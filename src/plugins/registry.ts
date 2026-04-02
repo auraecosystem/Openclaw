@@ -186,11 +186,18 @@ import type {
   OpenClawPluginService,
   OpenClawPluginToolContext,
   OpenClawPluginToolFactory,
+  PluginConfigUiHint,
+  PluginBundleFormat,
+  PluginDiagnostic,
+  PluginFormat,
   PluginHookHandlerMap,
   PluginHookName,
   PluginHookRegistration as TypedPluginHookRegistration,
+  PluginKind,
   PluginLogger,
+  PluginOrigin,
   PluginRegistrationMode,
+  PluginResetSessionResult,
   ProviderPlugin,
   RealtimeTranscriptionProviderPlugin,
   RealtimeVoiceProviderPlugin,
@@ -3174,8 +3181,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 registerTypedHook(record, hookName, handler, opts, params.hookPolicy),
               ...(coreGatewayMethods.has("sessions.reset")
                 ? {
-                    resetSession: async (key: string, reason?: string) => {
-                      type Result = import("./types.js").PluginResetSessionResult;
+                    resetSession: async (key: string, reason?: "new" | "reset") => {
                       if (typeof key !== "string" || !key.trim()) {
                         const safeKey = typeof key === "string" ? key.trim() : "";
                         return {
@@ -3183,7 +3189,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                           key: safeKey,
                           code: "INVALID_KEY",
                           message: "session key must be a non-empty string",
-                        } satisfies Result;
+                        } satisfies PluginResetSessionResult;
                       }
                       const trimmedKey = key.trim();
                       const normalizedReason: "new" | "reset" =
@@ -3201,7 +3207,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                             ok: true,
                             key: result.key,
                             sessionId: result.entry.sessionId,
-                          } satisfies Result;
+                          } satisfies PluginResetSessionResult;
                         }
                         const err: unknown = result.error;
                         const code =
@@ -3223,7 +3229,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                           key: trimmedKey,
                           code,
                           message: msg,
-                        } satisfies Result;
+                        } satisfies PluginResetSessionResult;
                       } catch (thrown: unknown) {
                         const message =
                           thrown instanceof Error
@@ -3236,7 +3242,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                           key: trimmedKey,
                           code: "RESET_ERROR",
                           message,
-                        } satisfies Result;
+                        } satisfies PluginResetSessionResult;
                       }
                     },
                   }
