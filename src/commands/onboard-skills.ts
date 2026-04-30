@@ -110,6 +110,7 @@ export async function setupSkills(
     );
     return next;
   }
+  const installSelected = new Set<string>();
   if (installable.length > 0) {
     const toInstall = await prompter.multiselect({
       message: t("wizard.skills.installDeps"),
@@ -128,6 +129,9 @@ export async function setupSkills(
     });
 
     const selected = toInstall.filter((name) => name !== "__skip__");
+    for (const name of selected) {
+      installSelected.add(name);
+    }
 
     const selectedSkills = selected
       .map((name) => installable.find((s) => s.name === name))
@@ -231,6 +235,9 @@ export async function setupSkills(
 
   for (const skill of missing) {
     if (!skill.primaryEnv || skill.missing.env.length === 0) {
+      continue;
+    }
+    if (skill.missing.bins.length > 0 && !installSelected.has(skill.name)) {
       continue;
     }
     const wantsKey = await prompter.confirm({
