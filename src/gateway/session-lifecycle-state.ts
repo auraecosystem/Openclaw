@@ -164,7 +164,6 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
   const endedAt = resolveLifecycleEndedAt(params.event);
   const updatedAt = endedAt ?? existing?.updatedAt;
   const terminalStatus = resolveTerminalStatus(params.event);
-  const yielded = resolveYielded(params.event);
   return {
     updatedAt,
     status: terminalStatus,
@@ -176,7 +175,9 @@ export function deriveGatewaySessionLifecycleSnapshot(params: {
       existingRuntimeMs: existing?.runtimeMs,
     }),
     abortedLastRun: terminalStatus === "killed",
-    pauseReason: yielded ? "sessions_yield" : undefined,
+    // Gate the marker on the derived terminal status so error end-events
+    // carrying `yielded: true` do not leak `sessions_yield` into failed rows.
+    pauseReason: terminalStatus === "paused" ? "sessions_yield" : undefined,
   };
 }
 
