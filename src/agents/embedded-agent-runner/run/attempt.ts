@@ -349,6 +349,7 @@ import {
 import {
   diagnosticErrorCategory,
   wrapStreamFnWithDiagnosticModelCallEvents,
+  resolveContentCapturePolicy,
 } from "./attempt.model-diagnostic-events.js";
 import {
   buildAfterTurnRuntimeContext,
@@ -2779,6 +2780,8 @@ export async function runEmbeddedAttempt(
         );
       }
       let diagnosticModelCallSeq = 0;
+      const configForCapture = params.config ?? getRuntimeConfig();
+      const otelCaptureContent = configForCapture?.diagnostics?.otel?.captureContent;
       activeSession.agent.streamFn = wrapStreamFnWithDiagnosticModelCallEvents(
         activeSession.agent.streamFn,
         {
@@ -2809,6 +2812,7 @@ export async function runEmbeddedAttempt(
               firstModelCallStarted: true,
             });
           },
+          contentCapture: resolveContentCapturePolicy(otelCaptureContent),
         },
       );
 
