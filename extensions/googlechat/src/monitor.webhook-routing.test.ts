@@ -18,6 +18,11 @@ vi.mock("./auth.js", () => ({
   verifyGoogleChatRequest: vi.fn(),
 }));
 
+afterAll(() => {
+  vi.doUnmock("./auth.js");
+  vi.resetModules();
+});
+
 type GoogleChatBuildContextParams = {
   messageId?: string;
   messageIdFull?: string;
@@ -177,11 +182,6 @@ function mockSecondVerifierSuccess() {
 describe("Google Chat webhook routing", () => {
   afterEach(() => {
     setActivePluginRegistry(createEmptyPluginRegistry());
-  });
-
-  afterAll(() => {
-    vi.doUnmock("./auth.js");
-    vi.resetModules();
   });
 
   it("rejects ambiguous routing when multiple targets on the same path verify successfully", async () => {
