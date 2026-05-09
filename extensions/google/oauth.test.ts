@@ -492,9 +492,6 @@ describe("extractGeminiCliCredentials", () => {
     expect(extractGeminiCliCredentials()).toBeNull();
   });
 
-<<<<<<< HEAD
-  it("extracts credentials from oauth2.js in known path", () => {
-=======
   it("includes missing binary details when resolving OAuth client config", async () => {
     process.env.PATH = "/nonexistent";
     mockExistsSync.mockReturnValue(false);
@@ -505,8 +502,7 @@ describe("extractGeminiCliCredentials", () => {
     );
   });
 
-  it("extracts credentials from oauth2.js in known path", async () => {
->>>>>>> 2d6bd0779e (Google: preserve Gemini CLI OAuth failure context)
+  it("extracts credentials from oauth2.js in known path", () => {
     installGeminiLayout({ oauth2Exists: true, oauth2Content: FAKE_OAUTH2_CONTENT });
 
     clearCredentialsCache();
