@@ -32,6 +32,8 @@ import { registerUnhandledRejectionHandler } from "openclaw/plugin-sdk/runtime-e
 import type {
   DiagnosticEventMetadata,
   DiagnosticEventPayload,
+  DiagnosticModelCallContent,
+  DiagnosticModelContentCapturePolicy,
   DiagnosticTraceContext,
   OpenClawPluginService,
 } from "../api.js";
@@ -40,6 +42,7 @@ import {
   isValidDiagnosticTraceFlags,
   isValidDiagnosticTraceId,
   redactSensitiveText,
+  resolveDiagnosticCaptureContentValue,
 } from "../api.js";
 
 const DEFAULT_SERVICE_NAME = "openclaw";
@@ -91,23 +94,6 @@ const GEN_AI_OPERATION_DURATION_BUCKETS = [
 const MAX_RETAINED_TRUSTED_SPAN_CONTEXTS = 1024;
 const RETAINED_TRUSTED_SPAN_CONTEXT_TIMEOUT_MS = 5_000;
 
-type OtelContentCapturePolicy = {
-  inputMessages: boolean;
-  outputMessages: boolean;
-  toolInputs: boolean;
-  toolOutputs: boolean;
-  systemPrompt: boolean;
-  toolDefinitions: boolean;
-  logBodies: boolean;
-};
-
-type OtelModelCallContent = {
-  inputMessages?: unknown;
-  outputMessages?: unknown;
-  systemPrompt?: string;
-  toolDefinitions?: unknown;
-};
-
 type MessageDeliveryDiagnosticEvent = Extract<
   DiagnosticEventPayload,
   {
@@ -133,16 +119,6 @@ type SessionRecoveryDiagnosticEvent = Extract<
 >;
 type TalkDiagnosticEvent = Extract<DiagnosticEventPayload, { type: "talk.event" }>;
 type TrustedSpanAliasOwner = { kind: "run"; id: string };
-
-const NO_CONTENT_CAPTURE: OtelContentCapturePolicy = {
-  inputMessages: false,
-  outputMessages: false,
-  toolInputs: false,
-  toolOutputs: false,
-  systemPrompt: false,
-  toolDefinitions: false,
-  logBodies: false,
-};
 
 function normalizeEndpoint(endpoint?: string): string | undefined {
   const trimmed = endpoint?.trim();
@@ -326,7 +302,7 @@ function lowCardinalityQueueLaneAttr(value: string | undefined, fallback = "unkn
   return LOW_CARDINALITY_VALUE_RE.test(lane) ? lane : fallback;
 }
 
-function shouldCaptureOtelLogBody(policy: OtelContentCapturePolicy): boolean {
+function shouldCaptureOtelLogBody(policy: DiagnosticModelContentCapturePolicy): boolean {
   return policy.logBodies;
 }
 
@@ -449,37 +425,6 @@ function clampOtelLogText(value: string, maxChars: number): string {
 
 function normalizeOtelLogString(value: string, maxChars: number): string {
   return clampOtelLogText(redactSensitiveText(value), maxChars);
-}
-
-function resolveContentCapturePolicy(value: unknown): OtelContentCapturePolicy {
-  if (value === true) {
-    return {
-      inputMessages: true,
-      outputMessages: true,
-      toolInputs: true,
-      toolOutputs: true,
-      systemPrompt: false,
-      toolDefinitions: true,
-      logBodies: true,
-    };
-  }
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return NO_CONTENT_CAPTURE;
-  }
-
-  const config = value as Record<string, unknown>;
-  if (config.enabled !== true) {
-    return NO_CONTENT_CAPTURE;
-  }
-  return {
-    inputMessages: config.inputMessages === true,
-    outputMessages: config.outputMessages === true,
-    toolInputs: config.toolInputs === true,
-    toolOutputs: config.toolOutputs === true,
-    systemPrompt: config.systemPrompt === true,
-    toolDefinitions: config.toolDefinitions === true,
-    logBodies: false,
-  };
 }
 
 function hasPreloadedOtelSdk(): boolean {
@@ -833,8 +778,8 @@ function assignJsonAttribute(
 
 function assignGenAiModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
-  content: OtelModelCallContent | undefined,
-  policy: OtelContentCapturePolicy,
+  content: DiagnosticModelCallContent | undefined,
+  policy: DiagnosticModelContentCapturePolicy,
 ): void {
   if (policy.systemPrompt && typeof content?.systemPrompt === "string") {
     const systemInstructions = [textPart(content.systemPrompt)];
@@ -877,8 +822,8 @@ function assignOtelContentAttribute(
 
 function assignOtelModelContentAttributes(
   attributes: Record<string, string | number | boolean>,
-  content: OtelModelCallContent | undefined,
-  policy: OtelContentCapturePolicy,
+  content: DiagnosticModelCallContent | undefined,
+  policy: DiagnosticModelContentCapturePolicy,
 ): void {
   assignGenAiModelContentAttributes(attributes, content, policy);
   if (policy.inputMessages) {
@@ -910,7 +855,7 @@ function assignOtelModelContentAttributes(
 function assignOtelToolContentAttributes(
   attributes: Record<string, string | number | boolean>,
   event: Record<string, unknown>,
-  policy: OtelContentCapturePolicy,
+  policy: DiagnosticModelContentCapturePolicy,
 ): void {
   if (policy.toolInputs) {
     assignOtelContentAttribute(attributes, "openclaw.content.tool_input", event.toolInput);
@@ -1140,7 +1085,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
       const serviceName =
         otel.serviceName?.trim() || process.env.OTEL_SERVICE_NAME || DEFAULT_SERVICE_NAME;
       const sampleRate = resolveSampleRate(otel.sampleRate);
-      const contentCapturePolicy = resolveContentCapturePolicy(otel.captureContent);
+      const contentCapturePolicy = resolveDiagnosticCaptureContentValue(otel.captureContent);
       const sdkPreloaded = hasPreloadedOtelSdk();
 
       const resource = resourceFromAttributes({
@@ -2881,7 +2826,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
       const recordModelCallCompleted = (
         evt: Extract<DiagnosticEventPayload, { type: "model.call.completed" }>,
         metadata: DiagnosticEventMetadata,
-        modelContent?: OtelModelCallContent,
+        modelContent?: DiagnosticModelCallContent,
       ) => {
         const metricAttrs = modelCallMetricAttrs(evt);
         modelCallDurationHistogram.record(evt.durationMs, metricAttrs);
@@ -2921,7 +2866,7 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
       const recordModelCallError = (
         evt: Extract<DiagnosticEventPayload, { type: "model.call.error" }>,
         metadata: DiagnosticEventMetadata,
-        modelContent?: OtelModelCallContent,
+        modelContent?: DiagnosticModelCallContent,
       ) => {
         const errorType = lowCardinalityAttr(evt.errorCategory, "other");
         const metricAttrs = {

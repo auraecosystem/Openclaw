@@ -349,7 +349,6 @@ import {
 import {
   diagnosticErrorCategory,
   wrapStreamFnWithDiagnosticModelCallEvents,
-  resolveContentCapturePolicy,
 } from "./attempt.model-diagnostic-events.js";
 import {
   buildAfterTurnRuntimeContext,
@@ -2812,7 +2811,6 @@ export async function runEmbeddedAttempt(
               firstModelCallStarted: true,
             });
           },
-          contentCapture: resolveContentCapturePolicy(otelCaptureContent),
         },
       );
 

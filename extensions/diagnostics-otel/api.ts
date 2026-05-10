@@ -1,4 +1,9 @@
 export {
+  resolveDiagnosticCaptureContentValue,
+  type DiagnosticModelCallContent,
+  type DiagnosticModelContentCapturePolicy,
+} from "../../src/infra/diagnostic-llm-content.js";
+export {
   createChildDiagnosticTraceContext,
   createDiagnosticTraceContext,
   emitDiagnosticEvent,
