@@ -167,6 +167,47 @@ function createCronJob(overrides: Partial<CronJob> = {}): CronJob {
   };
 }
 
+function createMultiChannelConfig(): OpenClawConfig {
+  return {
+    session: {
+      mainKey: "main",
+    },
+    channels: {
+      telegram: {
+        botToken: "telegram-token",
+      },
+      slack: {
+        botToken: "xoxb-slack-token",
+        appToken: "xapp-slack-token",
+      },
+    },
+    plugins: {
+      entries: {
+        telegram: { enabled: true },
+        slack: { enabled: true },
+      },
+    },
+  } as OpenClawConfig;
+}
+
+function createSingleChannelConfig(): OpenClawConfig {
+  return {
+    session: {
+      mainKey: "main",
+    },
+    channels: {
+      telegram: {
+        botToken: "telegram-token",
+      },
+    },
+    plugins: {
+      entries: {
+        telegram: { enabled: true },
+      },
+    },
+  } as OpenClawConfig;
+}
+
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`expected ${label} to be an object`);
@@ -365,26 +406,7 @@ describe("cron method validation", () => {
   });
 
   it("rejects ambiguous announce delivery on add when multiple channels are configured", async () => {
-    getRuntimeConfig.mockReturnValue({
-      session: {
-        mainKey: "main",
-      },
-      channels: {
-        telegram: {
-          botToken: "telegram-token",
-        },
-        slack: {
-          botToken: "xoxb-slack-token",
-          appToken: "xapp-slack-token",
-        },
-      },
-      plugins: {
-        entries: {
-          telegram: { enabled: true },
-          slack: { enabled: true },
-        },
-      },
-    } as OpenClawConfig);
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
     const { context, respond } = await invokeCronAdd({
       name: "ambiguous announce add",
@@ -397,7 +419,196 @@ describe("cron method validation", () => {
     });
 
     expect(context.cron.add).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel is required" });
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects omitted isolated agentTurn delivery on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "implicit announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects delivery.channel=last on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last channel announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects delivery.to=last without a deterministic channel on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last target announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", to: "last" },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts delivery.to=last when delivery.channel is explicit", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "explicit channel target named last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "telegram", to: "last" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("rejects delivery.failureDestination.channel=last on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last failure destination channel add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", channel: "last", to: "slack:ops" },
+      },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects delivery.failureDestination.to=last without a deterministic channel on add", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "last failure destination target add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", to: "last" },
+      },
+    });
+
+    expect(context.cron.add).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts delivery.failureDestination.to=last when failureDestination.channel is explicit", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "explicit failure destination target named last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", channel: "slack", to: "last" },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.failureDestination.mode=webhook on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "failure destination webhook add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "webhook", to: "https://example.invalid/cron-failed" },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("accepts delivery.mode=none on add when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "silent add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "none" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("preserves single-channel last-route announce compatibility", async () => {
+    getRuntimeConfig.mockReturnValue(createSingleChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "single channel last add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "last" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("accepts provider-prefixed announce target without delivery.channel when multiple channels are configured", async () => {
@@ -572,26 +783,7 @@ describe("cron method validation", () => {
   });
 
   it("rejects ambiguous announce delivery on update when multiple channels are configured", async () => {
-    getRuntimeConfig.mockReturnValue({
-      session: {
-        mainKey: "main",
-      },
-      channels: {
-        telegram: {
-          botToken: "telegram-token",
-        },
-        slack: {
-          botToken: "xoxb-slack-token",
-          appToken: "xapp-slack-token",
-        },
-      },
-      plugins: {
-        entries: {
-          telegram: { enabled: true },
-          slack: { enabled: true },
-        },
-      },
-    } as OpenClawConfig);
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
     const { context, respond } = await invokeCronUpdate(
       {
@@ -604,7 +796,91 @@ describe("cron method validation", () => {
     );
 
     expect(context.cron.update).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "delivery.channel is required" });
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects update patches that would create implicit isolated agentTurn announce delivery", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          sessionTarget: "isolated",
+          payload: { kind: "agentTurn", message: "hello" },
+        },
+      },
+      createCronJob({
+        sessionTarget: "main",
+        payload: { kind: "systemEvent", text: "hello" },
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects enabled=true patches that would activate implicit isolated agentTurn announce delivery", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: true,
+        },
+      },
+      createCronJob({
+        enabled: false,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("rejects failureDestination.channel=last on update when multiple channels are configured", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: { mode: "announce", channel: "last", to: "slack:ops" },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts failureDestination.to=last on update when failureDestination.channel is explicit", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: { mode: "announce", channel: "slack", to: "last" },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("rejects target ids mistakenly supplied as delivery.channel providers", async () => {
