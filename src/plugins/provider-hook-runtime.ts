@@ -119,11 +119,12 @@ function resolveProviderHookFunctionIdentity(hook: unknown): string {
 }
 
 export function resolveProviderToolSchemaNormalizeCacheKey(
-  params: ProviderRuntimePluginLookupParams & {
+  params: ProviderRuntimePluginHandleParams & {
     context: ProviderNormalizeToolSchemasContext;
   },
 ): string | null {
-  const plugin = resolveProviderRuntimePlugin(params);
+  const runtimeHandle = ensureProviderRuntimePluginHandle(params);
+  const plugin = runtimeHandle.plugin;
   if (!plugin?.normalizeToolSchemas || !plugin.resolveToolSchemaCacheKey) {
     return null;
   }
@@ -134,7 +135,7 @@ export function resolveProviderToolSchemaNormalizeCacheKey(
     }
     return createPluginCacheKey([
       "provider-tool-schema-normalize-hook-cache",
-      resolveProviderRuntimePluginCacheKey(params),
+      resolveProviderRuntimePluginCacheKey(runtimeHandle),
       {
         pluginId: plugin.pluginId ?? "",
         providerId: plugin.id,

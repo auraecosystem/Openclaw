@@ -35,16 +35,19 @@ describe("buildProviderToolCompatFamilyHooks", () => {
         family: "deepseek" as const,
         normalizeToolSchemas: normalizeDeepSeekToolSchemas,
         inspectToolSchemas: inspectDeepSeekToolSchemas,
+        hasCacheKey: false,
       },
       {
         family: "gemini" as const,
         normalizeToolSchemas: normalizeGeminiToolSchemas,
         inspectToolSchemas: inspectGeminiToolSchemas,
+        hasCacheKey: true,
       },
       {
         family: "openai" as const,
         normalizeToolSchemas: normalizeOpenAIToolSchemas,
         inspectToolSchemas: inspectOpenAIToolSchemas,
+        hasCacheKey: true,
       },
     ];
 
@@ -53,7 +56,7 @@ describe("buildProviderToolCompatFamilyHooks", () => {
 
       expect(hooks.normalizeToolSchemas).toBe(testCase.normalizeToolSchemas);
       expect(hooks.inspectToolSchemas).toBe(testCase.inspectToolSchemas);
-      expect(typeof hooks.resolveToolSchemaCacheKey).toBe("function");
+      expect(typeof hooks.resolveToolSchemaCacheKey === "function").toBe(testCase.hasCacheKey);
     }
   });
 
@@ -231,16 +234,26 @@ describe("buildProviderToolCompatFamilyHooks", () => {
 
   it("returns stable hook-owned cache keys for bundled tool compat families", () => {
     const geminiHooks = buildProviderToolCompatFamilyHooks("gemini");
+    const resolveGeminiCacheKey = geminiHooks.resolveToolSchemaCacheKey;
+    expect(resolveGeminiCacheKey).toBeTypeOf("function");
+    if (!resolveGeminiCacheKey) {
+      throw new Error("Gemini tool compat hooks must provide cache keys");
+    }
     expect(
-      geminiHooks.resolveToolSchemaCacheKey({
+      resolveGeminiCacheKey({
         provider: "gemini",
         tools: [],
       }),
     ).toEqual({ family: "gemini" });
 
     const openaiHooks = buildProviderToolCompatFamilyHooks("openai");
+    const resolveOpenAICacheKey = openaiHooks.resolveToolSchemaCacheKey;
+    expect(resolveOpenAICacheKey).toBeTypeOf("function");
+    if (!resolveOpenAICacheKey) {
+      throw new Error("OpenAI tool compat hooks must provide cache keys");
+    }
     expect(
-      openaiHooks.resolveToolSchemaCacheKey({
+      resolveOpenAICacheKey({
         provider: "openai",
         modelApi: "openai-responses",
         model: {
