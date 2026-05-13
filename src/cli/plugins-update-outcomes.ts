@@ -3,6 +3,9 @@ import { theme } from "../terminal/theme.js";
 type PluginUpdateCliOutcome = {
   status: string;
   message: string;
+  channelFallback?: {
+    message: string;
+  };
 };
 
 export function logPluginUpdateOutcomes(params: {
@@ -14,13 +17,22 @@ export function logPluginUpdateOutcomes(params: {
     if (outcome.status === "error") {
       hasErrors = true;
       params.log(theme.error(outcome.message));
+      if (outcome.channelFallback) {
+        params.log(theme.warn(outcome.channelFallback.message));
+      }
       continue;
     }
     if (outcome.status === "skipped") {
       params.log(theme.warn(outcome.message));
+      if (outcome.channelFallback) {
+        params.log(theme.warn(outcome.channelFallback.message));
+      }
       continue;
     }
     params.log(outcome.message);
+    if (outcome.channelFallback) {
+      params.log(theme.warn(outcome.channelFallback.message));
+    }
   }
   return { hasErrors };
 }
