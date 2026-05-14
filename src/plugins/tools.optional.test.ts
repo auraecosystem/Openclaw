@@ -2896,6 +2896,58 @@ describe("resolvePluginTools optional tools", () => {
 
     expectResolvedToolNames(tools, ["optional_tool"]);
   });
+
+  it("returns tools for loaded plugins even when manifest snapshot has unloaded siblings", () => {
+    const config = createContext().config;
+    installToolManifestSnapshots({
+      config,
+      plugins: [
+        {
+          id: "loaded-plugin",
+          origin: "bundled",
+          enabledByDefault: true,
+          channels: [],
+          providers: [],
+          contracts: { tools: ["loaded_tool"] },
+        },
+        {
+          id: "unloaded-plugin",
+          origin: "bundled",
+          enabledByDefault: true,
+          channels: [],
+          providers: [],
+          contracts: { tools: ["unloaded_tool"] },
+        },
+      ],
+    });
+    const loadedFactory = vi.fn(() => makeTool("loaded_tool"));
+    setActivePluginRegistry(
+      {
+        plugins: [{ id: "loaded-plugin", status: "loaded" }],
+        tools: [
+          {
+            pluginId: "loaded-plugin",
+            optional: false,
+            source: "/tmp/loaded-plugin.js",
+            names: ["loaded_tool"],
+            factory: loadedFactory,
+          },
+        ],
+        diagnostics: [],
+      } as never,
+      "test-tool-registry",
+      "gateway-bindable",
+      "/tmp",
+    );
+
+    const tools = resolvePluginTools(
+      createResolveToolsParams({ toolAllowlist: ["group:plugins"] }),
+    );
+
+    expectResolvedToolNames(tools, ["loaded_tool"]);
+    expect(loadedFactory).toHaveBeenCalledTimes(1);
+    expect(loadOpenClawPluginsMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("buildPluginToolMetadataKey", () => {
