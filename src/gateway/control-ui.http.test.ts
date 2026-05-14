@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import type { IncomingMessage } from "node:http";
 import os from "node:os";
 import path from "node:path";
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { describe, expect, it, vi } from "vitest";
 import { resolveStateDir } from "../config/paths.js";
 import {
@@ -1164,6 +1164,52 @@ describe("handleControlUiHttpRequest", () => {
         expect(res.statusCode).toBe(200);
         expect(res.setHeader).toHaveBeenCalledWith("Content-Encoding", "gzip");
         expect(firstEndCallLength(end)).toBe(0);
+      },
+    });
+  });
+
+  it("prefers the highest-q accepted control-ui asset encoding", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const script = "const answer = 42;\n".repeat(200);
+        await writeAssetFile(tmp, "app.js", script);
+
+        const { res, end, handled } = await runControlUiRequest({
+          url: "/assets/app.js",
+          method: "GET",
+          rootPath: tmp,
+          headers: { "accept-encoding": "br;q=0.1, gzip;q=1" },
+        });
+
+        expect(handled).toBe(true);
+        expect(res.statusCode).toBe(200);
+        expect(res.setHeader).toHaveBeenCalledWith("Content-Encoding", "gzip");
+        const body = end.mock.calls[0]?.[0];
+        expect(Buffer.isBuffer(body)).toBe(true);
+        expect(gunzipSync(body as Buffer).toString("utf8")).toBe(script);
+      },
+    });
+  });
+
+  it("does not revive explicitly rejected gzip through wildcard encoding", async () => {
+    await withControlUiRoot({
+      fn: async (tmp) => {
+        const script = "const answer = 42;\n".repeat(200);
+        await writeAssetFile(tmp, "app.js", script);
+
+        const { res, end, handled } = await runControlUiRequest({
+          url: "/assets/app.js",
+          method: "GET",
+          rootPath: tmp,
+          headers: { "accept-encoding": "gzip;q=0, *;q=1" },
+        });
+
+        expect(handled).toBe(true);
+        expect(res.statusCode).toBe(200);
+        expect(res.setHeader).toHaveBeenCalledWith("Content-Encoding", "br");
+        const body = end.mock.calls[0]?.[0];
+        expect(Buffer.isBuffer(body)).toBe(true);
+        expect(brotliDecompressSync(body as Buffer).toString("utf8")).toBe(script);
       },
     });
   });
