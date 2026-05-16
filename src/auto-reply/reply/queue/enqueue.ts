@@ -3,6 +3,7 @@ import { resolveGlobalDedupeCache } from "../../../infra/dedupe.js";
 import { channelRouteDedupeKey } from "../../../plugin-sdk/channel-route.js";
 import { applyQueueDropPolicy, shouldSkipQueueItem } from "../../../utils/queue-helpers.js";
 import { kickFollowupDrainIfIdle, rememberFollowupDrainCallback } from "./drain.js";
+import { persistFollowupQueues } from "./persist.js";
 import { getExistingFollowupQueue, getFollowupQueue } from "./state.js";
 import {
   completeFollowupRunLifecycle,
@@ -122,6 +123,7 @@ export function enqueueFollowupRun(
 
   queue.items.push(run);
   markFollowupRunEnqueued(run);
+  persistFollowupQueues();
   if (recentMessageIdKey) {
     RECENT_QUEUE_MESSAGE_IDS.check(recentMessageIdKey);
   }

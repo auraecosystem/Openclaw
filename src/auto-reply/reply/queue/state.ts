@@ -1,6 +1,7 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { resolveGlobalMap } from "../../../shared/global-singleton.js";
 import { applyQueueRuntimeSettings } from "../../../utils/queue-helpers.js";
+import { persistFollowupQueues, restoreFollowupQueues } from "./persist.js";
 import {
   completeFollowupRunLifecycle,
   type FollowupRun,
@@ -99,6 +100,7 @@ export function clearFollowupQueue(key: string): number {
   queue.lastRun = undefined;
   queue.lastEnqueuedAt = 0;
   FOLLOWUP_QUEUES.delete(cleaned);
+  persistFollowupQueues();
   return cleared;
 }
 
@@ -175,4 +177,7 @@ export function refreshQueuedFollowupSession(params: {
   for (const item of queue.items) {
     rewriteRun(item.run);
   }
+  persistFollowupQueues();
 }
+
+restoreFollowupQueues();
