@@ -438,7 +438,7 @@ describe("cron method validation", () => {
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
   });
 
-  it("rejects delivery.channel=last on add when multiple channels are configured", async () => {
+  it("rejects delivery.channel=last without a provider-prefixed target on add", async () => {
     getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
     const { context, respond } = await invokeCronAdd({
@@ -448,11 +448,28 @@ describe("cron method validation", () => {
       sessionTarget: "isolated",
       wakeMode: "next-heartbeat",
       payload: { kind: "agentTurn", message: "hello" },
-      delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+      delivery: { mode: "announce", channel: "last", to: "123" },
     });
 
     expect(context.cron.add).not.toHaveBeenCalled();
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts delivery.channel=last with a provider-prefixed target on add", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "prefixed last channel announce add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("rejects delivery.to=last without a deterministic channel on add when multiple channels are configured", async () => {
@@ -489,7 +506,7 @@ describe("cron method validation", () => {
     expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
-  it("rejects delivery.failureDestination.channel=last on add when multiple channels are configured", async () => {
+  it("rejects delivery.failureDestination.channel=last without a provider-prefixed target on add", async () => {
     getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
     const { context, respond } = await invokeCronAdd({
@@ -503,12 +520,34 @@ describe("cron method validation", () => {
         mode: "announce",
         channel: "telegram",
         to: "123",
-        failureDestination: { mode: "announce", channel: "last", to: "slack:ops" },
+        failureDestination: { mode: "announce", channel: "last", to: "ops" },
       },
     });
 
     expect(context.cron.add).not.toHaveBeenCalled();
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts delivery.failureDestination.channel=last with a provider-prefixed target on add", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronAdd({
+      name: "prefixed last failure destination channel add",
+      enabled: true,
+      schedule: { kind: "every", everyMs: 60_000 },
+      sessionTarget: "isolated",
+      wakeMode: "next-heartbeat",
+      payload: { kind: "agentTurn", message: "hello" },
+      delivery: {
+        mode: "announce",
+        channel: "telegram",
+        to: "123",
+        failureDestination: { mode: "announce", channel: "last", to: "slack:ops" },
+      },
+    });
+
+    expect(context.cron.add).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("rejects delivery.failureDestination.to=last without a deterministic channel on add", async () => {
@@ -841,7 +880,47 @@ describe("cron method validation", () => {
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
   });
 
-  it("rejects failureDestination.channel=last on update when multiple channels are configured", async () => {
+  it("accepts delivery.channel=last with a provider-prefixed target on update", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
+  it("rejects failureDestination.channel=last without a provider-prefixed target on update", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          delivery: {
+            failureDestination: { mode: "announce", channel: "last", to: "ops" },
+          },
+        },
+      },
+      createCronJob({
+        delivery: { mode: "announce", channel: "telegram", to: "123" },
+      }),
+    );
+
+    expect(context.cron.update).not.toHaveBeenCalled();
+    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts failureDestination.channel=last with a provider-prefixed target on update", async () => {
     getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
     const { context, respond } = await invokeCronUpdate(
@@ -858,8 +937,8 @@ describe("cron method validation", () => {
       }),
     );
 
-    expect(context.cron.update).not.toHaveBeenCalled();
-    expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("accepts failureDestination.to=last on update when failureDestination.channel is explicit", async () => {

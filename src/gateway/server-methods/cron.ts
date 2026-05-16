@@ -76,8 +76,8 @@ function assertNoImplicitLastAnnounceRoute(params: {
     Boolean(normalizedChannel && normalizedChannel !== "last") ||
     Boolean(resolveTargetPrefixedChannel(params.to));
   if (
-    isImplicitLastRouteValue(params.channel) ||
-    (!hasDeterministicChannel && isImplicitLastRouteValue(params.to))
+    !hasDeterministicChannel &&
+    (isImplicitLastRouteValue(params.channel) || isImplicitLastRouteValue(params.to))
   ) {
     throw new Error(formatDeterministicAnnounceRouteError(params.field));
   }
