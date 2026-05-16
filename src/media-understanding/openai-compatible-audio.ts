@@ -95,6 +95,19 @@ function assertJsonResponseFormat(responseFormat: string | undefined): void {
   );
 }
 
+function assertPromptSupportedByModel(params: { model: string; prompt?: string }): void {
+  const prompt = params.prompt?.trim();
+  if (!prompt) {
+    return;
+  }
+  if (params.model.trim().toLowerCase() !== "gpt-4o-transcribe-diarize") {
+    return;
+  }
+  throw new Error(
+    `OpenAI-compatible audio model "${params.model}" does not support prompt; omit prompt for diarized transcription`,
+  );
+}
+
 export async function transcribeOpenAiCompatibleAudio(
   params: OpenAiCompatibleAudioParams,
 ): Promise<AudioTranscriptionResult> {
@@ -127,6 +140,7 @@ export async function transcribeOpenAiCompatibleAudio(
     params.query?.chunkingStrategy,
   );
   assertJsonResponseFormat(responseFormat);
+  assertPromptSupportedByModel({ model, prompt: params.prompt });
   const form = buildAudioTranscriptionFormData({
     buffer: params.buffer,
     fileName: params.fileName,

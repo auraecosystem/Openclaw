@@ -407,7 +407,13 @@ function resolveEntryRunOptions(params: {
   entry: MediaUnderstandingModelConfig;
   cfg: OpenClawConfig;
   config?: MediaUnderstandingConfig;
-}): { maxBytes: number; maxChars?: number; timeoutMs: number; prompt: string } {
+}): {
+  maxBytes: number;
+  maxChars?: number;
+  timeoutMs: number;
+  prompt: string;
+  promptWasConfigured: boolean;
+} {
   const { capability, entry, cfg } = params;
   const maxBytes = resolveMaxBytes({ capability, entry, cfg, config: params.config });
   const maxChars = resolveMaxChars({ capability, entry, cfg, config: params.config });
@@ -417,12 +423,16 @@ function resolveEntryRunOptions(params: {
       cfg.tools?.media?.[capability]?.timeoutSeconds,
     DEFAULT_TIMEOUT_SECONDS[capability],
   );
-  const prompt = resolvePrompt(
-    capability,
-    entry.prompt ?? params.config?.prompt ?? cfg.tools?.media?.[capability]?.prompt,
+  const configuredPrompt =
+    entry.prompt ?? params.config?.prompt ?? cfg.tools?.media?.[capability]?.prompt;
+  const prompt = resolvePrompt(capability, configuredPrompt, maxChars);
+  return {
+    maxBytes,
     maxChars,
-  );
-  return { maxBytes, maxChars, timeoutMs, prompt };
+    timeoutMs,
+    prompt,
+    promptWasConfigured: typeof configuredPrompt === "string" && configuredPrompt.trim().length > 0,
+  };
 }
 
 function resolveMediaRequestOverrides(config: MediaUnderstandingConfig | undefined): {
@@ -437,6 +447,46 @@ function resolveMediaRequestOverrides(config: MediaUnderstandingConfig | undefin
     prompt: overrides["_requestPromptOverride"],
     language: overrides["_requestLanguageOverride"],
   };
+}
+
+function hasNonEmptyString(value: string | undefined): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function isOpenAiDiarizedAudioPromptUnsupported(params: {
+  providerId: string;
+  model?: string;
+  responseFormat?: string;
+}): boolean {
+  if (params.providerId !== "openai") {
+    return false;
+  }
+  return (
+    normalizeLowercaseStringOrEmpty(params.model) === "gpt-4o-transcribe-diarize" ||
+    normalizeLowercaseStringOrEmpty(params.responseFormat) === "diarized_json"
+  );
+}
+
+function resolveAudioPromptForProvider(params: {
+  providerId: string;
+  model?: string;
+  responseFormat?: string;
+  defaultPrompt: string;
+  promptWasConfigured: boolean;
+  requestPrompt?: string;
+}): string | undefined {
+  if (!isOpenAiDiarizedAudioPromptUnsupported(params)) {
+    return params.requestPrompt ?? params.defaultPrompt;
+  }
+  if (
+    hasNonEmptyString(params.requestPrompt) ||
+    (params.promptWasConfigured && hasNonEmptyString(params.defaultPrompt))
+  ) {
+    throw new Error(
+      'OpenAI diarized audio transcription model "gpt-4o-transcribe-diarize" does not support prompt; remove tools.media.audio.prompt, model prompt, or the request prompt override for diarized_json transcription.',
+    );
+  }
+  return undefined;
 }
 
 async function resolveProviderExecutionAuth(params: {
@@ -589,7 +639,7 @@ export async function runProviderEntry(params: {
   }
   const providerId = normalizeMediaProviderId(providerIdRaw);
   const requestProviderId = normalizeMediaExecutionProviderId(providerIdRaw);
-  const { maxBytes, maxChars, timeoutMs, prompt } = resolveEntryRunOptions({
+  const { maxBytes, maxChars, timeoutMs, prompt, promptWasConfigured } = resolveEntryRunOptions({
     capability,
     entry,
     cfg,
@@ -685,6 +735,24 @@ export async function runProviderEntry(params: {
         workspaceDir: params.workspaceDir,
       }) ||
       entry.model;
+    const responseFormat = resolveProviderStringOption(
+      providerQuery,
+      "response_format",
+      "responseFormat",
+    );
+    const chunkingStrategy = resolveProviderStringOption(
+      providerQuery,
+      "chunking_strategy",
+      "chunkingStrategy",
+    );
+    const audioPrompt = resolveAudioPromptForProvider({
+      providerId,
+      model,
+      responseFormat,
+      defaultPrompt: prompt,
+      promptWasConfigured,
+      requestPrompt: requestOverrides.prompt,
+    });
     const result = await executeWithApiKeyRotation({
       provider: providerId,
       apiKeys,
@@ -704,17 +772,9 @@ export async function runProviderEntry(params: {
             entry.language ??
             params.config?.language ??
             cfg.tools?.media?.audio?.language,
-          prompt: requestOverrides.prompt ?? prompt,
-          responseFormat: resolveProviderStringOption(
-            providerQuery,
-            "response_format",
-            "responseFormat",
-          ),
-          chunkingStrategy: resolveProviderStringOption(
-            providerQuery,
-            "chunking_strategy",
-            "chunkingStrategy",
-          ),
+          prompt: audioPrompt,
+          responseFormat,
+          chunkingStrategy,
           query: providerQuery,
           timeoutMs,
           fetchFn,
