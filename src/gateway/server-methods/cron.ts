@@ -253,6 +253,9 @@ function assertValidCronUpdateDelivery(params: {
   applyJobPatch(nextJob, params.patch, {
     defaultAgentId: params.defaultAgentId,
   });
+  if (!nextJob.enabled) {
+    return;
+  }
   assertValidCronAnnounceDelivery({
     cfg: params.cfg,
     delivery: nextJob.delivery,

@@ -860,6 +860,26 @@ describe("cron method validation", () => {
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
   });
 
+  it("accepts enabled=false patches that disable legacy implicit isolated agentTurn delivery", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: false,
+        },
+      },
+      createCronJob({
+        enabled: true,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
+  });
+
   it("rejects enabled=true patches that would activate implicit isolated agentTurn announce delivery", async () => {
     getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
 
@@ -878,6 +898,27 @@ describe("cron method validation", () => {
 
     expect(context.cron.update).not.toHaveBeenCalled();
     expectResponseError(respond, { messageIncludes: "cannot use implicit last routing" });
+  });
+
+  it("accepts enabled=true patches with provider-prefixed deterministic announce delivery", async () => {
+    getRuntimeConfig.mockReturnValue(createMultiChannelConfig());
+
+    const { context, respond } = await invokeCronUpdate(
+      {
+        id: "cron-1",
+        patch: {
+          enabled: true,
+          delivery: { mode: "announce", channel: "last", to: "telegram:123" },
+        },
+      },
+      createCronJob({
+        enabled: false,
+        delivery: undefined,
+      }),
+    );
+
+    expect(context.cron.update).toHaveBeenCalled();
+    expect(respond).toHaveBeenCalledWith(true, { id: "cron-1" }, undefined);
   });
 
   it("accepts delivery.channel=last with a provider-prefixed target on update", async () => {
