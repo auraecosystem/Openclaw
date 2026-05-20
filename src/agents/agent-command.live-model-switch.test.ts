@@ -453,8 +453,8 @@ vi.mock("./model-selection.js", () => {
     defaultProvider: string;
   }) => {
     const modelMap =
-      (cfg as { agents?: { defaults?: { models?: Record<string, { alias?: string }> } } })
-        ?.agents?.defaults?.models ?? {};
+      (cfg as { agents?: { defaults?: { models?: Record<string, { alias?: string }> } } })?.agents
+        ?.defaults?.models ?? {};
     const byAlias = new Map<string, { alias: string; ref: { provider: string; model: string } }>();
     const byKey = new Map<string, string[]>();
     for (const [rawRef, entry] of Object.entries(modelMap)) {
