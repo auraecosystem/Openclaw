@@ -172,6 +172,28 @@ function createSessionsSpawnToolSchema(params: {
       params.acpAvailable ? SESSIONS_SPAWN_RUNTIMES : (["subagent"] as const),
     ),
     agentId: Type.Optional(Type.String()),
+    execution: Type.Optional(
+      Type.Object(
+        {
+          backend: Type.Optional(
+            Type.String({
+              description:
+                'Execution placement backend id. Defaults to the built-in "local" process backend.',
+            }),
+          ),
+          profile: Type.Optional(
+            Type.String({
+              description:
+                "Optional profile id within the selected execution backend. Profiles are validated and recorded for status/readback.",
+            }),
+          ),
+        },
+        {
+          description:
+            "Optional execution placement request. This release supports local process execution and rejects non-process backend types at spawn time.",
+        },
+      ),
+    ),
     model: Type.Optional(Type.String()),
     thinking: Type.Optional(Type.String()),
     cwd: Type.Optional(Type.String()),
@@ -306,6 +328,13 @@ export function createSessionsSpawnTool(
       const label = readStringParam(params, "label") ?? "";
       const runtime = params.runtime === "acp" ? "acp" : "subagent";
       const requestedAgentId = readStringParam(params, "agentId");
+      const execution =
+        params.execution && typeof params.execution === "object" && !Array.isArray(params.execution)
+          ? {
+              backend: readStringParam(params.execution as Record<string, unknown>, "backend"),
+              profile: readStringParam(params.execution as Record<string, unknown>, "profile"),
+            }
+          : undefined;
       const resumeSessionId = readStringParam(params, "resumeSessionId");
       const modelOverride = normalizeToolModelOverride(readStringParam(params, "model"));
       const thinkingOverrideRaw = readStringParam(params, "thinking");
@@ -392,6 +421,7 @@ export function createSessionsSpawnTool(
             sandbox,
             streamTo,
             attachments: acpAttachments?.attachments,
+            execution,
           },
           {
             agentSessionKey: opts?.agentSessionKey,
@@ -450,6 +480,7 @@ export function createSessionsSpawnTool(
               runTimeoutSeconds: result.runTimeoutSeconds,
               expectsCompletionMessage: shouldExpectCompletionMessage,
               spawnMode: trackedSpawnMode,
+              execution: result.execution,
             });
           } catch (err) {
             // Best-effort only: the ACP turn was already started above, so deleting the
@@ -483,6 +514,7 @@ export function createSessionsSpawnTool(
           context,
           lightContext,
           expectsCompletionMessage,
+          execution,
           attachments,
           attachMountPath:
             params.attachAs && typeof params.attachAs === "object"
