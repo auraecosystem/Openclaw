@@ -747,6 +747,61 @@ describe("downgradeOpenAIReasoningBlocks", () => {
     );
   });
 
+  it("drops empty replayable reasoning before tool calls while preserving tool pairing", () => {
+    const input = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "   ",
+            thinkingSignature: JSON.stringify({ id: "rs_empty", type: "reasoning" }),
+          },
+          { type: "toolCall", id: "call_read", name: "read", arguments: {} },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_read",
+        toolName: "read",
+        content: [{ type: "text", text: "ok" }],
+      },
+    ];
+
+    expect(downgradeOpenAIReasoningBlocks(input as any)).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "call_read", name: "read", arguments: {} }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_read",
+        toolName: "read",
+        content: [{ type: "text", text: "ok" }],
+      },
+    ]);
+  });
+
+  it("drops non-string replayable reasoning even when followed by content", () => {
+    const input = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: { text: "not replayable text" },
+            thinkingSignature: JSON.stringify({ id: "rs_non_string", type: "reasoning" }),
+          },
+          { type: "text", text: "answer" },
+        ],
+      },
+    ];
+
+    expect(downgradeOpenAIReasoningBlocks(input as any)).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "answer" }] },
+    ]);
+  });
+
   it("drops orphaned reasoning blocks without following content", () => {
     const input = [
       {

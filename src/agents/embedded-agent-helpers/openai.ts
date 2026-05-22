@@ -57,6 +57,10 @@ function parseOpenAIReasoningSignature(value: unknown): OpenAIReasoningSignature
   return null;
 }
 
+function hasMeaningfulThinkingText(value: unknown): boolean {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
 function hasFollowingNonThinkingBlock(
   content: Extract<AgentMessage, { role: "assistant" }>["content"],
   index: number,
@@ -447,7 +451,7 @@ export function downgradeOpenAIReasoningBlocks(
         nextContent.push(block);
         continue;
       }
-      if (options.dropReplayableReasoning) {
+      if (options.dropReplayableReasoning || !hasMeaningfulThinkingText(record.thinking)) {
         changed = true;
         continue;
       }
