@@ -8,6 +8,10 @@ vi.mock("../infra/outbound/message.js", () => ({
   sendMessage: vi.fn(async () => ({ ok: true })),
 }));
 
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { clearSessionStoreCacheForTest } from "../config/sessions/store.js";
 import { sendMessage } from "../infra/outbound/message.js";
 import {
   buildExecApprovalFollowupPrompt,
@@ -15,8 +19,29 @@ import {
 } from "./bash-tools.exec-approval-followup.js";
 import { callGatewayTool } from "./tools/gateway.js";
 
+const tempStoreDirs: string[] = [];
+
+// Write a real on-disk session store and return its absolute path. Using a real
+// store (instead of mocking config/sessions modules) keeps these mocks from
+// leaking into other test files in a shared (`--isolate=false`) worker.
+function writeTempSessionStore(entries: Record<string, { sessionId: string }>): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "exec-approval-followup-store-"));
+  tempStoreDirs.push(dir);
+  const storePath = path.join(dir, "sessions.json");
+  fs.writeFileSync(storePath, JSON.stringify(entries), "utf8");
+  clearSessionStoreCacheForTest();
+  return storePath;
+}
+
 afterEach(() => {
   vi.resetAllMocks();
+  clearSessionStoreCacheForTest();
+  while (tempStoreDirs.length > 0) {
+    const dir = tempStoreDirs.pop();
+    if (dir) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
 });
 
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
@@ -111,6 +136,69 @@ describe("exec approval followup", () => {
       to: undefined,
     });
     expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("forwards the approval-time session id so the gateway can drop stale followups", async () => {
+    await sendExecApprovalFollowup({
+      approvalId: "req-pin-59349",
+      sessionKey: "agent:main:main",
+      expectedSessionId: "session-original",
+      resultText: "Exec completed: echo ok",
+    });
+
+    expectGatewayAgentFollowup({
+      sessionKey: "agent:main:main",
+      execApprovalFollowupExpectedSessionId: "session-original",
+    });
+  });
+
+  it("omits the expected session id when none was captured", async () => {
+    await sendExecApprovalFollowup({
+      approvalId: "req-no-pin",
+      sessionKey: "agent:main:main",
+      resultText: "Exec completed: echo ok",
+    });
+
+    const params = expectGatewayAgentFollowup({ sessionKey: "agent:main:main" });
+    expect(params).not.toHaveProperty("execApprovalFollowupExpectedSessionId");
+  });
+
+  it("drops a denied direct followup when the session key was rebound by /new or /reset", async () => {
+    const sessionStore = writeTempSessionStore({
+      "agent:main:main": { sessionId: "session-after-reset" },
+    });
+
+    const result = await sendExecApprovalFollowup({
+      approvalId: "req-denied-rebound",
+      sessionKey: "agent:main:main",
+      expectedSessionId: "session-original",
+      sessionStore,
+      turnSourceChannel: "telegram",
+      turnSourceTo: "-100123",
+      resultText: "Exec denied (gateway id=req-denied-rebound, user-denied): uname -a",
+    });
+
+    expect(result).toBe(false);
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(callGatewayTool).not.toHaveBeenCalled();
+  });
+
+  it("delivers a denied direct followup when the key still resolves to the approval-time session", async () => {
+    const sessionStore = writeTempSessionStore({
+      "agent:main:main": { sessionId: "session-original" },
+    });
+
+    await sendExecApprovalFollowup({
+      approvalId: "req-denied-same",
+      sessionKey: "agent:main:main",
+      expectedSessionId: "session-original",
+      sessionStore,
+      turnSourceChannel: "telegram",
+      turnSourceTo: "-100123",
+      resultText: "Exec denied (gateway id=req-denied-same, user-denied): uname -a",
+    });
+
+    expect(sendMessage).toHaveBeenCalled();
   });
 
   it("suppresses denied followups for normal sessions", async () => {
