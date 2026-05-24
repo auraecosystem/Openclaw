@@ -68,12 +68,6 @@ function isToolAllowedByFactoryPolicy(params: {
   });
 }
 
-function hasExplicitWorkspaceManifestPlugin(params: {
-  snapshot: Pick<PluginMetadataSnapshot, "plugins"> | undefined;
-}): boolean {
-  return params.snapshot?.plugins.some((plugin) => plugin.origin === "workspace") ?? false;
-}
-
 export function isToolExplicitlyAllowedByFactoryPolicy(params: {
   toolName: string;
   allowlist?: string[];
@@ -137,16 +131,15 @@ function resolveImageToolFactoryAvailableFromSnapshot(params: {
   if (params.modelHasVision || hasExplicitImageModelConfig(params.config)) {
     return true;
   }
-  if (!params.snapshot) {
-    return false;
-  }
   return (
-    hasSnapshotCapabilityAvailability({
-      snapshot: params.snapshot,
-      authStore: params.authStore,
-      key: "mediaUnderstandingProviders",
-      config: params.config,
-    }) ||
+    (params.snapshot
+      ? hasSnapshotCapabilityAvailability({
+          snapshot: params.snapshot,
+          authStore: params.authStore,
+          key: "mediaUnderstandingProviders",
+          config: params.config,
+        })
+      : false) ||
     hasConfiguredVisionModelAuthSignal({
       config: params.config,
       snapshot: params.snapshot,
@@ -157,7 +150,7 @@ function resolveImageToolFactoryAvailableFromSnapshot(params: {
 
 function hasConfiguredVisionModelAuthSignal(params: {
   config?: OpenClawConfig;
-  snapshot: Pick<PluginMetadataSnapshot, "index" | "plugins">;
+  snapshot?: Pick<PluginMetadataSnapshot, "index" | "plugins">;
   authStore?: AuthProfileStore;
 }): boolean {
   const providers = params.config?.models?.providers;
@@ -176,6 +169,7 @@ function hasConfiguredVisionModelAuthSignal(params: {
       return true;
     }
     if (
+      params.snapshot &&
       hasSnapshotProviderEnvAvailability({
         snapshot: params.snapshot,
         providerId,
@@ -238,7 +232,7 @@ export function resolveOptionalMediaToolFactoryPlan(params: {
     ? (getCurrentCapabilityMetadataSnapshot({
         config: params.config,
         workspaceDir: params.workspaceDir,
-      }) ?? (hasExplicitWorkspaceManifestPlugin({ snapshot }) ? snapshot : undefined))
+      }) ?? snapshot)
     : snapshot;
   const image = resolveImageToolFactoryAvailableFromSnapshot({
     config: params.config,
