@@ -481,6 +481,8 @@ export async function handleInlineActions(params: {
       storePath,
       provider,
       model,
+      activeModelProvider: provider,
+      activeModel: model,
       contextTokens,
       workspaceDir,
       resolvedThinkLevel,
