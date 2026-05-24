@@ -143,6 +143,8 @@ export async function applySessionsPatchToStore(params: {
   const sessionAgentId = normalizeAgentId(
     params.agentId ?? parsedAgent?.agentId ?? resolveDefaultAgentId(cfg),
   );
+  const preserveExplicitDefaultPatchSelection =
+    isSubagentSessionKey(storeKey) || isAcpSessionKey(storeKey);
   const resolvedDefault = resolveDefaultModelForAgent({ cfg, agentId: sessionAgentId });
   const subagentModelHint = isSubagentSessionKey(storeKey)
     ? resolveSubagentConfiguredModelSelection({ cfg, agentId: sessionAgentId })
@@ -579,7 +581,7 @@ export async function applySessionsPatchToStore(params: {
           entry: next,
           provider: resolved.ref.provider,
         }),
-        preserveDefaultSelectionSource: true,
+        preserveDefaultSelectionSource: preserveExplicitDefaultPatchSelection,
         markLiveSwitchPending: true,
       });
     }
