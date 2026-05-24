@@ -536,6 +536,9 @@ function hasUserPinnedModelSelection(entry: SessionEntry | undefined): boolean {
   if (!entry?.modelOverride) {
     return false;
   }
+  if (entry.modelOverrideSource === "user") {
+    return true;
+  }
   if (entry.modelOverrideSource === "auto") {
     return false;
   }
