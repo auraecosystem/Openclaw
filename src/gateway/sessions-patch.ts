@@ -579,6 +579,7 @@ export async function applySessionsPatchToStore(params: {
           entry: next,
           provider: resolved.ref.provider,
         }),
+        preserveDefaultSelectionSource: true,
         markLiveSwitchPending: true,
       });
     }
