@@ -488,7 +488,7 @@ class OpenAIRealtimeVoiceBridge implements RealtimeVoiceBridge {
     if (!this.isConnected() || !this.ws) {
       return;
     }
-    this.sendUserMessage(instructions ?? this.config.instructions ?? "Greet the meeting.");
+    this.requestResponseCreate(instructions ?? this.config.instructions ?? "Greet the meeting.");
   }
 
   submitToolResult(
@@ -1249,7 +1249,7 @@ class OpenAIRealtimeVoiceBridge implements RealtimeVoiceBridge {
     });
   }
 
-  private requestResponseCreate(): void {
+  private requestResponseCreate(instructions?: string): void {
     if (
       this.responseActive ||
       this.responseCreateInFlight ||
@@ -1261,7 +1261,14 @@ class OpenAIRealtimeVoiceBridge implements RealtimeVoiceBridge {
     }
     this.responseCreatePending = false;
     this.responseCreateInFlight = true;
-    this.sendEvent({ type: "response.create" });
+    this.sendEvent(
+      instructions
+        ? {
+            type: "response.create",
+            response: { instructions },
+          }
+        : { type: "response.create" },
+    );
   }
 
   private flushPendingResponseCreate(): void {
