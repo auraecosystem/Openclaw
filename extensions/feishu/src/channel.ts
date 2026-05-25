@@ -65,6 +65,7 @@ import {
   parseFeishuTargetId,
 } from "./conversation-id.js";
 import { listFeishuDirectoryGroups, listFeishuDirectoryPeers } from "./directory.static.js";
+import { feishuDoctor } from "./doctor.js";
 import { messageActionTargetAliases } from "./message-action-contract.js";
 import { resolveFeishuGroupToolPolicy } from "./policy.js";
 import { buildFeishuPresentationCard } from "./presentation-card.js";
@@ -685,6 +686,7 @@ export const feishuPlugin: ChannelPlugin<ResolvedFeishuAccount, FeishuProbeResul
       },
       reload: { configPrefixes: ["channels.feishu"] },
       configSchema: buildChannelConfigSchema(FeishuConfigSchema),
+      doctor: feishuDoctor,
       config: {
         ...feishuConfigAdapter,
         setAccountEnabled: ({ cfg, accountId, enabled }) => {
