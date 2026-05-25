@@ -11,7 +11,10 @@ import {
 import { createCapturedThinkingConfigStream } from "openclaw/plugin-sdk/provider-test-contracts";
 import type { RealtimeVoiceProviderPlugin } from "openclaw/plugin-sdk/realtime-voice";
 import { describe, expect, it, vi } from "vitest";
-import { registerGoogleGeminiCliProvider } from "./gemini-cli-provider.js";
+import {
+  buildGoogleGeminiCliProvider,
+  registerGoogleGeminiCliProvider,
+} from "./gemini-cli-provider.js";
 import googlePlugin from "./index.js";
 import { registerGoogleProvider } from "./provider-registration.js";
 
@@ -23,8 +26,10 @@ const googleProviderPlugin = {
 };
 
 const refreshGeminiCliOAuthTokenMock = vi.hoisted(() => vi.fn());
+const loginGeminiCliOAuthMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./oauth.runtime.js", () => ({
+  loginGeminiCliOAuth: loginGeminiCliOAuthMock,
   refreshGeminiCliOAuthToken: refreshGeminiCliOAuthTokenMock,
 }));
 
@@ -325,5 +330,49 @@ describe("google provider plugin hooks", () => {
       projectId: "project-1",
     });
     expect(refreshGeminiCliOAuthTokenMock).toHaveBeenCalledWith(credential);
+  });
+
+  it("configures provider/model runtime policy from Gemini CLI OAuth setup", async () => {
+    const provider = buildGoogleGeminiCliProvider();
+    const oauthMethod = provider.auth?.find((method) => method.id === "oauth");
+    if (!oauthMethod) {
+      throw new Error("expected Gemini CLI OAuth auth method");
+    }
+    const note = vi.fn(async () => {});
+    const progress = { stop: vi.fn(), update: vi.fn() };
+    loginGeminiCliOAuthMock.mockResolvedValueOnce({
+      access: "gemini-cli-access-token",
+      refresh: "gemini-cli-refresh-token",
+      expires: Date.now() + 60_000,
+      email: "user@example.test",
+    });
+
+    const result = await oauthMethod.run({
+      config: {},
+      env: process.env,
+      isRemote: false,
+      openUrl: async () => {},
+      prompter: {
+        confirm: vi.fn(async () => true),
+        note,
+        progress: vi.fn(() => progress),
+        text: vi.fn(async () => ""),
+      },
+      runtime: { log: vi.fn() },
+    } as never);
+
+    expect(loginGeminiCliOAuthMock).toHaveBeenCalledOnce();
+    expect(result.configPatch?.agents?.defaults?.agentRuntime).toBeUndefined();
+    expect(result.configPatch).toEqual({
+      agents: {
+        defaults: {
+          models: {
+            "google/gemini-3.1-pro-preview": {
+              agentRuntime: { id: "google-gemini-cli" },
+            },
+          },
+        },
+      },
+    });
   });
 });
