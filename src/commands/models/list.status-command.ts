@@ -439,6 +439,7 @@ export async function modelsStatusCommand(
         openAIProviderUsesCodexRuntimeByDefault({ provider: usage.provider, config: cfg }),
     );
     const cliRuntimeAuthUsages = providerUses
+      .filter((usage) => usage.allowCodexRuntimeFallback)
       .map((usage) => {
         const runtime = resolveCliRuntimeExecutionProvider({
           provider: usage.provider,
@@ -446,8 +447,14 @@ export async function modelsStatusCommand(
           cfg,
           agentId: workspaceAgentId,
         });
-        return runtime && normalizeProviderId(runtime) !== usage.provider
-          ? { ...usage, runtime: normalizeProviderId(runtime) }
+        const normalizedRuntime = runtime ? normalizeProviderId(runtime) : undefined;
+        return normalizedRuntime && normalizedRuntime !== usage.provider
+          ? {
+              allowCodexRuntimeFallback: usage.allowCodexRuntimeFallback,
+              model: usage.model,
+              provider: usage.provider,
+              runtime: normalizedRuntime,
+            }
           : undefined;
       })
       .filter((usage): usage is NonNullable<typeof usage> => Boolean(usage));
