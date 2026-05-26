@@ -291,10 +291,7 @@ function resolveBrowserChromeMcpConfig(params: {
         { ...policy, autoDefault: params.openClawManagedUserDataDir },
         "diagnostics",
       ),
-      extensions: resolveChromeMcpCapability(
-        { ...policy, autoDefault: params.openClawManagedUserDataDir },
-        "extensions",
-      ),
+      extensions: resolveChromeMcpCapability({ ...policy, autoDefault: false }, "extensions"),
       extensionMutation: resolveChromeMcpCapability(
         { ...policy, autoDefault: false },
         "extensionMutation",
