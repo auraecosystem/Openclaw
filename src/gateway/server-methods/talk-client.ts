@@ -9,6 +9,7 @@ import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
   buildRealtimeVoiceAgentConsultChatMessage,
 } from "../../talk/agent-consult-tool.js";
+import { REALTIME_VOICE_DESCRIBE_VIEW_TOOL } from "../../talk/describe-view-tool.js";
 import { resolveConfiguredRealtimeVoiceProvider } from "../../talk/provider-resolver.js";
 import {
   ErrorCodes,
@@ -194,7 +195,7 @@ export const talkClientHandlers: GatewayRequestHandlers = {
           cfg: runtimeConfig,
           providerConfig: resolution.providerConfig,
           instructions: buildRealtimeInstructions(realtimeConfig.instructions),
-          tools: [REALTIME_VOICE_AGENT_CONSULT_TOOL],
+          tools: [REALTIME_VOICE_AGENT_CONSULT_TOOL, REALTIME_VOICE_DESCRIBE_VIEW_TOOL],
           ...launchOptions,
         });
         if (

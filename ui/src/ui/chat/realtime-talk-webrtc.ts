@@ -1,6 +1,8 @@
 import type { RealtimeTalkWebRtcSdpSessionResult } from "./realtime-talk-shared.ts";
 import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
+  REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME,
+  captureFrameFromVideoStream,
   createRealtimeTalkEventEmitter,
   submitRealtimeTalkConsult,
   type RealtimeTalkTransport,
@@ -32,6 +34,7 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
   private peer: RTCPeerConnection | null = null;
   private channel: RTCDataChannel | null = null;
   private media: MediaStream | null = null;
+  private videoStream: MediaStream | null = null;
   private audio: HTMLAudioElement | null = null;
   private closed = false;
   private toolBuffers = new Map<string, ToolBuffer>();
@@ -60,6 +63,22 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
         this.audio.srcObject = event.streams[0];
       }
     });
+    if (this.ctx.videoEnabled) {
+      try {
+        this.videoStream = await navigator.mediaDevices.getUserMedia({ video: true });
+        this.ctx.callbacks.onVideoStream?.(this.videoStream);
+      } catch (err) {
+        const detail =
+          typeof DOMException !== "undefined" &&
+          err instanceof DOMException &&
+          err.message.trim().length > 0
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : String(err);
+        throw new Error(`Camera access denied: ${detail}`, { cause: err });
+      }
+    }
     this.media = await navigator.mediaDevices.getUserMedia({ audio: true });
     for (const track of this.media.getAudioTracks()) {
       this.peer.addTrack(track, this.media);
@@ -110,6 +129,11 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
     this.peer = null;
     this.media?.getTracks().forEach((track) => track.stop());
     this.media = null;
+    this.videoStream?.getTracks().forEach((track) => track.stop());
+    this.videoStream = null;
+    if (this.ctx.videoEnabled) {
+      this.ctx.callbacks.onVideoStream?.(null);
+    }
     this.audio?.remove();
     this.audio = null;
     for (const controller of this.consultAbortControllers) {
@@ -236,7 +260,9 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
     this.toolBuffers.delete(key);
     const name = buffered?.name || event.name || "";
     const callId = buffered?.callId || event.call_id || "";
-    if (name !== REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME || !callId) {
+    const isConsult = name === REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME;
+    const isDescribeView = name === REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME;
+    if ((!isConsult && !isDescribeView) || !callId) {
       return;
     }
     this.emitTalkEvent({
@@ -245,6 +271,10 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
       itemId: key,
       payload: { name, args: buffered?.args || event.arguments || "{}" },
     });
+    if (isDescribeView) {
+      await this.handleDescribeViewToolCall(callId);
+      return;
+    }
     const abortController = new AbortController();
     this.consultAbortControllers.add(abortController);
     try {
@@ -257,6 +287,39 @@ export class WebRtcSdpRealtimeTalkTransport implements RealtimeTalkTransport {
       });
     } finally {
       this.consultAbortControllers.delete(abortController);
+    }
+  }
+
+  private async handleDescribeViewToolCall(callId: string): Promise<void> {
+    if (!this.ctx.videoEnabled) {
+      this.submitToolResult(callId, {
+        error:
+          "describe_view is only available in Video Talk mode. Please restart using the video button.",
+      });
+      return;
+    }
+    this.ctx.callbacks.onStatus?.("thinking");
+    try {
+      const imageBase64 = await captureFrameFromVideoStream(this.videoStream);
+      if (imageBase64) {
+        this.send({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [{ type: "input_image", image_url: `data:image/jpeg;base64,${imageBase64}` }],
+          },
+        });
+      }
+      this.submitToolResult(callId, {
+        result: imageBase64
+          ? "Image captured and injected into the conversation. Please describe what you see."
+          : "Camera capture failed. Describe the current situation based on audio context.",
+      });
+    } catch {
+      this.submitToolResult(callId, { error: "Camera capture failed" });
+    } finally {
+      this.ctx.callbacks.onStatus?.("listening");
     }
   }
 

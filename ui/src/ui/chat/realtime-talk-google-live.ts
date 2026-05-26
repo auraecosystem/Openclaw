@@ -2,6 +2,7 @@ import { base64ToBytes, bytesToBase64, floatToPcm16, pcm16ToFloat } from "./real
 import type { RealtimeTalkJsonPcmWebSocketSessionResult } from "./realtime-talk-shared.ts";
 import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
+  REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME,
   createRealtimeTalkEventEmitter,
   submitRealtimeTalkConsult,
   type RealtimeTalkTransport,
@@ -308,6 +309,12 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
       callId,
       payload: { name, args: call.args ?? {} },
     });
+    if (name === REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME) {
+      this.submitToolResult(callId, {
+        error: "describe_view is only available in Video Talk (WebRTC) mode.",
+      });
+      return;
+    }
     if (name !== REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME) {
       return;
     }

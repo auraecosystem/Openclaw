@@ -1,6 +1,7 @@
 import { base64ToBytes, bytesToBase64, floatToPcm16, pcm16ToFloat } from "./realtime-talk-audio.ts";
 import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
+  REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME,
   submitRealtimeTalkConsult,
   type RealtimeTalkGatewayRelaySessionResult,
   type RealtimeTalkEvent,
@@ -260,6 +261,14 @@ export class GatewayRelayRealtimeTalkTransport implements RealtimeTalkTransport 
     const callId = event.callId?.trim();
     const name = event.name?.trim();
     if (!callId || !name) {
+      return;
+    }
+    if (name === REALTIME_VOICE_DESCRIBE_VIEW_TOOL_NAME) {
+      // Path B (inline image injection) requires WebRTC transport; relay cannot forward raw
+      // conversation.item.create events with images. Return a graceful fallback.
+      this.submitToolResult(callId, {
+        error: "describe_view is only available in Video Talk (WebRTC) mode.",
+      });
       return;
     }
     if (name !== REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME) {

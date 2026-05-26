@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME } from "./chat/realtime-talk-shared.ts";
+import {
+  REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
+  captureFrameFromVideoStream,
+} from "./chat/realtime-talk-shared.ts";
 import { WebRtcSdpRealtimeTalkTransport } from "./chat/realtime-talk-webrtc.ts";
 
 class FakeDataChannel extends EventTarget {
@@ -115,6 +118,46 @@ describe("WebRtcSdpRealtimeTalkTransport", () => {
         "Content-Type": "application/sdp",
       },
     });
+    transport.stop();
+  });
+
+  it("rejects startup when video capture permission is denied", async () => {
+    const permissionError = new DOMException("Permission denied", "NotAllowedError");
+    const getUserMedia = vi
+      .fn()
+      .mockRejectedValueOnce(permissionError)
+      .mockResolvedValueOnce({
+        getAudioTracks: () => [],
+        getTracks: () => [],
+      } as unknown as MediaStream);
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: { getUserMedia },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("answer-sdp")) as unknown as typeof fetch,
+    );
+    const onStatus = vi.fn();
+    const transport = new WebRtcSdpRealtimeTalkTransport(
+      {
+        provider: "openai",
+        transport: "webrtc",
+        clientSecret: "client-secret-123",
+      },
+      {
+        client: {} as never,
+        sessionKey: "main",
+        callbacks: { onStatus },
+        videoEnabled: true,
+      },
+    );
+
+    await expect(transport.start()).rejects.toThrow("Camera access denied: Permission denied");
+
+    expect(getUserMedia).toHaveBeenCalledTimes(1);
+    expect(getUserMedia).toHaveBeenCalledWith({ video: true });
+    expect(onStatus).not.toHaveBeenCalledWith("listening");
     transport.stop();
   });
 
@@ -265,6 +308,62 @@ describe("WebRtcSdpRealtimeTalkTransport", () => {
     transport.stop();
   });
 
+  it("calls onVideoStream with the stream when video capture succeeds, and with null on stop", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("answer-sdp")) as unknown as typeof fetch,
+    );
+    const videoTrack = { stop: vi.fn() } as unknown as MediaStreamTrack;
+    const videoStream = {
+      getVideoTracks: () => [videoTrack],
+      getTracks: () => [videoTrack],
+    } as unknown as MediaStream;
+    const audioTrack = { stop: vi.fn() } as unknown as MediaStreamTrack;
+    const audioStream = {
+      getAudioTracks: () => [audioTrack],
+      getTracks: () => [audioTrack],
+    } as unknown as MediaStream;
+    Object.defineProperty(globalThis.navigator, "mediaDevices", {
+      configurable: true,
+      value: {
+        getUserMedia: vi.fn(async (constraints: MediaStreamConstraints) =>
+          constraints.video ? videoStream : audioStream,
+        ),
+      },
+    });
+
+    const onVideoStream = vi.fn();
+    const transport = new WebRtcSdpRealtimeTalkTransport(
+      { provider: "openai", transport: "webrtc", clientSecret: "secret" },
+      { client: {} as never, sessionKey: "main", callbacks: { onVideoStream }, videoEnabled: true },
+    );
+
+    await transport.start();
+    expect(onVideoStream).toHaveBeenCalledTimes(1);
+    expect(onVideoStream).toHaveBeenCalledWith(videoStream);
+
+    transport.stop();
+    expect(onVideoStream).toHaveBeenCalledTimes(2);
+    expect(onVideoStream).toHaveBeenLastCalledWith(null);
+  });
+
+  it("does not call onVideoStream when videoEnabled is false", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("answer-sdp")) as unknown as typeof fetch,
+    );
+
+    const onVideoStream = vi.fn();
+    const transport = new WebRtcSdpRealtimeTalkTransport(
+      { provider: "openai", transport: "webrtc", clientSecret: "secret" },
+      { client: {} as never, sessionKey: "main", callbacks: { onVideoStream } },
+    );
+
+    await transport.start();
+    transport.stop();
+    expect(onVideoStream).not.toHaveBeenCalled();
+  });
+
   it("aborts an in-flight OpenAI tool consult when the transport stops", async () => {
     vi.stubGlobal(
       "fetch",
@@ -329,5 +428,38 @@ describe("WebRtcSdpRealtimeTalkTransport", () => {
       expect(request).toHaveBeenCalledWith("chat.abort", { sessionKey: "main", runId: "run-1" }),
     );
     expect(listeners.size).toBe(0);
+  });
+});
+
+describe("captureFrameFromVideoStream", () => {
+  it("returns undefined when the stream is null", async () => {
+    expect(await captureFrameFromVideoStream(null)).toBeUndefined();
+  });
+
+  it("returns undefined when canvas 2d context is unavailable", async () => {
+    const track = { stop: vi.fn() } as unknown as MediaStreamTrack;
+    const stream = { getTracks: () => [track] } as unknown as MediaStream;
+
+    const origCreateElement = document.createElement.bind(document);
+    vi.spyOn(document, "createElement").mockImplementation((tag: string) => {
+      if (tag === "canvas") {
+        const canvas = origCreateElement("canvas");
+        vi.spyOn(canvas, "getContext").mockReturnValue(null);
+        return canvas;
+      }
+      if (tag === "video") {
+        const video = origCreateElement("video");
+        Object.defineProperty(video, "videoWidth", { get: () => 320 });
+        Object.defineProperty(video, "videoHeight", { get: () => 240 });
+        vi.spyOn(video, "play").mockImplementation(async () => {
+          video.dispatchEvent(new Event("canplay"));
+        });
+        return video;
+      }
+      return origCreateElement(tag);
+    });
+
+    expect(await captureFrameFromVideoStream(stream)).toBeUndefined();
+    vi.restoreAllMocks();
   });
 });

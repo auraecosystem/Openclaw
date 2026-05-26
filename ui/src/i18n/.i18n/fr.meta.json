@@ -1,11 +1,13 @@
 {
-  "fallbackKeys": [],
-  "generatedAt": "2026-05-17T15:18:25.568Z",
+  "fallbackKeys": [
+    "chat.composer.startVideoTalk"
+  ],
+  "generatedAt": "2026-05-25T10:48:48.544Z",
   "locale": "fr",
   "model": "claude-opus-4-7",
   "provider": "anthropic",
-  "sourceHash": "79544002c00e9adfebe5cc0ad3a6ff6393313f6fd7b546e68f0d53110df29914",
-  "totalKeys": 1117,
+  "sourceHash": "6bdfa480dbc0b9f83949a528b933f2152b8904c3dff98c4902d9ccc7c9d9d8ef",
+  "totalKeys": 1118,
   "translatedKeys": 1117,
   "workflow": 1
 }

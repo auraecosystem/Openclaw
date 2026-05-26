@@ -2711,6 +2711,7 @@ export function renderApp(state: AppViewState) {
                   realtimeTalkStatus: state.realtimeTalkStatus,
                   realtimeTalkDetail: state.realtimeTalkDetail,
                   realtimeTalkTranscript: state.realtimeTalkTranscript,
+                  realtimeTalkVideoStream: state.realtimeTalkVideoStream,
                   realtimeTalkOptionsOpen: state.realtimeTalkOptionsOpen,
                   realtimeTalkOptions: state.realtimeTalkOptions,
                   connected: state.connected,
@@ -2756,6 +2757,8 @@ export function renderApp(state: AppViewState) {
                     });
                   },
                   onToggleRealtimeTalk: () => state.toggleRealtimeTalk(),
+                  onToggleRealtimeTalkWithVideo: () =>
+                    state.toggleRealtimeTalk({ videoEnabled: true, transport: "webrtc" }),
                   onToggleRealtimeTalkOptions: () => {
                     state.realtimeTalkOptionsOpen = !state.realtimeTalkOptionsOpen;
                   },
