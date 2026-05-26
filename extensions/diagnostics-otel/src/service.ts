@@ -1058,10 +1058,13 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
           description: "Tool execution duration",
         },
       );
-      const toolExecutionBlockedCounter = meter.createCounter("openclaw.tool.execution.blocked", {
-        unit: "1",
-        description: "Tool executions blocked by policy or sandbox diagnostics",
-      });
+      const toolExecutionBlockedCounter = meter.createCounter(
+        "openclaw.tool.execution.blocked",
+        {
+          unit: "1",
+          description: "Tool executions blocked by policy or sandbox diagnostics",
+        },
+      );
       const execProcessDurationHistogram = meter.createHistogram("openclaw.exec.duration_ms", {
         unit: "ms",
         description: "Exec process duration",

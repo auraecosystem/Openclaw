@@ -120,7 +120,7 @@ describe("docker build helper", () => {
 
     expect(runner).toContain("OPENCLAW_ONBOARD_MAX_MEMORY_MIB");
     expect(runner).toContain("OPENCLAW_ONBOARD_MAX_CPU_PERCENT");
-    expect(runner).toContain('--name "$CONTAINER_NAME"');
+    expect(runner).toContain("--name \"$CONTAINER_NAME\"");
     expect(runner).toContain("docker stats --no-stream");
     expect(runner).toContain("assert-resource-ceiling.mjs");
     expect(runner).not.toContain("docker_e2e_run_with_harness -t");
@@ -428,9 +428,7 @@ describe("docker build helper", () => {
     expect(runner).not.toContain("-- --reporter=verbose");
     expect(runner).toContain("expected focused Vitest summary for exactly 3 passed tests");
     expect(dockerfile).toContain("OPENCLAW_DISABLE_BUNDLED_PLUGIN_POSTINSTALL=1");
-    expect(dockerfile).toContain(
-      "pnpm install --frozen-lockfile --ignore-scripts --filter openclaw",
-    );
+    expect(dockerfile).toContain("pnpm install --frozen-lockfile --ignore-scripts --filter openclaw");
   });
 
   it("covers plugin install/update sources in the Docker plugin sweep", () => {

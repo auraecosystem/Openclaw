@@ -2018,7 +2018,15 @@ async function startManualGatewayFromInstalledCli(params) {
   const gatewayLog = createWriteStream(params.logPath, { flags: "a" });
   const invocation = resolveInstalledCliInvocation(
     params.cliPath,
-    ["gateway", "run", "--bind", "loopback", "--port", String(params.lane.gatewayPort), "--force"],
+    [
+      "gateway",
+      "run",
+      "--bind",
+      "loopback",
+      "--port",
+      String(params.lane.gatewayPort),
+      "--force",
+    ],
     {
       comSpec: params.env?.ComSpec ?? params.env?.COMSPEC,
       platform: process.platform,
