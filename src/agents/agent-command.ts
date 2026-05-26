@@ -810,6 +810,7 @@ async function agentCommandInternal(
 
       const visibleTextAccumulator = attemptExecutionRuntime.createAcpVisibleTextAccumulator();
       let stopReason: string | undefined;
+      let acpUserMessagePersisted = false;
       try {
         const {
           resolveAcpAgentPolicyError,
@@ -829,6 +830,31 @@ async function agentCommandInternal(
         const agentPolicyError = resolveAcpAgentPolicyError(cfg, acpAgent);
         if (agentPolicyError) {
           throw agentPolicyError;
+        }
+
+        if (opts.suppressPromptPersistence !== true) {
+          try {
+            const { resolveAcpSessionCwd } = await loadAcpSessionIdentifiersRuntime();
+            sessionEntry =
+              (await attemptExecutionRuntime.persistUserTurnTranscript({
+                body,
+                transcriptBody,
+                sessionId,
+                sessionKey,
+                sessionEntry,
+                sessionStore: suppressVisibleSessionEffects ? undefined : sessionStore,
+                storePath: suppressVisibleSessionEffects ? undefined : storePath,
+                sessionAgentId,
+                threadId: opts.threadId,
+                sessionCwd: resolveAcpSessionCwd(acpResolution.meta) ?? workspaceDir,
+                config: cfg,
+              })) ?? sessionEntry;
+            acpUserMessagePersisted = true;
+          } catch (error) {
+            log.warn(
+              `ACP user turn transcript persistence failed for ${sessionKey}: ${formatErrorMessage(error)}`,
+            );
+          }
         }
 
         const acpImageAttachments = resolveInlineAgentImageAttachments(opts.images);
@@ -944,6 +970,7 @@ async function agentCommandInternal(
           threadId: opts.threadId,
           sessionCwd: resolveAcpSessionCwd(acpResolution.meta) ?? workspaceDir,
           config: cfg,
+          userAlreadyPersisted: acpUserMessagePersisted,
         });
         if (internalSessionFile) {
           sessionEntry = prepared.sessionEntry;
@@ -1577,6 +1604,7 @@ async function agentCommandInternal(
               sessionFile: attemptSessionFile,
               workspaceDir,
               cwd,
+              transcriptBody,
               body,
               isFallbackRetry,
               resolvedThinkLevel,
@@ -1840,6 +1868,7 @@ async function agentCommandInternal(
             sessionCwd: effectiveCwd,
             config: cfg,
             embeddedAssistantGapFill,
+            userAlreadyPersisted: attemptLifecycleState.currentTurnUserMessagePersisted,
           });
           if (suppressVisibleSessionEffects) {
             sessionEntry = prepared.sessionEntry;

@@ -9,6 +9,7 @@ export {
   emitAcpRuntimeEvent,
   persistAcpTurnTranscript,
   persistCliTurnTranscript,
+  persistUserTurnTranscript,
   runAgentAttempt,
   sessionFileHasContent,
 } from "./attempt-execution.js";
