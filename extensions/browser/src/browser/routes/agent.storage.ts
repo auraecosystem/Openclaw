@@ -2,11 +2,16 @@ import {
   normalizeOptionalString,
   readStringValue,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { setExtraHTTPHeadersViaCdp } from "../cdp.js";
+import { emulateChromeMcpPage } from "../chrome-mcp.js";
+import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
   readBody,
   resolveTargetIdFromBody,
   resolveTargetIdFromQuery,
+  requirePwAi,
+  withRouteTabContext,
   withPlaywrightRouteContext,
 } from "./agent.shared.js";
 import type { BrowserRequest, BrowserResponse, BrowserRouteRegistrar } from "./types.js";
@@ -266,13 +271,26 @@ export function registerBrowserAgentStorageRoutes(
       }
 
       // Intentional: mutation routes are outside the tab-scoped read/export guard scope.
-      await withPlaywrightRouteContext({
+      await withRouteTabContext({
         req,
         res,
         ctx,
         targetId,
-        feature: "offline",
-        run: async ({ cdpUrl, tab, pw }) => {
+        run: async ({ cdpUrl, tab, profileCtx }) => {
+          if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            await emulateChromeMcpPage({
+              profileName: profileCtx.profile.name,
+              profile: profileCtx.profile,
+              targetId: tab.targetId,
+              offline,
+            });
+            res.json({ ok: true, targetId: tab.targetId });
+            return;
+          }
+          const pw = await requirePwAi(res, "offline");
+          if (!pw) {
+            return;
+          }
           await pw.setOfflineViaPlaywright({
             cdpUrl,
             targetId: tab.targetId,
@@ -305,13 +323,26 @@ export function registerBrowserAgentStorageRoutes(
       }
 
       // Intentional: mutation routes are outside the tab-scoped read/export guard scope.
-      await withPlaywrightRouteContext({
+      await withRouteTabContext({
         req,
         res,
         ctx,
         targetId,
-        feature: "headers",
-        run: async ({ cdpUrl, tab, pw }) => {
+        run: async ({ cdpUrl, tab, profileCtx }) => {
+          if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            await setExtraHTTPHeadersViaCdp({
+              cdpUrl,
+              targetId: tab.targetId,
+              targetUrl: tab.url,
+              headers: parsed,
+            });
+            res.json({ ok: true, targetId: tab.targetId });
+            return;
+          }
+          const pw = await requirePwAi(res, "headers");
+          if (!pw) {
+            return;
+          }
           await pw.setExtraHTTPHeadersViaPlaywright({
             cdpUrl,
             targetId: tab.targetId,
@@ -363,13 +394,33 @@ export function registerBrowserAgentStorageRoutes(
       const accuracy = toNumber(body.accuracy) ?? undefined;
       const origin = toStringOrEmpty(body.origin) || undefined;
 
-      await withPlaywrightRouteContext({
+      await withRouteTabContext({
         req,
         res,
         ctx,
         targetId,
-        feature: "geolocation",
-        run: async ({ cdpUrl, tab, pw }) => {
+        run: async ({ cdpUrl, tab, profileCtx }) => {
+          if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            if (!clear && (typeof latitude !== "number" || typeof longitude !== "number")) {
+              throw new Error("latitude and longitude are required (or set clear=true)");
+            }
+            await emulateChromeMcpPage({
+              profileName: profileCtx.profile.name,
+              profile: profileCtx.profile,
+              targetId: tab.targetId,
+              geolocation: clear ? null : { latitude: latitude!, longitude: longitude! },
+            });
+            res.json({
+              ok: true,
+              targetId: tab.targetId,
+              ...(origin ? { permissionGrantUnsupported: true } : {}),
+            });
+            return;
+          }
+          const pw = await requirePwAi(res, "geolocation");
+          if (!pw) {
+            return;
+          }
           await pw.setGeolocationViaPlaywright({
             cdpUrl,
             targetId: tab.targetId,
@@ -401,13 +452,26 @@ export function registerBrowserAgentStorageRoutes(
         return jsonError(res, 400, "colorScheme must be dark|light|no-preference|none");
       }
 
-      await withPlaywrightRouteContext({
+      await withRouteTabContext({
         req,
         res,
         ctx,
         targetId,
-        feature: "media emulation",
-        run: async ({ cdpUrl, tab, pw }) => {
+        run: async ({ cdpUrl, tab, profileCtx }) => {
+          if (getBrowserProfileCapabilities(profileCtx.profile).usesChromeMcp) {
+            await emulateChromeMcpPage({
+              profileName: profileCtx.profile.name,
+              profile: profileCtx.profile,
+              targetId: tab.targetId,
+              colorScheme: colorScheme === "dark" || colorScheme === "light" ? colorScheme : "auto",
+            });
+            res.json({ ok: true, targetId: tab.targetId });
+            return;
+          }
+          const pw = await requirePwAi(res, "media emulation");
+          if (!pw) {
+            return;
+          }
           await pw.emulateMediaViaPlaywright({
             cdpUrl,
             targetId: tab.targetId,

@@ -3,6 +3,7 @@ import {
   DEFAULT_AI_SNAPSHOT_MAX_CHARS,
   browserAct,
   browserConsoleMessages,
+  browserNetworkRequests,
   browserSnapshot,
   browserTabs,
   getBrowserProfileCapabilities,
@@ -24,6 +25,7 @@ import {
 const browserToolActionDeps = {
   browserAct,
   browserConsoleMessages,
+  browserNetworkRequests,
   browserSnapshot,
   browserTabs,
   getRuntimeConfig,
@@ -123,6 +125,7 @@ export const testing = {
     overrides: Partial<{
       browserAct: typeof browserAct;
       browserConsoleMessages: typeof browserConsoleMessages;
+      browserNetworkRequests: typeof browserNetworkRequests;
       browserSnapshot: typeof browserSnapshot;
       browserTabs: typeof browserTabs;
       imageResultFromFile: typeof imageResultFromFile;
@@ -132,6 +135,8 @@ export const testing = {
     browserToolActionDeps.browserAct = overrides?.browserAct ?? browserAct;
     browserToolActionDeps.browserConsoleMessages =
       overrides?.browserConsoleMessages ?? browserConsoleMessages;
+    browserToolActionDeps.browserNetworkRequests =
+      overrides?.browserNetworkRequests ?? browserNetworkRequests;
     browserToolActionDeps.browserSnapshot = overrides?.browserSnapshot ?? browserSnapshot;
     browserToolActionDeps.browserTabs = overrides?.browserTabs ?? browserTabs;
     browserToolActionDeps.imageResultFromFile =
@@ -182,7 +187,7 @@ function formatAgentTab(tab: unknown): Record<string, unknown> {
 }
 
 function wrapBrowserExternalJson(params: {
-  kind: "snapshot" | "console" | "tabs";
+  kind: "snapshot" | "console" | "requests" | "tabs";
   payload: unknown;
   includeWarning?: boolean;
 }): { wrappedText: string; safeDetails: Record<string, unknown> } {
@@ -242,6 +247,27 @@ function formatConsoleToolResult(result: {
       targetId: readStringValue(result.targetId),
       url: readStringValue(result.url),
       messageCount: Array.isArray(result.messages) ? result.messages.length : undefined,
+    },
+  };
+}
+
+function formatNetworkRequestsToolResult(result: {
+  targetId?: string;
+  url?: string;
+  requests?: unknown[];
+}): AgentToolResult<unknown> {
+  const wrapped = wrapBrowserExternalJson({
+    kind: "requests",
+    payload: result,
+    includeWarning: false,
+  });
+  return {
+    content: [{ type: "text" as const, text: wrapped.wrappedText }],
+    details: {
+      ...wrapped.safeDetails,
+      targetId: readStringValue(result.targetId),
+      url: readStringValue(result.url),
+      requestCount: Array.isArray(result.requests) ? result.requests.length : undefined,
     },
   };
 }
@@ -533,6 +559,38 @@ export async function executeConsoleAction(params: {
     profile,
   });
   return formatConsoleToolResult(result);
+}
+
+export async function executeRequestsAction(params: {
+  input: Record<string, unknown>;
+  baseUrl?: string;
+  profile?: string;
+  proxyRequest: BrowserProxyRequest | null;
+}): Promise<AgentToolResult<unknown>> {
+  const { input, baseUrl, profile, proxyRequest } = params;
+  const filter = normalizeOptionalString(input.filter);
+  const targetId = normalizeOptionalString(input.targetId);
+  const clear = typeof input.clear === "boolean" ? input.clear : undefined;
+  if (proxyRequest) {
+    const result = (await proxyRequest({
+      method: "GET",
+      path: "/requests",
+      profile,
+      query: {
+        filter,
+        clear,
+        targetId,
+      },
+    })) as { ok?: boolean; targetId?: string; requests?: unknown[] };
+    return formatNetworkRequestsToolResult(result);
+  }
+  const result = await browserToolActionDeps.browserNetworkRequests(baseUrl, {
+    filter,
+    clear,
+    targetId,
+    profile,
+  });
+  return formatNetworkRequestsToolResult(result);
 }
 
 export async function executeActAction(params: {

@@ -57,6 +57,26 @@ function collectExactPluginConfigContractMatches({
   return Object.hasOwn(root, pathPattern) ? [{ path: pathPattern, value: root[pathPattern] }] : [];
 }
 
+function collectDangerousBrowserChromeMcpCapabilities(
+  chromeMcp: unknown,
+  pathPrefix: string,
+  enabledFlags: string[],
+): void {
+  if (!isRecord(chromeMcp) || !isRecord(chromeMcp.capabilities)) {
+    return;
+  }
+  for (const key of [
+    "diagnostics",
+    "extensionMutation",
+    "thirdPartyToolExecution",
+    "webMcpToolExecution",
+  ] as const) {
+    if (chromeMcp.capabilities[key] === true) {
+      enabledFlags.push(`${pathPrefix}.capabilities.${key}=true`);
+    }
+  }
+}
+
 export function collectEnabledInsecureOrDangerousFlagsFromContracts(
   cfg: OpenClawConfig,
   inputs: DangerousConfigFlagContractInputs = {},
@@ -82,6 +102,20 @@ export function collectEnabledInsecureOrDangerousFlagsFromContracts(
   }
   if (cfg.browser?.ssrfPolicy?.dangerouslyAllowPrivateNetwork === true) {
     enabledFlags.push("browser.ssrfPolicy.dangerouslyAllowPrivateNetwork=true");
+  }
+  collectDangerousBrowserChromeMcpCapabilities(
+    cfg.browser?.chromeMcp,
+    "browser.chromeMcp",
+    enabledFlags,
+  );
+  if (cfg.browser?.profiles) {
+    for (const [profileName, profile] of Object.entries(cfg.browser.profiles)) {
+      collectDangerousBrowserChromeMcpCapabilities(
+        profile?.chromeMcp,
+        `browser.profiles[${JSON.stringify(profileName)}].chromeMcp`,
+        enabledFlags,
+      );
+    }
   }
   if (cfg.tools?.fs?.workspaceOnly === false) {
     enabledFlags.push("tools.fs.workspaceOnly=false");

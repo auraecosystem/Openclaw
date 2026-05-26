@@ -157,6 +157,17 @@ Browser settings live in `~/.openclaw/openclaw.json`.
       maxTabsPerSession: 8, // set 0 to disable the per-session cap
       sweepMinutes: 5,
     },
+    chromeMcp: {
+      capabilities: {
+        diagnostics: "auto", // auto enables only for OpenClaw-managed existing-session data dirs
+        extensions: false, // enable explicitly only for Chrome MCP pipe-launch profiles
+        extensionMutation: false,
+        thirdPartyTools: false,
+        thirdPartyToolExecution: false,
+        webMcpTools: false,
+        webMcpToolExecution: false,
+      },
+    },
     defaultProfile: "openclaw",
     color: "#FF4500",
     headless: false,
@@ -249,6 +260,7 @@ Browser settings live in `~/.openclaw/openclaw.json`.
 - Auto-detect order: system default browser if Chromium-based; otherwise Chrome → Brave → Edge → Chromium → Chrome Canary.
 - `driver: "existing-session"` uses Chrome DevTools MCP instead of raw CDP. Do not set `cdpUrl` for that driver.
 - Set `browser.profiles.<name>.userDataDir` when an existing-session profile should attach to a non-default Chromium user profile (Brave, Edge, etc.). This path also accepts `~` for your OS home directory.
+- `browser.chromeMcp.capabilities` controls higher-risk existing-session Chrome MCP surfaces. The `"auto"` default enables diagnostics only for OpenClaw-managed existing-session profile data dirs. Extension inventory, mutation, and page-provided tools require explicit opt-in.
 
 </Accordion>
 
@@ -612,10 +624,84 @@ Agent use:
   prompt.
 - the Gateway or node host can spawn `npx chrome-devtools-mcp@latest --autoConnect`
 
+### Choosing a profile for proof runs
+
+Use the profile mode that matches the risk of the task:
+
+- **Disposable managed profile:** use the default `openclaw` profile or create a
+  short-lived local managed profile with `openclaw browser create-profile --name
+proof-<id>`. This does not reuse login state. `openclaw browser delete-profile
+--name proof-<id>` removes the OpenClaw-managed profile config and moves that
+  managed profile data to Trash.
+- **Disposable Chrome MCP launch:** use an `existing-session` profile with
+  `executablePath`, `headless`, and Chrome MCP args such as `--isolated` when
+  you need to prove Chrome MCP behavior without reusing a signed-in profile.
+  This is appropriate for public proof runs that should not depend on personal
+  cookies.
+- **Reusable logged-in profile:** use `profile="user"` or a named
+  `existing-session` profile with `userDataDir` only when the user explicitly
+  wants existing login state. Deleting the OpenClaw profile entry does not delete
+  that external browser user data directory.
+
+Example disposable Chrome MCP proof profile:
+
+```json5
+{
+  browser: {
+    profiles: {
+      "chrome-proof": {
+        driver: "existing-session",
+        executablePath: "/usr/bin/google-chrome",
+        headless: true,
+        mcpArgs: ["--isolated", "--no-usage-statistics"],
+        chromeMcp: {
+          capabilities: {
+            diagnostics: true,
+            extensions: true,
+          },
+        },
+      },
+    },
+  },
+}
+```
+
+For public or maintainer proof packets, prefer a disposable profile unless the
+proof explicitly needs logged-in state.
+
 Notes:
 
 - This path is higher-risk than the isolated `openclaw` profile because it can
   act inside your signed-in browser session.
+- Chrome MCP diagnostics (`console-message`, `request-detail`, trace, heap
+  snapshot, Lighthouse, and screencast) are disabled by default for personal
+  signed-in profiles. Enable them per profile when the target browser profile is
+  dedicated to automation:
+
+  ```json5
+  {
+    browser: {
+      profiles: {
+        "agent-chrome": {
+          driver: "existing-session",
+          attachOnly: true,
+          userDataDir: "~/.openclaw/browser/agent-chrome/user-data",
+          chromeMcp: {
+            capabilities: {
+              diagnostics: true,
+              extensions: true,
+            },
+          },
+          color: "#00AA00",
+        },
+      },
+    },
+  }
+  ```
+
+- Extension mutation and page-provided tool execution are always explicit
+  opt-ins: set `extensionMutation`, `thirdPartyToolExecution`, or
+  `webMcpToolExecution` only for trusted automation profiles.
 - OpenClaw does not launch the browser for this driver; it only attaches.
 - OpenClaw uses the official Chrome DevTools MCP `--autoConnect` flow here. If
   `userDataDir` is set, it is passed through to target that user data directory.
@@ -623,16 +709,51 @@ Notes:
   browser node. If Chrome lives elsewhere and no browser node is connected, use
   remote CDP or a node host instead.
 
+### Screencast proof checks
+
+Chrome MCP screencasts should be validated as video artifacts, not just as
+non-empty files. For WebM output, some encoders do not write container duration
+or `nb_frames` metadata, so a strict proof should run `ffprobe` with frame
+counting:
+
+```bash
+ffprobe -v error -count_frames -select_streams v:0 \
+  -show_entries stream=codec_name,width,height,r_frame_rate,avg_frame_rate,nb_read_frames \
+  -of json /tmp/openclaw/browser-screencast.webm
+```
+
+A usable proof has a video stream, non-zero dimensions, a positive
+`r_frame_rate` or `avg_frame_rate`, and `nb_read_frames` greater than zero.
+Treat zero-byte output, invalid container errors such as `moov atom not found`,
+or no readable video stream as failed screencast evidence and recapture.
+
+Chrome MCP `/screencast/stop` performs this probe automatically when `ffprobe`
+is available on the host. In that response, `artifactReady` means a non-empty
+artifact file was observed, while `artifactVideoReady` is true only when
+`ffprobe -count_frames` confirms a decodable video stream. If `ffprobe` is
+missing or cannot validate the file, `artifactReady` can still be true but
+`artifactVideoReady` remains false and `artifactWarning` explains the failed
+probe. The default frame-count probe is bounded to 15 seconds; pass
+`probeTimeoutMs` or `videoProbeTimeoutMs` to `/screencast/stop` for longer
+recordings. Values above 60 seconds are clamped.
+
 ### Custom Chrome MCP launch
 
 Override the spawned Chrome DevTools MCP server per profile when the default
 `npx chrome-devtools-mcp@latest` flow is not what you want (offline hosts,
 pinned versions, vendored binaries):
 
-| Field        | What it does                                                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| `mcpCommand` | Executable to spawn instead of `npx`. Resolved as-is; absolute paths are honored.                                          |
-| `mcpArgs`    | Argument array passed verbatim to `mcpCommand`. Replaces the default `chrome-devtools-mcp@latest --autoConnect` arguments. |
+| Field        | What it does                                                                                                                                                                                                                                                                            |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mcpCommand` | Executable to spawn instead of `npx`. Resolved as-is; absolute paths are honored.                                                                                                                                                                                                       |
+| `mcpArgs`    | Extra argument array for `mcpCommand`. Endpoint arguments can override auto-connect. Use `browser.chromeMcp.capabilities` for Chrome MCP feature policy; legacy diagnostic/category flags here are accepted as compatibility defaults unless explicit capability policy overrides them. |
+
+For upgrades from older configs, legacy `mcpArgs` diagnostic/category flags keep
+their previous behavior without being silently dropped: diagnostic flags enable
+the matching diagnostics capability, category flags enable the matching list/read
+capability, and explicit `chromeMcp.capabilities.*: false` still wins. Mutation
+and page-provided tool execution capabilities are never inferred from legacy
+category args; opt into those with explicit `chromeMcp.capabilities` settings.
 
 When `cdpUrl` is set on an existing-session profile, OpenClaw skips
 `--autoConnect` and forwards the endpoint to Chrome MCP automatically:
@@ -651,7 +772,8 @@ Compared to the managed `openclaw` profile, existing-session drivers are more co
 
 - **Screenshots** - page captures and `--ref` element captures work; CSS `--element` selectors do not. `--full-page` cannot combine with `--ref` or `--element`. Playwright is not required for page or ref-based element screenshots.
 - **Actions** - `click`, `type`, `hover`, `scrollIntoView`, `drag`, and `select` require snapshot refs (no CSS selectors). `click-coords` clicks visible viewport coordinates and does not require a snapshot ref. `click` is left-button only. `type` does not support `slowly=true`; use `fill` or `press`. `press` does not support `delayMs`. `type`, `hover`, `scrollIntoView`, `drag`, `select`, `fill`, and `evaluate` do not support per-call timeouts. `select` accepts a single value.
-- **Wait / upload / dialog** - `wait --url` supports exact, substring, and glob patterns; `wait --load networkidle` is not supported. Upload hooks require `ref` or `inputRef`, one file at a time, no CSS `element`. Dialog hooks do not support timeout overrides or `dialogId`.
+- **Wait / upload / dialog** - `wait --url` supports exact, substring, and glob patterns. Upload hooks require `ref` or `inputRef`, one file at a time, no CSS `element`. Dialog hooks accept a bounded `timeoutMs` wait budget and do not support `dialogId`.
+- **Diagnostics** - console/request detail, trace, heap snapshot, Lighthouse, and screencast require `chromeMcp.capabilities.diagnostics: true` for the selected profile.
 - **Dialog visibility** - Managed browser action responses include `blockedByDialog` and `browserState.dialogs.pending` when an action opens a modal dialog; snapshots also include pending dialog state. Respond with `browser dialog --accept/--dismiss --dialog-id <id>` while a dialog is pending. Dialogs handled outside OpenClaw appear under `browserState.dialogs.recent`.
 - **Managed-only features** - batch actions, PDF export, download interception, and `responsebody` still require the managed browser path.
 
