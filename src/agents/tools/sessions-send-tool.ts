@@ -183,6 +183,7 @@ async function startAgentRun(params: {
 
 export function createSessionsSendTool(opts?: {
   agentSessionKey?: string;
+  requesterAgentIdOverride?: string;
   agentChannel?: GatewayMessageChannel;
   sandboxed?: boolean;
   config?: OpenClawConfig;
@@ -200,11 +201,14 @@ export function createSessionsSendTool(opts?: {
       const message = readStringParam(params, "message", { required: true });
       const { cfg, mainKey, alias, effectiveRequesterKey, restrictToSpawned } =
         resolveSessionToolContext(opts);
+      const requesterAgentId =
+        opts?.requesterAgentIdOverride ?? resolveAgentIdFromSessionKey(effectiveRequesterKey);
 
       const a2aPolicy = createAgentToAgentPolicy(cfg);
       const sessionVisibility = resolveEffectiveSessionToolsVisibility({
         cfg,
         sandboxed: opts?.sandboxed === true,
+        agentId: requesterAgentId,
       });
 
       const sessionKeyParam = readStringParam(params, "sessionKey");
