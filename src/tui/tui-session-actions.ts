@@ -295,6 +295,16 @@ export function createSessionActions(context: SessionActionContext) {
   };
 
   const loadHistory = async () => {
+    const shouldPrewarmRuntime = !state.historyLoaded;
+    if (shouldPrewarmRuntime) {
+      setActivityStatus("warming runtime");
+    }
+    const prewarmPromise =
+      shouldPrewarmRuntime && client.prewarmAgentRuntime
+        ? client
+            .prewarmAgentRuntime({ sessionKey: state.currentSessionKey })
+            .catch((err) => ({ agentRuntimePrewarm: { status: "failed", error: String(err) } }))
+        : undefined;
     try {
       const history = await client.loadHistory({
         sessionKey: state.currentSessionKey,
@@ -367,11 +377,23 @@ export function createSessionActions(context: SessionActionContext) {
         }
       }
       state.historyLoaded = true;
+      tui.requestRender();
+      const prewarm = (await prewarmPromise) as
+        | { agentRuntimePrewarm?: { status?: string; error?: string } }
+        | undefined;
+      if (prewarm?.agentRuntimePrewarm?.status === "failed") {
+        chatLog.addSystem(
+          `runtime prewarm failed: ${prewarm.agentRuntimePrewarm.error ?? "unknown"}`,
+        );
+      }
       void rememberSessionKey?.(state.currentSessionKey);
     } catch (err) {
       chatLog.addSystem(`history failed: ${String(err)}`);
     }
     await refreshSessionInfo();
+    if (shouldPrewarmRuntime) {
+      setActivityStatus("idle");
+    }
     tui.requestRender();
   };
 

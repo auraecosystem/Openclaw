@@ -374,6 +374,9 @@ export function canSubmitTuiChatMessage(params: {
   pendingOptimisticUserMessage?: boolean;
 }): boolean {
   const pending = Boolean(params.pendingChatRunId) || params.pendingOptimisticUserMessage === true;
+  if (params.activityStatus === "warming runtime") {
+    return false;
+  }
   if (params.activeChatRunId) {
     return params.local === true && params.activityStatus === "finishing context" && !pending;
   }
@@ -385,6 +388,7 @@ const TUI_BUSY_ACTIVITY_STATUSES = new Set([
   "waiting",
   "streaming",
   "running",
+  "warming runtime",
   "finishing context",
 ]);
 

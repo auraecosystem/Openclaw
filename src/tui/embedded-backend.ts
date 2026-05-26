@@ -1,8 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { agentCommandFromIngress } from "../agents/agent-command.js";
-import { resolveSessionAgentId } from "../agents/agent-scope.js";
+import {
+  resolveAgentDir,
+  resolveAgentWorkspaceDir,
+  resolveSessionAgentId,
+} from "../agents/agent-scope.js";
 import { ensureContextWindowCacheLoaded } from "../agents/context.js";
 import { DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { prewarmAgentHarnessRuntime } from "../agents/harness/prewarm.js";
 import {
   buildAllowedModelSet,
   buildConfiguredModelCatalog,
@@ -385,7 +390,6 @@ export class EmbeddedTuiBackend implements TuiBackend {
         catalog,
       });
     }
-
     return {
       sessionKey: opts.sessionKey,
       sessionId,
@@ -394,6 +398,28 @@ export class EmbeddedTuiBackend implements TuiBackend {
       fastMode: entry?.fastMode,
       verboseLevel: entry?.verboseLevel ?? cfg.agents?.defaults?.verboseDefault,
     };
+  }
+
+  async prewarmAgentRuntime(opts: { sessionKey: string }) {
+    const { cfg, entry } = loadSessionEntry(opts.sessionKey);
+    const sessionId = entry?.sessionId;
+    const sessionAgentId = resolveSessionAgentId({ sessionKey: opts.sessionKey, config: cfg });
+    const resolvedSessionModel = resolveSessionModelRef(cfg, entry, sessionAgentId);
+    const agentRuntimePrewarm = await prewarmAgentHarnessRuntime({
+      cfg,
+      provider: resolvedSessionModel.provider,
+      modelId: resolvedSessionModel.model,
+      agentId: sessionAgentId,
+      sessionKey: opts.sessionKey,
+      sessionId,
+      sessionFile: entry?.sessionFile,
+      agentDir: resolveAgentDir(cfg, sessionAgentId),
+      workspaceDir: entry?.spawnedWorkspaceDir ?? resolveAgentWorkspaceDir(cfg, sessionAgentId),
+      authProfileId: entry?.authProfileOverride,
+      authProfileIdSource: entry?.authProfileOverrideSource,
+      reason: "tui-startup",
+    });
+    return { agentRuntimePrewarm };
   }
 
   async listSessions(opts?: Parameters<TuiBackend["listSessions"]>[0]): Promise<TuiSessionList> {
