@@ -9,6 +9,7 @@ import {
   type DiagnosticEventPayload,
   waitForDiagnosticEventsDrained,
 } from "../../../infra/diagnostic-events.js";
+import type { DiagnosticModelContentCapturePolicy } from "../../../infra/diagnostic-llm-content.js";
 import { createDiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import {
   getDiagnosticSessionActivitySnapshot,
@@ -107,6 +108,29 @@ function requireMockRecordArg(
   return requireRecord(mock.mock.calls[callIndex]?.[argIndex], label);
 }
 
+function contentCapturePolicy(
+  overrides: Partial<DiagnosticModelContentCapturePolicy>,
+): DiagnosticModelContentCapturePolicy {
+  const policy = {
+    inputMessages: false,
+    outputMessages: false,
+    toolInputs: false,
+    toolOutputs: false,
+    systemPrompt: false,
+    toolDefinitions: false,
+    logBodies: false,
+    ...overrides,
+  };
+  return {
+    ...policy,
+    anyModelContent:
+      policy.inputMessages ||
+      policy.outputMessages ||
+      policy.systemPrompt ||
+      policy.toolDefinitions,
+  };
+}
+
 describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
   beforeEach(() => {
     resetDiagnosticEventsForTest();
@@ -156,7 +180,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
           spanId: "00f067aa0ba902b7",
         }),
         nextCallId: () => "call-1",
-        contentCapture: { inputMessages: false, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: false, outputMessages: true }),
       },
     );
 
@@ -330,7 +354,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-payload",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -477,7 +501,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         provider: "openai",
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
-        contentCapture: {
+        contentCapture: contentCapturePolicy({
           inputMessages: true,
           outputMessages: true,
           toolInputs: false,
@@ -485,7 +509,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
           systemPrompt: true,
           toolDefinitions: true,
           anyModelContent: true,
-        },
+        }),
         nextCallId: () => "call-content",
       },
     );
@@ -557,7 +581,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
           traceFlags: "01",
         }),
         nextCallId: () => "call-traceparent",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -599,7 +623,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "sonnet-4.6",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-err",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -638,7 +662,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "qwen/qwen3.5-9b",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-terminated",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -679,7 +703,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-frozen",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -727,7 +751,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         contextWindowReferenceTokens: 200_000,
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-hook",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -794,7 +818,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-abandoned",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -842,7 +866,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-no-input",
-        contentCapture: { inputMessages: false, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: false, outputMessages: true }),
       },
     );
 
@@ -882,7 +906,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-no-output",
-        contentCapture: { inputMessages: true, outputMessages: false },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: false }),
       },
     );
 
@@ -916,7 +940,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-no-output-read",
-        contentCapture: { inputMessages: true, outputMessages: false },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: false }),
       },
     );
 
@@ -969,7 +993,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-responses-input-text",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -1027,7 +1051,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-filter-system-developer-input",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -1042,8 +1066,12 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completed?.event).not.toHaveProperty("outputMessages");
     expect(completed?.privateData.modelContent?.inputMessages).toEqual(["responses user input"]);
     expect(completed?.privateData.modelContent?.outputMessages).toEqual(["output text"]);
-    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain("responses system prompt");
-    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain("responses developer prompt");
+    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain(
+      "responses system prompt",
+    );
+    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain(
+      "responses developer prompt",
+    );
   });
 
   it("does not capture system or developer role chat messages", async () => {
@@ -1073,7 +1101,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-filter-system-developer-chat",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
@@ -1088,8 +1116,12 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     expect(completed?.event).not.toHaveProperty("outputMessages");
     expect(completed?.privateData.modelContent?.inputMessages).toEqual(["visible user message"]);
     expect(completed?.privateData.modelContent?.outputMessages).toEqual(["output text"]);
-    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain("hidden system prompt");
-    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain("hidden developer prompt");
+    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain(
+      "hidden system prompt",
+    );
+    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain(
+      "hidden developer prompt",
+    );
   });
 
   it("does not capture tool role chat messages as inputMessages", async () => {
@@ -1118,22 +1150,22 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-filter-tool-chat",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
-    const events = await collectModelCallEvents(async () => {
+    const events = await collectTrustedModelCallEvents(async () => {
       const streamResult = await wrapped({} as never, {} as never, {} as never);
       await drain(streamResult as unknown as AsyncIterable<unknown>);
     });
 
-    const completed = events.find((e) => e.type === "model.call.completed");
-    expect(completed).toMatchObject({
-      type: "model.call.completed",
-      inputMessages: ["visible user message"],
-      outputMessages: ["output text"],
-    });
-    expect(JSON.stringify(completed)).not.toContain("hidden tool result");
+    const completed = events.find(({ event }) => event.type === "model.call.completed");
+    expect(completed?.event).toMatchObject({ type: "model.call.completed" });
+    expect(completed?.event).not.toHaveProperty("inputMessages");
+    expect(completed?.event).not.toHaveProperty("outputMessages");
+    expect(completed?.privateData.modelContent?.inputMessages).toEqual(["visible user message"]);
+    expect(completed?.privateData.modelContent?.outputMessages).toEqual(["output text"]);
+    expect(JSON.stringify(completed?.privateData.modelContent)).not.toContain("hidden tool result");
   });
 
   it("captures output from normalized text_delta chunks", async () => {
@@ -1148,7 +1180,7 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
         model: "gpt-5.4",
         trace: createDiagnosticTraceContext(),
         nextCallId: () => "call-text-delta",
-        contentCapture: { inputMessages: true, outputMessages: true },
+        contentCapture: contentCapturePolicy({ inputMessages: true, outputMessages: true }),
       },
     );
 
