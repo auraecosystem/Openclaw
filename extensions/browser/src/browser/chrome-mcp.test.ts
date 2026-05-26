@@ -43,6 +43,7 @@ import {
   resetChromeMcpSessionsForTest,
   resizeChromeMcpPage,
   runChromeMcpLighthouseAudit,
+  setChromeMcpProcessCleanupDepsForTest,
   setChromeMcpSessionFactoryForTest,
   startChromeMcpPerformanceTrace,
   startChromeMcpScreencast,
@@ -1361,6 +1362,76 @@ describe("chrome MCP page parsing", () => {
       "--experimental-page-id-routing",
       "--experimentalVision",
     ]);
+  });
+
+  it("terminates the owned Chrome MCP subprocess tree when closing temporary sessions", async () => {
+    const session = createFakeSession();
+    Object.assign(session, { ownsProcessTree: true });
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+    session.client.close = closeMock as typeof session.client.close;
+    const killCalls: Array<{ pid: number; signal: NodeJS.Signals }> = [];
+    setChromeMcpProcessCleanupDepsForTest({
+      platform: "linux",
+      listProcesses: vi.fn().mockResolvedValue([
+        { pid: 123, ppid: 1 },
+        { pid: 124, ppid: 123 },
+        { pid: 125, ppid: 124 },
+        { pid: 126, ppid: 1 },
+      ]),
+      killProcess: (pid, signal) => {
+        killCalls.push({ pid, signal });
+      },
+      sleep: vi.fn().mockResolvedValue(undefined),
+    });
+    setChromeMcpSessionFactoryForTest(async () => session);
+
+    await ensureChromeMcpAvailable("chrome-live", undefined, { ephemeral: true });
+
+    expect(closeMock).toHaveBeenCalledTimes(1);
+    expect(killCalls).toEqual([
+      { pid: 125, signal: "SIGTERM" },
+      { pid: 124, signal: "SIGTERM" },
+      { pid: 123, signal: "SIGTERM" },
+      { pid: 125, signal: "SIGKILL" },
+      { pid: 124, signal: "SIGKILL" },
+      { pid: 123, signal: "SIGKILL" },
+    ]);
+  });
+
+  it("uses Windows taskkill tree cleanup without waiting for SDK stdio close timeout", async () => {
+    const session = createFakeSession();
+    Object.assign(session, { ownsProcessTree: true });
+    const closeOrder: string[] = [];
+    session.client.close = vi.fn(async () => {
+      closeOrder.push("client.close");
+    }) as typeof session.client.close;
+    setChromeMcpProcessCleanupDepsForTest({
+      platform: "win32",
+      taskkillProcessTree: vi.fn(async (pid) => {
+        closeOrder.push(`taskkill:${pid}`);
+      }),
+    });
+    setChromeMcpSessionFactoryForTest(async () => session);
+
+    await ensureChromeMcpAvailable("chrome-live", undefined, { ephemeral: true });
+
+    expect(closeOrder).toEqual(["taskkill:123"]);
+  });
+
+  it("falls back to SDK stdio close when Windows taskkill cleanup fails", async () => {
+    const session = createFakeSession();
+    Object.assign(session, { ownsProcessTree: true });
+    const closeMock = vi.fn().mockResolvedValue(undefined);
+    session.client.close = closeMock as typeof session.client.close;
+    setChromeMcpProcessCleanupDepsForTest({
+      platform: "win32",
+      taskkillProcessTree: vi.fn().mockRejectedValue(new Error("taskkill failed")),
+    });
+    setChromeMcpSessionFactoryForTest(async () => session);
+
+    await ensureChromeMcpAvailable("chrome-live", undefined, { ephemeral: true });
+
+    expect(closeMock).toHaveBeenCalledTimes(1);
   });
 
   it("redacts remote CDP URL secrets from attach failures", async () => {
