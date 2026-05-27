@@ -1,6 +1,8 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable", "ESNext", "ScriptHost"],
+    "target": "ESNext",
     "declaration": true,
     "declarationMap": false,
     "emitDeclarationOnly": true,
