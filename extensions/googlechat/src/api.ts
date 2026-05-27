@@ -4,7 +4,13 @@ import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtim
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { ResolvedGoogleChatAccount } from "./accounts.js";
 import { getGoogleChatAccessToken } from "./auth.js";
+import { isGoogleChatThreadResourceName } from "./thread-resource.js";
 import type { GoogleChatReaction } from "./types.js";
+
+export {
+  isGoogleChatMessageResourceName,
+  isGoogleChatThreadResourceName,
+} from "./thread-resource.js";
 
 const CHAT_API_BASE = "https://chat.googleapis.com/v1";
 const CHAT_UPLOAD_BASE = "https://chat.googleapis.com/upload/v1";
@@ -145,6 +151,9 @@ export async function sendGoogleChatMessage(params: {
     body.text = text;
   }
   if (thread) {
+    if (!isGoogleChatThreadResourceName(thread)) {
+      throw new Error(`Google Chat thread must be a thread resource name, got ${thread}`);
+    }
     body.thread = { name: thread };
   }
   if (attachments && attachments.length > 0) {
