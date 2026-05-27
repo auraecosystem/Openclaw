@@ -313,6 +313,12 @@ export function detectImageReferences(prompt: string): DetectedImageRef[] {
     if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
       return;
     }
+    // Skip paths inside .openclaw-cli-images/ — these are sink files written
+    // by OpenClaw itself and must not be re-resolved on subsequent turns.
+    // Match both POSIX (/) and Windows (\) separators.
+    if (/(?:^|[\\\/])\.openclaw-cli-images(?:[\\\/]|$)/.test(trimmed)) {
+      return;
+    }
     if (!isImageExtension(trimmed)) {
       return;
     }
