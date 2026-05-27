@@ -749,6 +749,7 @@ export function createOpenClawCodingTools(options?: {
           workspaceOnly
             ? wrapToolWorkspaceRootGuardWithOptions(wrapped, codingRoot, {
                 additionalRoots: skillReadRoots,
+                allowManagedInboundMediaReferences: true,
               })
             : wrapped,
         );

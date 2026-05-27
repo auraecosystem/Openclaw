@@ -10,6 +10,7 @@ import {
 } from "../infra/fs-safe.js";
 import { expandHomePrefix, resolveOsHomeDir } from "../infra/home-dir.js";
 import { hasEncodedFileUrlSeparator, trySafeFileURLToPath } from "../infra/local-file-access.js";
+import { resolveInboundMediaReference } from "../media/media-reference.js";
 import { sniffMimeFromBase64 } from "../media/sniff-mime-from-base64.js";
 import {
   REQUIRED_PARAM_GROUPS,
@@ -738,6 +739,7 @@ export function wrapToolWorkspaceRootGuardWithOptions(
     containerWorkdir?: string;
     pathParamKeys?: readonly string[];
     normalizeGuardedPathParams?: boolean;
+    allowManagedInboundMediaReferences?: boolean;
   },
 ): AnyAgentTool {
   const pathParamKeys =
@@ -759,6 +761,14 @@ export function wrapToolWorkspaceRootGuardWithOptions(
         if (filePath !== rawFilePath && record) {
           normalizedRecord ??= { ...record };
           normalizedRecord[key] = filePath;
+        }
+        if (options?.allowManagedInboundMediaReferences) {
+          const mediaReference = await resolveInboundMediaReference(filePath);
+          if (mediaReference) {
+            normalizedRecord ??= { ...record };
+            normalizedRecord[key] = mediaReference.physicalPath;
+            continue;
+          }
         }
         let guardedRoot = root;
         const workspaceMapping = mapContainerPathToRoot({
@@ -859,20 +869,30 @@ export function createOpenClawReadTool(
         ? stripMalformedXmlArgValueSuffixFromKeys(record, ["path"])
         : undefined;
       assertRequiredParams(normalizedRecord, REQUIRED_PARAM_GROUPS.read, base.name);
+      const readArgs = normalizedRecord ? { ...normalizedRecord } : {};
+      const originalFilePath =
+        typeof normalizedRecord?.path === "string" ? normalizedRecord.path : "<unknown>";
+      if (typeof normalizedRecord?.path === "string") {
+        const mediaReference = await resolveInboundMediaReference(normalizedRecord.path);
+        if (mediaReference) {
+          readArgs.path = mediaReference.physicalPath;
+        }
+      }
       const result = await executeReadWithAdaptivePaging({
         base,
         toolCallId,
-        args: normalizedRecord ?? {},
+        args: readArgs,
         signal,
         maxBytes: resolveAdaptiveReadMaxBytes(options),
       });
-      const filePath =
-        typeof normalizedRecord?.path === "string" ? normalizedRecord.path : "<unknown>";
       const strippedDetailsResult = stripReadTruncationContentDetails(result);
-      const normalizedResult = await normalizeReadImageResult(strippedDetailsResult, filePath);
+      const normalizedResult = await normalizeReadImageResult(
+        strippedDetailsResult,
+        originalFilePath,
+      );
       return sanitizeToolResultImages(
         normalizedResult,
-        `read:${filePath}`,
+        `read:${originalFilePath}`,
         options?.imageSanitization,
       );
     },
