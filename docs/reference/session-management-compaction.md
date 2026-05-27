@@ -248,9 +248,11 @@ After compaction, future turns see:
 - The compaction summary
 - Messages after `firstKeptEntryId`
 
-AGENTS.md section reinjection after compaction is opt-in via
-`agents.defaults.compaction.postCompactionSections`; when unset or `[]`,
-OpenClaw does not append AGENTS.md excerpts on top of the compaction summary.
+AGENTS.md section reinjection after compaction defaults to the
+`Session Startup` and `Red Lines` sections, with legacy `Every Session` and
+`Safety` fallback headings. Set
+`agents.defaults.compaction.postCompactionSections` to `[]` to disable
+reinjection, or to custom section names to replace the defaults.
 
 Compaction is **persistent** (unlike session pruning). See [/concepts/session-pruning](/concepts/session-pruning).
 

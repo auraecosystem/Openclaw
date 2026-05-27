@@ -6,7 +6,12 @@ import type {
   ExtensionContext,
   FileOperations,
 } from "@earendil-works/pi-coding-agent";
-import { extractSections } from "../../auto-reply/reply/post-compaction-context.js";
+import {
+  DEFAULT_POST_COMPACTION_SECTIONS,
+  LEGACY_POST_COMPACTION_SECTIONS,
+  extractSections,
+  matchesSectionSet,
+} from "../../auto-reply/reply/post-compaction-context.js";
 import { openRootFile } from "../../infra/boundary-file-read.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isAbortError } from "../../infra/unhandled-rejections.js";
@@ -819,9 +824,7 @@ function extractLatestUserAsk(messages: AgentMessage[]): string | null {
 
 /**
  * Read and format critical workspace context for compaction summary.
- * Uses explicitly configured AGENTS.md section names only.
- * The default "Session Startup" / "Red Lines" pair preserves the legacy
- * "Every Session" / "Safety" fallback.
+ * Uses the legacy default section pair unless explicitly disabled or customized.
  * Limited to 2000 chars to avoid bloating the summary.
  */
 async function readWorkspaceContextForSummary(
@@ -829,7 +832,10 @@ async function readWorkspaceContextForSummary(
   workspaceDir = process.cwd(),
 ): Promise<string> {
   const MAX_SUMMARY_CONTEXT_CHARS = 2000;
-  if (!Array.isArray(sectionNames) || sectionNames.length === 0) {
+  const effectiveSectionNames = Array.isArray(sectionNames)
+    ? sectionNames
+    : DEFAULT_POST_COMPACTION_SECTIONS;
+  if (effectiveSectionNames.length === 0) {
     return "";
   }
   const agentsPath = path.join(workspaceDir, "AGENTS.md");
@@ -851,14 +857,12 @@ async function readWorkspaceContextForSummary(
         fs.closeSync(opened.fd);
       }
     })();
-    let sections = extractSections(content, sectionNames);
+    let sections = extractSections(content, effectiveSectionNames);
     if (
       sections.length === 0 &&
-      sectionNames.length === 2 &&
-      sectionNames.some((name) => name.trim().toLowerCase() === "session startup") &&
-      sectionNames.some((name) => name.trim().toLowerCase() === "red lines")
+      matchesSectionSet(effectiveSectionNames, DEFAULT_POST_COMPACTION_SECTIONS)
     ) {
-      sections = extractSections(content, ["Every Session", "Safety"]);
+      sections = extractSections(content, LEGACY_POST_COMPACTION_SECTIONS);
     }
 
     if (sections.length === 0) {

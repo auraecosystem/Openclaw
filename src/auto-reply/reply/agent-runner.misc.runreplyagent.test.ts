@@ -510,7 +510,7 @@ describe("runReplyAgent auto-compaction token update", () => {
     );
   });
 
-  it("reads opted-in post-compaction context from the queued workspace instead of process cwd", async () => {
+  it("reads default post-compaction context from the queued workspace instead of process cwd", async () => {
     const workspaceDir = await fs.mkdtemp(
       path.join(os.tmpdir(), "openclaw-post-compaction-workspace-"),
     );
@@ -532,13 +532,6 @@ describe("runReplyAgent auto-compaction token update", () => {
       const { sessionKey } = await runBaseReplyWithAgentMeta({
         tmpPrefix: "openclaw-post-compaction-workspace-root-",
         workspaceDir,
-        config: {
-          agents: {
-            defaults: {
-              compaction: { postCompactionSections: ["Session Startup", "Red Lines"] },
-            },
-          },
-        },
         agentMeta: {
           compactionCount: 1,
           lastCallUsage: { input: 10_000, output: 500, total: 10_500 },

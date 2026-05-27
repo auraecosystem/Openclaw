@@ -2464,13 +2464,17 @@ describe("readWorkspaceContextForSummary", () => {
     }
   }
 
-  it("returns empty when post-compaction sections are not configured", async () => {
+  it("injects default workspace critical rules when post-compaction sections are not configured", async () => {
     const result = await withWorkspaceSummary(
       "## Session Startup\n\nRead AGENTS.md\n\n## Red Lines\n\nBe careful.\n",
       undefined,
     );
 
-    expect(result).toBe("");
+    expect(result).toContain("<workspace-critical-rules>");
+    expect(result).toContain("## Session Startup");
+    expect(result).toContain("Read AGENTS.md");
+    expect(result).toContain("## Red Lines");
+    expect(result).toContain("Be careful");
   });
 
   it("returns empty when post-compaction sections are explicitly disabled", async () => {
@@ -2479,7 +2483,7 @@ describe("readWorkspaceContextForSummary", () => {
     expect(result).toBe("");
   });
 
-  it("injects workspace critical rules only for explicit section opt-in", async () => {
+  it("injects configured workspace critical rules", async () => {
     const result = await withWorkspaceSummary(
       "## Session Startup\n\nRead AGENTS.md\n\n## Other\n\nIgnore me.\n",
       ["Session Startup", "Red Lines"],
@@ -2516,7 +2520,7 @@ describe("readWorkspaceContextForSummary", () => {
     }
   });
 
-  it("preserves legacy fallback only for the explicit default section pair", async () => {
+  it("preserves legacy fallback for the default section pair", async () => {
     const result = await withWorkspaceSummary(
       "## Every Session\n\nDo startup things.\n\n## Safety\n\nBe safe.\n",
       ["Red Lines", "Session Startup"],
