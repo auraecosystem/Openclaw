@@ -197,6 +197,7 @@ export const tr: TranslationMap = {
     inherit: "devral",
     defaultOption: "Varsayılan ({value})",
     offExplicit: "kapalı (açıkça)",
+    auto: "auto",
     on: "açık",
     off: "kapalı",
     full: "tam",

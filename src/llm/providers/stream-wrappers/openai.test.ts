@@ -6,6 +6,7 @@ import {
   createOpenAIAttributionHeadersWrapper,
   createOpenAICompletionsStrictMessageKeysWrapper,
   createOpenAICompletionsToolsCompatWrapper,
+  createOpenAIFastModeWrapper,
   createOpenAIThinkingLevelWrapper,
   createCodexNativeWebSearchWrapper,
 } from "./openai.js";
@@ -34,7 +35,23 @@ const openaiModel = {
   api: "openai-responses",
   provider: "openai",
   id: "gpt-5.2",
+  baseUrl: "https://api.openai.com/v1",
 } as Model<"openai-responses">;
+
+describe("createOpenAIFastModeWrapper", () => {
+  it("resolves dynamic fast mode for each stream call", () => {
+    const { baseStreamFn, payloads } = createPayloadCapture();
+    let enabled = true;
+    const wrapped = createOpenAIFastModeWrapper(baseStreamFn, () => enabled);
+
+    void wrapped(openaiModel, { messages: [] }, {});
+    enabled = false;
+    void wrapped(openaiModel, { messages: [] }, {});
+
+    expect(payloads[0]?.service_tier).toBe("priority");
+    expect(payloads[1]).not.toHaveProperty("service_tier");
+  });
+});
 
 describe("createOpenAICompletionsToolsCompatWrapper", () => {
   it("strips tools fields when OpenAI-compatible models disable tool support", () => {

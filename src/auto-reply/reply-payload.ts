@@ -57,6 +57,12 @@ export type ReplyPayload = {
   channelData?: Record<string, unknown>;
 };
 
+export const FAST_MODE_AUTO_PROGRESS_KIND = "fast-mode-auto";
+
+export function isFastModeAutoProgressPayload(payload: Pick<ReplyPayload, "channelData">): boolean {
+  return payload.channelData?.openclawProgressKind === FAST_MODE_AUTO_PROGRESS_KIND;
+}
+
 export type ReplyPayloadTtsSupplement = {
   spokenText: string;
   visibleTextAlreadyDelivered?: boolean;

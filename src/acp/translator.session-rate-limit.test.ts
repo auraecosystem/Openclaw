@@ -276,6 +276,14 @@ describe("acp session UX bridge behavior", () => {
       category: "thought_level",
     });
     expectConfigOption(result.configOptions, "verbose_level", { currentValue: "off" });
+    expectConfigOption(result.configOptions, "fast_mode", {
+      currentValue: "off",
+      options: [
+        { value: "off", name: "Off" },
+        { value: "auto", name: "Auto" },
+        { value: "on", name: "On" },
+      ],
+    });
     expectConfigOption(result.configOptions, "reasoning_level", { currentValue: "off" });
     expectConfigOption(result.configOptions, "response_usage", { currentValue: "off" });
     expectConfigOption(result.configOptions, "elevated_level", { currentValue: "off" });
@@ -668,7 +676,7 @@ describe("acp setSessionConfigOption bridge behavior", () => {
               thinkingLevel: "minimal",
               modelProvider: "openai",
               model: "gpt-5.4",
-              fastMode: true,
+              fastMode: "auto",
             },
           ],
         };
@@ -676,7 +684,7 @@ describe("acp setSessionConfigOption bridge behavior", () => {
       if (method === "sessions.patch") {
         expect(_params).toEqual({
           key: "fast-session",
-          fastMode: true,
+          fastMode: "auto",
         });
       }
       return { ok: true };
@@ -689,14 +697,14 @@ describe("acp setSessionConfigOption bridge behavior", () => {
     sessionUpdate.mockClear();
 
     const result = await agent.setSessionConfigOption(
-      createSetSessionConfigOptionRequest("fast-session", "fast_mode", "on"),
+      createSetSessionConfigOptionRequest("fast-session", "fast_mode", "auto"),
     );
 
-    expectConfigOption(result.configOptions, "fast_mode", { currentValue: "on" });
+    expectConfigOption(result.configOptions, "fast_mode", { currentValue: "auto" });
     expectConfigOption(
       expectSessionUpdate(sessionUpdate, "fast-session", "config_option_update").configOptions,
       "fast_mode",
-      { currentValue: "on" },
+      { currentValue: "auto" },
     );
 
     sessionStore.clearAllSessionsForTest();

@@ -23,6 +23,7 @@ import type { ThinkLevel } from "../../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
 import {
+  normalizeFastMode,
   normalizeOptionalLowercaseString,
   readStringValue,
 } from "../../../shared/string-coerce.js";
@@ -34,6 +35,7 @@ import { streamWithPayloadPatch } from "./stream-payload-utils.js";
 const log = createSubsystemLogger("llm/providers/stream-wrappers");
 
 type OpenAIServiceTier = "auto" | "default" | "flex" | "priority";
+type DynamicFastMode = boolean | (() => boolean | undefined);
 type OpenClawSimpleStreamOptions = SimpleStreamOptions & {
   openclawCodeModeToolSurface?: boolean;
 };
@@ -308,8 +310,18 @@ export function resolveOpenAIServiceTier(
 }
 
 function normalizeOpenAIFastMode(value: unknown): boolean | undefined {
+  if (typeof value === "function") {
+    return normalizeOpenAIFastMode((value as () => unknown)());
+  }
   if (typeof value === "boolean") {
     return value;
+  }
+  const fastMode = normalizeFastMode(value);
+  if (fastMode === "auto") {
+    return undefined;
+  }
+  if (typeof fastMode === "boolean") {
+    return fastMode;
   }
   const normalized = normalizeOptionalLowercaseString(value);
   if (!normalized) {
@@ -342,7 +354,12 @@ export function resolveOpenAIFastMode(
 ): boolean | undefined {
   const raw = extraParams?.fastMode ?? extraParams?.fast_mode;
   const normalized = normalizeOpenAIFastMode(raw);
-  if (raw !== undefined && normalized === undefined) {
+  if (
+    raw !== undefined &&
+    normalized === undefined &&
+    typeof raw !== "function" &&
+    normalizeFastMode(raw) !== "auto"
+  ) {
     const rawSummary = typeof raw === "string" ? raw : typeof raw;
     log.warn(`ignoring invalid OpenAI fast mode param: ${rawSummary}`);
   }
@@ -512,10 +529,14 @@ export function createOpenAIThinkingLevelWrapper(
 }
 
 /** @deprecated OpenAI provider-owned stream helper; do not use from third-party plugins. */
-export function createOpenAIFastModeWrapper(baseStreamFn: StreamFn | undefined): StreamFn {
+export function createOpenAIFastModeWrapper(
+  baseStreamFn: StreamFn | undefined,
+  enabled: DynamicFastMode = true,
+): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     if (
+      normalizeOpenAIFastMode(enabled) !== true ||
       (model.api !== "openai-responses" &&
         model.api !== "openai-codex-responses" &&
         model.api !== "azure-openai-responses") ||

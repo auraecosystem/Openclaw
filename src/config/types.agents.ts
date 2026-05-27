@@ -1,4 +1,5 @@
 import type { ChatType } from "../channels/chat-type.js";
+import type { FastMode } from "../shared/string-coerce.js";
 import type {
   AgentContextLimitsConfig,
   AgentDefaultsConfig,
@@ -105,7 +106,7 @@ export type AgentConfig = {
   /** Optional per-agent default reasoning visibility. */
   reasoningDefault?: "on" | "off" | "stream";
   /** Optional per-agent default for fast mode. */
-  fastModeDefault?: boolean;
+  fastModeDefault?: FastMode;
   /** Optional per-agent bootstrap/context injection mode override. */
   contextInjection?: AgentDefaultsConfig["contextInjection"];
   /** Optional per-agent max chars for each injected bootstrap file. */

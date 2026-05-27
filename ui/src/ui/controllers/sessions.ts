@@ -5,6 +5,7 @@ import {
 import { toNumber } from "../format.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import type {
+  FastMode,
   GatewaySessionRow,
   SessionCompactionCheckpoint,
   SessionsCompactionBranchResult,
@@ -736,7 +737,7 @@ export async function patchSession(
   patch: {
     label?: string | null;
     thinkingLevel?: string | null;
-    fastMode?: boolean | null;
+    fastMode?: FastMode | null;
     verboseLevel?: string | null;
     reasoningLevel?: string | null;
   },

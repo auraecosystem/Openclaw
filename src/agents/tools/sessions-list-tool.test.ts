@@ -40,7 +40,7 @@ type SessionsListDetails = {
       to?: string;
     };
     elevatedLevel?: string;
-    fastMode?: boolean;
+    fastMode?: boolean | "auto";
     reasoningLevel?: string;
     responseUsage?: string;
     thinkingLevel?: string;
@@ -169,7 +169,7 @@ describe("sessions-list-tool", () => {
               kind: "direct",
               sessionId: "sess-main",
               thinkingLevel: "high",
-              fastMode: true,
+              fastMode: "auto",
               verboseLevel: "on",
               reasoningLevel: "deep",
               elevatedLevel: "on",
@@ -187,7 +187,7 @@ describe("sessions-list-tool", () => {
 
     const session = details.sessions?.[0];
     expect(session?.thinkingLevel).toBe("high");
-    expect(session?.fastMode).toBe(true);
+    expect(session?.fastMode).toBe("auto");
     expect(session?.verboseLevel).toBe("on");
     expect(session?.reasoningLevel).toBe("deep");
     expect(session?.elevatedLevel).toBe("on");

@@ -196,6 +196,7 @@ export const pl: TranslationMap = {
     inherit: "dziedzicz",
     defaultOption: "Domyślnie ({value})",
     offExplicit: "wył. (jawnie)",
+    auto: "auto",
     on: "wł.",
     off: "wył.",
     full: "pełne",

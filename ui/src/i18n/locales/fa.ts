@@ -196,6 +196,7 @@ export const fa: TranslationMap = {
     inherit: "ارث‌بری",
     defaultOption: "پیش‌فرض ({value})",
     offExplicit: "خاموش (صریح)",
+    auto: "auto",
     on: "روشن",
     off: "خاموش",
     full: "کامل",
