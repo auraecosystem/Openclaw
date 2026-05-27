@@ -414,6 +414,10 @@ export function createGatewayTool(opts?: {
         const scheduled = scheduleGatewaySigusr1Restart({
           delayMs,
           reason,
+          // Session-routing guard: coalesced requests from a different session
+          // must not overwrite the existing pending restart's continuation
+          // (CWE-200, #86742).
+          sessionKey,
           emitHooks: {
             beforeEmit: async () => {
               sentinelPath = await writeRestartSentinel(payload);
@@ -423,7 +427,10 @@ export function createGatewayTool(opts?: {
             },
           },
         });
-        return jsonResult(scheduled);
+        return jsonResult({
+          ...scheduled,
+          ...(payload.continuation ? { continuationQueued: scheduled.emitHooksQueued } : {}),
+        });
       }
 
       const gatewayOpts = readGatewayCallOptions(params);
