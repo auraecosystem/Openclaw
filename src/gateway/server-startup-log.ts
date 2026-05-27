@@ -1,7 +1,7 @@
 import chalk from "chalk";
 import { resolveDefaultAgentId, resolveAgentConfig } from "../agents/agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
-import { resolveFastModeState } from "../agents/fast-mode.js";
+import { formatFastModeValue, resolveFastModeState } from "../agents/fast-mode.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.types.js";
 import { legacyModelKey, modelKey } from "../agents/model-selection-normalize.js";
 import {
@@ -155,7 +155,7 @@ export function formatAgentModelStartupDetails(params: {
     agentId: defaultAgentId,
   });
 
-  return `thinking=${thinking}, fast=${fast.enabled ? "on" : "off"}`;
+  return `thinking=${thinking}, fast=${formatFastModeValue(fast.mode)}`;
 }
 
 function formatReadyDetails(

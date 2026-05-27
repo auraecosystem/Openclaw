@@ -7,7 +7,7 @@ import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 const VERBOSE_LEVELS = ["on", "off"];
 const TRACE_LEVELS = ["on", "off"];
-const FAST_LEVELS = ["status", "on", "off"];
+const FAST_LEVELS = ["status", "auto", "on", "off"];
 const REASONING_LEVELS = ["on", "off"];
 const ELEVATED_LEVELS = ["on", "off", "ask", "full"];
 const ACTIVATION_LEVELS = ["mention", "always"];
@@ -111,7 +111,7 @@ export function getSlashCommands(options: SlashCommandOptions = {}): SlashComman
     },
     {
       name: "fast",
-      description: "Set fast mode on/off",
+      description: "Set fast mode auto/on/off",
       getArgumentCompletions: fastCompletions,
     },
     {
@@ -191,7 +191,7 @@ export function helpText(options: SlashCommandOptions = {}): string {
     "/session <key> (or /sessions)",
     "/model <provider/model> (or /models)",
     `/think <${thinkLevels}>`,
-    "/fast <status|on|off>",
+    "/fast <status|auto|on|off>",
     "/verbose <on|off>",
     "/trace <on|off>",
     "/reasoning <on|off>",

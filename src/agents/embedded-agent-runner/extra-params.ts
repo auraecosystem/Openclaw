@@ -276,7 +276,10 @@ export function resolvePreparedExtraParams(params: {
     canonicalizeOpenRouterResponseCacheParams(merged, [resolvedExtraParams, override]);
   }
   const cfg = params.cfg;
-  const cacheKey = cfg ? resolvePreparedExtraParamsCacheKey(params) : undefined;
+  const cacheKey =
+    cfg && !hasFunctionExtraParamValue(params.extraParamsOverride)
+      ? resolvePreparedExtraParamsCacheKey(params)
+      : undefined;
   if (cacheKey) {
     const cached = preparedExtraParamsCache.get(cfg!)?.get(cacheKey);
     if (cached) {
@@ -362,6 +365,10 @@ function hasRequestScopedExtraParams(value: Record<string, unknown> | undefined)
     return false;
   }
   return [...REQUEST_SCOPED_EXTRA_PARAM_KEYS].some((key) => Object.hasOwn(value, key));
+}
+
+function hasFunctionExtraParamValue(value: Record<string, unknown> | undefined): boolean {
+  return Boolean(value && Object.values(value).some((item) => typeof item === "function"));
 }
 function shouldApplyDefaultOpenAIGptRuntimeParams(params: {
   provider: string;

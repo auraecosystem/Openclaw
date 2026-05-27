@@ -17,6 +17,7 @@ const XAI_FAST_MODEL_IDS = new Map<string, string>([
   ["grok-4", "grok-4-fast"],
   ["grok-4-0709", "grok-4-fast"],
 ]);
+type DynamicFastMode = boolean | (() => boolean | undefined);
 
 interface MutableAssistantMessageEventStream extends AsyncIterable<AssistantMessageEvent> {
   result: () => Promise<AssistantMessage>;
@@ -275,13 +276,17 @@ export function createXaiToolPayloadCompatibilityWrapper(
 
 export function createXaiFastModeWrapper(
   baseStreamFn: StreamFn | undefined,
-  fastMode: boolean,
+  fastMode: DynamicFastMode,
 ): StreamFn {
   const underlying = baseStreamFn ?? streamSimple;
   return (model, context, options) => {
     const supportsFastAliasTransport =
       model.api === "openai-completions" || model.api === "openai-responses";
-    if (!fastMode || !supportsFastAliasTransport || model.provider !== "xai") {
+    if (
+      (typeof fastMode === "function" ? fastMode() : fastMode) !== true ||
+      !supportsFastAliasTransport ||
+      model.provider !== "xai"
+    ) {
       return underlying(model, context, options);
     }
 
@@ -292,6 +297,22 @@ export function createXaiFastModeWrapper(
 
     return underlying({ ...model, id: fastModelId }, context, options);
   };
+}
+
+function resolveXaiFastMode(extraParams: Record<string, unknown> | undefined): boolean | undefined {
+  const raw = extraParams?.fastMode ?? extraParams?.fast_mode;
+  if (typeof raw === "function") {
+    const resolved = (raw as () => unknown)();
+    return typeof resolved === "boolean" ? resolved : undefined;
+  }
+  return typeof raw === "boolean" ? raw : undefined;
+}
+
+function hasXaiFastModeParam(extraParams: Record<string, unknown> | undefined): boolean {
+  return Boolean(
+    extraParams &&
+    (Object.hasOwn(extraParams, "fastMode") || Object.hasOwn(extraParams, "fast_mode")),
+  );
 }
 
 function transformXaiStreamEvent(
@@ -355,12 +376,13 @@ function createXaiToolCallArgumentDecodingWrapper(baseStreamFn: StreamFn | undef
 
 export function wrapXaiProviderStream(ctx: ProviderWrapStreamFnContext): StreamFn | undefined {
   const extraParams = ctx.extraParams;
-  const fastMode = extraParams?.fastMode;
   const toolStreamEnabled = extraParams?.tool_stream !== false;
   return composeProviderStreamWrappers(ctx.streamFn, (streamFn) => {
     let wrappedStreamFn = createXaiToolPayloadCompatibilityWrapper(streamFn);
-    if (typeof fastMode === "boolean") {
-      wrappedStreamFn = createXaiFastModeWrapper(wrappedStreamFn, fastMode);
+    if (hasXaiFastModeParam(extraParams)) {
+      wrappedStreamFn = createXaiFastModeWrapper(wrappedStreamFn, () =>
+        resolveXaiFastMode(extraParams),
+      );
     }
     wrappedStreamFn = createXaiToolCallArgumentDecodingWrapper(wrappedStreamFn);
     wrappedStreamFn = createPlainTextToolCallCompatWrapper(wrappedStreamFn);

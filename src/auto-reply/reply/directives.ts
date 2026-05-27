@@ -1,3 +1,4 @@
+import type { FastMode } from "../../shared/string-coerce.js";
 import { escapeRegExp } from "../../utils.js";
 import type { NoticeLevel, ReasoningLevel, TraceLevel } from "../thinking.js";
 import {
@@ -154,7 +155,7 @@ export function extractTraceDirective(body?: string): {
 
 export function extractFastDirective(body?: string): {
   cleaned: string;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   rawLevel?: string;
   hasDirective: boolean;
 } {

@@ -5,6 +5,7 @@ import type {
   SessionsPatchParams,
   SessionsPatchResult,
 } from "../gateway/protocol/index.js";
+import type { FastMode } from "../shared/string-coerce.js";
 import type { ResponseUsageMode, SessionInfo, SessionScope } from "./tui-types.js";
 
 export type ChatSendOptions = {
@@ -55,7 +56,7 @@ export type TuiSessionList = {
       key: string;
       sessionId?: string;
       updatedAt?: number | null;
-      fastMode?: boolean;
+      fastMode?: FastMode;
       sendPolicy?: string;
       responseUsage?: ResponseUsageMode;
       label?: string;

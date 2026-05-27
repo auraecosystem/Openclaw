@@ -1,1 +1,4 @@
-export const formatFastModeLabel = (enabled: boolean): string => `Fast: ${enabled ? "on" : "off"}`;
+import type { FastMode } from "../shared/string-coerce.js";
+
+export const formatFastModeLabel = (mode: FastMode): string =>
+  `Fast: ${mode === "auto" ? "auto" : mode ? "on" : "off"}`;

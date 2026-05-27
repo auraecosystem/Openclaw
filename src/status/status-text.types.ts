@@ -7,6 +7,7 @@ import type {
 import type { SessionEntry, SessionScope } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { MediaUnderstandingDecision } from "../media-understanding/types.js";
+import type { FastMode } from "../shared/string-coerce.js";
 
 export type BuildStatusTextParams = {
   cfg: OpenClawConfig;
@@ -21,7 +22,7 @@ export type BuildStatusTextParams = {
   model: string;
   contextTokens?: number;
   resolvedThinkLevel?: ThinkLevel;
-  resolvedFastMode?: boolean;
+  resolvedFastMode?: FastMode;
   resolvedHarness?: string;
   resolvedVerboseLevel: VerboseLevel;
   resolvedReasoningLevel: ReasoningLevel;

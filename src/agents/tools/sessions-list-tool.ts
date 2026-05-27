@@ -14,7 +14,11 @@ import {
   readSessionTitleFieldsFromTranscriptAsync,
 } from "../../gateway/session-utils.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
-import { normalizeOptionalLowercaseString, readStringValue } from "../../shared/string-coerce.js";
+import {
+  normalizeFastMode,
+  normalizeOptionalLowercaseString,
+  readStringValue,
+} from "../../shared/string-coerce.js";
 import { deliveryContextFromSession } from "../../utils/delivery-context.shared.js";
 import {
   describeSessionsListTool,
@@ -318,7 +322,7 @@ export function createSessionsListTool(opts?: {
                 )
             : undefined,
           thinkingLevel: readStringValue(entry.thinkingLevel),
-          fastMode: typeof entry.fastMode === "boolean" ? entry.fastMode : undefined,
+          fastMode: normalizeFastMode(entry.fastMode),
           verboseLevel: readStringValue(entry.verboseLevel),
           reasoningLevel: readStringValue(entry.reasoningLevel),
           elevatedLevel: readStringValue(entry.elevatedLevel),

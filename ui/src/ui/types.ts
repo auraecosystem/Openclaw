@@ -7,7 +7,9 @@ import type {
   SessionsListResultBase,
   SessionsPatchResultBase,
 } from "../../../src/shared/session-types.js";
+import type { FastMode } from "../../../src/shared/string-coerce.js";
 export type { ConfigUiHint, ConfigUiHints } from "../../../src/shared/config-ui-hints-types.js";
+export type { FastMode } from "../../../src/shared/string-coerce.js";
 
 export type ChannelsStatusSnapshot = {
   ts: number;
@@ -437,7 +439,7 @@ export type GatewaySessionRow = {
   thinkingLevels?: GatewayThinkingLevelOption[];
   thinkingOptions?: string[];
   thinkingDefault?: string;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   verboseLevel?: string;
   reasoningLevel?: string;
   elevatedLevel?: string;
@@ -503,7 +505,7 @@ export type SessionsPatchResult = SessionsPatchResultBase<{
   sessionId: string;
   updatedAt?: number;
   thinkingLevel?: string;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   verboseLevel?: string;
   reasoningLevel?: string;
   elevatedLevel?: string;

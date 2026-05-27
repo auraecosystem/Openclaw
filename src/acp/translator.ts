@@ -41,7 +41,7 @@ import {
   createFixedWindowRateLimiter,
   type FixedWindowRateLimiter,
 } from "../infra/fixed-window-rate-limit.js";
-import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { normalizeFastMode, normalizeOptionalString } from "../shared/string-coerce.js";
 import { shortenHomePath } from "../utils.js";
 import {
   createInMemoryAcpEventLedger,
@@ -372,6 +372,7 @@ function buildSessionPresentation(params: {
     ...BASE_THINKING_LEVELS,
   ];
   const currentModeId = normalizeOptionalString(row.thinkingLevel) || "adaptive";
+  const currentFastMode = normalizeFastMode(row.fastMode) ?? false;
   if (!availableLevelIds.includes(currentModeId)) {
     availableLevelIds.push(currentModeId);
   }
@@ -399,8 +400,8 @@ function buildSessionPresentation(params: {
       id: ACP_FAST_MODE_CONFIG_ID,
       name: "Fast mode",
       description: "Controls whether OpenAI sessions use the Gateway fast-mode profile.",
-      currentValue: row.fastMode ? "on" : "off",
-      values: ["off", "on"],
+      currentValue: currentFastMode === "auto" ? "auto" : currentFastMode ? "on" : "off",
+      values: ["off", "auto", "on"],
     }),
     buildSelectConfigOption({
       id: ACP_VERBOSE_LEVEL_CONFIG_ID,
@@ -2004,11 +2005,16 @@ export class AcpGatewayAgent implements Agent {
           patch: { thinkingLevel: value },
           overrides: { thinkingLevel: value },
         };
-      case ACP_FAST_MODE_CONFIG_ID:
+      case ACP_FAST_MODE_CONFIG_ID: {
+        const fastMode = normalizeFastMode(value);
+        if (fastMode === undefined) {
+          throw new Error(`Unsupported fast mode value: ${value}`);
+        }
         return {
-          patch: { fastMode: value === "on" },
-          overrides: { fastMode: value === "on" },
+          patch: { fastMode },
+          overrides: { fastMode },
         };
+      }
       case ACP_VERBOSE_LEVEL_CONFIG_ID:
         return {
           patch: { verboseLevel: value },

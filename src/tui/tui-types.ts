@@ -1,3 +1,5 @@
+import type { FastMode } from "../shared/string-coerce.js";
+
 export type TuiOptions = {
   local?: boolean;
   url?: string;
@@ -53,7 +55,7 @@ export type ResponseUsageMode = "on" | "off" | "tokens" | "full";
 export type SessionInfo = {
   thinkingLevel?: string;
   thinkingLevels?: Array<{ id: string; label: string }>;
-  fastMode?: boolean;
+  fastMode?: FastMode;
   verboseLevel?: string;
   traceLevel?: string;
   reasoningLevel?: string;
