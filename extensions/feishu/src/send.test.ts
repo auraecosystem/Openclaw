@@ -61,7 +61,9 @@ let editMessageFeishu: typeof import("./send.js").editMessageFeishu;
 let getMessageFeishu: typeof import("./send.js").getMessageFeishu;
 let listFeishuThreadMessages: typeof import("./send.js").listFeishuThreadMessages;
 let resolveFeishuCardTemplate: typeof import("./send.js").resolveFeishuCardTemplate;
+let sendMarkdownCardFeishu: typeof import("./send.js").sendMarkdownCardFeishu;
 let sendMessageFeishu: typeof import("./send.js").sendMessageFeishu;
+let sendStructuredCardFeishu: typeof import("./send.js").sendStructuredCardFeishu;
 
 describe("getMessageFeishu", () => {
   beforeAll(async () => {
@@ -71,7 +73,9 @@ describe("getMessageFeishu", () => {
       getMessageFeishu,
       listFeishuThreadMessages,
       resolveFeishuCardTemplate,
+      sendMarkdownCardFeishu,
       sendMessageFeishu,
+      sendStructuredCardFeishu,
     } = await import("./send.js"));
   });
 
@@ -104,6 +108,72 @@ describe("getMessageFeishu", () => {
         },
       },
     });
+  });
+
+  it("converts markdown tables before sending markdown cards", async () => {
+    const create = vi.fn().mockResolvedValue({ code: 0, data: { message_id: "om_card" } });
+    mockCreateFeishuClient.mockReturnValue({
+      im: {
+        message: {
+          create,
+          get: mockClientGet,
+          list: mockClientList,
+          patch: mockClientPatch,
+        },
+      },
+    });
+    mockResolveMarkdownTableMode.mockReturnValue("code");
+    mockConvertMarkdownTables.mockReturnValue("converted table");
+
+    await sendMarkdownCardFeishu({
+      cfg: {} as ClawdbotConfig,
+      to: "oc_card",
+      text: "| A | B |\n|---|---|\n| 1 | 2 |",
+      accountId: "main",
+    });
+
+    const content = JSON.parse(create.mock.calls[0][0].data.content);
+    expect(mockResolveMarkdownTableMode).toHaveBeenCalledWith({
+      cfg: {},
+      channel: "feishu",
+      accountId: "main",
+    });
+    expect(mockConvertMarkdownTables).toHaveBeenCalledWith(
+      "| A | B |\n|---|---|\n| 1 | 2 |",
+      "code",
+    );
+    expect(content.body.elements[0].content).toBe("converted table");
+  });
+
+  it("converts markdown tables before sending structured cards", async () => {
+    const create = vi.fn().mockResolvedValue({ code: 0, data: { message_id: "om_structured" } });
+    mockCreateFeishuClient.mockReturnValue({
+      im: {
+        message: {
+          create,
+          get: mockClientGet,
+          list: mockClientList,
+          patch: mockClientPatch,
+        },
+      },
+    });
+    mockResolveMarkdownTableMode.mockReturnValue("code");
+    mockConvertMarkdownTables.mockReturnValue("converted table");
+
+    await sendStructuredCardFeishu({
+      cfg: {} as ClawdbotConfig,
+      to: "oc_card",
+      text: "| A | B |\n|---|---|\n| 1 | 2 |",
+      header: { title: "agent" },
+    });
+
+    const content = JSON.parse(create.mock.calls[0][0].data.content);
+    expect(mockConvertMarkdownTables).toHaveBeenCalledWith(
+      "| A | B |\n|---|---|\n| 1 | 2 |",
+      "code",
+    );
+    expect(content.body.elements[0].content).toBe("converted table");
+    expect(content.header.title.content).toBe("agent");
   });
 
   it("sends text without requiring Feishu runtime text helpers", async () => {
@@ -207,10 +277,49 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "hello markdown\nhello div",
+      rawContent: expect.any(String),
       contentType: "interactive",
       createTime: undefined,
       threadId: undefined,
     });
+  });
+
+  it("extracts title and nested legacy text elements from interactive cards", async () => {
+    mockClientGet.mockResolvedValueOnce({
+      code: 0,
+      data: {
+        items: [
+          {
+            message_id: "om_legacy_card",
+            chat_id: "oc_legacy_card",
+            msg_type: "interactive",
+            body: {
+              content: JSON.stringify({
+                title: "saber",
+                elements: [
+                  [
+                    { tag: "img", image_key: "img_v3" },
+                    { tag: "text", text: "请升级至最新版本客户端，以查看内容" },
+                    { tag: "text", text: "" },
+                  ],
+                ],
+              }),
+            },
+          },
+        ],
+      },
+    });
+
+    const result = await getMessageFeishu({
+      cfg: {} as ClawdbotConfig,
+      messageId: "om_legacy_card",
+    });
+
+    if (!result) {
+      throw new Error("expected interactive card result");
+    }
+    expect(result.content).toBe("saber\n请升级至最新版本客户端，以查看内容");
+    expect(result.contentType).toBe("interactive");
   });
 
   it("falls through empty interactive card element arrays and locale variants", async () => {
@@ -260,6 +369,7 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "hello 2 tasks {{metadata}}",
+      rawContent: expect.any(String),
       contentType: "interactive",
       createTime: undefined,
       threadId: undefined,
@@ -304,6 +414,7 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "Card summary\n\n**fallback** body",
+      rawContent: expect.any(String),
       contentType: "interactive",
       createTime: undefined,
       threadId: undefined,
@@ -345,6 +456,7 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "Summary\n\npost body",
+      rawContent: expect.any(String),
       contentType: "post",
       createTime: undefined,
       threadId: undefined,
@@ -381,6 +493,7 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "[file message]",
+      rawContent: JSON.stringify({ file_key: "file_v3_123" }),
       contentType: "file",
       createTime: undefined,
       threadId: undefined,
@@ -413,6 +526,7 @@ describe("getMessageFeishu", () => {
       senderOpenId: undefined,
       senderType: undefined,
       content: "single payload",
+      rawContent: expect.any(String),
       contentType: "text",
       createTime: undefined,
       threadId: undefined,

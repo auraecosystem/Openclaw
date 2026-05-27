@@ -250,11 +250,16 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
     if (!thinking) {
       return "";
     }
-    const withoutLabel = thinking.replace(/^(?:Reasoning:|Thinking\.{0,3})\s*/u, "");
+    const withoutLabel = thinking.replace(/^(?:Reasoning:\n|Thinking\n\n)/, "");
     const plain = withoutLabel.replace(/^_(.*)_$/gm, "$1");
     const lines = plain.split("\n").map((line) => `> ${line}`);
     return `> 💭 **Thinking**\n${lines.join("\n")}`;
   };
+
+  const convertTablesForFeishuCard = (text: string): string =>
+    core.channel.text.convertMarkdownTables(text, tableMode);
+  const hasMarkdownTable = (text: string): boolean =>
+    /\|.+\|[\r\n]+\|[-:| ]+\|/.test(text);
 
   const buildCombinedStreamText = (thinking: string, answer: string): string => {
     const parts: string[] = [];
@@ -278,7 +283,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
       if (streamingStartPromise) {
         await streamingStartPromise;
       }
-      if (streaming?.isActive()) {
+      if (streaming?.isActive() && !hasMarkdownTable(combined)) {
         await streaming.update(combined);
       }
     });
@@ -355,7 +360,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         const cardHeader = resolveCardHeader(agentId, identity);
         const cardNote = resolveCardNote(agentId, identity, prefixContext.prefixContext);
         await streaming.start(chatId, resolveReceiveIdType(chatId), {
-          replyToMessageId,
+          replyToMessageId: sendReplyToMessageId,
           replyInThread: effectiveReplyInThread,
           rootId,
           header: cardHeader,
@@ -385,7 +390,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
         statusLine = "";
         const text = buildCombinedStreamText(reasoningText, streamText);
         const finalNote = resolveCardNote(agentId, identity, prefixContext.prefixContext);
-        await streaming.close(text, { note: finalNote });
+        await streaming.close(convertTablesForFeishuCard(text), { note: finalNote });
         // Track the raw streamed text so the duplicate-final check in deliver()
         // can skip the redundant text delivery that arrives after onIdle closes
         // the streaming card.
@@ -424,9 +429,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
     infoKind?: string;
     sendChunk: (params: { chunk: string; isFirst: boolean }) => Promise<void>;
   }) => {
-    const chunkSource = params.useCard
-      ? params.text
-      : core.channel.text.convertMarkdownTables(params.text, tableMode);
+    const chunkSource = core.channel.text.convertMarkdownTables(params.text, tableMode);
     const chunks = resolveTextChunksWithFallback(
       chunkSource,
       core.channel.text.chunkTextWithMode(chunkSource, textChunkLimit, chunkMode),

@@ -265,6 +265,7 @@ export function parseFeishuMessageEvent(
     chatId: event.message.chat_id,
     messageId: event.message.message_id,
     replyTargetMessageId: event.message.reply_target_message_id?.trim() || undefined,
+    syntheticCardAction: event.message.synthetic_card_action === true,
     suppressReplyTarget: event.message.suppress_reply_target === true,
     senderId: senderUserId || senderOpenId || "",
     // Keep the historical field name, but fall back to user_id when open_id is unavailable
@@ -926,7 +927,7 @@ export async function handleFeishuMessage(params: {
       return;
     }
 
-    const mediaPayload = buildAgentMediaPayload(mediaList);
+    let mediaPayload = buildAgentMediaPayload(mediaList);
     const audioTranscript = await resolveFeishuAudioPreflightTranscript({
       cfg: effectiveCfg,
       mediaList,
@@ -1017,6 +1018,30 @@ export async function handleFeishuMessage(params: {
           log(
             `feishu[${account.accountId}]: fetched quoted message: ${quotedContent?.slice(0, 100)}`,
           );
+          if (
+            quotedMessageInfo.rawContent &&
+            quotedMessageInfo.contentType &&
+            ["image", "file", "audio", "video", "media", "sticker", "post"].includes(
+              quotedMessageInfo.contentType,
+            )
+          ) {
+            const quotedMediaList = await resolveFeishuMediaList({
+              cfg,
+              messageId: ctx.parentId,
+              messageType: quotedMessageInfo.contentType,
+              content: quotedMessageInfo.rawContent,
+              maxBytes: mediaMaxBytes,
+              log,
+              accountId: account.accountId,
+            });
+            if (quotedMediaList.length > 0) {
+              mediaList.push(...quotedMediaList);
+              mediaPayload = buildAgentMediaPayload(mediaList);
+              log(
+                `feishu[${account.accountId}]: attached ${quotedMediaList.length} quoted media item(s) to agent context`,
+              );
+            }
+          }
         } else if (quotedMessageInfo) {
           log(
             `feishu[${account.accountId}]: skipped quoted message from sender ${quotedMessageInfo.senderId ?? "unknown"} (mode=${contextVisibilityMode})`,
@@ -1313,9 +1338,10 @@ export async function handleFeishuMessage(params: {
     //   root so the bot stays in the same thread.
     // - Groups with explicit replyInThread config: reply to the root so the bot
     //   stays in the thread the user expects.
-    // - Normal groups (auto-detected threadReply from root_id): reply to the
-    //   triggering message itself. Using rootId here would silently push the
-    //   reply into a topic thread invisible in the main chat view (#32980).
+    // - Normal groups: reply to the triggering message itself. Quoted-message
+    //   metadata (reply_target_message_id/root_id/parent_id) is inbound context,
+    //   not the outbound reply anchor; otherwise commands sent with a quote can
+    //   be routed back into the quoted message's thread.
     const isTopicSession =
       isGroup &&
       (groupSession?.groupSessionScope === "group_topic" ||
@@ -1323,17 +1349,24 @@ export async function handleFeishuMessage(params: {
     const configReplyInThread =
       isGroup &&
       (groupConfig?.replyInThread ?? feishuCfg?.replyInThread ?? "disabled") === "enabled";
-    const replyTargetMessageId =
-      isTopicSession || configReplyInThread
-        ? (ctx.rootId ??
-          ctx.replyTargetMessageId ??
-          (ctx.suppressReplyTarget ? undefined : ctx.messageId))
+    const shouldReplyInFeishuThread = isTopicSession || configReplyInThread;
+    const normalGroupReplyTargetMessageId = ctx.syntheticCardAction
+      ? ctx.replyTargetMessageId
+      : ctx.suppressReplyTarget
+        ? undefined
+        : ctx.messageId;
+    const replyTargetMessageId = shouldReplyInFeishuThread
+      ? (ctx.rootId ??
+        ctx.replyTargetMessageId ??
+        (ctx.suppressReplyTarget ? undefined : ctx.messageId))
+      : isGroup
+        ? normalGroupReplyTargetMessageId
         : (ctx.replyTargetMessageId ?? (ctx.suppressReplyTarget ? undefined : ctx.messageId));
-    const threadReply = isGroup ? (groupSession?.threadReply ?? false) : false;
+    const skipReplyToInMessages = !isGroup;
+    const threadReply =
+      isGroup && shouldReplyInFeishuThread ? (groupSession?.threadReply ?? false) : false;
     const lastRouteThreadId =
-      isGroup && (isTopicSession || configReplyInThread || threadReply)
-        ? replyTargetMessageId
-        : undefined;
+      isGroup && shouldReplyInFeishuThread ? replyTargetMessageId : undefined;
     const pinnedMainDmOwner = !isGroup
       ? resolvePinnedMainDmOwnerFromAllowlist({
           dmScope: cfg.session?.dmScope,
@@ -1453,8 +1486,8 @@ export async function handleFeishuMessage(params: {
             chatId: ctx.chatId,
             allowReasoningPreview,
             replyToMessageId: replyTargetMessageId,
-            skipReplyToInMessages: !isGroup,
-            replyInThread,
+            skipReplyToInMessages,
+            replyInThread: shouldReplyInFeishuThread ? replyInThread : false,
             rootId: ctx.rootId,
             threadReply,
             accountId: account.accountId,
@@ -1618,8 +1651,8 @@ export async function handleFeishuMessage(params: {
         chatId: ctx.chatId,
         allowReasoningPreview,
         replyToMessageId: replyTargetMessageId,
-        skipReplyToInMessages: !isGroup,
-        replyInThread,
+        skipReplyToInMessages,
+        replyInThread: shouldReplyInFeishuThread ? replyInThread : false,
         rootId: ctx.rootId,
         threadReply,
         accountId: account.accountId,

@@ -35,6 +35,8 @@ export type FeishuMessageContext = {
   chatId: string;
   messageId: string;
   replyTargetMessageId?: string;
+  /** True for locally synthesized events created from interactive card actions. */
+  syntheticCardAction?: boolean;
   suppressReplyTarget?: boolean;
   senderId: string;
   senderOpenId: string;
@@ -71,6 +73,8 @@ export type FeishuMessageInfo = {
   senderOpenId?: string;
   senderType?: string;
   content: string;
+  /** Raw Feishu body.content JSON, preserved so quoted media messages can be rehydrated. */
+  rawContent?: string;
   contentType: string;
   createTime?: number;
   /** Feishu thread ID (omt_xxx) — present when the message belongs to a topic thread. */

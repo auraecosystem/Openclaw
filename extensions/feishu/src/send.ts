@@ -238,6 +238,9 @@ function extractInteractiveElementText(
   element: unknown,
   variables: Map<string, string>,
 ): string | undefined {
+  if (Array.isArray(element)) {
+    return extractInteractiveElementsText(element, variables);
+  }
   if (!isRecord(element)) {
     return undefined;
   }
@@ -245,6 +248,12 @@ function extractInteractiveElementText(
   const text = isRecord(element.text) ? element.text : undefined;
 
   if (tag === "div" && typeof text?.content === "string") {
+    return applyCardTemplateVariables(text.content, variables);
+  }
+  if (tag === "text" && typeof element.text === "string") {
+    return applyCardTemplateVariables(element.text, variables);
+  }
+  if (tag === "text" && typeof text?.content === "string") {
     return applyCardTemplateVariables(text.content, variables);
   }
   if ((tag === "markdown" || tag === "lark_md") && typeof element.content === "string") {
@@ -299,17 +308,41 @@ function parseInteractivePostFallback(parsed: unknown): string | undefined {
   return textContent && textContent !== POST_FALLBACK_TEXT ? textContent : undefined;
 }
 
+function readInteractiveTitle(
+  parsed: Record<string, unknown>,
+  variables: Map<string, string>,
+): string | undefined {
+  if (typeof parsed.title === "string" && parsed.title.trim()) {
+    return applyCardTemplateVariables(parsed.title.trim(), variables);
+  }
+  const header = isRecord(parsed.header) ? parsed.header : undefined;
+  const title = isRecord(header?.title) ? header.title : undefined;
+  if (typeof title?.content === "string" && title.content.trim()) {
+    return applyCardTemplateVariables(title.content.trim(), variables);
+  }
+  return undefined;
+}
+
 function parseInteractiveCardContent(parsed: unknown): string {
   if (!isRecord(parsed)) {
     return INTERACTIVE_CARD_FALLBACK_TEXT;
   }
 
   const variables = readCardTemplateVariables(parsed);
+  const parts: string[] = [];
+  const title = readInteractiveTitle(parsed, variables);
+  if (title) {
+    parts.push(title);
+  }
   for (const elements of readInteractiveElementArrays(parsed)) {
     const text = extractInteractiveElementsText(elements, variables);
     if (text) {
-      return text;
+      parts.push(text);
     }
+  }
+  const combined = parts.join("\n").trim();
+  if (combined) {
+    return combined;
   }
 
   return parseInteractivePostFallback(parsed) ?? INTERACTIVE_CARD_FALLBACK_TEXT;
@@ -377,6 +410,7 @@ function parseFeishuMessageItem(
     senderOpenId: item.sender?.id_type === "open_id" ? item.sender?.id : undefined,
     senderType: item.sender?.sender_type,
     content: parseFeishuMessageContent(rawContent, msgType),
+    rawContent,
     contentType: msgType,
     createTime: item.create_time ? Number.parseInt(item.create_time, 10) : undefined,
     threadId: item.thread_id || undefined,
@@ -571,6 +605,7 @@ export async function sendMessageFeishu(
   const tableMode = resolveMarkdownTableMode({
     cfg,
     channel: "feishu",
+    accountId,
   });
 
   // Build message content (with @mention support)
@@ -663,6 +698,7 @@ export async function editMessageFeishu(params: {
   const tableMode = resolveMarkdownTableMode({
     cfg,
     channel: "feishu",
+    accountId,
   });
   const messageText = convertMarkdownTables(text!, tableMode);
   const payload = buildFeishuPostMessagePayload({ messageText });
@@ -708,6 +744,19 @@ export async function updateCardFeishu(params: {
  * Cards render markdown properly (code blocks, tables, links, etc.)
  * Uses schema 2.0 format for proper markdown rendering.
  */
+function convertFeishuMarkdownTablesForDelivery(
+  cfg: ClawdbotConfig,
+  text: string,
+  accountId?: string,
+): string {
+  const tableMode = resolveMarkdownTableMode({
+    cfg,
+    channel: "feishu",
+    accountId,
+  });
+  return convertMarkdownTables(text, tableMode);
+}
+
 export function buildMarkdownCard(text: string): Record<string, unknown> {
   return {
     schema: "2.0",
@@ -803,6 +852,7 @@ export async function sendStructuredCardFeishu(params: {
   if (mentions && mentions.length > 0) {
     cardText = buildMentionedCardContent(mentions, text);
   }
+  cardText = convertFeishuMarkdownTablesForDelivery(cfg, cardText, accountId);
   const card = buildStructuredCard(cardText, { header, note });
   return sendCardFeishu({
     cfg,
@@ -845,6 +895,7 @@ export async function sendMarkdownCardFeishu(params: {
   if (mentions && mentions.length > 0) {
     cardText = buildMentionedCardContent(mentions, text);
   }
+  cardText = convertFeishuMarkdownTablesForDelivery(cfg, cardText, accountId);
   const card = buildMarkdownCard(cardText);
   return sendCardFeishu({
     cfg,
