@@ -966,9 +966,11 @@ export const dispatchTelegramMessage = async ({
   let finalAnswerDelivered = false;
   const pushStreamToolProgress = async (
     line?: string | ChannelProgressDraftLine,
-    options?: { toolName?: string; startImmediately?: boolean },
+    options?: { toolName?: string; startImmediately?: boolean; allowAfterFinal?: boolean },
   ) => {
-    if (answerLane.finalized || finalAnswerDeliveryStarted || finalAnswerDelivered) {
+    const finalDeliveryClosed =
+      answerLane.finalized || finalAnswerDeliveryStarted || finalAnswerDelivered;
+    if (finalDeliveryClosed && (!options?.allowAfterFinal || !nativeToolProgressDraft)) {
       return false;
     }
     if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
@@ -2064,7 +2066,10 @@ export const dispatchTelegramMessage = async ({
                     ) {
                       return;
                     }
-                    await pushStreamToolProgress(text, { startImmediately: true });
+                    await pushStreamToolProgress(text, {
+                      startImmediately: true,
+                      allowAfterFinal: isFastModeAutoProgressPayload(payload),
+                    });
                   },
                   onCommandOutput: async (payload) => {
                     if (payload.phase !== "end") {
