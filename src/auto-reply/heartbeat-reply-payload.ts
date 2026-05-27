@@ -1,4 +1,5 @@
 import { hasOutboundReplyContent } from "openclaw/plugin-sdk/reply-payload";
+import { getReplyPayloadMetadata } from "./reply-payload.js";
 import type { ReplyPayload } from "./types.js";
 
 export function resolveHeartbeatReplyPayload(
@@ -20,4 +21,14 @@ export function resolveHeartbeatReplyPayload(
     }
   }
   return undefined;
+}
+
+export function hasHeartbeatMessageToolDeliveryEvidence(
+  replyResult: ReplyPayload | ReplyPayload[] | undefined,
+): boolean {
+  const replyPayload = resolveHeartbeatReplyPayload(replyResult);
+  if (!replyPayload) {
+    return false;
+  }
+  return getReplyPayloadMetadata(replyPayload)?.messageToolDeliveredForReplyRoute === true;
 }
