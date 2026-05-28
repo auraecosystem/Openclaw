@@ -270,7 +270,7 @@ const execApprovalHoisted = vi.hoisted(() => ({
 }));
 export const resolveExecApprovalSpy = execApprovalHoisted.resolveExecApprovalSpy;
 const speakeasyVoiceHoisted = vi.hoisted(() => ({
-  generateSpeakeasyVoiceNoteSpy: vi.fn(async () => "/tmp/speakeasy.mp3"),
+  generateSpeakeasyVoiceNoteSpy: vi.fn(async () => "/tmp/speakeasy.ogg"),
 }));
 export const generateSpeakeasyVoiceNoteSpy = speakeasyVoiceHoisted.generateSpeakeasyVoiceNoteSpy;
 
@@ -541,7 +541,7 @@ beforeEach(() => {
   resolveExecApprovalSpy.mockReset();
   resolveExecApprovalSpy.mockResolvedValue(undefined);
   generateSpeakeasyVoiceNoteSpy.mockReset();
-  generateSpeakeasyVoiceNoteSpy.mockResolvedValue("/tmp/speakeasy.mp3");
+  generateSpeakeasyVoiceNoteSpy.mockResolvedValue("/tmp/speakeasy.ogg");
   dispatchReplyWithBufferedBlockDispatcher.mockReset();
   dispatchReplyWithBufferedBlockDispatcher.mockImplementation(
     async (params: DispatchReplyHarnessParams) =>
