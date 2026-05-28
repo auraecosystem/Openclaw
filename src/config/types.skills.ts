@@ -51,4 +51,11 @@ export type SkillsConfig = {
   install?: SkillsInstallConfig;
   limits?: SkillsLimitsConfig;
   entries?: Record<string, SkillConfig>;
+  /** Skill router configuration for pre-routing. */
+  router?: {
+    /** Registered router name (must match a plugin's registerSkillRouter name). */
+    name: string;
+    /** Router-specific configuration passed to the factory. */
+    config?: Record<string, unknown>;
+  };
 };
