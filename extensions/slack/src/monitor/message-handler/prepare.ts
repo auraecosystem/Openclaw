@@ -661,6 +661,8 @@ export async function prepareSlackMessage(params: {
     : isGroupDm
       ? "group"
       : "channel";
+  const channelReplyToMode =
+    channelConfig?.replyToMode ?? resolveSlackReplyToMode(account, channelChatType);
   const messageAssistantThreadContext = resolveSlackMessageAssistantThreadContext(message);
   const assistantContextLookupChannelId =
     messageAssistantThreadContext?.assistantChannelId ?? message.channel;
@@ -690,7 +692,7 @@ export async function prepareSlackMessage(params: {
     ctx.saveSlackAssistantThreadContext(assistantThreadContextToCache);
   }
   const willImplicitlyThreadReply =
-    isRoom && !channelRequireMention && resolveSlackReplyToMode(account, channelChatType) !== "off";
+    isRoom && !channelRequireMention && channelReplyToMode !== "off";
   const seedTopLevelRoomThreadBySource =
     opts.source === "app_mention" ||
     opts.wasMentioned === true ||
@@ -704,6 +706,7 @@ export async function prepareSlackMessage(params: {
     isGroupDm,
     isRoom,
     isRoomish,
+    channelConfig,
     seedTopLevelRoomThread: seedTopLevelRoomThreadBySource,
     assistantThreadTs: assistantThreadContext?.threadTs,
   });
@@ -742,6 +745,7 @@ export async function prepareSlackMessage(params: {
       isGroupDm,
       isRoom,
       isRoomish,
+      channelConfig,
       seedTopLevelRoomThread: true,
       assistantThreadTs: assistantThreadContext?.threadTs,
     });
@@ -1305,6 +1309,7 @@ export async function prepareSlackMessage(params: {
       GroupSubject: isRoomish ? roomLabel : undefined,
       UntrustedContext: untrustedChannelMetadata ? [untrustedChannelMetadata] : undefined,
       TransportThreadId: directThreadRoutedToDmSession ? threadContext.messageThreadId : undefined,
+      ReplyToMode: replyToMode,
       SlackAssistantThread: assistantThreadContext ? true : undefined,
       SlackAssistantThreadContextChannelId: assistantThreadContext?.channelId,
       SlackAssistantThreadContextTeamId: assistantThreadContext?.teamId,

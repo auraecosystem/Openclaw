@@ -1,4 +1,5 @@
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
+import type { ReplyToMode } from "../config/types.js";
 import type {
   MediaUnderstandingDecision,
   MediaUnderstandingOutput,
@@ -275,6 +276,8 @@ export type MsgContext = {
   MessageThreadId?: string | number;
   /** Provider-native thread target for reply delivery without making the session thread-scoped. */
   TransportThreadId?: string | number;
+  /** Provider-resolved reply threading mode for this inbound turn. */
+  ReplyToMode?: ReplyToMode;
   /** Platform-native channel/conversation id (e.g. Slack DM channel "D…" id). */
   NativeChannelId?: string;
   /** Stable provider-native direct-peer id when a DM room/user mapping must survive later writes. */

@@ -470,6 +470,7 @@ export type ChannelThreadingContext = {
   ThreadLabel?: string;
   MessageThreadId?: string | number;
   TransportThreadId?: string | number;
+  ReplyToMode?: "off" | "first" | "all" | "batched";
   /** Platform-native channel/conversation id (e.g. Slack DM channel "D…" id). */
   NativeChannelId?: string;
 };

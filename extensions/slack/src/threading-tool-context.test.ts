@@ -48,6 +48,18 @@ describe("buildSlackThreadingToolContext", () => {
     ).toBe("all");
   });
 
+  it("prefers the inbound resolved replyToMode over account config", () => {
+    expect(
+      resolveReplyToModeWithConfig({
+        slackConfig: {
+          replyToMode: "all",
+          replyToModeByChatType: { channel: "all" },
+        },
+        context: { ChatType: "channel", ReplyToMode: "off" },
+      }),
+    ).toBe("off");
+  });
+
   it("uses top-level replyToMode for channels when no channel override is set", () => {
     expect(
       resolveReplyToModeWithConfig({
