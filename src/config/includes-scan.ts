@@ -1,10 +1,16 @@
 import * as fs from "node:fs/promises";
 import path from "node:path";
 import { parseJsonWithJson5Fallback } from "../utils/parse-json-compat.js";
-import { INCLUDE_KEY, MAX_INCLUDE_DEPTH } from "./includes.js";
+import { INCLUDE_KEY, INCLUDE_TEXT_KEY, MAX_INCLUDE_DEPTH } from "./includes.js";
 
-function listDirectIncludes(parsed: unknown): string[] {
-  const out: string[] = [];
+type DirectInclude = {
+  path: string;
+  /** Whether the include target may itself contain further includes. */
+  recurse: boolean;
+};
+
+function listDirectIncludes(parsed: unknown): DirectInclude[] {
+  const out: DirectInclude[] = [];
   const visit = (value: unknown) => {
     if (!value) {
       return;
@@ -21,13 +27,19 @@ function listDirectIncludes(parsed: unknown): string[] {
     const rec = value as Record<string, unknown>;
     const includeVal = rec[INCLUDE_KEY];
     if (typeof includeVal === "string") {
-      out.push(includeVal);
+      out.push({ path: includeVal, recurse: true });
     } else if (Array.isArray(includeVal)) {
       for (const item of includeVal) {
         if (typeof item === "string") {
-          out.push(item);
+          out.push({ path: item, recurse: true });
         }
       }
+    }
+    // $includeText injects raw text and cannot contain further includes, so it
+    // is watched as a dependency but never recursed into.
+    const includeTextVal = rec[INCLUDE_TEXT_KEY];
+    if (typeof includeTextVal === "string") {
+      out.push({ path: includeTextVal, recurse: false });
     }
     for (const v of Object.values(rec)) {
       visit(v);
@@ -56,13 +68,19 @@ export async function collectIncludePathsRecursive(params: {
     if (depth > MAX_INCLUDE_DEPTH) {
       return;
     }
-    for (const raw of listDirectIncludes(parsed)) {
+    for (const { path: raw, recurse } of listDirectIncludes(parsed)) {
       const resolved = resolveIncludePath(basePath, raw);
       if (visited.has(resolved)) {
         continue;
       }
       visited.add(resolved);
       result.push(resolved);
+
+      if (!recurse) {
+        // Raw-text leaf: register as a watched dependency but do not parse or
+        // descend into it.
+        continue;
+      }
 
       const rawText = await fs.readFile(resolved, "utf-8").catch(() => null);
       if (!rawText) {
