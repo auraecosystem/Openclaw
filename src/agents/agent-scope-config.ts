@@ -25,6 +25,7 @@ export type ResolvedAgentConfig = {
   contextInjection?: AgentEntry["contextInjection"];
   bootstrapMaxChars?: AgentEntry["bootstrapMaxChars"];
   bootstrapTotalMaxChars?: AgentEntry["bootstrapTotalMaxChars"];
+  experimental?: AgentDefaultsConfig["experimental"];
   skills?: AgentEntry["skills"];
   memorySearch?: AgentEntry["memorySearch"];
   humanDelay?: AgentEntry["humanDelay"];
@@ -35,7 +36,7 @@ export type ResolvedAgentConfig = {
   groupChat?: AgentEntry["groupChat"];
   subagents?: AgentEntry["subagents"];
   runRetries?: AgentEntry["runRetries"];
-  embeddedPi?: AgentEntry["embeddedPi"];
+  embeddedAgent?: AgentEntry["embeddedAgent"];
   sandbox?: AgentEntry["sandbox"];
   tools?: AgentEntry["tools"];
 };
@@ -128,6 +129,10 @@ export function resolveAgentConfig(
     contextInjection: entry.contextInjection,
     bootstrapMaxChars: entry.bootstrapMaxChars,
     bootstrapTotalMaxChars: entry.bootstrapTotalMaxChars,
+    experimental:
+      typeof entry.experimental === "object" && entry.experimental
+        ? { ...agentDefaults?.experimental, ...entry.experimental }
+        : agentDefaults?.experimental,
     skills: Array.isArray(entry.skills) ? entry.skills : undefined,
     memorySearch: entry.memorySearch,
     humanDelay: entry.humanDelay,
@@ -144,8 +149,10 @@ export function resolveAgentConfig(
       typeof entry.runRetries === "object" && entry.runRetries
         ? { ...agentDefaults?.runRetries, ...entry.runRetries }
         : agentDefaults?.runRetries,
-    embeddedPi:
-      typeof entry.embeddedPi === "object" && entry.embeddedPi ? entry.embeddedPi : undefined,
+    embeddedAgent:
+      typeof entry.embeddedAgent === "object" && entry.embeddedAgent
+        ? entry.embeddedAgent
+        : undefined,
     sandbox: entry.sandbox,
     tools: entry.tools,
   };

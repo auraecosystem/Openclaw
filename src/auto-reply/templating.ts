@@ -1,3 +1,5 @@
+import type { InboundEventKind } from "../channels/inbound-event/kind.js";
+import type { ReplyToMode } from "../config/types.js";
 import type {
   MediaUnderstandingDecision,
   MediaUnderstandingOutput,
@@ -38,8 +40,39 @@ type UntrustedStructuredContextEntry = {
   payload: unknown;
 };
 
+export type SupplementalContextFacts = {
+  quote?: {
+    id?: string;
+    fullId?: string;
+    body?: string;
+    sender?: string;
+    senderAllowed?: boolean;
+    isExternal?: boolean;
+    isQuote?: boolean;
+  };
+  forwarded?: {
+    from?: string;
+    fromType?: string;
+    fromId?: string;
+    date?: number;
+    senderAllowed?: boolean;
+  };
+  thread?: {
+    id?: string;
+    starterBody?: string;
+    historyBody?: string;
+    label?: string;
+    parentSessionKey?: string;
+    modelParentSessionKey?: string;
+    senderAllowed?: boolean;
+  };
+  untrustedContext?: Array<{ label: string; source?: string; type?: string; payload: unknown }>;
+  groupSystemPrompt?: string;
+};
+
 export type MsgContext = {
   Body?: string;
+  InboundEventKind?: InboundEventKind;
   /**
    * Agent prompt body (may include envelope/history/context). Prefer this for prompt shaping.
    * Should use real newlines (`\n`), not escaped `\\n`.
@@ -184,6 +217,11 @@ export type MsgContext = {
   MemberRoleIds?: string[];
   GroupMembers?: string;
   GroupSystemPrompt?: string;
+  /**
+   * Canonical inbound supplemental facts for new channel code. `finalizeInboundContext`
+   * projects these to the existing flat reply/forward/thread/group prompt fields.
+   */
+  SupplementalContext?: SupplementalContextFacts;
   /** Untrusted metadata that must not be treated as system instructions. */
   UntrustedContext?: string[];
   /** Structured untrusted metadata rendered by prompt assembly as fenced JSON. */
@@ -234,10 +272,12 @@ export type MsgContext = {
   AcpDispatchTailAfterReset?: boolean;
   /** Gateway client scopes when the message originates from the gateway. */
   GatewayClientScopes?: string[];
-  /** System-event authority override for contexts that must never inherit owner semantics. */
-  ForceSenderIsOwnerFalse?: boolean;
   /** Thread identifier (Telegram topic id or Matrix thread event id). */
   MessageThreadId?: string | number;
+  /** Provider-native thread target for reply delivery without making the session thread-scoped. */
+  TransportThreadId?: string | number;
+  /** Provider-resolved reply threading mode for this inbound turn. */
+  ReplyToMode?: ReplyToMode;
   /** Platform-native channel/conversation id (e.g. Slack DM channel "D…" id). */
   NativeChannelId?: string;
   /** Stable provider-native direct-peer id when a DM room/user mapping must survive later writes. */

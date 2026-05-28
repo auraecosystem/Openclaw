@@ -143,6 +143,24 @@ describe("OpenClaw SDK", () => {
     expect(result.error?.message).toBe("aborted by operator");
   });
 
+  it("maps auth-revoked wait snapshots to cancelled", async () => {
+    const transport = new FakeTransport({
+      "agent.wait": {
+        status: "timeout",
+        runId: "run_auth_revoked",
+        stopReason: "auth-revoked",
+        error: "provider auth was removed",
+      },
+    });
+    const oc = new OpenClaw({ transport });
+
+    const result = await oc.runs.wait("run_auth_revoked");
+
+    expect(result.runId).toBe("run_auth_revoked");
+    expect(result.status).toBe("cancelled");
+    expect(result.error?.message).toBe("provider auth was removed");
+  });
+
   it("keeps wait-only deadlines non-terminal", async () => {
     const transport = new FakeTransport({
       "agent.wait": { status: "timeout", runId: "run_still_active" },
@@ -154,6 +172,24 @@ describe("OpenClaw SDK", () => {
     expect(result.runId).toBe("run_still_active");
     expect(result.status).toBe("accepted");
     expect(result.error).toBeUndefined();
+  });
+
+  it("keeps pending-error wait deadlines non-terminal", async () => {
+    const transport = new FakeTransport({
+      "agent.wait": {
+        status: "timeout",
+        runId: "run_pending_error",
+        error: "429 RESOURCE_EXHAUSTED",
+        pendingError: true,
+      },
+    });
+    const oc = new OpenClaw({ transport });
+
+    const result = await oc.runs.wait("run_pending_error");
+
+    expect(result.runId).toBe("run_pending_error");
+    expect(result.status).toBe("accepted");
+    expect(result.error?.message).toBe("429 RESOURCE_EXHAUSTED");
   });
 
   it("maps terminal runtime timeout snapshots to timed_out", async () => {
@@ -989,9 +1025,27 @@ describe("OpenClaw SDK", () => {
     expect(cancelled.runId).toBe("run_1");
     expect(cancelled.data).toEqual({ phase: "end", aborted: true, stopReason: "rpc" });
 
-    const timedOut = normalizeGatewayEvent({
+    const authRevoked = normalizeGatewayEvent({
       event: "agent",
       seq: 6,
+      payload: {
+        runId: "run_1",
+        stream: "lifecycle",
+        ts,
+        data: { phase: "end", aborted: true, stopReason: "auth-revoked" },
+      },
+    });
+    expect(authRevoked.type).toBe("run.cancelled");
+    expect(authRevoked.runId).toBe("run_1");
+    expect(authRevoked.data).toEqual({
+      phase: "end",
+      aborted: true,
+      stopReason: "auth-revoked",
+    });
+
+    const timedOut = normalizeGatewayEvent({
+      event: "agent",
+      seq: 7,
       payload: {
         runId: "run_1",
         stream: "lifecycle",

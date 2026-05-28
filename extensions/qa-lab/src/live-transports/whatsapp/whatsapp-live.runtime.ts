@@ -7,10 +7,12 @@ import { startWhatsAppQaDriverSession } from "@openclaw/whatsapp/api.js";
 import { normalizeE164 } from "openclaw/plugin-sdk/account-resolution";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { z } from "zod";
 import { startQaGatewayChild } from "../../gateway-child.js";
 import { DEFAULT_QA_LIVE_PROVIDER_MODE } from "../../providers/index.js";
+import { fingerprintQaCredentialId } from "../../qa-credentials-fingerprint.runtime.js";
 import {
   defaultQaModelForMode,
   normalizeQaProviderMode,
@@ -21,8 +23,11 @@ import {
   startQaCredentialLeaseHeartbeat,
   type QaCredentialRole,
 } from "../shared/credential-lease.runtime.js";
+import {
+  appendQaLiveLaneIssue as appendLiveLaneIssue,
+  buildQaLiveLaneArtifactsError as buildLiveLaneArtifactsError,
+} from "../shared/live-artifacts.js";
 import { startQaLiveLaneGateway } from "../shared/live-gateway.runtime.js";
-import { appendLiveLaneIssue, buildLiveLaneArtifactsError } from "../shared/live-lane-helpers.js";
 import {
   collectLiveTransportStandardScenarioCoverage,
   selectLiveTransportScenarios,
@@ -100,6 +105,12 @@ type WhatsAppQaScenarioResult = {
   requestStartedAt?: string;
   responseObservedAt?: string;
   rttMs?: number;
+  rttMeasurement?: {
+    finalMatchedReplyRttMs: number;
+    requestStartedAt: string;
+    responseObservedAt: string;
+    source: "request-to-observed-message";
+  };
   status: "fail" | "pass" | "skip";
   title: string;
 };
@@ -122,6 +133,7 @@ type WhatsAppQaSummary = {
     total: number;
   };
   credentials: {
+    credentialFingerprint?: string;
     credentialId?: string;
     kind: string;
     ownerId?: string;
@@ -142,6 +154,10 @@ type WhatsAppCredentialHeartbeat = ReturnType<typeof startQaCredentialLeaseHeart
 
 const WHATSAPP_QA_CAPTURE_CONTENT_ENV = "OPENCLAW_QA_WHATSAPP_CAPTURE_CONTENT";
 const QA_REDACT_PUBLIC_METADATA_ENV = "OPENCLAW_QA_REDACT_PUBLIC_METADATA";
+const WHATSAPP_QA_TRANSIENT_DRIVER_ATTEMPTS = 5;
+const WHATSAPP_QA_READY_TIMEOUT_MS = 150_000;
+const WHATSAPP_QA_READY_STABILITY_MS = 20_000;
+const WHATSAPP_QA_DRIVER_RECONNECT_DELAY_MS = 10_000;
 const WHATSAPP_QA_ENV_KEYS = [
   "OPENCLAW_QA_WHATSAPP_DRIVER_PHONE_E164",
   "OPENCLAW_QA_WHATSAPP_SUT_PHONE_E164",
@@ -312,7 +328,7 @@ function buildWhatsAppQaConfig(
     sutAccountId: string;
   },
 ): OpenClawConfig {
-  const pluginAllow = [...new Set([...(baseCfg.plugins?.allow ?? []), "whatsapp"])];
+  const pluginAllow = uniqueStrings([...(baseCfg.plugins?.allow ?? []), "whatsapp"]);
   return {
     ...baseCfg,
     plugins: {
@@ -366,22 +382,22 @@ function buildWhatsAppQaConfig(
   };
 }
 
+type WhatsAppChannelStatus = {
+  connected?: boolean;
+  lastConnectedAt?: number;
+  lastDisconnect?: unknown;
+  lastError?: string;
+  restartPending?: boolean;
+  running?: boolean;
+};
+
 async function waitForWhatsAppChannelRunning(
   gateway: Awaited<ReturnType<typeof startQaGatewayChild>>,
   accountId: string,
-) {
+): Promise<WhatsAppChannelStatus> {
   const startedAt = Date.now();
-  let lastStatus:
-    | {
-        connected?: boolean;
-        lastConnectedAt?: number;
-        lastDisconnect?: unknown;
-        lastError?: string;
-        restartPending?: boolean;
-        running?: boolean;
-      }
-    | undefined;
-  while (Date.now() - startedAt < 60_000) {
+  let lastStatus: WhatsAppChannelStatus | undefined;
+  while (Date.now() - startedAt < WHATSAPP_QA_READY_TIMEOUT_MS) {
     try {
       const payload = (await gateway.call(
         "channels.status",
@@ -414,7 +430,12 @@ async function waitForWhatsAppChannelRunning(
           }
         : undefined;
       if (match?.running && match.connected === true && match.restartPending !== true) {
-        return;
+        if (!lastStatus) {
+          throw new Error(
+            `whatsapp account "${accountId}" status disappeared after readiness check`,
+          );
+        }
+        return lastStatus;
       }
     } catch {
       // retry
@@ -427,14 +448,35 @@ async function waitForWhatsAppChannelRunning(
   );
 }
 
+async function waitForWhatsAppChannelStable(
+  gateway: Awaited<ReturnType<typeof startQaGatewayChild>>,
+  accountId: string,
+) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < WHATSAPP_QA_READY_TIMEOUT_MS) {
+    const status = await waitForWhatsAppChannelRunning(gateway, accountId);
+    const connectedAt =
+      typeof status.lastConnectedAt === "number" && status.lastConnectedAt > 0
+        ? status.lastConnectedAt
+        : Date.now();
+    const connectedForMs = Date.now() - connectedAt;
+    if (connectedForMs >= WHATSAPP_QA_READY_STABILITY_MS) {
+      return;
+    }
+    await new Promise((resolve) =>
+      setTimeout(resolve, Math.max(750, WHATSAPP_QA_READY_STABILITY_MS - connectedForMs)),
+    );
+  }
+  throw new Error(
+    `whatsapp account "${accountId}" did not remain ready for ${WHATSAPP_QA_READY_STABILITY_MS}ms`,
+  );
+}
+
 async function listTarEntries(archivePath: string): Promise<string[]> {
   const { stdout } = await execFileAsync("tar", ["-tzf", archivePath], {
     maxBuffer: 1024 * 1024,
   });
-  return stdout
-    .split("\n")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  return normalizeStringEntries(stdout.split("\n"));
 }
 
 function assertSafeArchiveEntries(entries: string[]) {
@@ -470,6 +512,42 @@ function messageMatches(message: WhatsAppObservedMessage, matchText: string | Re
     : matchText.test(message.text);
 }
 
+function isTransientWhatsAppQaDriverError(error: unknown) {
+  const message = formatErrorMessage(error);
+  return (
+    /\bConnection Closed\b/iu.test(message) ||
+    /\bconflict\b/iu.test(message) ||
+    /\bsession conflict\b/iu.test(message) ||
+    /\btimed out waiting for WhatsApp QA driver message\b/iu.test(message)
+  );
+}
+
+async function restartWhatsAppQaDriverSession(params: {
+  authDir: string;
+  current: WhatsAppQaDriverSession;
+}) {
+  await params.current.close().catch(() => {});
+  return await startWhatsAppQaDriverSession({ authDir: params.authDir });
+}
+
+async function startWhatsAppQaDriverSessionWithRetry(params: { authDir: string }) {
+  let attempt = 1;
+  while (true) {
+    try {
+      return await startWhatsAppQaDriverSession({ authDir: params.authDir });
+    } catch (error) {
+      if (
+        attempt >= WHATSAPP_QA_TRANSIENT_DRIVER_ATTEMPTS ||
+        !isTransientWhatsAppQaDriverError(error)
+      ) {
+        throw error;
+      }
+      attempt += 1;
+      await new Promise((resolve) => setTimeout(resolve, WHATSAPP_QA_DRIVER_RECONNECT_DELAY_MS));
+    }
+  }
+}
+
 async function runWhatsAppScenario(params: {
   driver: WhatsAppQaDriverSession;
   driverPhoneE164: string;
@@ -485,7 +563,7 @@ async function runWhatsAppScenario(params: {
   sutAuthDir: string;
   sutPhoneE164: string;
   groupJid?: string;
-}) {
+}): Promise<WhatsAppQaScenarioResult> {
   const scenarioRun = params.scenario.buildRun();
   if (scenarioRun.target === "group" && !params.groupJid) {
     throw new Error(`WhatsApp scenario ${params.scenario.id} requires groupJid.`);
@@ -522,7 +600,7 @@ async function runWhatsAppScenario(params: {
   });
   let preservedGatewayDebug = false;
   try {
-    await waitForWhatsAppChannelRunning(gatewayHarness.gateway, params.sutAccountId);
+    await waitForWhatsAppChannelStable(gatewayHarness.gateway, params.sutAccountId);
     if (scenarioRun.quietInput) {
       const quietStartedAt = new Date();
       await params.driver.sendText(target, scenarioRun.quietInput);
@@ -578,6 +656,12 @@ async function runWhatsAppScenario(params: {
       rttMs,
       requestStartedAt: requestStartedAt.toISOString(),
       responseObservedAt: responseObservedAt.toISOString(),
+      rttMeasurement: {
+        finalMatchedReplyRttMs: rttMs,
+        requestStartedAt: requestStartedAt.toISOString(),
+        responseObservedAt: responseObservedAt.toISOString(),
+        source: "request-to-observed-message" as const,
+      },
     };
   } catch (error) {
     preservedGatewayDebug = true;
@@ -610,6 +694,7 @@ function toObservedWhatsAppArtifacts(params: {
 
 function renderWhatsAppQaMarkdown(params: {
   cleanupIssues: string[];
+  credentialFingerprint?: string;
   credentialSource: "convex" | "env";
   finishedAt: string;
   gatewayDebugDirPath?: string;
@@ -622,6 +707,9 @@ function renderWhatsAppQaMarkdown(params: {
     "# WhatsApp QA Report",
     "",
     `- Credential source: \`${params.credentialSource}\``,
+    ...(params.credentialFingerprint
+      ? [`- Credential fingerprint: \`${params.credentialFingerprint}\``]
+      : []),
     `- SUT phone: \`${params.redactMetadata ? "<redacted>" : (params.sutPhoneE164 ?? "<unavailable>")}\``,
     `- Metadata redaction: \`${params.redactMetadata ? "enabled" : "disabled"}\``,
     `- Started: ${params.startedAt}`,
@@ -754,7 +842,7 @@ export async function runWhatsAppQaLive(params: {
         parentDir: tempAuthRoot,
       }),
     ]);
-    const activeDriver = await startWhatsAppQaDriverSession({ authDir: driverAuthDir });
+    let activeDriver = await startWhatsAppQaDriverSessionWithRetry({ authDir: driverAuthDir });
     driver = activeDriver;
 
     for (const scenario of scenarios) {
@@ -768,32 +856,70 @@ export async function runWhatsAppQaLive(params: {
         );
         continue;
       }
-      try {
-        const result = await runWhatsAppScenario({
-          driver: activeDriver,
-          driverPhoneE164: runtimeEnv.driverPhoneE164,
-          gatewayDebugDirPath,
-          observedMessages,
-          providerMode,
-          primaryModel,
-          alternateModel,
-          fastMode: params.fastMode,
-          groupJid: runtimeEnv.groupJid,
-          repoRoot,
-          scenario,
-          sutAccountId,
-          sutAuthDir,
-          sutPhoneE164: runtimeEnv.sutPhoneE164,
-        });
-        scenarioResults.push(result);
-      } catch (error) {
-        preservedGatewayDebugArtifacts = true;
-        scenarioResults.push({
-          id: scenario.id,
-          title: scenario.title,
-          status: "fail",
-          details: formatErrorMessage(error),
-        });
+      let driverAttempt = 1;
+      while (true) {
+        try {
+          const result = await runWhatsAppScenario({
+            driver: activeDriver,
+            driverPhoneE164: runtimeEnv.driverPhoneE164,
+            gatewayDebugDirPath,
+            observedMessages,
+            providerMode,
+            primaryModel,
+            alternateModel,
+            fastMode: params.fastMode,
+            groupJid: runtimeEnv.groupJid,
+            repoRoot,
+            scenario,
+            sutAccountId,
+            sutAuthDir,
+            sutPhoneE164: runtimeEnv.sutPhoneE164,
+          });
+          scenarioResults.push(
+            driverAttempt > 1
+              ? {
+                  ...result,
+                  details: `${result.details}; driver reconnected ${driverAttempt - 1}x`,
+                }
+              : result,
+          );
+          break;
+        } catch (error) {
+          if (
+            driverAttempt < WHATSAPP_QA_TRANSIENT_DRIVER_ATTEMPTS &&
+            isTransientWhatsAppQaDriverError(error)
+          ) {
+            driverAttempt += 1;
+            await new Promise((resolve) =>
+              setTimeout(resolve, WHATSAPP_QA_DRIVER_RECONNECT_DELAY_MS),
+            );
+            try {
+              activeDriver = await restartWhatsAppQaDriverSession({
+                authDir: driverAuthDir,
+                current: activeDriver,
+              });
+              driver = activeDriver;
+            } catch (restartError) {
+              if (!isTransientWhatsAppQaDriverError(restartError)) {
+                throw restartError;
+              }
+            }
+            continue;
+          }
+          preservedGatewayDebugArtifacts = true;
+          scenarioResults.push({
+            id: scenario.id,
+            title: scenario.title,
+            status: "fail",
+            details:
+              driverAttempt > 1
+                ? `${formatErrorMessage(error)}; driver reconnected ${driverAttempt - 1}x`
+                : formatErrorMessage(error),
+          });
+          break;
+        }
+      }
+      if (scenarioResults.at(-1)?.status === "fail") {
         break;
       }
     }
@@ -850,12 +976,14 @@ export async function runWhatsAppQaLive(params: {
   const passed = scenarioResults.filter((entry) => entry.status === "pass").length;
   const failed = scenarioResults.filter((entry) => entry.status === "fail").length;
   const skipped = scenarioResults.filter((entry) => entry.status === "skip").length;
+  const credentialFingerprint = fingerprintQaCredentialId(credentialLease?.credentialId);
   const summary: WhatsAppQaSummary = {
     credentials: credentialLease
       ? {
           source: credentialLease.source,
           kind: credentialLease.kind,
           role: credentialLease.role,
+          credentialFingerprint,
           credentialId: redactPublicMetadata ? undefined : credentialLease.credentialId,
           ownerId: redactPublicMetadata ? undefined : credentialLease.ownerId,
         }
@@ -896,6 +1024,7 @@ export async function runWhatsAppQaLive(params: {
     reportPath,
     `${renderWhatsAppQaMarkdown({
       cleanupIssues,
+      credentialFingerprint,
       credentialSource: credentialLease?.source ?? requestedCredentialSource,
       finishedAt,
       gatewayDebugDirPath: preservedGatewayDebugArtifacts ? gatewayDebugDirPath : undefined,
@@ -915,16 +1044,20 @@ export async function runWhatsAppQaLive(params: {
   };
 }
 
-export const __testing = {
+export const testing = {
   assertSafeArchiveEntries,
   appendPreScenarioFailureResults,
   buildWhatsAppQaConfig,
   createMissingGroupJidScenarioResult,
   findScenarios,
+  fingerprintWhatsAppCredentialId: fingerprintQaCredentialId,
+  isTransientWhatsAppQaDriverError,
   parseWhatsAppQaCredentialPayload,
+  renderWhatsAppQaMarkdown,
   resolveWhatsAppQaRuntimeEnv,
   resolveWhatsAppMetadataRedaction,
   toObservedWhatsAppArtifacts,
   unpackWhatsAppAuthArchive,
   WHATSAPP_QA_STANDARD_SCENARIO_IDS,
 };
+export { testing as __testing };

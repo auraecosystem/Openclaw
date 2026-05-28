@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
 const authProfilesStoreMock = vi.hoisted(() => ({
   profiles: {} as Record<
     string,
@@ -10,34 +11,38 @@ const authProfilesStoreMock = vi.hoisted(() => ({
   >,
 }));
 
-vi.mock("../../agents/auth-profiles.js", () => ({
-  clearRuntimeAuthProfileStoreSnapshots: () => {
-    authProfilesStoreMock.profiles = {};
-  },
-  externalCliDiscoveryForProviderAuth: () => ({
-    mode: "scoped",
-    allowKeychainPrompt: false,
-  }),
-  ensureAuthProfileStore: () => ({
+vi.mock("../../agents/auth-profiles.js", () => {
+  const store = () => ({
     version: 1,
     profiles: authProfilesStoreMock.profiles,
-  }),
-  isProfileInCooldown: () => false,
-  listProfilesForProvider: (_store: unknown, provider: string) =>
-    Object.entries(authProfilesStoreMock.profiles)
-      .filter(([, profile]) => profile.provider === provider)
-      .map(([profileId, profile]) => ({ profileId, profile })),
-  replaceRuntimeAuthProfileStoreSnapshots: (
-    snapshots: Array<{
-      store?: { profiles?: Record<string, AuthProfileForTest> };
-    }>,
-  ) => {
-    authProfilesStoreMock.profiles = snapshots[0]?.store?.profiles ?? {};
-  },
-  resolveAuthProfileDisplayLabel: ({ profileId }: { profileId: string }) => profileId,
-  resolveAuthProfileOrder: () => [],
-  resolveAuthStorePathForDisplay: () => "/tmp/auth-profiles.json",
-}));
+  });
+  return {
+    clearRuntimeAuthProfileStoreSnapshots: () => {
+      authProfilesStoreMock.profiles = {};
+    },
+    externalCliDiscoveryForProviderAuth: () => ({
+      mode: "scoped",
+      allowKeychainPrompt: false,
+    }),
+    ensureAuthProfileStore: store,
+    ensureAuthProfileStoreWithoutExternalProfiles: store,
+    isProfileInCooldown: () => false,
+    listProfilesForProvider: (_store: unknown, provider: string) =>
+      Object.entries(authProfilesStoreMock.profiles)
+        .filter(([, profile]) => profile.provider === provider)
+        .map(([profileId, profile]) => ({ profileId, profile })),
+    replaceRuntimeAuthProfileStoreSnapshots: (
+      snapshots: Array<{
+        store?: { profiles?: Record<string, AuthProfileForTest> };
+      }>,
+    ) => {
+      authProfilesStoreMock.profiles = snapshots[0]?.store?.profiles ?? {};
+    },
+    resolveAuthProfileDisplayLabel: ({ profileId }: { profileId: string }) => profileId,
+    resolveAuthProfileOrder: () => [],
+    resolveAuthStorePathForDisplay: () => "/tmp/auth-profiles.json",
+  };
+});
 
 vi.mock("../../agents/auth-profiles/store.js", () => {
   const store = () => ({
@@ -77,6 +82,14 @@ vi.mock("../../agents/model-auth.js", () => {
   const hasWorkspaceCredential = (env: NodeJS.ProcessEnv = process.env) =>
     Boolean(env.WORKSPACE_MODEL_LIST_CREDENTIALS || env.WORKSPACE_MODEL_CREDENTIALS);
   return {
+    createRuntimeProviderAuthLookup: () => ({
+      envApiKey: {
+        aliasMap: {},
+        candidateMap: {},
+        authEvidenceMap: {},
+      },
+      syntheticAuthProviderRefs: [],
+    }),
     ensureAuthProfileStore: store,
     hasRuntimeAvailableProviderAuth: ({
       provider,
@@ -105,6 +118,10 @@ vi.mock("../../agents/model-auth.js", () => {
   };
 });
 
+vi.mock("../../agents/provider-auth-aliases.js", () => ({
+  resolveProviderIdForAuth: (provider: string) => provider,
+}));
+
 import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import {
   clearRuntimeAuthProfileStoreSnapshots,
@@ -113,6 +130,11 @@ import {
 import type { ModelAliasIndex } from "../../agents/model-selection.js";
 import type { ModelDefinitionConfig, OpenClawConfig } from "../../config/config.js";
 import type { SessionEntry } from "../../config/sessions.js";
+import {
+  clearInternalHooks,
+  registerInternalHook,
+  type InternalHookEvent,
+} from "../../hooks/internal-hooks.js";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
@@ -230,6 +252,17 @@ function setDirectiveTestProviders(providers: ProviderPlugin[]): void {
 }
 
 beforeEach(() => {
+  vi.useRealTimers();
+  cliBackendsTesting.setDepsForTest({
+    resolvePluginSetupRegistry: () => ({
+      providers: [],
+      cliBackends: [],
+      configMigrations: [],
+      autoEnableProbes: [],
+      diagnostics: [],
+    }),
+    resolveRuntimeCliBackends: () => [],
+  });
   setDirectiveTestProviders([]);
   clearRuntimeAuthProfileStoreSnapshots();
   replaceRuntimeAuthProfileStoreSnapshots([
@@ -243,11 +276,14 @@ beforeEach(() => {
   vi.mocked(enqueueSystemEvent).mockClear();
   liveModelSwitchMocks.requestLiveSessionModelSwitch.mockReset().mockReturnValue(false);
   queueMocks.refreshQueuedFollowupSession.mockReset();
+  clearInternalHooks();
 });
 
 afterEach(() => {
+  cliBackendsTesting.resetDepsForTest();
   setDirectiveTestProviders([]);
   clearRuntimeAuthProfileStoreSnapshots();
+  clearInternalHooks();
 });
 
 function setAuthProfiles(profiles: Record<string, AuthProfileForTest>) {
@@ -638,7 +674,7 @@ describe("/model chat UX", () => {
     expect(reply?.text).not.toContain("[openai] endpoint: default auth: missing");
     expect(reply?.text).toContain("via codex runtime / openai-codex");
     expect(reply?.text).toContain("openai-codex:patrick@example.test=OAuth");
-  });
+  }, 240_000);
 
   it("keeps direct provider auth labels when OpenAI API key auth exists", async () => {
     setAuthProfiles({
@@ -682,7 +718,7 @@ describe("/model chat UX", () => {
     expect(reply?.text).not.toContain("via codex runtime");
   });
 
-  it("does not borrow Codex auth when OpenAI model policy pins PI runtime", async () => {
+  it("does not borrow Codex auth when OpenAI model policy pins OpenClaw runtime", async () => {
     setAuthProfiles({
       "openai-codex:patrick@example.test": {
         type: "oauth",
@@ -706,7 +742,7 @@ describe("/model chat UX", () => {
             model: { primary: "openai/gpt-5.5" },
             models: {
               "openai/gpt-5.5": {
-                agentRuntime: { id: "pi" },
+                agentRuntime: { id: "openclaw" },
               },
             },
           },
@@ -1067,7 +1103,7 @@ describe("/model chat UX", () => {
     const { sessionEntry } = await persistModelDirectiveForTest({
       command: "/model openai/gpt-4o --runtime claude-cli hello",
       allowedModelKeys: ["openai/gpt-4o"],
-      sessionEntry: createSessionEntry({ agentRuntimeOverride: "pi" }),
+      sessionEntry: createSessionEntry({ agentRuntimeOverride: "openclaw" }),
       provider: "openai",
       model: "gpt-4o",
       initialModelLabel: "openai/gpt-4o",
@@ -1264,6 +1300,34 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
       to: "medium",
       provider: "openai",
       model: "gpt-4o",
+    });
+  });
+
+  it("fires session:patch when /model changes the persisted session model", async () => {
+    const events: InternalHookEvent[] = [];
+    registerInternalHook("session:patch", async (event) => {
+      events.push(event);
+    });
+    const sessionEntry = createSessionEntry();
+
+    await handleDirectiveOnly(
+      createHandleParams({
+        directives: parseInlineDirectives("/model openai/gpt-4o"),
+        sessionEntry,
+      }),
+    );
+
+    await vi.waitFor(() => expect(events).toHaveLength(1));
+    const event = events[0];
+    expect(event.type).toBe("session");
+    expect(event.action).toBe("patch");
+    expect(event.sessionKey).toBe(sessionKey);
+    const context = event.context;
+    expect(context.patch).toMatchObject({ key: sessionKey, model: "openai/gpt-4o" });
+    expect(context.sessionEntry).toMatchObject({
+      providerOverride: "openai",
+      modelOverride: "gpt-4o",
+      liveModelSwitchPending: true,
     });
   });
 
@@ -1509,6 +1573,55 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
     expect(sessionEntry.thinkingLevel).toBe("medium");
   });
 
+  it.each([
+    ["openai", "gpt-5.5"],
+    ["openai-codex", "gpt-5.5"],
+  ])("accepts xhigh for %s/%s when catalog marks reasoning support", async (provider, model) => {
+    setDirectiveTestProviders([
+      {
+        id: provider,
+        label: provider,
+        auth: [],
+        resolveThinkingProfile: ({ modelId }) => ({
+          levels:
+            modelId === "gpt-5.5"
+              ? [
+                  { id: "off" },
+                  { id: "minimal" },
+                  { id: "low" },
+                  { id: "medium" },
+                  { id: "high" },
+                  { id: "xhigh" },
+                ]
+              : [{ id: "off" }],
+        }),
+      },
+    ]);
+    const sessionEntry = createSessionEntry();
+    const sessionStore = { [sessionKey]: sessionEntry };
+    const catalogEntry = {
+      provider,
+      id: model,
+      name: model,
+      reasoning: true,
+    };
+
+    const result = await handleDirectiveOnly(
+      createHandleParams({
+        directives: parseInlineDirectives("/think xhigh"),
+        provider,
+        model,
+        allowedModelCatalog: [catalogEntry],
+        thinkingCatalog: [catalogEntry],
+        sessionEntry,
+        sessionStore,
+      }),
+    );
+
+    expect(result?.text).toContain("Thinking level set to xhigh.");
+    expect(sessionEntry.thinkingLevel).toBe("xhigh");
+  });
+
   it("persists verbose on and off directives", async () => {
     const sessionEntry = createSessionEntry();
     const sessionStore = { [sessionKey]: sessionEntry };
@@ -1742,7 +1855,7 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
   });
 });
 
-describe("persistInlineDirectives internal exec scope gate", () => {
+describe("persistInlineDirectives session directive persistence policy", () => {
   it("skips exec persistence for internal operator.write callers", async () => {
     const sessionEntry = await persistInternalOperatorWriteDirective(
       "/exec host=node security=allowlist ask=always node=worker-1",
@@ -1758,6 +1871,130 @@ describe("persistInlineDirectives internal exec scope gate", () => {
     const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full");
 
     expect(sessionEntry.verboseLevel).toBeUndefined();
+  });
+
+  it("skips exec persistence for unauthorized external callers even when gateway scopes are empty", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective(
+      "/exec host=node security=allowlist ask=always node=worker-1",
+      {
+        messageProvider: "telegram",
+        surface: "telegram",
+        gatewayClientScopes: [],
+      },
+    );
+
+    expect(sessionEntry.execHost).toBeUndefined();
+    expect(sessionEntry.execSecurity).toBeUndefined();
+    expect(sessionEntry.execAsk).toBeUndefined();
+    expect(sessionEntry.execNode).toBeUndefined();
+  });
+
+  it("skips verbose persistence for unauthorized external callers even when gateway scopes are empty", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
+      messageProvider: "telegram",
+      surface: "telegram",
+      gatewayClientScopes: [],
+    });
+
+    expect(sessionEntry.verboseLevel).toBeUndefined();
+  });
+
+  it("allows authorized external callers with empty gateway scopes to persist exec defaults", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective(
+      "/exec host=node security=allowlist ask=always node=worker-1",
+      {
+        messageProvider: "telegram",
+        surface: "telegram",
+        gatewayClientScopes: [],
+        commandAuthorized: true,
+      },
+    );
+
+    expect(sessionEntry.execHost).toBe("node");
+    expect(sessionEntry.execSecurity).toBe("allowlist");
+    expect(sessionEntry.execAsk).toBe("always");
+    expect(sessionEntry.execNode).toBe("worker-1");
+  });
+
+  it("allows authorized external callers with empty gateway scopes to persist verbose defaults", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
+      messageProvider: "telegram",
+      surface: "telegram",
+      gatewayClientScopes: [],
+      commandAuthorized: true,
+    });
+
+    expect(sessionEntry.verboseLevel).toBe("full");
+  });
+
+  it("skips exec persistence for non-webchat channel callers without gateway scopes", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective(
+      "/exec host=node security=allowlist ask=always node=worker-1",
+      {
+        messageProvider: "telegram",
+        surface: "telegram",
+        gatewayClientScopes: undefined,
+      },
+    );
+
+    expect(sessionEntry.execHost).toBeUndefined();
+    expect(sessionEntry.execSecurity).toBeUndefined();
+    expect(sessionEntry.execAsk).toBeUndefined();
+    expect(sessionEntry.execNode).toBeUndefined();
+  });
+
+  it("skips verbose persistence for non-webchat channel callers without gateway scopes", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
+      messageProvider: "telegram",
+      surface: "telegram",
+      gatewayClientScopes: undefined,
+    });
+
+    expect(sessionEntry.verboseLevel).toBeUndefined();
+  });
+
+  it("allows exec persistence for authorized non-webchat channel callers without gateway scopes", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective(
+      "/exec host=node security=allowlist ask=always node=worker-1",
+      {
+        messageProvider: "telegram",
+        surface: "telegram",
+        gatewayClientScopes: undefined,
+        commandAuthorized: true,
+      },
+    );
+
+    expect(sessionEntry.execHost).toBe("node");
+    expect(sessionEntry.execSecurity).toBe("allowlist");
+    expect(sessionEntry.execAsk).toBe("always");
+    expect(sessionEntry.execNode).toBe("worker-1");
+  });
+
+  it("allows verbose persistence for authorized non-webchat channel callers without gateway scopes", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
+      messageProvider: "telegram",
+      surface: "telegram",
+      gatewayClientScopes: undefined,
+      commandAuthorized: true,
+    });
+
+    expect(sessionEntry.verboseLevel).toBe("full");
+  });
+
+  it("allows exec persistence for local callers without channel context", async () => {
+    const sessionEntry = await persistInternalOperatorWriteDirective(
+      "/exec host=node security=allowlist ask=always node=worker-1",
+      {
+        messageProvider: undefined,
+        surface: undefined,
+        gatewayClientScopes: undefined,
+      },
+    );
+
+    expect(sessionEntry.execHost).toBe("node");
+    expect(sessionEntry.execSecurity).toBe("allowlist");
+    expect(sessionEntry.execAsk).toBe("always");
+    expect(sessionEntry.execNode).toBe("worker-1");
   });
 
   it("treats internal provider context as authoritative over external surface metadata", async () => {

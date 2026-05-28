@@ -1,8 +1,11 @@
 import type { CronConfig } from "../../config/types.cron.js";
 import type { HeartbeatRunResult, HeartbeatWakeRequest } from "../../infra/heartbeat-wake.js";
+import type { DeliveryContext } from "../../utils/delivery-context.types.js";
+import type { PreservedCronConfigJob } from "../store.js";
 import type {
   CronAgentExecutionPhaseUpdate,
   CronAgentExecutionStarted,
+  CronFailureNotificationDelivery,
   CronDeliveryStatus,
   CronDeliveryTrace,
   CronJob,
@@ -30,6 +33,7 @@ export type CronEvent = {
   delivered?: boolean;
   deliveryStatus?: CronDeliveryStatus;
   deliveryError?: string;
+  failureNotificationDelivery?: CronFailureNotificationDelivery;
   delivery?: CronDeliveryTrace;
   sessionId?: string;
   sessionKey?: string;
@@ -80,7 +84,7 @@ export type CronServiceDeps = {
       agentId?: string;
       sessionKey?: string;
       contextKey?: string;
-      forceSenderIsOwnerFalse?: boolean;
+      deliveryContext?: DeliveryContext;
     },
   ) => void;
   requestHeartbeat: (opts: HeartbeatWakeRequest) => void;
@@ -160,6 +164,16 @@ export type CronServiceState = {
    * single broken job does not spam the log on every scheduler cycle.
    */
   warnedMissingSessionTargetJobIds: Set<string>;
+  /**
+   * Persisted job rows with non-canonical storage shape are skipped in memory
+   * until doctor/fix or an explicit config write repairs the store.
+   */
+  warnedInvalidPersistedJobKeys: Set<string>;
+  /**
+   * Raw persisted config rows that are skipped for runtime safety but must not
+   * be deleted by routine cron-store writes.
+   */
+  preservedInvalidPersistedJobs: PreservedCronConfigJob[];
   storeLoadedAtMs: number | null;
   storeFileMtimeMs: number | null;
 };
@@ -173,6 +187,8 @@ export function createCronServiceState(deps: CronServiceDeps): CronServiceState 
     op: Promise.resolve(),
     warnedDisabled: false,
     warnedMissingSessionTargetJobIds: new Set<string>(),
+    warnedInvalidPersistedJobKeys: new Set<string>(),
+    preservedInvalidPersistedJobs: [],
     storeLoadedAtMs: null,
     storeFileMtimeMs: null,
   };

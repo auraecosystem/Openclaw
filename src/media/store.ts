@@ -198,6 +198,10 @@ function looksLikeUrl(src: string) {
   return /^https?:\/\//i.test(src);
 }
 
+function discardIgnoredHttpResponse(res: NodeJS.ReadableStream): void {
+  res.resume();
+}
+
 /**
  * Download media to disk while capturing the first few KB for mime sniffing.
  */
@@ -227,6 +231,7 @@ async function downloadToFile(
           if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
             const location = res.headers.location;
             if (!location || maxRedirects <= 0) {
+              discardIgnoredHttpResponse(res);
               reject(new Error(`Redirect loop or missing Location header`));
               return;
             }
@@ -234,6 +239,7 @@ async function downloadToFile(
             try {
               redirectUrl = new URL(location, url);
             } catch {
+              discardIgnoredHttpResponse(res);
               reject(new Error("Invalid redirect Location header"));
               return;
             }
@@ -241,12 +247,14 @@ async function downloadToFile(
               redirectUrl.origin === parsedUrl.origin
                 ? headers
                 : retainSafeHeadersForCrossOriginRedirect(headers);
+            discardIgnoredHttpResponse(res);
             resolve(
               downloadToFile(redirectUrl.href, dest, redirectHeaders, maxRedirects - 1, maxBytes),
             );
             return;
           }
           if (!res.statusCode || res.statusCode >= 400) {
+            discardIgnoredHttpResponse(res);
             reject(new Error(`HTTP ${res.statusCode ?? "?"} downloading media`));
             return;
           }
@@ -327,6 +335,34 @@ function extensionForAuthoritativeHeaderMime(contentType?: string): string | und
     return undefined;
   }
   return extensionForMime(mime);
+}
+
+function isGenericContainerMime(mime?: string): boolean {
+  return mime === "application/zip" || mime === "application/octet-stream";
+}
+
+function isImageHeaderMime(contentType?: string): boolean {
+  return normalizeOptionalString(contentType?.split(";")[0])?.startsWith("image/") === true;
+}
+
+function resolveSavedMediaExtension(params: {
+  detectedMime?: string;
+  headerExt?: string;
+  contentType?: string;
+  originalFilename?: string;
+}): string {
+  const trustedHeaderExt =
+    params.headerExt &&
+    isGenericContainerMime(params.detectedMime) &&
+    isImageHeaderMime(params.contentType)
+      ? undefined
+      : params.headerExt;
+  return (
+    trustedHeaderExt ??
+    extensionForMime(params.detectedMime) ??
+    safeOriginalFilenameExtension(params.originalFilename) ??
+    ""
+  );
 }
 
 function buildSavedMediaResult(params: {
@@ -532,8 +568,12 @@ export async function saveMediaBuffer(
     headerMime: contentType,
     filePath: originalFilename ?? detectionFilePathHint,
   });
-  const ext =
-    headerExt ?? extensionForMime(mime) ?? safeOriginalFilenameExtension(originalFilename) ?? "";
+  const ext = resolveSavedMediaExtension({
+    detectedMime: mime,
+    headerExt,
+    contentType,
+    originalFilename,
+  });
   const id = buildSavedMediaId({ baseId: uuid, ext, originalFilename });
   await writeSavedMediaBuffer({ subdir, id, buffer });
   return buildSavedMediaResult({ dir, id, size: buffer.byteLength, contentType: mime });
@@ -567,11 +607,12 @@ export async function saveMediaStream(
           headerMime: contentType,
           filePath: originalFilename ?? detectionFilePathHint,
         });
-        const ext =
-          headerExt ??
-          extensionForMime(mime) ??
-          safeOriginalFilenameExtension(originalFilename) ??
-          "";
+        const ext = resolveSavedMediaExtension({
+          detectedMime: mime,
+          headerExt,
+          contentType,
+          originalFilename,
+        });
         const id = buildSavedMediaId({ baseId, ext, originalFilename });
         return { id, size, contentType: mime };
       },

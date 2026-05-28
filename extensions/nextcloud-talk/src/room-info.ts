@@ -13,7 +13,7 @@ const roomCache = new Map<
   { kind?: "direct" | "group"; fetchedAt: number; error?: string }
 >();
 
-export const __testing = {
+export const testing = {
   resetRoomCache() {
     roomCache.clear();
   },
@@ -27,9 +27,9 @@ function coerceRoomType(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  if (typeof value === "string" && value.trim()) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : undefined;
+  if (typeof value === "string" && /^[+-]?\d+$/.test(value.trim())) {
+    const parsed = Number(value.trim());
+    return Number.isSafeInteger(parsed) ? parsed : undefined;
   }
   return undefined;
 }
@@ -127,3 +127,4 @@ export async function resolveNextcloudTalkRoomKind(params: {
     return undefined;
   }
 }
+export { testing as __testing };

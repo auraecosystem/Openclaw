@@ -158,6 +158,7 @@ export function resolveSlackRoutingContext(params: {
   isRoomish: boolean;
   channelConfig?: SlackChannelConfigResolved | null;
   seedTopLevelRoomThread?: boolean;
+  assistantThreadTs?: string;
 }): SlackRoutingContext {
   const {
     ctx,
@@ -169,6 +170,7 @@ export function resolveSlackRoutingContext(params: {
     isRoomish,
     channelConfig,
     seedTopLevelRoomThread,
+    assistantThreadTs,
   } = params;
   let route = resolveSlackInitialAgentRoute({
     ctx,
@@ -206,10 +208,14 @@ export function resolveSlackRoutingContext(params: {
       ? seedCandidateThreadId
       : undefined;
   const roomThreadId = isThreadReply && threadTs ? threadTs : undefined;
+  const assistantThreadId = assistantThreadTs;
+  // DM threads are a UI affordance, not a session boundary. Route all DM
+  // messages, including thread replies, to the user's main DM session so
+  // the agent sees them as part of the existing conversation. Slack assistant
+  // threads are the exception: Slack treats each assistant thread as its own
+  // conversation and sends the lifecycle context only on assistant events.
   const canonicalThreadId = isDirectMessage
-    ? isThreadReply
-      ? threadTs
-      : undefined
+    ? assistantThreadId
     : isRoomish
       ? roomThreadId
       : isThreadReply
@@ -217,13 +223,15 @@ export function resolveSlackRoutingContext(params: {
         : autoThreadId;
   const routedThreadId = canonicalThreadId ?? (isRoomish ? seededRoomThreadId : undefined);
   const baseConversationId = resolveSlackBaseConversationId({ message, isDirectMessage });
-  const boundThreadRoute = routedThreadId
+  const runtimeBindingThreadId =
+    routedThreadId ?? (isDirectMessage && isThreadReply ? threadTs : undefined);
+  const boundThreadRoute = runtimeBindingThreadId
     ? resolveRuntimeConversationBindingRoute({
         route,
         conversation: {
           channel: "slack",
           accountId: account.accountId,
-          conversationId: routedThreadId,
+          conversationId: runtimeBindingThreadId,
           parentConversationId: baseConversationId,
         },
       })
@@ -286,3 +294,8 @@ export function resolveSlackRoutingContext(params: {
     historyKey,
   };
 }
+
+export const testing = {
+  normalizeSlackRouteBindingConfig,
+};
+export { testing as __testing };

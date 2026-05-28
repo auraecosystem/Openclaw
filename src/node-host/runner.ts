@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import { getRuntimeConfig, type OpenClawConfig } from "../config/config.js";
 import { startGatewayClientWhenEventLoopReady } from "../gateway/client-start-readiness.js";
 import { GatewayClient, type GatewayReconnectPausedInfo } from "../gateway/client.js";
@@ -72,6 +73,7 @@ const NODE_HOST_EXIT_ON_RECONNECT_PAUSE_CODES: ReadonlySet<string> = new Set([
   ConnectErrorDetailCodes.AUTH_BOOTSTRAP_TOKEN_INVALID,
   ConnectErrorDetailCodes.AUTH_PASSWORD_MISSING,
   ConnectErrorDetailCodes.AUTH_PASSWORD_MISMATCH,
+  ConnectErrorDetailCodes.CLIENT_VERSION_MISMATCH,
 ]);
 
 type NodeHostReconnectPausedDeps = {
@@ -114,6 +116,18 @@ function resolveExecutablePathFromEnv(bin: string, pathEnv: string): string | nu
   return resolveExecutableFromPathEnv(bin, pathEnv) ?? null;
 }
 
+function resolveExecutableTrustPathFromEnv(bin: string, pathEnv: string): string | null {
+  const resolvedPath = resolveExecutablePathFromEnv(bin, pathEnv);
+  if (!resolvedPath) {
+    return null;
+  }
+  try {
+    return fs.realpathSync(resolvedPath);
+  } catch {
+    return resolvedPath;
+  }
+}
+
 function resolveSkillBinTrustEntries(bins: string[], pathEnv: string): SkillBinTrustEntry[] {
   const trustEntries: SkillBinTrustEntry[] = [];
   const seen = new Set<string>();
@@ -122,7 +136,7 @@ function resolveSkillBinTrustEntries(bins: string[], pathEnv: string): SkillBinT
     if (!name) {
       continue;
     }
-    const resolvedPath = resolveExecutablePathFromEnv(name, pathEnv);
+    const resolvedPath = resolveExecutableTrustPathFromEnv(name, pathEnv);
     if (!resolvedPath) {
       continue;
     }

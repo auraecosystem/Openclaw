@@ -7,7 +7,7 @@ import {
   normalizeOptionalString,
 } from "../shared/string-coerce.js";
 import { canonicalizeBase64, estimateBase64DecodedBytes } from "./base64.js";
-import { convertHeicToJpeg } from "./image-ops.js";
+import { convertHeicToJpeg } from "./media-services.js";
 import { detectMime } from "./mime.js";
 import { extractPdfContent, type PdfExtractedImage } from "./pdf-extract.js";
 import { readResponseWithLimit } from "./read-response-with-limit.js";
@@ -154,7 +154,7 @@ export function parseContentType(value: string | undefined): {
 
 export function normalizeMimeList(values: string[] | undefined, fallback: string[]): Set<string> {
   const input = values && values.length > 0 ? values : fallback;
-  return new Set(input.map((value) => normalizeMimeType(value)).filter(Boolean) as string[]);
+  return new Set(input.flatMap((value) => normalizeMimeType(value) ?? []));
 }
 
 export function resolveInputFileLimits(config?: InputFileLimitsConfig): InputFileLimits {
@@ -192,6 +192,7 @@ export async function fetchWithGuard(params: {
 
   try {
     if (!response.ok) {
+      await discardIgnoredResponseBody(response);
       throw new Error(`Failed to fetch: ${response.status} ${response.statusText}`);
     }
 
@@ -199,6 +200,7 @@ export async function fetchWithGuard(params: {
     if (contentLength) {
       const size = Number(contentLength);
       if (Number.isFinite(size) && size > params.maxBytes) {
+        await discardIgnoredResponseBody(response);
         throw new Error(`Content too large: ${size} bytes (limit: ${params.maxBytes} bytes)`);
       }
     }
@@ -212,6 +214,10 @@ export async function fetchWithGuard(params: {
   } finally {
     await release();
   }
+}
+
+async function discardIgnoredResponseBody(response: Response): Promise<void> {
+  await response.body?.cancel().catch(() => undefined);
 }
 
 function decodeTextContent(buffer: Buffer, charset: string | undefined): string {
@@ -270,6 +276,20 @@ async function normalizeInputImage(params: {
     data: normalizedBuffer.toString("base64"),
     mimeType: NORMALIZED_INPUT_IMAGE_MIME,
   };
+}
+
+async function resolveInputFileMime(params: {
+  buffer: Buffer;
+  declaredMime?: string;
+}): Promise<string | undefined> {
+  const sniffedMime = normalizeMimeType(await detectMime({ buffer: params.buffer }));
+  if (!sniffedMime) {
+    return params.declaredMime;
+  }
+  if (sniffedMime === "application/octet-stream") {
+    return params.declaredMime ?? sniffedMime;
+  }
+  return sniffedMime;
 }
 
 export async function extractImageContentFromSource(
@@ -366,6 +386,8 @@ export async function extractFileContentFromSource(params: {
   if (buffer.byteLength > limits.maxBytes) {
     throw new Error(`File too large: ${buffer.byteLength} bytes (limit: ${limits.maxBytes} bytes)`);
   }
+
+  mimeType = await resolveInputFileMime({ buffer, declaredMime: mimeType });
 
   if (!mimeType) {
     throw new Error("input_file missing media type");

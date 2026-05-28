@@ -25,6 +25,10 @@ OpenClaw security guidance assumes a **personal assistant** deployment: one trus
 
 This page explains hardening **within that model**. It does not claim hostile multi-tenant isolation on one shared gateway.
 
+Before changing remote access, DM policy, reverse proxy, or public exposure,
+use the [Gateway exposure runbook](/gateway/security/exposure-runbook) as a
+pre-flight and rollback checklist.
+
 ## Quick check: `openclaw security audit`
 
 See also: [Formal Verification (Security Models)](/security/formal-verification)
@@ -52,6 +56,74 @@ OpenClaw is both a product and an experiment: you're wiring frontier-model behav
 - what the bot can touch
 
 Start with the smallest access that still works, then widen it as you gain confidence.
+
+### Published package dependency lock
+
+OpenClaw source checkouts use `pnpm-lock.yaml`. The published `openclaw` npm
+package and OpenClaw-owned npm plugin packages include `npm-shrinkwrap.json`,
+npm's publishable dependency lockfile, so package installs use the reviewed
+transitive dependency graph from the release instead of resolving a fresh graph
+at install time. Suitable OpenClaw-owned npm plugin packages can also publish
+with explicit `bundledDependencies`, so their runtime dependency files are
+carried in the plugin tarball instead of depending only on install-time
+resolution.
+
+This is a supply-chain hardening measure:
+
+- release installs are more reproducible;
+- transitive dependency updates become visible review surfaces;
+- the package tarball contains the dependency graph that release validators
+  checked;
+- suitable OpenClaw-owned plugin tarballs contain the dependency files from
+  that graph;
+- `package-lock.json` stays out of the published package, because npm does not
+  treat it as the publishable lock contract.
+
+Shrinkwrap is not a sandbox and does not make every dependency trustworthy. It
+does not replace `openclaw security audit`, host isolation, npm provenance,
+signature/audit checks, or `--ignore-scripts` install smoke tests when those are
+appropriate. Treat it as a release reproducibility and review-control boundary.
+
+Maintainers should update and verify shrinkwrap whenever the root package or an
+OpenClaw-owned published plugin package changes its published dependency graph:
+
+```bash
+pnpm deps:shrinkwrap:generate
+pnpm deps:shrinkwrap:check
+```
+
+The generator resolves npm's publishable lock format but rejects generated
+package versions that are not already present in `pnpm-lock.yaml`, preserving
+the pnpm dependency age, override, and patch review boundary.
+
+Use `pnpm deps:shrinkwrap:root:generate` and
+`pnpm deps:shrinkwrap:root:check` only when you intentionally want to refresh
+the root `openclaw` package without touching plugin packages.
+
+Review `pnpm-lock.yaml`, `npm-shrinkwrap.json`, bundled plugin dependency
+payloads, and any `package-lock.json` diff as security-sensitive. The package
+validators require shrinkwrap in new root package tarballs and the plugin npm
+publish path checks plugin-local shrinkwrap, installs package-local bundled
+dependencies, and then packs or publishes. Package validators reject
+`package-lock.json`.
+
+To inspect a published package:
+
+```bash
+npm pack openclaw@<version> --json --pack-destination /tmp/openclaw-pack
+tar -tf /tmp/openclaw-pack/openclaw-<version>.tgz | grep '^package/npm-shrinkwrap.json$'
+```
+
+To inspect an OpenClaw-owned plugin package, replace the package spec and check
+the same tar entry:
+
+```bash
+npm pack @openclaw/discord@<version> --json --pack-destination /tmp/openclaw-plugin-pack
+tar -tf /tmp/openclaw-plugin-pack/openclaw-discord-<version>.tgz | grep '^package/npm-shrinkwrap.json$'
+tar -tf /tmp/openclaw-plugin-pack/openclaw-discord-<version>.tgz | grep '^package/node_modules/'
+```
+
+Background: [npm-shrinkwrap.json](https://docs.npmjs.com/cli/v11/configuring-npm/npm-shrinkwrap-json).
 
 ### Deployment and host trust
 
@@ -302,13 +374,16 @@ does not extend to node-role Control UI sessions.
 
 `openclaw security audit` raises `config.insecure_or_dangerous_flags` when
 known insecure/dangerous debug switches are enabled. Keep these unset in
-production.
+production. Each enabled flag is reported as its own finding. If audit
+suppressions are configured, `security.audit.suppressions.active` remains in the
+active audit output even when matching findings move to `suppressedFindings`.
 
 <AccordionGroup>
   <Accordion title="Flags tracked by the audit today">
     - `gateway.controlUi.allowInsecureAuth=true`
     - `gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback=true`
     - `gateway.controlUi.dangerouslyDisableDeviceAuth=true`
+    - `security.audit.suppressions configured (<count>)`
     - `hooks.gmail.allowUnsafeExternalContent=true`
     - `hooks.mappings[<index>].allowUnsafeExternalContent=true`
     - `tools.exec.applyPatch.workspaceOnly=false`
@@ -489,7 +564,7 @@ Two built-in tools can make persistent control-plane changes:
 - `gateway` can inspect config with `config.schema.lookup` / `config.get`, and can make persistent changes with `config.apply`, `config.patch`, and `update.run`.
 - `cron` can create scheduled jobs that keep running after the original chat/task ends.
 
-The owner-only `gateway` runtime tool still refuses to rewrite
+The agent-facing `gateway` runtime tool still refuses to rewrite
 `tools.exec.ask` or `tools.exec.security`; legacy `tools.bash.*` aliases are
 normalized to the same protected exec paths before the write.
 Agent-driven `gateway config.apply` and `gateway config.patch` edits are
@@ -873,10 +948,11 @@ Doctor can generate one for you: `openclaw doctor --generate-gateway-token`.
 `gateway.remote.token` and `gateway.remote.password` are client credential sources. They do **not** protect local WS access by themselves. Local call paths can use `gateway.remote.*` as fallback only when `gateway.auth.*` is unset. If `gateway.auth.token` or `gateway.auth.password` is explicitly configured via SecretRef and unresolved, resolution fails closed (no remote fallback masking).
 </Note>
 Optional: pin remote TLS with `gateway.remote.tlsFingerprint` when using `wss://`.
-Plaintext `ws://` is loopback-only by default. For trusted private-network
-paths, set `OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1` on the client process as
-break-glass. This is intentionally process environment only, not an
-`openclaw.json` config key.
+Plaintext `ws://` is accepted for loopback, private IP literals, `.local`, and
+Tailnet `*.ts.net` gateway URLs. For other trusted private-DNS names, set
+`OPENCLAW_ALLOW_INSECURE_PRIVATE_WS=1` on the client process as break-glass.
+This is intentionally process environment only, not an `openclaw.json` config
+key.
 Mobile pairing and Android manual or scanned gateway routes are stricter:
 cleartext is accepted for loopback, but private-LAN, link-local, `.local`, and
 dotless hostnames must use TLS unless you explicitly opt into the trusted
@@ -931,7 +1007,7 @@ Important boundary note:
 - On the OpenAI-compatible HTTP surface, shared-secret bearer auth restores the full default operator scopes (`operator.admin`, `operator.approvals`, `operator.pairing`, `operator.read`, `operator.talk.secrets`, `operator.write`) and owner semantics for agent turns; narrower `x-openclaw-scopes` values do not reduce that shared-secret path.
 - Per-request scope semantics on HTTP only apply when the request comes from an identity-bearing mode such as trusted proxy auth, or from an explicitly no-auth private ingress.
 - In those identity-bearing modes, omitting `x-openclaw-scopes` falls back to the normal operator default scope set; send the header explicitly when you want a narrower scope set.
-- `/tools/invoke` follows the same shared-secret rule: token/password bearer auth is treated as full operator access there too, while identity-bearing modes still honor declared scopes.
+- `/tools/invoke` and HTTP session history endpoints follow the same shared-secret rule: token/password bearer auth is treated as full operator access there too, while identity-bearing modes still honor declared scopes.
 - Do not share these credentials with untrusted callers; prefer separate gateways per trust boundary.
 
 **Trust assumption:** tokenless Serve auth assumes the gateway host is trusted.
@@ -994,12 +1070,13 @@ Hardening tips:
 
 OpenClaw loads workspace-local `.env` files for agents and tools, but never lets those files silently override gateway runtime controls.
 
+- Provider credential environment variables are blocked from untrusted workspace `.env` files. Examples include `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `DEEPSEEK_API_KEY`, `PERPLEXITY_API_KEY`, `BRAVE_API_KEY`, `TAVILY_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, and provider auth keys declared by installed trusted plugins. Put provider credentials in the Gateway process environment, `~/.openclaw/.env` (`$OPENCLAW_STATE_DIR/.env`), the config `env` block, or optional login-shell import.
 - Any key that starts with `OPENCLAW_*` is blocked from untrusted workspace `.env` files.
 - Channel endpoint settings for Matrix, Mattermost, IRC, and Synology Chat are also blocked from workspace `.env` overrides, so cloned workspaces cannot redirect bundled connector traffic through local endpoint config. Endpoint env keys (such as `MATRIX_HOMESERVER`, `MATTERMOST_URL`, `IRC_HOST`, `SYNOLOGY_CHAT_INCOMING_URL`) must come from the gateway process environment or `env.shellEnv`, not from a workspace-loaded `.env`.
 - The block is fail-closed: a new runtime-control variable added in a future release cannot be inherited from a checked-in or attacker-supplied `.env`; the key is ignored and the gateway keeps its own value.
-- Trusted process/OS environment variables (the gateway's own shell, launchd/systemd unit, app bundle) still apply - this only constrains `.env` file loading.
+- Trusted process/OS environment variables, global runtime dotenv, config `env`, and enabled login-shell import still apply - this only constrains workspace `.env` file loading.
 
-Why: workspace `.env` files frequently live next to agent code, get committed by accident, or get written by tools. Blocking the whole `OPENCLAW_*` prefix means adding a new `OPENCLAW_*` flag later can never regress into silent inheritance from workspace state.
+Why: workspace `.env` files frequently live next to agent code, get committed by accident, or get written by tools. Blocking provider credentials prevents a cloned workspace from substituting attacker-controlled provider accounts. Blocking the whole `OPENCLAW_*` prefix means adding a new `OPENCLAW_*` flag later can never regress into silent inheritance from workspace state.
 
 ### Logs and transcripts (redaction and retention)
 

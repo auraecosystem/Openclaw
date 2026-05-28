@@ -8,6 +8,7 @@ import type {
   ChannelMessageSendLifecycleAdapter,
   ChannelMessageSendResult,
 } from "../../channels/message/types.js";
+import { adaptMessagePresentationForChannel } from "../../channels/plugins/outbound/interactive.js";
 import { loadChannelOutboundAdapter } from "../../channels/plugins/outbound/load.js";
 import type {
   ChannelDeliveryCapabilities,
@@ -38,7 +39,10 @@ import type { OutboundMediaAccess } from "../../media/load-options.js";
 import { resolveAgentScopedOutboundMediaAccess } from "../../media/read-capability.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { diagnosticErrorCategory } from "../diagnostic-error-metadata.js";
-import { emitDiagnosticEvent, type DiagnosticMessageDeliveryKind } from "../diagnostic-events.js";
+import {
+  emitInternalDiagnosticEvent as emitDiagnosticEvent,
+  type DiagnosticMessageDeliveryKind,
+} from "../diagnostic-events.js";
 import { formatErrorMessage } from "../errors.js";
 import { throwIfAborted } from "./abort.js";
 import { resolveOutboundChannelMessageAdapter } from "./channel-resolution.js";
@@ -143,10 +147,12 @@ type ChannelHandler = {
   normalizePayload?: (payload: ReplyPayload) => ReplyPayload | null;
   sendTextOnlyErrorPayloads?: boolean;
   renderPresentation?: (payload: ReplyPayload) => Promise<ReplyPayload | null>;
+  presentationCapabilities?: ChannelOutboundAdapter["presentationCapabilities"];
   pinDeliveredMessage?: (params: {
     target: ChannelOutboundTargetRef;
     messageId: string;
     pin: ReplyPayloadDeliveryPin;
+    gatewayClientScopes?: readonly string[];
   }) => Promise<void>;
   afterDeliverPayload?: (params: {
     target: ChannelOutboundTargetRef;
@@ -387,6 +393,7 @@ function createPluginHandler(
           })
       : undefined,
     sendTextOnlyErrorPayloads: outbound?.sendTextOnlyErrorPayloads === true,
+    presentationCapabilities: outbound?.presentationCapabilities,
     renderPresentation: outbound?.renderPresentation
       ? async (payload) => {
           const presentation = normalizeMessagePresentation(payload.presentation);
@@ -407,12 +414,13 @@ function createPluginHandler(
         }
       : undefined,
     pinDeliveredMessage: outbound?.pinDeliveredMessage
-      ? async ({ target, messageId, pin }) =>
+      ? async ({ target, messageId, pin, gatewayClientScopes }) =>
           outbound.pinDeliveredMessage!({
             cfg: params.cfg,
             target,
             messageId,
             pin,
+            gatewayClientScopes,
           })
       : undefined,
     afterDeliverPayload: outbound?.afterDeliverPayload
@@ -677,6 +685,15 @@ type MessageSentEvent = {
   messageId?: string;
 };
 
+/**
+ * Best-effort session identifier for delivery telemetry only. Falls back to
+ * `policyKey` as a last resort so diagnostic emission still has a stable
+ * string when neither mirror nor canonical key are available. **Do not use
+ * this value for hook-context correlation** — use `sessionKeyForInternalHooks`
+ * (mirror.sessionKey ?? session.key, no policyKey fallback) instead, so we
+ * never accidentally hand the policy key to plugins that expect the canonical
+ * session key.
+ */
 function sessionKeyForDeliveryDiagnostics(params: {
   mirror?: DeliveryMirror;
   session?: OutboundSessionContext;
@@ -874,6 +891,7 @@ async function maybePinDeliveredMessage(params: {
   payload: ReplyPayload;
   target: ChannelOutboundTargetRef;
   messageId?: string;
+  gatewayClientScopes?: readonly string[];
 }): Promise<void> {
   const pin = normalizeDeliveryPin(params.payload);
   if (!pin) {
@@ -904,6 +922,7 @@ async function maybePinDeliveredMessage(params: {
       target: params.target,
       messageId: params.messageId,
       pin,
+      gatewayClientScopes: params.gatewayClientScopes,
     });
   } catch (err) {
     if (pin.required) {
@@ -950,7 +969,14 @@ async function renderPresentationForDelivery(
   if (!presentation) {
     return payload;
   }
-  const rendered = handler.renderPresentation ? await handler.renderPresentation(payload) : null;
+  const adaptedPresentation = adaptMessagePresentationForChannel({
+    presentation,
+    capabilities: handler.presentationCapabilities,
+  });
+  const adaptedPayload = { ...payload, presentation: adaptedPresentation };
+  const rendered = handler.renderPresentation
+    ? await handler.renderPresentation(adaptedPayload)
+    : null;
   if (rendered) {
     const { presentation: _presentation, ...withoutPresentation } = rendered;
     return withoutPresentation;
@@ -960,7 +986,7 @@ async function renderPresentationForDelivery(
     ...withoutPresentation,
     text: renderMessagePresentationFallbackText({
       text: payload.text,
-      presentation,
+      presentation: adaptedPresentation,
     }),
   };
 }
@@ -988,6 +1014,14 @@ function createMessageSentEmitter(params: {
       channelId: params.channel,
       accountId: params.accountId ?? undefined,
       conversationId: params.to,
+      // Mirror the canonical outbound session key into the `message_sent`
+      // hook context so plugins that observe both `message_sending` and
+      // `message_sent` see the same `sessionKey` (and so it matches the
+      // value the internal `message:sent` hook fires with). The value is
+      // already computed for the internal hook below; reusing it here
+      // keeps the contract documented in `PluginHookMessageContext`
+      // honest for both outbound delivery hooks.
+      sessionKey: params.sessionKeyForInternalHooks,
       messageId: event.messageId,
       isGroup: params.mirrorIsGroup,
       groupId: params.mirrorGroupId,
@@ -1035,6 +1069,7 @@ async function applyMessageSendingHook(params: {
   accountId?: string;
   replyToId?: string | null;
   threadId?: string | number | null;
+  sessionKey?: string;
 }): Promise<{
   cancelled: boolean;
   cancelReason?: string;
@@ -1068,6 +1103,7 @@ async function applyMessageSendingHook(params: {
         channelId: params.channel,
         accountId: params.accountId ?? undefined,
         conversationId: params.to,
+        ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
       },
     );
     if (sendingResult?.cancel) {
@@ -1285,7 +1321,13 @@ async function deliverOutboundPayloadsWithQueueCleanup(
     }
     if (queueId) {
       if (hadPartialFailure) {
-        await failDelivery(queueId, "partial delivery failure (bestEffort)").catch(() => {});
+        await failDelivery(queueId, "partial delivery failure (bestEffort)").catch(
+          (err: unknown) => {
+            log.warn(
+              `failed to mark queued delivery ${queueId} as failed after partial failure; continuing best-effort delivery: ${formatErrorMessage(err)}`,
+            );
+          },
+        );
       } else {
         if (platformSendStarted) {
           await markQueuedPlatformOutcomeUnknown({
@@ -1315,7 +1357,11 @@ async function deliverOutboundPayloadsWithQueueCleanup(
       if (isDeliveryAbortError(err)) {
         await ackDelivery(queueId).catch(() => {});
       } else if (!platformResultsReturned) {
-        await failDelivery(queueId, formatErrorMessage(err)).catch(() => {});
+        await failDelivery(queueId, formatErrorMessage(err)).catch((failErr: unknown) => {
+          log.warn(
+            `failed to mark queued delivery ${queueId} as failed: ${formatErrorMessage(failErr)}`,
+          );
+        });
       }
     }
     throw err;
@@ -1427,6 +1473,15 @@ async function deliverOutboundPayloadsCore(
     });
   }
   const hookRunner = getGlobalHookRunner();
+  // Canonical session key forwarded to internal lifecycle hooks
+  // (`message:sent` event, `message_sending` plugin hook ctx, etc.). Mirror
+  // delivery wins because mirror sends are explicitly bound to the mirror's
+  // session; otherwise we use `session.key`, which by contract equals the
+  // agent runtime's `params.sessionKey` for the run that produced the
+  // payload (see OutboundSessionContext.key JSDoc). We deliberately do NOT
+  // fall back to `session.policyKey` here — the policy key describes the
+  // delivery target's policy, not the canonical control session, and
+  // handing it to plugins that correlate against agent_end would be wrong.
   const sessionKeyForInternalHooks = params.mirror?.sessionKey ?? params.session?.key;
   const mirrorIsGroup = params.mirror?.isGroup;
   const mirrorGroupId = params.mirror?.groupId;
@@ -1508,6 +1563,7 @@ async function deliverOutboundPayloadsCore(
         accountId,
         replyToId: resolveCurrentReplyTo(payload).replyToId,
         threadId: params.threadId,
+        sessionKey: sessionKeyForInternalHooks,
       });
       if (hookResult.cancelled) {
         const hookEffect =
@@ -1598,6 +1654,7 @@ async function deliverOutboundPayloadsCore(
           payload: effectivePayload,
           target: deliveryTarget,
           messageId: delivery.messageId,
+          gatewayClientScopes: params.gatewayClientScopes,
         });
         await maybeNotifyAfterDeliveredPayload({
           handler,
@@ -1647,6 +1704,7 @@ async function deliverOutboundPayloadsCore(
           payload: effectivePayload,
           target: deliveryTarget,
           messageId: pinMessageId,
+          gatewayClientScopes: params.gatewayClientScopes,
         });
         await maybeNotifyAfterDeliveredPayload({
           handler,
@@ -1702,6 +1760,7 @@ async function deliverOutboundPayloadsCore(
           payload: effectivePayload,
           target: deliveryTarget,
           messageId: pinMessageId,
+          gatewayClientScopes: params.gatewayClientScopes,
         });
         await maybeNotifyAfterDeliveredPayload({
           handler,
@@ -1744,6 +1803,7 @@ async function deliverOutboundPayloadsCore(
         payload: effectivePayload,
         target: deliveryTarget,
         messageId: firstMessageId,
+        gatewayClientScopes: params.gatewayClientScopes,
       });
       await maybeNotifyAfterDeliveredPayload({
         handler,

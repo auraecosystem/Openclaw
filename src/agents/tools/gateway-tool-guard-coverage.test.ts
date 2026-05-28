@@ -67,6 +67,9 @@ describe("gateway config mutation guard coverage", () => {
     expect(ALLOWED_GATEWAY_CONFIG_PATHS_FOR_TEST).toContain("channels.*.requireMention");
     expect(ALLOWED_GATEWAY_CONFIG_PATHS_FOR_TEST).toContain("messages.visibleReplies");
     expect(ALLOWED_GATEWAY_CONFIG_PATHS_FOR_TEST).toContain("messages.groupChat.visibleReplies");
+    expect(ALLOWED_GATEWAY_CONFIG_PATHS_FOR_TEST).toContain(
+      "messages.groupChat.unmentionedInbound",
+    );
   });
 
   it("allows documented subagent thinking default edits via config.patch", () => {
@@ -273,16 +276,16 @@ describe("gateway config mutation guard coverage", () => {
     );
   });
 
-  it("blocks per-agent embeddedPi override under agents.list[]", () => {
+  it("blocks per-agent embeddedAgent override under agents.list[]", () => {
     expectBlocked(
       {
         agents: {
-          list: [{ id: "worker", embeddedPi: { executionContract: "strict-agentic" } }],
+          list: [{ id: "worker", embeddedAgent: { executionContract: "strict-agentic" } }],
         },
       },
       {
         agents: {
-          list: [{ id: "worker", embeddedPi: { executionContract: "none" } }],
+          list: [{ id: "worker", embeddedAgent: { executionContract: "none" } }],
         },
       },
     );

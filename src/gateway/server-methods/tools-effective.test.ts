@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ErrorCodes } from "../protocol/index.js";
-import { __testing, toolsEffectiveHandlers } from "./tools-effective.js";
+import { testing, toolsEffectiveHandlers } from "./tools-effective.js";
 
 const runtimeMocks = vi.hoisted(() => ({
   deliveryContextFromSession: vi.fn(() => ({
@@ -32,6 +32,7 @@ const runtimeMocks = vi.hoisted(() => ({
   getActivePluginChannelRegistryVersion: vi.fn(() => 1),
   getActivePluginRegistryVersion: vi.fn(() => 1),
   resolveRuntimeConfigCacheKey: vi.fn(() => "runtime:1:test"),
+  resolveAgentDir: vi.fn(() => "/tmp/agents/main/agent"),
   resolveEffectiveToolInventory: vi.fn(() => ({
     agentId: "main",
     profile: "coding",
@@ -55,6 +56,16 @@ const runtimeMocks = vi.hoisted(() => ({
   resolveReplyToMode: vi.fn(() => "first"),
   resolveSessionAgentId: vi.fn(() => "main"),
   resolveSessionModelRef: vi.fn(() => ({ provider: "openai", model: "gpt-4.1" })),
+  resolveEffectiveToolInventoryRuntimeModelContext: vi.fn(() => ({
+    modelApi: "openai-responses",
+    runtimeModel: {
+      id: "gpt-4.1",
+      name: "GPT 4.1",
+      provider: "openai",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1",
+    },
+  })),
 }));
 
 vi.mock("./tools-effective.runtime.js", () => runtimeMocks);
@@ -100,8 +111,8 @@ function firstRespondCall(respond: ReturnType<typeof vi.fn>): RespondCall | unde
 describe("tools.effective handler", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    __testing.resetToolsEffectiveCacheForTest();
-    __testing.resetToolsEffectiveNowForTest();
+    testing.resetToolsEffectiveCacheForTest();
+    testing.resetToolsEffectiveNowForTest();
     runtimeMocks.getActivePluginChannelRegistryVersion.mockReturnValue(1);
     runtimeMocks.getActivePluginRegistryVersion.mockReturnValue(1);
   });
@@ -174,7 +185,6 @@ describe("tools.effective handler", () => {
     expect(payload?.groups?.[0]?.tools?.[0]?.id).toBe("exec");
     expect(payload?.groups?.[0]?.tools?.[0]?.source).toBe("core");
     const inventoryParams = resolveEffectiveToolInventoryArg();
-    expect(inventoryParams?.senderIsOwner).toBe(false);
     expect(inventoryParams?.currentChannelId).toBe("channel-1");
     expect(inventoryParams?.currentThreadTs).toBe("thread-2");
     expect(inventoryParams?.accountId).toBe("acct-1");
@@ -185,6 +195,22 @@ describe("tools.effective handler", () => {
     expect(inventoryParams?.messageProvider).toBe("telegram");
     expect(inventoryParams?.modelProvider).toBe("openai");
     expect(inventoryParams?.modelId).toBe("gpt-4.1");
+    expect(inventoryParams?.agentDir).toBe("/tmp/agents/main/agent");
+    expect(inventoryParams?.modelApi).toBe("openai-responses");
+    expect(inventoryParams?.runtimeModel).toMatchObject({
+      id: "gpt-4.1",
+      api: "openai-responses",
+      provider: "openai",
+    });
+    expect(runtimeMocks.resolveEffectiveToolInventoryRuntimeModelContext).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.resolveEffectiveToolInventoryRuntimeModelContext).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "main",
+        agentDir: "/tmp/agents/main/agent",
+        modelProvider: "openai",
+        modelId: "gpt-4.1",
+      }),
+    );
   });
 
   it("serves repeated requests from the fresh inventory cache", async () => {
@@ -194,6 +220,7 @@ describe("tools.effective handler", () => {
     await second.invoke();
 
     expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.resolveEffectiveToolInventoryRuntimeModelContext).toHaveBeenCalledTimes(1);
     expect(firstRespondCall(first.respond)?.[0]).toBe(true);
     expect(firstRespondCall(second.respond)?.[0]).toBe(true);
   });
@@ -210,6 +237,27 @@ describe("tools.effective handler", () => {
     expect(firstRespondCall(second.respond)?.[0]).toBe(true);
   });
 
+  it("does not resolve runtime model context for fresh inventory cache hits", async () => {
+    const first = createInvokeParams({ sessionKey: "main:abc" });
+    await first.invoke();
+
+    runtimeMocks.resolveEffectiveToolInventoryRuntimeModelContext.mockReturnValueOnce({
+      modelApi: "openai-completions",
+      runtimeModel: {
+        id: "gpt-4.1",
+        name: "GPT 4.1",
+        provider: "openai",
+        api: "openai-completions",
+      },
+    } as never);
+    const second = createInvokeParams({ sessionKey: "main:abc" });
+    await second.invoke();
+
+    expect(runtimeMocks.resolveEffectiveToolInventory).toHaveBeenCalledTimes(1);
+    expect(runtimeMocks.resolveEffectiveToolInventoryRuntimeModelContext).toHaveBeenCalledTimes(1);
+    expect(firstRespondCall(second.respond)?.[0]).toBe(true);
+  });
+
   it("coalesces identical cache misses while inventory resolution is pending", async () => {
     const first = createInvokeParams({ sessionKey: "main:abc" });
     const second = createInvokeParams({ sessionKey: "main:abc" });
@@ -223,7 +271,7 @@ describe("tools.effective handler", () => {
 
   it("returns stale cached inventory immediately while refreshing in the background", async () => {
     let now = 1_000;
-    __testing.setToolsEffectiveNowForTest(() => now);
+    testing.setToolsEffectiveNowForTest(() => now);
     const stalePayload = {
       agentId: "main",
       profile: "coding",
@@ -321,21 +369,6 @@ describe("tools.effective handler", () => {
 
     expect(resolveEffectiveToolInventoryArg()?.currentThreadTs).toBe("42");
     expect(firstRespondCall(respond)?.[0]).toBe(true);
-  });
-
-  it("passes senderIsOwner=true for admin-scoped callers", async () => {
-    const respond = vi.fn();
-    await toolsEffectiveHandlers["tools.effective"]({
-      params: { sessionKey: "main:abc" },
-      respond: respond as never,
-      context: { getRuntimeConfig: () => ({}) } as never,
-      client: {
-        connect: { scopes: ["operator.admin"] },
-      } as never,
-      req: { type: "req", id: "req-1", method: "tools.effective" },
-      isWebchatConnect: () => false,
-    });
-    expect(resolveEffectiveToolInventoryArg()?.senderIsOwner).toBe(true);
   });
 
   it("rejects agent ids that do not match the session agent", async () => {

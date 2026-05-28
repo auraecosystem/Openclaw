@@ -1,20 +1,17 @@
-import type {
-  AgentTool,
-  AgentToolResult,
-  AgentToolUpdateCallback,
-} from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
 import { readLocalFileSafely } from "../../infra/fs-safe.js";
+import { parseStrictFiniteNumber } from "../../infra/parse-finite-number.js";
 import { detectMime } from "../../media/mime.js";
 import { readSnakeCaseParamRaw } from "../../param-key.js";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import type { ImageSanitizationLimits } from "../image-sanitization.js";
+import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../runtime/index.js";
 import { sanitizeToolResultImages } from "../tool-images.js";
 
 export type AgentToolWithMeta<TParameters extends TSchema, TResult> = AgentTool<
   TParameters,
   TResult
 > & {
-  ownerOnly?: boolean;
   displaySummary?: string;
 };
 
@@ -24,13 +21,12 @@ type ErasedAgentToolExecute = {
     toolCallId: string,
     params: unknown,
     signal?: AbortSignal,
-    onUpdate?: AgentToolUpdateCallback<unknown>,
+    onUpdate?: AgentToolUpdateCallback,
   ): Promise<AgentToolResult<unknown>>;
 };
 
-export type AnyAgentTool = Omit<AgentTool<TSchema, unknown>, "execute"> &
+export type AnyAgentTool = Omit<AgentTool, "execute"> &
   ErasedAgentToolExecute & {
-    ownerOnly?: boolean;
     displaySummary?: string;
   };
 
@@ -51,8 +47,6 @@ export type ActionGate<T extends Record<string, boolean | undefined>> = (
   key: keyof T,
   defaultValue?: boolean,
 ) => boolean;
-
-export const OWNER_ONLY_TOOL_ERROR = "Tool restricted to owner senders.";
 
 export class ToolInputError extends Error {
   readonly status: number = 400;
@@ -173,8 +167,8 @@ export function readNumberParam(
   } else if (typeof raw === "string") {
     const trimmed = raw.trim();
     if (trimmed) {
-      const parsed = strict ? Number(trimmed) : Number.parseFloat(trimmed);
-      if (Number.isFinite(parsed)) {
+      const parsed = strict ? parseStrictFiniteNumber(trimmed) : Number.parseFloat(trimmed);
+      if (parsed !== undefined && Number.isFinite(parsed)) {
         value = parsed;
       }
     }
@@ -206,10 +200,7 @@ export function readStringArrayParam(
   const { required = false, label = key } = options;
   const raw = readParamRaw(params, key);
   if (Array.isArray(raw)) {
-    const values = raw
-      .filter((entry) => typeof entry === "string")
-      .map((entry) => entry.trim())
-      .filter(Boolean);
+    const values = normalizeStringEntries(raw.filter((entry) => typeof entry === "string"));
     if (values.length === 0) {
       if (required) {
         throw new ToolInputError(`${label} required`);
@@ -301,21 +292,6 @@ export function payloadTextResult<TDetails>(payload: TDetails): AgentToolResult<
 
 export function jsonResult(payload: unknown): AgentToolResult<unknown> {
   return textResult(JSON.stringify(payload, null, 2), payload);
-}
-
-export function wrapOwnerOnlyToolExecution(
-  tool: AnyAgentTool,
-  senderIsOwner: boolean,
-): AnyAgentTool {
-  if (tool.ownerOnly !== true || senderIsOwner || !tool.execute) {
-    return tool;
-  }
-  return {
-    ...tool,
-    execute: async () => {
-      throw new Error(OWNER_ONLY_TOOL_ERROR);
-    },
-  };
 }
 
 export async function imageResult(params: {

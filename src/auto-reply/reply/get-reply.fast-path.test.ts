@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   buildFastReplyCommandContext,
@@ -57,6 +58,7 @@ registerGetReplyRuntimeOverrides(mocks);
 
 let getReplyFromConfig: typeof import("./get-reply.js").getReplyFromConfig;
 let resolveDefaultModelMock: typeof import("./directive-handling.defaults.js").resolveDefaultModel;
+let resolveModelRefFromStringMock: typeof import("../../agents/model-selection.js").resolveModelRefFromString;
 let loadConfigMock: typeof import("../../config/config.js").getRuntimeConfig;
 let runPreparedReplyMock: typeof import("./get-reply-run.js").runPreparedReply;
 
@@ -64,6 +66,8 @@ async function loadGetReplyRuntimeForTest() {
   ({ getReplyFromConfig } = await loadGetReplyModuleForTest({ cacheKey: import.meta.url }));
   ({ resolveDefaultModel: resolveDefaultModelMock } =
     await import("./directive-handling.defaults.js"));
+  ({ resolveModelRefFromString: resolveModelRefFromStringMock } =
+    await import("../../agents/model-selection.js"));
   ({ getRuntimeConfig: loadConfigMock } = await import("../../config/config.js"));
   ({ runPreparedReply: runPreparedReplyMock } = await import("./get-reply-run.js"));
 }
@@ -78,7 +82,12 @@ function requirePreparedReplyParams() {
 
 function requireDirectiveParams() {
   const directiveParams = mocks.resolveReplyDirectives.mock.calls[0]?.[0] as
-    | { sessionKey?: string; workspaceDir?: string }
+    | {
+        sessionKey?: string;
+        workspaceDir?: string;
+        provider?: string;
+        model?: string;
+      }
     | undefined;
   if (!directiveParams) {
     throw new Error("expected directive params");
@@ -93,6 +102,16 @@ describe("getReplyFromConfig fast test bootstrap", () => {
 
   beforeEach(() => {
     vi.stubEnv("OPENCLAW_TEST_FAST", "1");
+    cliBackendsTesting.setDepsForTest({
+      resolvePluginSetupRegistry: () => ({
+        providers: [],
+        cliBackends: [],
+        configMigrations: [],
+        autoEnableProbes: [],
+        diagnostics: [],
+      }),
+      resolveRuntimeCliBackends: () => [],
+    });
     mocks.ensureAgentWorkspace.mockReset();
     mocks.initSessionState.mockReset();
     mocks.loadModelCatalog.mockReset();
@@ -111,6 +130,8 @@ describe("getReplyFromConfig fast test bootstrap", () => {
       defaultModel: "gpt-4o-mini",
       aliasIndex: emptyAliasIndex(),
     });
+    vi.mocked(resolveModelRefFromStringMock).mockReset();
+    vi.mocked(resolveModelRefFromStringMock).mockReturnValue(null);
     vi.mocked(loadConfigMock).mockReset();
     vi.mocked(runPreparedReplyMock).mockReset();
     vi.mocked(loadConfigMock).mockReturnValue({});
@@ -120,6 +141,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
   });
 
   afterEach(() => {
+    cliBackendsTesting.resetDepsForTest();
     vi.unstubAllEnvs();
   });
 
@@ -189,7 +211,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(vi.mocked(runPreparedReplyMock)).toHaveBeenCalledOnce();
   });
 
-  it("clears stale ack-only heartbeat pending delivery before replay", async () => {
+  it("clears stale ack-only heartbeat pending delivery before running heartbeat", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-pending-clear-"));
     const storePath = path.join(home, "sessions.json");
     const sessionKey = "agent:main:telegram:123";
@@ -229,7 +251,7 @@ describe("getReplyFromConfig fast test bootstrap", () => {
     expect(stored.pendingFinalDeliveryAttemptCount).toBeUndefined();
   });
 
-  it("uses ackMaxChars when replaying stale heartbeat pending delivery", async () => {
+  it("keeps non-ack heartbeat pending delivery without direct replay", async () => {
     const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-pending-replay-"));
     const storePath = path.join(home, "sessions.json");
     const sessionKey = "agent:main:telegram:123";
@@ -258,12 +280,52 @@ describe("getReplyFromConfig fast test bootstrap", () => {
 
     await expect(
       getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, cfg),
-    ).resolves.toEqual({ text: "short" });
+    ).resolves.toEqual({ text: "ok" });
 
     const stored = JSON.parse(await fs.readFile(storePath, "utf8"))[sessionKey];
     expect(stored.pendingFinalDelivery).toBe(true);
-    expect(stored.pendingFinalDeliveryText).toBe("short");
-    expect(stored.pendingFinalDeliveryAttemptCount).toBe(1);
+    expect(stored.pendingFinalDeliveryText).toBe("HEARTBEAT_OK short");
+    expect(stored.pendingFinalDeliveryAttemptCount).toBeUndefined();
+  });
+
+  it("does not replay stale heartbeat pending delivery", async () => {
+    const home = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-pending-suppress-"));
+    const storePath = path.join(home, "sessions.json");
+    const sessionKey = "agent:main:telegram:123";
+    await fs.writeFile(
+      storePath,
+      JSON.stringify({
+        [sessionKey]: {
+          sessionId: "pending-user-final",
+          updatedAt: Date.now() - 60_000,
+          pendingFinalDelivery: true,
+          pendingFinalDeliveryText: "private prior user answer",
+          pendingFinalDeliveryCreatedAt: 1,
+        },
+      }),
+      "utf8",
+    );
+    const cfg = withFastReplyConfig({
+      agents: {
+        defaults: {
+          model: "openai/gpt-5.5",
+          workspace: home,
+          heartbeat: { ackMaxChars: 300 },
+        },
+      },
+      session: { store: storePath },
+    } as OpenClawConfig);
+
+    await expect(
+      getReplyFromConfig(buildGetReplyCtx(), { isHeartbeat: true }, cfg),
+    ).resolves.toEqual({
+      text: "ok",
+    });
+
+    const stored = JSON.parse(await fs.readFile(storePath, "utf8"))[sessionKey];
+    expect(stored.pendingFinalDelivery).toBe(true);
+    expect(stored.pendingFinalDeliveryText).toBe("private prior user answer");
+    expect(stored.pendingFinalDeliveryAttemptCount).toBeUndefined();
   });
 
   it("handles native /status before workspace bootstrap", async () => {

@@ -58,9 +58,10 @@ function runStatusFromWaitPayload(payload: unknown): RunResult["status"] {
       : {};
   const status = typeof record.status === "string" ? record.status.toLowerCase() : undefined;
   const stopReason = typeof record.stopReason === "string" ? record.stopReason.toLowerCase() : "";
+  const pendingError = record.pendingError === true;
   const hasTerminalTimeoutMetadata =
     readOptionalTimestamp(record.endedAt) !== undefined ||
-    readOptionalString(record.error) !== undefined ||
+    (!pendingError && readOptionalString(record.error) !== undefined) ||
     stopReason.length > 0 ||
     typeof record.livenessState === "string" ||
     record.yielded === true;
@@ -73,6 +74,7 @@ function runStatusFromWaitPayload(payload: unknown): RunResult["status"] {
     stopReason === "cancelled" ||
     stopReason === "canceled" ||
     stopReason === "killed" ||
+    stopReason === "auth-revoked" ||
     stopReason === "rpc" ||
     stopReason === "user" ||
     (record.aborted === true && stopReason === "stop")
@@ -568,7 +570,7 @@ export class Run {
       },
       { timeoutMs: null },
     );
-    const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const record = asRecord(raw);
     const status = runStatusFromWaitPayload(raw);
     const error = readOptionalString(record.error)
       ? { message: readOptionalString(record.error) ?? "run failed" }
@@ -604,7 +606,7 @@ export class Session {
     const params: SessionSendParams =
       typeof input === "string" ? { key: this.key, message: input } : { ...input, key: this.key };
     const raw = await this.client.request("sessions.send", params, { expectFinal: true });
-    const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const record = asRecord(raw);
     const runId = readOptionalString(record.runId);
     if (!runId) {
       throw new Error("sessions.send did not return a runId");
@@ -661,7 +663,7 @@ export class SessionsNamespace {
 
   async create(params: SessionCreateParams = {}): Promise<Session> {
     const raw = await this.client.request("sessions.create", params);
-    const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const record = asRecord(raw);
     const key =
       readOptionalString(record.key) ?? readOptionalString(record.sessionKey) ?? params.key;
     if (!key) {
@@ -692,7 +694,7 @@ export class RunsNamespace {
       expectFinal: false,
       timeoutMs: params.timeoutMs,
     });
-    const record = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>) : {};
+    const record = asRecord(raw);
     const runId = readOptionalString(record.runId);
     if (!runId) {
       throw new Error("agent did not return a runId");

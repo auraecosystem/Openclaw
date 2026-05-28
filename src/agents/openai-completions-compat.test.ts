@@ -27,6 +27,16 @@ describe("resolveOpenAICompletionsCompatDefaults", () => {
     ).toBe(true);
   });
 
+  it("keeps streaming usage enabled for local OpenAI-compatible endpoints", () => {
+    expect(
+      resolveOpenAICompletionsCompatDefaults({
+        provider: "llama-cpp",
+        endpointClass: "local",
+        knownProviderFamily: "llama-cpp",
+      }).supportsUsageInStreaming,
+    ).toBe(true);
+  });
+
   it("does not broaden streaming usage for generic custom providers", () => {
     expect(
       resolveOpenAICompletionsCompatDefaults({
@@ -58,6 +68,38 @@ describe("resolveOpenAICompletionsCompatDefaults", () => {
         endpointClass: "custom",
         knownProviderFamily: "vllm",
       }).supportsUsageInStreaming,
+    ).toBe(false);
+  });
+
+  it("uses Together reasoning payload format for Together-family providers", () => {
+    const defaults = resolveOpenAICompletionsCompatDefaults({
+      provider: "together",
+      endpointClass: "custom",
+      knownProviderFamily: "together",
+    });
+
+    expect(defaults.thinkingFormat).toBe("together");
+    expect(defaults.supportsReasoningEffort).toBe(false);
+    expect(defaults.maxTokensField).toBe("max_tokens");
+  });
+
+  it("requires a non-empty user or assistant turn for ModelStudio-compatible providers", () => {
+    expect(
+      resolveOpenAICompletionsCompatDefaults({
+        provider: "qwen",
+        endpointClass: "modelstudio-native",
+        knownProviderFamily: "modelstudio",
+      }).requiresNonEmptyUserOrAssistantMessage,
+    ).toBe(true);
+  });
+
+  it("does not require a non-empty user or assistant turn for generic local endpoints", () => {
+    expect(
+      resolveOpenAICompletionsCompatDefaults({
+        provider: "vllm",
+        endpointClass: "local",
+        knownProviderFamily: "vllm",
+      }).requiresNonEmptyUserOrAssistantMessage,
     ).toBe(false);
   });
 });
