@@ -6,7 +6,11 @@ import type {
   ExecApprovalRequest,
   ExecApprovalResolved,
 } from "./exec-approvals.js";
-import type { PluginApprovalRequest, PluginApprovalResolved } from "./plugin-approvals.js";
+import type {
+  PluginApprovalExternalResolution,
+  PluginApprovalRequest,
+  PluginApprovalResolved,
+} from "./plugin-approvals.js";
 
 type ApprovalPhase = "pending" | "resolved" | "expired";
 
@@ -69,6 +73,7 @@ export type PluginApprovalViewBase = ApprovalViewBase & {
   pluginId?: string | null;
   toolName?: string | null;
   severity: "info" | "warning" | "critical";
+  externalResolution?: PluginApprovalExternalResolution | null;
 };
 
 export type PluginApprovalPendingView = PluginApprovalViewBase & {

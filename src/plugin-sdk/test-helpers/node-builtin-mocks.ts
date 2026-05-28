@@ -1,14 +1,16 @@
-import { vi } from "vitest";
+import { createRequire } from "node:module";
 
 type MockFactory<TModule extends object> =
   | Partial<TModule>
   | ((actual: TModule) => Partial<TModule>);
 
+const require = createRequire(import.meta.url);
 let childProcessModulePromise: Promise<typeof import("node:child_process")> | null = null;
 
 const loadChildProcessModule = async () => {
-  childProcessModulePromise ??=
-    vi.importActual<typeof import("node:child_process")>("node:child_process");
+  childProcessModulePromise ??= Promise.resolve(
+    require("node:child_process") as typeof import("node:child_process"),
+  );
   return await childProcessModulePromise;
 };
 

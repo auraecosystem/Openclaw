@@ -6394,6 +6394,7 @@ public struct PluginApprovalRequestParams: Codable, Sendable {
     public let toolname: String?
     public let toolcallid: String?
     public let alloweddecisions: [String]?
+    public let externalresolution: [String: AnyCodable]?
     public let agentid: String?
     public let sessionkey: String?
     public let turnsourcechannel: String?
@@ -6411,6 +6412,7 @@ public struct PluginApprovalRequestParams: Codable, Sendable {
         toolname: String?,
         toolcallid: String?,
         alloweddecisions: [String]?,
+        externalresolution: [String: AnyCodable]?,
         agentid: String? = nil,
         sessionkey: String?,
         turnsourcechannel: String?,
@@ -6427,6 +6429,7 @@ public struct PluginApprovalRequestParams: Codable, Sendable {
         self.toolname = toolname
         self.toolcallid = toolcallid
         self.alloweddecisions = alloweddecisions
+        self.externalresolution = externalresolution
         self.agentid = agentid
         self.sessionkey = sessionkey
         self.turnsourcechannel = turnsourcechannel
@@ -6445,6 +6448,7 @@ public struct PluginApprovalRequestParams: Codable, Sendable {
         case toolname = "toolName"
         case toolcallid = "toolCallId"
         case alloweddecisions = "allowedDecisions"
+        case externalresolution = "externalResolution"
         case agentid = "agentId"
         case sessionkey = "sessionKey"
         case turnsourcechannel = "turnSourceChannel"
@@ -6471,6 +6475,28 @@ public struct PluginApprovalResolveParams: Codable, Sendable {
     private enum CodingKeys: String, CodingKey {
         case id
         case decision
+    }
+}
+
+public struct PluginApprovalResolveVerifiedParams: Codable, Sendable {
+    public let id: String
+    public let decision: String
+    public let pluginid: String
+
+    public init(
+        id: String,
+        decision: String,
+        pluginid: String)
+    {
+        self.id = id
+        self.decision = decision
+        self.pluginid = pluginid
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case decision
+        case pluginid = "pluginId"
     }
 }
 
