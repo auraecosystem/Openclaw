@@ -260,6 +260,10 @@ export type PluginHookModelCallEndedEvent = PluginHookModelCallBaseEvent & {
   errorCategory?: string;
   failureKind?: "aborted" | "connection_closed" | "connection_reset" | "terminated" | "timeout";
   requestPayloadBytes?: number;
+  /**
+   * Serialized streamed response payload bytes. Delta events count only their
+   * incremental payload and exclude repeated `partial` snapshots.
+   */
   responseStreamBytes?: number;
   timeToFirstByteMs?: number;
   upstreamRequestIdHash?: string;

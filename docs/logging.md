@@ -233,7 +233,9 @@ Model-call diagnostics record bounded request/response measurements without
 capturing raw prompt or response content:
 
 - `requestPayloadBytes`: UTF-8 byte size of the final model request payload
-- `responseStreamBytes`: UTF-8 byte size of streamed model response events
+- `responseStreamBytes`: UTF-8 byte size of streamed model response payloads.
+  Delta events count only their incremental payload and exclude repeated
+  `partial` snapshots.
 - `timeToFirstByteMs`: elapsed time before the first streamed response event
 - `durationMs`: total model-call duration
 

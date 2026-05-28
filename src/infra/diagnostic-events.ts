@@ -532,6 +532,10 @@ export type DiagnosticModelCallCompletedEvent = DiagnosticModelCallBaseEvent & {
   type: "model.call.completed";
   durationMs: number;
   requestPayloadBytes?: number;
+  /**
+   * Serialized streamed response payload bytes. Delta events count only their
+   * incremental payload and exclude repeated `partial` snapshots.
+   */
   responseStreamBytes?: number;
   timeToFirstByteMs?: number;
 };
@@ -543,6 +547,10 @@ export type DiagnosticModelCallErrorEvent = DiagnosticModelCallBaseEvent & {
   failureKind?: "aborted" | "connection_closed" | "connection_reset" | "terminated" | "timeout";
   memory?: DiagnosticMemoryUsage;
   requestPayloadBytes?: number;
+  /**
+   * Serialized streamed response payload bytes. Delta events count only their
+   * incremental payload and exclude repeated `partial` snapshots.
+   */
   responseStreamBytes?: number;
   timeToFirstByteMs?: number;
 };

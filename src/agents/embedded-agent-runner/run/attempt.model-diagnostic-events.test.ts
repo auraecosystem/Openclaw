@@ -263,6 +263,55 @@ describe("wrapStreamFnWithDiagnosticModelCallEvents", () => {
     }
   });
 
+  it("accounts delta stream bytes without serializing repeated partial snapshots", async () => {
+    const chunks: Array<Record<string, unknown>> = [];
+    let accumulated = "";
+    for (let index = 0; index < 32; index += 1) {
+      const delta = `${index}: ${"token ".repeat(64)}`;
+      accumulated += delta;
+      chunks.push({
+        type: "text_delta",
+        contentIndex: 0,
+        delta,
+        partial: {
+          role: "assistant",
+          content: [{ type: "text", text: accumulated }],
+        },
+      });
+    }
+    async function* stream() {
+      yield* chunks;
+    }
+    const wrapped = wrapStreamFnWithDiagnosticModelCallEvents(
+      (() => stream()) as unknown as StreamFn,
+      {
+        runId: "run-1",
+        provider: "ollama",
+        model: "qwen/qwen3.5-9b",
+        trace: createDiagnosticTraceContext(),
+        nextCallId: () => "call-delta-accounting",
+      },
+    );
+
+    const events = await collectModelCallEvents(async () => {
+      await drain(wrapped({} as never, {} as never, {} as never) as AsyncIterable<unknown>);
+    });
+
+    const completedEvent = getEvent(events, 1);
+    const deltaOnlyBytes = chunks.reduce((total, chunk) => {
+      const incrementalChunk = { ...chunk };
+      delete incrementalChunk.partial;
+      return total + Buffer.byteLength(JSON.stringify(incrementalChunk), "utf8");
+    }, 0);
+    const fullSnapshotBytes = chunks.reduce(
+      (total, chunk) => total + Buffer.byteLength(JSON.stringify(chunk), "utf8"),
+      0,
+    );
+    expect(completedEvent.type).toBe("model.call.completed");
+    expect(completedEvent.responseStreamBytes).toBe(deltaOnlyBytes);
+    expect(fullSnapshotBytes).toBeGreaterThan(deltaOnlyBytes * 10);
+  });
+
   it("does not retain stream progress activity when diagnostics are disabled", async () => {
     setDiagnosticsEnabledForProcess(false);
     const runProgressEvents: DiagnosticEventPayload[] = [];

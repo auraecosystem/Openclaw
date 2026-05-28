@@ -106,6 +106,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+function responseStreamChunkByteLength(chunk: unknown): number | undefined {
+  if (!isRecord(chunk)) {
+    return utf8JsonByteLength(chunk);
+  }
+  const type = chunk.type;
+  if (
+    (type === "text_delta" || type === "thinking_delta" || type === "toolcall_delta") &&
+    "partial" in chunk
+  ) {
+    // Delta events already carry the new bytes. The `partial` snapshot repeats
+    // the full answer-so-far, so counting it on every token turns diagnostics
+    // into quadratic work for fast local streams.
+    const incrementalChunk: Record<string, unknown> = { ...chunk };
+    delete incrementalChunk.partial;
+    return utf8JsonByteLength(incrementalChunk);
+  }
+  return utf8JsonByteLength(chunk);
+}
+
 function cloneDiagnosticContentValue(value: unknown): unknown {
   try {
     return structuredClone(value);
@@ -157,7 +176,7 @@ function observeResponseChunk(
 ): void {
   state.timeToFirstByteMs ??= Math.max(0, Date.now() - startedAt);
   observeOutputMessageContent(state, chunk);
-  const bytes = utf8JsonByteLength(chunk);
+  const bytes = responseStreamChunkByteLength(chunk);
   if (bytes !== undefined) {
     state.responseStreamBytes += bytes;
   }
