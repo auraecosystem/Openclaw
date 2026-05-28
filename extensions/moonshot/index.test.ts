@@ -43,7 +43,7 @@ describe("moonshot provider plugin", () => {
     });
   });
 
-  it("owns replay policy for OpenAI-compatible Moonshot transports without mangling native Kimi tool_call IDs", async () => {
+  it("owns replay policy for OpenAI-compatible Moonshot transports while keeping native Kimi tool_call IDs on first occurrence", async () => {
     const provider = await registerSingleProviderPlugin(plugin);
 
     const policy = provider.buildReplayPolicy?.({
@@ -56,10 +56,28 @@ describe("moonshot provider plugin", () => {
       applyAssistantFirstOrderingFix: true,
       validateGeminiTurns: true,
       validateAnthropicTurns: true,
+      // Regression for #51593: enable occurrence-aware sanitisation so the
+      // second appearance of `functions.exec:26` (or any other duplicated
+      // native id, common in WhatsApp group chats and long sessions) gets a
+      // unique rewritten id instead of being passed through verbatim.
+      sanitizeToolCallIds: true,
+      toolCallIdMode: "strict",
+      preserveNativeKimiToolCallIds: true,
     });
     expect(policy).not.toHaveProperty("dropReasoningFromHistory");
-    expect(policy).not.toHaveProperty("sanitizeToolCallIds");
-    expect(policy).not.toHaveProperty("toolCallIdMode");
+  });
+
+  it("preserves anthropic-messages native tool_use ids when the transport family switches", async () => {
+    const provider = await registerSingleProviderPlugin(plugin);
+
+    const policy = provider.buildReplayPolicy?.({
+      provider: "moonshot",
+      modelApi: "anthropic-messages",
+      modelId: "kimi-k2.6",
+    } as never);
+
+    expect(policy?.preserveNativeAnthropicToolUseIds).toBe(true);
+    expect(policy?.preserveNativeKimiToolCallIds).toBe(true);
   });
 
   it("wires moonshot-thinking stream hooks", async () => {

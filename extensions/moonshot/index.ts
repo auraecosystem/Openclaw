@@ -1,3 +1,7 @@
+import type {
+  ProviderReplayPolicy,
+  ProviderReplayPolicyContext,
+} from "openclaw/plugin-sdk/plugin-entry";
 import { defineSingleProviderPluginEntry } from "openclaw/plugin-sdk/provider-entry";
 import { buildProviderReplayFamilyHooks } from "openclaw/plugin-sdk/provider-model-shared";
 import { MOONSHOT_THINKING_STREAM_HOOKS } from "openclaw/plugin-sdk/provider-stream-family";
@@ -60,11 +64,26 @@ export default defineSingleProviderPluginEntry({
       applyMoonshotNativeStreamingUsageCompat(providerConfig),
     // Kimi K2+ returns native tool_call IDs shaped like `functions.<name>:<index>`.
     // Sanitizing them to alphanumeric-only breaks Kimi's serving-layer matching in
-    // multi-turn replay. See openclaw/openclaw#62319.
+    // multi-turn replay (openclaw/openclaw#62319), but leaving them untouched lets
+    // the runner replay the same id twice and Moonshot rejects the second turn
+    // with HTTP 400 `tool call id <id> is duplicated` in long sessions and group
+    // chats (openclaw/openclaw#51593). Compose the OpenAI-compatible family hooks
+    // first to keep the existing per-message sanitisation, then override
+    // `buildReplayPolicy` so the occurrence-aware sanitiser preserves the first
+    // native Kimi id and only rewrites later duplicates.
     ...buildProviderReplayFamilyHooks({
       family: "openai-compatible",
       sanitizeToolCallIds: false,
       dropReasoningFromHistory: false,
+    }),
+    buildReplayPolicy: (ctx: ProviderReplayPolicyContext): ProviderReplayPolicy => ({
+      applyAssistantFirstOrderingFix: true,
+      validateGeminiTurns: true,
+      validateAnthropicTurns: true,
+      sanitizeToolCallIds: true,
+      toolCallIdMode: "strict",
+      preserveNativeKimiToolCallIds: true,
+      ...(ctx.modelApi === "anthropic-messages" ? { preserveNativeAnthropicToolUseIds: true } : {}),
     }),
     ...MOONSHOT_THINKING_STREAM_HOOKS,
     resolveThinkingProfile: () => ({
