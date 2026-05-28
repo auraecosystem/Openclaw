@@ -244,6 +244,7 @@ describe("runWithModelFallback – probe logic", () => {
     soonest: number | null;
     isPrimary?: boolean;
     hasFallbackCandidates?: boolean;
+    hasAvailableAuthFallbackCandidate?: boolean;
     requestedModel?: boolean;
     throttleKey?: string;
     usageStats?: AuthProfileStore["usageStats"];
@@ -259,6 +260,8 @@ describe("runWithModelFallback – probe logic", () => {
       isPrimary: params.isPrimary ?? true,
       requestedModel: params.requestedModel ?? true,
       hasFallbackCandidates: params.hasFallbackCandidates ?? true,
+      hasAvailableAuthFallbackCandidate:
+        params.hasAvailableAuthFallbackCandidate ?? params.hasFallbackCandidates ?? true,
       now: NOW,
       probeThrottleKey: params.throttleKey ?? "openai",
       authRuntime: {
@@ -354,6 +357,64 @@ describe("runWithModelFallback – probe logic", () => {
 
   it("uses inferred unavailable reason when skipping a cooldowned primary model", async () => {
     await expectPrimarySkippedAfterLongCooldown("billing");
+  });
+
+  it("probes billing cooldowns when configured fallbacks share the unavailable auth path", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["openai/gpt-4.1"],
+          },
+        },
+      },
+    } as Partial<OpenClawConfig>);
+    mockedGetSoonestCooldownExpiry.mockReturnValue(NOW + 30 * 60 * 1000);
+    mockedResolveProfilesUnavailableReason.mockReturnValue("billing");
+
+    const run = vi.fn().mockResolvedValue("recovered");
+
+    const result = await runPrimaryCandidate(cfg, run);
+
+    expectPrimaryProbeSuccess(result, run, "recovered");
+  });
+
+  it("uses config-aware auth order when deciding whether a fallback is available", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["anthropic/claude-haiku-3-5"],
+          },
+        },
+      },
+    } as Partial<OpenClawConfig>);
+    mockedResolveAuthProfileOrder.mockImplementation(
+      ({ provider, cfg: activeCfg }: { provider: string; cfg?: OpenClawConfig }) => {
+        if (provider === "openai") {
+          return ["openai-profile-1"];
+        }
+        if (provider === "anthropic") {
+          return activeCfg
+            ? ["anthropic-cooldown-profile"]
+            : ["anthropic-cooldown-profile", "anthropic-healthy-profile"];
+        }
+        return [];
+      },
+    );
+    mockedIsProfileInCooldown.mockImplementation(
+      (_store: AuthProfileStore, profileId: string) => profileId !== "anthropic-healthy-profile",
+    );
+    mockedGetSoonestCooldownExpiry.mockReturnValue(NOW + 30 * 60 * 1000);
+    mockedResolveProfilesUnavailableReason.mockReturnValue("billing");
+
+    const run = vi.fn().mockResolvedValue("recovered");
+
+    const result = await runPrimaryCandidate(cfg, run);
+
+    expectPrimaryProbeSuccess(result, run, "recovered");
   });
 
   it("decides when cooldowned primary probes are allowed", () => {
@@ -746,5 +807,12 @@ describe("runWithModelFallback – probe logic", () => {
       }),
       "billing",
     );
+    expect(
+      resolveOpenAiCooldownDecision({
+        reason: "billing",
+        soonest: NOW + 30 * 60 * 1000,
+        hasAvailableAuthFallbackCandidate: false,
+      }),
+    ).toEqual({ type: "attempt", reason: "billing", markProbe: true });
   });
 });

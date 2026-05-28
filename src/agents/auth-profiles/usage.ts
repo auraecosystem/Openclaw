@@ -9,6 +9,7 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { resolveProviderRequestHeaders } from "../provider-request-config.js";
+import { listProfilesForProvider } from "./profile-list.js";
 import { logAuthProfileFailureStateChange } from "./state-observation.js";
 
 const authProfileUsageLog = createSubsystemLogger("agent/embedded");
@@ -568,6 +569,25 @@ function updateUsageStatsEntry(
   store.usageStats[profileId] = updater(store.usageStats[profileId]);
 }
 
+function clearProviderCooldownEntries(
+  store: AuthProfileStore,
+  provider: string,
+  additionalProfileIds: string[] = [],
+): boolean {
+  const profileIds = [
+    ...new Set([...additionalProfileIds, ...listProfilesForProvider(store, provider)]),
+  ];
+  let changed = false;
+  for (const profileId of profileIds) {
+    if (!store.usageStats?.[profileId]) {
+      continue;
+    }
+    updateUsageStatsEntry(store, profileId, (existing) => resetUsageStats(existing));
+    changed = true;
+  }
+  return changed;
+}
+
 function keepActiveWindowOrRecompute(params: {
   existingUntil: number | undefined;
   now: number;
@@ -983,6 +1003,36 @@ export async function clearAuthProfileCooldown(params: {
   }
 
   updateUsageStatsEntry(store, profileId, (existing) => resetUsageStats(existing));
+  authProfileUsageDeps.saveAuthProfileStore(store, agentDir);
+}
+
+/**
+ * Clear cooldown/disabled state for every profile owned by a provider.
+ * Re-auth flows use this after fresh credentials are saved so stale persisted
+ * lockouts do not keep a healthy profile unavailable.
+ */
+export async function clearProviderAuthProfileCooldowns(params: {
+  store: AuthProfileStore;
+  provider: string;
+  profileIds?: string[];
+  agentDir?: string;
+}): Promise<void> {
+  const { store, provider, profileIds = [], agentDir } = params;
+  const providerProfileIds = [
+    ...new Set([...profileIds, ...listProfilesForProvider(store, provider)]),
+  ];
+  const updated = await authProfileUsageDeps.updateAuthProfileStoreWithLock({
+    agentDir,
+    updater: (freshStore) => clearProviderCooldownEntries(freshStore, provider, providerProfileIds),
+  });
+  if (updated) {
+    store.usageStats = updated.usageStats;
+    return;
+  }
+
+  if (!clearProviderCooldownEntries(store, provider, providerProfileIds)) {
+    return;
+  }
   authProfileUsageDeps.saveAuthProfileStore(store, agentDir);
 }
 export { testing as __testing };

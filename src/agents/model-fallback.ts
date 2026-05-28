@@ -1091,6 +1091,38 @@ function shouldProbePrimaryDuringCooldown(params: {
   return params.now >= soonest - PROBE_MARGIN_MS;
 }
 
+function hasLaterAvailableAuthFallbackCandidate(params: {
+  candidates: ModelCandidate[];
+  currentIndex: number;
+  cfg: OpenClawConfig | undefined;
+  authRuntime: ModelFallbackAuthRuntime;
+  authStore: AuthProfileStore;
+}): boolean {
+  for (let i = params.currentIndex + 1; i < params.candidates.length; i += 1) {
+    const candidate = params.candidates[i];
+    if (!candidate) {
+      continue;
+    }
+    const profileIds = params.authRuntime.resolveAuthProfileOrder({
+      cfg: params.cfg,
+      store: params.authStore,
+      provider: candidate.provider,
+    });
+    if (profileIds.length === 0) {
+      return true;
+    }
+    if (
+      profileIds.some(
+        (id) =>
+          !params.authRuntime.isProfileInCooldown(params.authStore, id, undefined, candidate.model),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** @internal – exposed for unit tests only */
 export const probeThrottleInternals = {
   lastProbeAttempt,
@@ -1126,6 +1158,7 @@ function resolveCooldownDecision(params: {
   isPrimary: boolean;
   requestedModel: boolean;
   hasFallbackCandidates: boolean;
+  hasAvailableAuthFallbackCandidate: boolean;
   now: number;
   probeThrottleKey: string;
   authRuntime: ModelFallbackAuthRuntime;
@@ -1166,7 +1199,7 @@ function resolveCooldownDecision(params: {
   if (inferredReason === "billing") {
     const shouldProbeSingleProviderBilling =
       params.isPrimary &&
-      !params.hasFallbackCandidates &&
+      !params.hasAvailableAuthFallbackCandidate &&
       isProbeThrottleOpen(params.now, params.probeThrottleKey);
     if (params.isPrimary && (shouldProbe || shouldProbeSingleProviderBilling)) {
       return { type: "attempt", reason: inferredReason, markProbe: true };
@@ -1358,6 +1391,13 @@ export async function runWithModelFallback<T>(
           isPrimary,
           requestedModel,
           hasFallbackCandidates,
+          hasAvailableAuthFallbackCandidate: hasLaterAvailableAuthFallbackCandidate({
+            candidates,
+            currentIndex: i,
+            cfg: params.cfg,
+            authRuntime,
+            authStore,
+          }),
           now,
           probeThrottleKey,
           authRuntime,
