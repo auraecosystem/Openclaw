@@ -1389,6 +1389,8 @@ export async function runPreparedReply(
           storePath,
           agentId,
           agentDir,
+          authProfileId,
+          authProfileIdSource,
         }),
       )
       .catch(() => undefined);

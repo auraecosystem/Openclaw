@@ -22,6 +22,8 @@ export type ConversationLabelParams = {
   modelProvider?: string;
   /** Session-scoped model ID override (e.g. from /model). */
   modelId?: string;
+  authProfileId?: string;
+  authProfileIdSource?: "auto" | "user";
 };
 
 function isTextContentBlock(block: { type: string }): block is TextContent {
@@ -45,7 +47,17 @@ function extractSimpleCompletionError(result: {
 export async function generateConversationLabel(
   params: ConversationLabelParams,
 ): Promise<string | null> {
-  const { userMessage, prompt, cfg, agentId, agentDir, modelProvider, modelId } = params;
+  const {
+    userMessage,
+    prompt,
+    cfg,
+    agentId,
+    agentDir,
+    modelProvider,
+    modelId,
+    authProfileId,
+    authProfileIdSource,
+  } = params;
   const maxLength =
     typeof params.maxLength === "number" &&
     Number.isFinite(params.maxLength) &&
@@ -67,7 +79,11 @@ export async function generateConversationLabel(
     await getRuntimeAuthForModel({
       model: completionModel,
       cfg,
+      agentDir,
       workspaceDir: agentDir,
+      ...(authProfileId
+        ? { profileId: authProfileId, lockedProfile: authProfileIdSource === "user" }
+        : {}),
     }),
     resolvedProvider,
   );
