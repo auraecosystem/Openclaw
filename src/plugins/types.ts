@@ -774,13 +774,6 @@ export type ProviderReplayPolicy = {
   sanitizeToolCallIds?: boolean;
   toolCallIdMode?: ProviderReplayToolCallIdMode;
   preserveNativeAnthropicToolUseIds?: boolean;
-  /**
-   * Preserve `functions.<name>:<index>`-shaped Kimi tool_call_ids on first
-   * occurrence even when `sanitizeToolCallIds` is enabled. Repeat occurrences
-   * still receive distinct rewritten ids so providers (notably Moonshot's
-   * serving layer) do not reject the second turn with a duplicate-id error.
-   */
-  preserveNativeKimiToolCallIds?: boolean;
   preserveSignatures?: boolean;
   sanitizeThoughtSignatures?: {
     allowBase64Only?: boolean;

@@ -57,7 +57,6 @@ export async function sanitizeSessionMessagesImages(
     sanitizeMode?: "full" | "images-only";
     sanitizeToolCallIds?: boolean;
     preserveNativeAnthropicToolUseIds?: boolean;
-    preserveNativeKimiToolCallIds?: boolean;
     /**
      * Mode for tool call ID sanitization:
      * - "strict" (alphanumeric only)
@@ -83,7 +82,6 @@ export async function sanitizeSessionMessagesImages(
   const sanitizedIds = shouldSanitizeToolCallIds
     ? sanitizeToolCallIdsForCloudCodeAssist(messages, options.toolCallIdMode, {
         preserveNativeAnthropicToolUseIds: options?.preserveNativeAnthropicToolUseIds,
-        preserveNativeKimiToolCallIds: options?.preserveNativeKimiToolCallIds,
       })
     : messages;
   const out: AgentMessage[] = [];

@@ -17,7 +17,6 @@ export type TranscriptPolicy = {
   sanitizeToolCallIds: boolean;
   toolCallIdMode?: ToolCallIdMode;
   preserveNativeAnthropicToolUseIds: boolean;
-  preserveNativeKimiToolCallIds: boolean;
   repairToolUseResultPairing: boolean;
   preserveSignatures: boolean;
   sanitizeThoughtSignatures?: {
@@ -62,7 +61,6 @@ const DEFAULT_TRANSCRIPT_POLICY: TranscriptPolicy = {
   sanitizeToolCallIds: false,
   toolCallIdMode: undefined,
   preserveNativeAnthropicToolUseIds: false,
-  preserveNativeKimiToolCallIds: false,
   repairToolUseResultPairing: true,
   preserveSignatures: false,
   sanitizeThoughtSignatures: undefined,
@@ -213,9 +211,6 @@ function mergeTranscriptPolicy(
     ...(policy.toolCallIdMode ? { toolCallIdMode: policy.toolCallIdMode as ToolCallIdMode } : {}),
     ...(typeof policy.preserveNativeAnthropicToolUseIds === "boolean"
       ? { preserveNativeAnthropicToolUseIds: policy.preserveNativeAnthropicToolUseIds }
-      : {}),
-    ...(typeof policy.preserveNativeKimiToolCallIds === "boolean"
-      ? { preserveNativeKimiToolCallIds: policy.preserveNativeKimiToolCallIds }
       : {}),
     ...(typeof policy.repairToolUseResultPairing === "boolean"
       ? { repairToolUseResultPairing: policy.repairToolUseResultPairing }

@@ -357,12 +357,12 @@ describe("sanitizeToolCallIdsForCloudCodeAssist", () => {
     });
 
     // Regression for #51593: Moonshot/Kimi K2+ returns native tool_call ids
-    // shaped like `functions.<name>:<index>`. Sanitising them to alphanumeric
-    // (#62319) would break Kimi's serving-layer matching, but leaving every
-    // occurrence untouched lets the runner replay the same id twice when long
-    // sessions or group chats reuse the same `<name>:<index>` slot, and
-    // Moonshot rejects the second turn with HTTP 400 `tool call id <id> is
-    // duplicated`. Preserve the first occurrence and only rewrite later ones.
+    // shaped like `functions.<name>:<index>`. The sanitiser already keeps the
+    // native shape on first occurrence (#62319) and the occurrence-aware
+    // resolver mangles the seed for repeats, so duplicates that previously
+    // reached Moonshot verbatim (and triggered HTTP 400 `tool call id <id> is
+    // duplicated`) now get a unique rewritten id — no Kimi-specific option
+    // required.
     it("preserves the first native Kimi tool_call id and rewrites duplicates", () => {
       const kimiId = "functions.exec:26";
       const input = castAgentMessages([
@@ -388,9 +388,7 @@ describe("sanitizeToolCallIdsForCloudCodeAssist", () => {
         },
       ]);
 
-      const out = sanitizeToolCallIdsForCloudCodeAssist(input, "strict", {
-        preserveNativeKimiToolCallIds: true,
-      });
+      const out = sanitizeToolCallIdsForCloudCodeAssist(input, "strict");
 
       const firstAssistant = out[0] as Extract<AgentMessage, { role: "assistant" }>;
       const firstCall = firstAssistant.content[0] as { id: string };

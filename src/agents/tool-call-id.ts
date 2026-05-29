@@ -281,7 +281,6 @@ function createOccurrenceAwareResolver(
   mode: ToolCallIdMode,
   options?: {
     preserveNativeAnthropicToolUseIds?: boolean;
-    preserveNativeKimiToolCallIds?: boolean;
     reservedIds?: Iterable<string>;
   },
 ): {
@@ -294,7 +293,6 @@ function createOccurrenceAwareResolver(
   const orphanToolResultOccurrences = new Map<string, number>();
   const pendingByRawId = new Map<string, string[]>();
   const preserveNativeAnthropicToolUseIds = options?.preserveNativeAnthropicToolUseIds === true;
-  const preserveNativeKimiToolCallIds = options?.preserveNativeKimiToolCallIds === true;
 
   const allocate = (seed: string): string => {
     const next = makeUniqueToolId({ id: seed, used, mode });
@@ -302,19 +300,10 @@ function createOccurrenceAwareResolver(
     return next;
   };
 
-  const allocatePreservingNativeId = (id: string, occurrence: number): string => {
+  const allocatePreservingNativeAnthropicId = (id: string, occurrence: number): string => {
     if (
       preserveNativeAnthropicToolUseIds &&
       isNativeAnthropicToolUseId(id) &&
-      occurrence === 1 &&
-      !used.has(id)
-    ) {
-      used.add(id);
-      return id;
-    }
-    if (
-      preserveNativeKimiToolCallIds &&
-      isNativeKimiToolCallId(id) &&
       occurrence === 1 &&
       !used.has(id)
     ) {
@@ -327,7 +316,7 @@ function createOccurrenceAwareResolver(
   const resolveAssistantId = (id: string): string => {
     const occurrence = (assistantOccurrences.get(id) ?? 0) + 1;
     assistantOccurrences.set(id, occurrence);
-    const next = allocatePreservingNativeId(id, occurrence);
+    const next = allocatePreservingNativeAnthropicId(id, occurrence);
     const pending = pendingByRawId.get(id);
     if (pending) {
       pending.push(next);
@@ -352,15 +341,6 @@ function createOccurrenceAwareResolver(
     if (
       preserveNativeAnthropicToolUseIds &&
       isNativeAnthropicToolUseId(id) &&
-      occurrence === 1 &&
-      !used.has(id)
-    ) {
-      used.add(id);
-      return id;
-    }
-    if (
-      preserveNativeKimiToolCallIds &&
-      isNativeKimiToolCallId(id) &&
       occurrence === 1 &&
       !used.has(id)
     ) {
@@ -463,7 +443,6 @@ export function sanitizeToolCallIdsForCloudCodeAssist(
   mode: ToolCallIdMode = "strict",
   options?: {
     preserveNativeAnthropicToolUseIds?: boolean;
-    preserveNativeKimiToolCallIds?: boolean;
     preserveReplaySafeThinkingToolCallIds?: boolean;
     allowedToolNames?: Iterable<string>;
   },

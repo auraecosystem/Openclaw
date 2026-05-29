@@ -723,7 +723,6 @@ export async function sanitizeSessionHistory(params: {
         policy.sanitizeToolCallIds && !allowProviderOwnedThinkingReplay && !isOpenAIResponsesApi,
       toolCallIdMode: policy.toolCallIdMode,
       preserveNativeAnthropicToolUseIds: policy.preserveNativeAnthropicToolUseIds,
-      preserveNativeKimiToolCallIds: policy.preserveNativeKimiToolCallIds,
       preserveSignatures: policy.preserveSignatures,
       sanitizeThoughtSignatures: policy.sanitizeThoughtSignatures,
       ...resolveImageSanitizationLimits(params.config),
@@ -778,7 +777,6 @@ export async function sanitizeSessionHistory(params: {
     policy.sanitizeToolCallIds && policy.toolCallIdMode
       ? sanitizeToolCallIdsForCloudCodeAssist(openAISafeToolCalls, policy.toolCallIdMode, {
           preserveNativeAnthropicToolUseIds: policy.preserveNativeAnthropicToolUseIds,
-          preserveNativeKimiToolCallIds: policy.preserveNativeKimiToolCallIds,
           preserveReplaySafeThinkingToolCallIds: allowProviderOwnedThinkingReplay,
           allowedToolNames: params.allowedToolNames,
         })

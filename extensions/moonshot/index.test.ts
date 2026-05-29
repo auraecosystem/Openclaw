@@ -59,12 +59,14 @@ describe("moonshot provider plugin", () => {
       // Regression for #51593: enable occurrence-aware sanitisation so the
       // second appearance of `functions.exec:26` (or any other duplicated
       // native id, common in WhatsApp group chats and long sessions) gets a
-      // unique rewritten id instead of being passed through verbatim.
+      // unique rewritten id. The first occurrence stays native via the shared
+      // sanitiser's existing Kimi detector (#62319), so no Kimi-specific policy
+      // flag is required.
       sanitizeToolCallIds: true,
       toolCallIdMode: "strict",
-      preserveNativeKimiToolCallIds: true,
     });
     expect(policy).not.toHaveProperty("dropReasoningFromHistory");
+    expect(policy).not.toHaveProperty("preserveNativeKimiToolCallIds");
   });
 
   it("preserves anthropic-messages native tool_use ids when the transport family switches", async () => {
@@ -77,7 +79,7 @@ describe("moonshot provider plugin", () => {
     } as never);
 
     expect(policy?.preserveNativeAnthropicToolUseIds).toBe(true);
-    expect(policy?.preserveNativeKimiToolCallIds).toBe(true);
+    expect(policy?.sanitizeToolCallIds).toBe(true);
   });
 
   it("wires moonshot-thinking stream hooks", async () => {
