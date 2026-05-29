@@ -224,7 +224,7 @@ class NodeForegroundService : Service() {
 }
 
 internal fun foregroundServiceTypesForVoiceMode(mode: VoiceCaptureMode): Int {
-  val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+  val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
   return if (mode == VoiceCaptureMode.TalkMode) {
     base or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
   } else {
