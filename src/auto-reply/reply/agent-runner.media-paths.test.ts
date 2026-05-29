@@ -6,6 +6,10 @@ import type { EmbeddedAgentQueueMessageOutcome } from "../../agents/embedded-age
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { TemplateContext } from "../templating.js";
 import type { FollowupRun, QueueSettings } from "./queue.js";
+import {
+  clearBusyMessageOutcomeStoreForTest,
+  getLastBusyMessageOutcome,
+} from "./queue/busy-message-outcome.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
 import { createMockFollowupRun, createMockTypingController } from "./test-helpers.js";
 
@@ -318,6 +322,7 @@ describe("runReplyAgent media path normalization", () => {
   const cleanupPaths: string[] = [];
 
   beforeEach(() => {
+    clearBusyMessageOutcomeStoreForTest();
     runEmbeddedAgentMock.mockReset();
     runWithModelFallbackMock.mockReset();
     abortEmbeddedAgentRunMock.mockReset();
@@ -414,7 +419,7 @@ describe("runReplyAgent media path normalization", () => {
       gatewayHealth: "live",
     }));
 
-    await runReplyAgent(
+    const silent = await runReplyAgent(
       makeRunReplyAgentParams({
         resolvedQueue: { mode: "steer" } as QueueSettings,
         shouldSteer: true,
@@ -423,6 +428,7 @@ describe("runReplyAgent media path normalization", () => {
       }),
     );
 
+    expect(silent).toBeUndefined();
     expect(queueEmbeddedAgentMessageWithOutcomeAsyncMock).toHaveBeenLastCalledWith(
       "session",
       "generate chart",
@@ -431,6 +437,24 @@ describe("runReplyAgent media path normalization", () => {
       },
     );
     expect(enqueueFollowupRunMock).not.toHaveBeenCalled();
+    expect(getLastBusyMessageOutcome("main")).toMatchObject({
+      kind: "active_run_steer_accepted",
+      sessionId: "session",
+      queueMode: "steer",
+      source: "inbound",
+    });
+
+    const verbose = await runReplyAgent(
+      makeRunReplyAgentParams({
+        resolvedQueue: { mode: "steer" } as QueueSettings,
+        shouldSteer: true,
+        shouldFollowup: true,
+        isStreaming: true,
+        resolvedVerboseLevel: "on",
+      }),
+    );
+
+    expect(verbose).toEqual({ text: "Steered current run." });
   });
 
   it("queues active prompts in followup mode without steering", async () => {
@@ -448,6 +472,12 @@ describe("runReplyAgent media path normalization", () => {
     expect(queueEmbeddedAgentMessageWithOutcomeAsyncMock).not.toHaveBeenCalled();
     expect(enqueueFollowupRunMock).toHaveBeenCalledOnce();
     expect(enqueueFollowupRunMock.mock.calls[0]?.[1].prompt).toBe("generate chart");
+    expect(getLastBusyMessageOutcome("main")).toMatchObject({
+      kind: "followup_enqueued",
+      sessionId: "session",
+      queueMode: "followup",
+      source: "inbound",
+    });
   });
 
   it("falls back to a queued followup when active steering is rejected", async () => {
@@ -459,7 +489,7 @@ describe("runReplyAgent media path normalization", () => {
       errorMessage: "cannot steer a compact turn",
     }));
 
-    await runReplyAgent(
+    const silent = await runReplyAgent(
       makeRunReplyAgentParams({
         resolvedQueue: { mode: "steer" } as QueueSettings,
         shouldSteer: true,
@@ -470,8 +500,31 @@ describe("runReplyAgent media path normalization", () => {
       }),
     );
 
+    expect(silent).toBeUndefined();
     expect(enqueueFollowupRunMock).toHaveBeenCalledOnce();
     expect(enqueueFollowupRunMock.mock.calls[0]?.[1].prompt).toBe("generate chart");
+    expect(getLastBusyMessageOutcome("main")).toMatchObject({
+      kind: "followup_enqueued",
+      sessionId: "session",
+      queueMode: "steer",
+      source: "inbound",
+    });
+
+    const verbose = await runReplyAgent(
+      makeRunReplyAgentParams({
+        resolvedQueue: { mode: "steer" } as QueueSettings,
+        shouldSteer: true,
+        shouldFollowup: true,
+        isActive: true,
+        isRunActive: () => true,
+        isStreaming: true,
+        resolvedVerboseLevel: "on",
+      }),
+    );
+
+    expect(verbose).toEqual({
+      text: "Queued after current run: steering unavailable while runtime_rejected.",
+    });
   });
 
   it("shares one media cache between block accumulation and final payload delivery", async () => {
