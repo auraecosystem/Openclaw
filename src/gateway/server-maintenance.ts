@@ -1,4 +1,5 @@
 import type { HealthSummary } from "../commands/health.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { sweepStaleRunContexts } from "../infra/agent-events.js";
 import { cleanOldMedia } from "../media/store.js";
 import { abortChatRunById, type ChatAbortControllerEntry } from "./chat-abort.js";
@@ -14,6 +15,7 @@ import {
 import type { DedupeEntry } from "./server-shared.js";
 import { formatError } from "./server-utils.js";
 import { setBroadcastHealthUpdate } from "./server/health-state.js";
+import { startDailySessionResetScheduler } from "./session-daily-reset-scheduler.js";
 
 export function startGatewayMaintenanceTimers(params: {
   broadcast: (
@@ -53,12 +55,15 @@ export function startGatewayMaintenanceTimers(params: {
   ) => ChatRunEntry | undefined;
   agentRunSeq: Map<string, number>;
   nodeSendToSession: (sessionKey: string, event: string, payload: unknown) => void;
+  cfg?: OpenClawConfig;
+  getConfig?: () => OpenClawConfig;
   mediaCleanupTtlMs?: number;
 }): {
   tickInterval: ReturnType<typeof setInterval>;
   healthInterval: ReturnType<typeof setInterval>;
   dedupeCleanup: ReturnType<typeof setInterval>;
   mediaCleanup: ReturnType<typeof setInterval> | null;
+  dailySessionReset: ReturnType<typeof setInterval> | null;
 } {
   setBroadcastHealthUpdate((snap: HealthSummary) => {
     params.broadcast("health", snap, {
@@ -258,8 +263,22 @@ export function startGatewayMaintenanceTimers(params: {
     sweepStaleRunContexts();
   }, 60_000);
 
+  const dailySessionReset =
+    params.cfg || params.getConfig
+      ? startDailySessionResetScheduler({
+          cfg: params.cfg ?? params.getConfig?.() ?? {},
+          getConfig: params.getConfig,
+          getActiveSessionKeys: () =>
+            new Set(
+              [...params.chatAbortControllers.values()]
+                .map((entry) => entry.sessionKey)
+                .filter((sessionKey) => sessionKey.trim()),
+            ),
+        })
+      : null;
+
   if (typeof params.mediaCleanupTtlMs !== "number") {
-    return { tickInterval, healthInterval, dedupeCleanup, mediaCleanup: null };
+    return { tickInterval, healthInterval, dedupeCleanup, mediaCleanup: null, dailySessionReset };
   }
 
   let mediaCleanupInFlight: Promise<void> | null = null;
@@ -286,5 +305,5 @@ export function startGatewayMaintenanceTimers(params: {
 
   void runMediaCleanup();
 
-  return { tickInterval, healthInterval, dedupeCleanup, mediaCleanup };
+  return { tickInterval, healthInterval, dedupeCleanup, mediaCleanup, dailySessionReset };
 }

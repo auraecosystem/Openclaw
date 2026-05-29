@@ -58,12 +58,16 @@ function stopMaintenanceTimers(timers: {
   healthInterval: NodeJS.Timeout;
   dedupeCleanup: NodeJS.Timeout;
   mediaCleanup: NodeJS.Timeout | null;
+  dailySessionReset: NodeJS.Timeout | null;
 }) {
   clearInterval(timers.tickInterval);
   clearInterval(timers.healthInterval);
   clearInterval(timers.dedupeCleanup);
   if (timers.mediaCleanup) {
     clearInterval(timers.mediaCleanup);
+  }
+  if (timers.dailySessionReset) {
+    clearInterval(timers.dailySessionReset);
   }
 }
 
@@ -83,6 +87,7 @@ describe("startGatewayMaintenanceTimers", () => {
 
     expect(cleanOldMediaMock).not.toHaveBeenCalled();
     expect(timers.mediaCleanup).toBeNull();
+    expect(timers.dailySessionReset).toBeNull();
 
     stopMaintenanceTimers(timers);
   });

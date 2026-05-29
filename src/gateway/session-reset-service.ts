@@ -702,8 +702,12 @@ export async function emitGatewayBeforeResetPluginHook(params: {
 
 export async function performGatewaySessionReset(params: {
   key: string;
-  reason: "new" | "reset";
+  reason: "new" | "reset" | "daily";
   commandSource: string;
+  expectedDailySession?: {
+    sessionId: string;
+    updatedAt: number;
+  };
 }): Promise<
   | { ok: true; key: string; entry: SessionEntry }
   | { ok: false; error: ReturnType<typeof errorShape> }
@@ -714,12 +718,21 @@ export async function performGatewaySessionReset(params: {
     return { cfg, target, storePath: target.storePath };
   })();
   const { entry, legacyKey, canonicalKey } = loadSessionEntry(params.key);
+  if (
+    params.expectedDailySession &&
+    !matchesExpectedDailyResetEntry(entry, params.expectedDailySession)
+  ) {
+    return {
+      ok: false,
+      error: skippedDailyResetError(params.key),
+    };
+  }
   const hadExistingEntry = Boolean(entry);
   const agentId = normalizeAgentId(target.agentId ?? resolveDefaultAgentId(cfg));
   const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
   const hookEvent = createInternalHookEvent(
     "command",
-    params.reason,
+    params.reason === "new" ? "new" : "reset",
     target.canonicalKey ?? params.key,
     {
       sessionEntry: entry,
@@ -730,6 +743,15 @@ export async function performGatewaySessionReset(params: {
     },
   );
   await triggerInternalHook(hookEvent);
+  if (params.expectedDailySession) {
+    const { entry: currentEntry } = loadSessionEntry(params.key);
+    if (!matchesExpectedDailyResetEntry(currentEntry, params.expectedDailySession)) {
+      return {
+        ok: false,
+        error: skippedDailyResetError(params.key),
+      };
+    }
+  }
   const mutationCleanupError = await cleanupSessionBeforeMutation({
     cfg,
     key: params.key,
@@ -753,6 +775,12 @@ export async function performGatewaySessionReset(params: {
       store,
     });
     const currentEntry = store[primaryKey];
+    if (
+      params.expectedDailySession &&
+      !matchesExpectedDailyResetEntry(currentEntry, params.expectedDailySession)
+    ) {
+      return undefined;
+    }
     resetSourceEntry = currentEntry ? { ...currentEntry } : undefined;
     const parsed = parseAgentSessionKey(primaryKey);
     const sessionAgentId = normalizeAgentId(parsed?.agentId ?? resolveDefaultAgentId(cfg));
@@ -860,13 +888,19 @@ export async function performGatewaySessionReset(params: {
     store[primaryKey] = nextEntry;
     return nextEntry;
   });
+  if (!next) {
+    return {
+      ok: false,
+      error: skippedDailyResetError(params.key),
+    };
+  }
   await emitGatewayBeforeResetPluginHook({
     cfg,
     key: params.key,
     target,
     storePath,
     entry: resetSourceEntry,
-    reason: params.reason,
+    reason: params.reason === "new" ? "new" : "reset",
   });
 
   const archivedTranscripts = archiveSessionTranscriptsForSessionDetailed({
@@ -917,4 +951,21 @@ export async function performGatewaySessionReset(params: {
     });
   }
   return { ok: true, key: target.canonicalKey, entry: next };
+}
+
+function matchesExpectedDailyResetEntry(
+  entry: SessionEntry | undefined,
+  expected: { sessionId: string; updatedAt: number },
+) {
+  return entry?.sessionId === expected.sessionId && entry.updatedAt === expected.updatedAt;
+}
+
+function skippedDailyResetError(key: string) {
+  return errorShape(
+    ErrorCodes.INVALID_REQUEST,
+    `Daily reset skipped for ${key}; session changed before reset mutation.`,
+    {
+      details: { skippedDailyReset: true },
+    },
+  );
 }
