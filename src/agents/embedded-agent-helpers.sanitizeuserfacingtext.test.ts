@@ -747,7 +747,7 @@ describe("downgradeOpenAIReasoningBlocks", () => {
     );
   });
 
-  it("drops empty replayable reasoning before tool calls while preserving tool pairing", () => {
+  it("drops empty non-replayable reasoning before tool calls while preserving tool pairing", () => {
     const input = [
       {
         role: "assistant",
@@ -780,6 +780,79 @@ describe("downgradeOpenAIReasoningBlocks", () => {
         content: [{ type: "text", text: "ok" }],
       },
     ]);
+  });
+
+  it("keeps empty-text reasoning when the signature carries encrypted replay state", () => {
+    const input = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "   ",
+            thinkingSignature: JSON.stringify({
+              id: "rs_encrypted",
+              type: "reasoning",
+              encrypted_content: "enc_payload",
+            }),
+          },
+          { type: "toolCall", id: "call_read|fc_123", name: "read", arguments: {} },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_read|fc_123",
+        toolName: "read",
+        content: [{ type: "text", text: "ok" }],
+      },
+    ];
+
+    expect(downgradeOpenAIReasoningBlocks(input as any)).toEqual(input);
+    expect(downgradeOpenAIFunctionCallReasoningPairs(input as any)).toEqual(input);
+  });
+
+  it("keeps empty-text reasoning when the signature carries content replay state", () => {
+    const input = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "",
+            thinkingSignature: JSON.stringify({
+              id: "rs_content",
+              type: "reasoning",
+              content: [{ type: "reasoning_text", text: "hidden" }],
+            }),
+          },
+          { type: "text", text: "answer" },
+        ],
+      },
+    ];
+
+    expect(downgradeOpenAIReasoningBlocks(input as any)).toEqual(input);
+  });
+
+  it("keeps empty-text reasoning when the signature carries summary replay state", () => {
+    const input = [
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "thinking",
+            thinking: "",
+            thinkingSignature: JSON.stringify({
+              id: "rs_summary",
+              type: "reasoning",
+              summary: [{ type: "summary_text", text: "summary" }],
+            }),
+          },
+          { type: "text", text: "answer" },
+        ],
+      },
+    ];
+
+    expect(downgradeOpenAIReasoningBlocks(input as any)).toEqual(input);
   });
 
   it("drops non-string replayable reasoning even when followed by content", () => {
