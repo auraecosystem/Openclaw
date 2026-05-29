@@ -1,11 +1,14 @@
+import { existsSync, renameSync } from "node:fs";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "../infra/sqlite-wal.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveTaskRegistryDir, resolveTaskRegistrySqlitePath } from "./task-registry.paths.js";
 import {
   ensureSqliteStorePermissions,
   normalizeSqliteNumber,
   parseDeliveryContextJson,
+  SQLITE_SIDECAR_SUFFIXES,
 } from "./task-registry.sqlite.shared.js";
 import type { TaskRegistryStoreSnapshot } from "./task-registry.store.types.js";
 import type { TaskDeliveryState, TaskRecord } from "./task-registry.types.js";
@@ -71,6 +74,7 @@ type TaskRegistryDatabase = {
 let cachedDatabase: TaskRegistryDatabase | null = null;
 const TASK_REGISTRY_DIR_MODE = 0o700;
 const TASK_REGISTRY_FILE_MODE = 0o600;
+const log = createSubsystemLogger("task-registry");
 const TASK_RUN_SELECT_COLUMNS = `
   task_id,
   runtime,
@@ -427,6 +431,87 @@ function ensureTaskRegistryPermissions(pathname: string) {
   });
 }
 
+function isSqliteCorruptionError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const msg = error.message?.toLowerCase() ?? "";
+  const code = (error as NodeJS.ErrnoException).code ?? "";
+  return (
+    code === "SQLITE_CORRUPT" ||
+    msg.includes("malformed") ||
+    msg.includes("corrupt") ||
+    msg.includes("database disk image") ||
+    msg.includes("file is not a database")
+  );
+}
+
+function quarantineCorruptedDatabase(pathname: string): string | null {
+  const quarantinePath = `${pathname}.corrupted.${Date.now()}`;
+  try {
+    for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
+      if (!suffix) {
+        continue;
+      }
+      const sidecar = `${pathname}${suffix}`;
+      if (existsSync(sidecar)) {
+        renameSync(sidecar, `${quarantinePath}${suffix}`);
+      }
+    }
+    renameSync(pathname, quarantinePath);
+    return quarantinePath;
+  } catch {
+    for (const suffix of SQLITE_SIDECAR_SUFFIXES) {
+      if (!suffix) {
+        continue;
+      }
+      const movedSidecar = `${quarantinePath}${suffix}`;
+      if (existsSync(movedSidecar)) {
+        try {
+          renameSync(movedSidecar, `${pathname}${suffix}`);
+        } catch {}
+      }
+    }
+    return null;
+  }
+}
+
+function openDatabaseOrRecover(pathname: string): DatabaseSync {
+  const { DatabaseSync } = requireNodeSqlite();
+  let db: DatabaseSync | undefined;
+  try {
+    db = new DatabaseSync(pathname);
+    db.exec(`PRAGMA synchronous = NORMAL;`);
+    db.exec(`PRAGMA busy_timeout = 5000;`);
+    ensureSchema(db);
+    return db;
+  } catch (error) {
+    if (db) {
+      try {
+        db.close();
+      } catch {}
+    }
+    if (!isSqliteCorruptionError(error) || !existsSync(pathname)) {
+      throw error;
+    }
+    const quarantinePath = quarantineCorruptedDatabase(pathname);
+    if (!quarantinePath) {
+      throw error;
+    }
+    log.warn("Corrupted task registry database quarantined, creating fresh database", {
+      originalPath: pathname,
+      quarantinePath,
+      error: String(error),
+    });
+    ensureTaskRegistryPermissions(pathname);
+    db = new DatabaseSync(pathname);
+    db.exec(`PRAGMA synchronous = NORMAL;`);
+    db.exec(`PRAGMA busy_timeout = 5000;`);
+    ensureSchema(db);
+    return db;
+  }
+}
+
 function openTaskRegistryDatabase(): TaskRegistryDatabase {
   const pathname = resolveTaskRegistrySqlitePath(process.env);
   if (cachedDatabase && cachedDatabase.path === pathname) {
@@ -438,12 +523,8 @@ function openTaskRegistryDatabase(): TaskRegistryDatabase {
     cachedDatabase = null;
   }
   ensureTaskRegistryPermissions(pathname);
-  const { DatabaseSync } = requireNodeSqlite();
-  const db = new DatabaseSync(pathname);
+  const db = openDatabaseOrRecover(pathname);
   const walMaintenance = configureSqliteWalMaintenance(db);
-  db.exec(`PRAGMA synchronous = NORMAL;`);
-  db.exec(`PRAGMA busy_timeout = 5000;`);
-  ensureSchema(db);
   ensureTaskRegistryPermissions(pathname);
   cachedDatabase = {
     db,
