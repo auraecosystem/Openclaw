@@ -232,6 +232,20 @@ export function createSubagentRegistryLifecycleController(params: {
     if (typeof delivery.enqueuedAt === "number") {
       deliveryState.enqueuedAt ??= delivery.enqueuedAt;
     }
+    if (delivery.requesterWakeStatus === "delivered") {
+      deliveryState.requesterWakeDeliveredAt =
+        typeof delivery.deliveredAt === "number" ? delivery.deliveredAt : Date.now();
+    }
+    if (delivery.visibleDeliveryRequired !== undefined) {
+      deliveryState.visibleRequired = delivery.visibleDeliveryRequired;
+    }
+    if (delivery.visibleDeliveryStatus !== undefined) {
+      deliveryState.visibleStatus = delivery.visibleDeliveryStatus;
+      deliveryState.visibleError =
+        delivery.visibleDeliveryStatus === "failed"
+          ? (delivery.visibleDeliveryError ?? delivery.error ?? null)
+          : undefined;
+    }
     if (delivery.delivered) {
       const deliveredAt =
         typeof delivery.deliveredAt === "number" ? delivery.deliveredAt : Date.now();
@@ -823,27 +837,42 @@ export function createSubagentRegistryLifecycleController(params: {
       return;
     }
     if (didAnnounce) {
+      const visibleDeliveryError =
+        entry.delivery?.visibleStatus === "failed"
+          ? (entry.delivery.visibleError ??
+            getDeliveryLastError(entry) ??
+            "visible delivery failed")
+          : undefined;
       if (!options?.skipAnnounce) {
         const delivery = ensureDeliveryState(entry);
         const deliveredAt = delivery.deliveredAt ?? Date.now();
-        delivery.status = "delivered";
+        delivery.status = visibleDeliveryError ? "failed" : "delivered";
         delivery.deliveredAt = deliveredAt;
         delivery.announcedAt = deliveredAt;
+        if (visibleDeliveryError) {
+          delivery.lastError = visibleDeliveryError;
+        }
         params.persist();
       }
       clearPendingFinalDelivery(entry);
       const delivery = ensureDeliveryState(entry);
-      delivery.status = "delivered";
+      delivery.status = visibleDeliveryError ? "failed" : "delivered";
       delivery.suspendedAt = undefined;
       delivery.suspendedReason = undefined;
+      if (visibleDeliveryError) {
+        delivery.lastError = visibleDeliveryError;
+      }
       if (!options?.skipDeliveryStatus) {
         safeSetSubagentTaskDeliveryStatus({
           runId,
           childSessionKey: entry.childSessionKey,
-          deliveryStatus: "delivered",
+          deliveryStatus: visibleDeliveryError ? "failed" : "delivered",
+          deliveryError: visibleDeliveryError,
         });
       }
-      delivery.lastError = undefined;
+      if (!visibleDeliveryError) {
+        delivery.lastError = undefined;
+      }
       delivery.lastDropReason = undefined;
       entry.wakeOnDescendantSettle = undefined;
       const completion = ensureCompletionState(entry);
@@ -1056,7 +1085,14 @@ export function createSubagentRegistryLifecycleController(params: {
           recordAnnounceDeliveryResult(entry, delivery);
           if (delivery.delivered) {
             const deliveryState = ensureDeliveryState(entry);
-            if (deliveryState.lastError !== undefined) {
+            const visibleDeliveryError =
+              delivery.visibleDeliveryStatus === "failed"
+                ? (delivery.visibleDeliveryError ?? delivery.error)
+                : undefined;
+            if (visibleDeliveryError) {
+              deliveryState.lastError = visibleDeliveryError;
+              params.persist();
+            } else if (deliveryState.lastError !== undefined) {
               deliveryState.lastError = undefined;
               params.persist();
             }
