@@ -805,7 +805,8 @@ function applyPostPluginStreamWrappers(
     ctx.agent.streamFn = createDeepSeekV4OpenAICompatibleThinkingWrapper({
       baseStreamFn: ctx.agent.streamFn,
       thinkingLevel: ctx.thinkingLevel,
-      shouldPatchModel: isDeepSeekV4OpenAICompatibleModel,
+      shouldPatchModel: (model) =>
+        isDeepSeekV4OpenAICompatibleModel(model) && deepSeekV4NativeThinkingAllowedByCompat(model),
     });
 
     // MiMo reasoning models use the same DeepSeek-style reasoning_content wire
@@ -902,6 +903,21 @@ function isDeepSeekV4OpenAICompatibleModel(model: Parameters<StreamFn>[0]): bool
     model.api === "openai-completions" &&
     (normalizedModelId === "deepseek-v4-flash" || normalizedModelId === "deepseek-v4-pro")
   );
+}
+
+/**
+ * The DeepSeek V4 wrapper emits the deepseek-native `thinking: { type }` wire
+ * format (plus `reasoning_effort`). Honor an explicit `compat.thinkingFormat`
+ * override that selects a different reasoning format: some OpenAI-compatible
+ * deployments — notably Azure AI Foundry DeepSeek V4 — reject the `thinking`
+ * parameter outright, even `thinking: { type: "disabled" }`. When the format is
+ * unset we keep id-based auto-detection so genuine DeepSeek V4 endpoints still
+ * receive the native thinking payload; an explicit `"deepseek"` also keeps it.
+ */
+function deepSeekV4NativeThinkingAllowedByCompat(model: Parameters<StreamFn>[0]): boolean {
+  const compat = (model as ProviderRuntimeModel).compat;
+  const thinkingFormat = compat && typeof compat === "object" ? compat.thinkingFormat : undefined;
+  return thinkingFormat === undefined || thinkingFormat === "deepseek";
 }
 
 const MIMO_REASONING_OPENAI_COMPATIBLE_MODEL_IDS = new Set([

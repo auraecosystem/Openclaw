@@ -7,6 +7,7 @@ Docs: https://docs.openclaw.ai
 ### Fixes
 
 - Cron: retry recurring jobs after transient model rate limits before waiting for the next scheduled slot.
+- Providers: respect an explicit `compat.thinkingFormat` override for DeepSeek V4 models, so OpenAI-compatible deployments like Azure AI Foundry no longer receive a rejected `thinking` parameter on reasoning runs. (#87737)
 
 ## 2026.5.28
 
