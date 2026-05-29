@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 - Providers: bound generated media downloads from OpenAI, Runway, xAI, MiniMax, BytePlus, DashScope-compatible, FAL, OpenRouter, Google, Vydra, and Comfy providers.
 - Providers: cap GitHub Copilot OAuth request timeouts before creating abort signals.
 - Cron: retry recurring jobs after transient model rate limits before waiting for the next scheduled slot.
+- Providers: respect an explicit `compat.thinkingFormat` override for DeepSeek V4 models, so OpenAI-compatible deployments like Azure AI Foundry no longer receive a rejected `thinking` parameter on reasoning runs. (#87737)
 
 ## 2026.5.28
 
