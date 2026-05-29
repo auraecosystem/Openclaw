@@ -163,7 +163,7 @@ import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
-  resolveSkillsPromptForRun,
+  resolveSkillsPromptStateForRun,
 } from "../../skills.js";
 import { resolveSkillRoute } from "../../skills/router-integration.js";
 import { buildActiveSubagentSystemPromptAddition } from "../../subagent-active-context.js";
@@ -973,30 +973,32 @@ export async function runEmbeddedAttempt(
           config: params.config,
         });
 
-    const skillsPrompt = resolveSkillsPromptForRun({
+    const skillsPromptState = resolveSkillsPromptStateForRun({
       skillsSnapshot: skillsSnapshotForRun,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
       agentId: sessionAgentId,
     });
+    const skillsPrompt = skillsPromptState.prompt;
+    const isRawModelRun = params.modelRun === true || params.promptMode === "none";
 
     // Pre-filter: call configured skill router before building the system prompt.
     // When a router matches, its narrowed result replaces the full skills catalog.
     const skillRouterConfig = params.config?.skills?.router;
-    const skillRoute = await resolveSkillRoute({
-      routerName: skillRouterConfig?.name,
-      routerConfig: skillRouterConfig?.config,
-      resolvedSkills: skillsSnapshotForRun?.resolvedSkills,
-      entries: skillEntries,
-      query: params.prompt,
-    });
+    const skillRoute = isRawModelRun
+      ? undefined
+      : await resolveSkillRoute({
+          routerName: skillRouterConfig?.name,
+          routerConfig: skillRouterConfig?.config,
+          resolvedSkills: skillsPromptState.resolvedSkills,
+          query: params.prompt,
+        });
 
     prepStages.mark("skills");
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const contextInjectionMode = resolveContextInjectionMode(params.config, sessionAgentId);
-    const isRawModelRun = params.modelRun === true || params.promptMode === "none";
     if (isRawModelRun && log.isEnabled("debug")) {
       log.debug(
         `raw model run enabled: modelRun=${params.modelRun === true} promptMode=${params.promptMode ?? "unset"}`,

@@ -79,7 +79,8 @@ type AttemptSpawnWorkspaceHoisted = {
   resolveContextInjectionModeMock: Mock<() => "always" | "continuation-skip">;
   hasCompletedBootstrapTurnMock: Mock<() => Promise<boolean>>;
   resolveEmbeddedRunSkillEntriesMock: UnknownMock;
-  resolveSkillsPromptForRunMock: UnknownMock;
+  resolveSkillsPromptStateForRunMock: UnknownMock;
+  resolveSkillRouteMock: UnknownMock;
   supportsModelToolsMock: Mock<(model?: unknown) => boolean>;
   getGlobalHookRunnerMock: Mock<() => unknown>;
   initializeGlobalHookRunnerMock: UnknownMock;
@@ -169,7 +170,8 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
     shouldLoadSkillEntries: false,
     skillEntries: undefined,
   }));
-  const resolveSkillsPromptForRunMock = vi.fn(() => "");
+  const resolveSkillsPromptStateForRunMock = vi.fn(() => ({ prompt: "", resolvedSkills: [] }));
+  const resolveSkillRouteMock = vi.fn(async () => undefined);
   const supportsModelToolsMock = vi.fn<(model?: unknown) => boolean>(() => true);
   const getGlobalHookRunnerMock = vi.fn<() => unknown>(() => undefined);
   const initializeGlobalHookRunnerMock = vi.fn();
@@ -219,7 +221,8 @@ const hoisted = vi.hoisted((): AttemptSpawnWorkspaceHoisted => {
     resolveContextInjectionModeMock,
     hasCompletedBootstrapTurnMock,
     resolveEmbeddedRunSkillEntriesMock,
-    resolveSkillsPromptForRunMock,
+    resolveSkillsPromptStateForRunMock,
+    resolveSkillRouteMock,
     supportsModelToolsMock,
     getGlobalHookRunnerMock,
     initializeGlobalHookRunnerMock,
@@ -379,7 +382,12 @@ vi.mock("../../bootstrap-files.js", async () => {
 vi.mock("../../skills.js", () => ({
   applySkillEnvOverrides: () => () => {},
   applySkillEnvOverridesFromSnapshot: () => () => {},
-  resolveSkillsPromptForRun: (...args: unknown[]) => hoisted.resolveSkillsPromptForRunMock(...args),
+  resolveSkillsPromptStateForRun: (...args: unknown[]) =>
+    hoisted.resolveSkillsPromptStateForRunMock(...args),
+}));
+
+vi.mock("../../skills/router-integration.js", () => ({
+  resolveSkillRoute: (...args: unknown[]) => hoisted.resolveSkillRouteMock(...args),
 }));
 
 vi.mock("../skills-runtime.js", () => ({
@@ -978,7 +986,10 @@ export function resetEmbeddedAttemptHarness(
     shouldLoadSkillEntries: false,
     skillEntries: undefined,
   });
-  hoisted.resolveSkillsPromptForRunMock.mockReset().mockReturnValue("");
+  hoisted.resolveSkillsPromptStateForRunMock
+    .mockReset()
+    .mockReturnValue({ prompt: "", resolvedSkills: [] });
+  hoisted.resolveSkillRouteMock.mockReset().mockResolvedValue(undefined);
   hoisted.supportsModelToolsMock.mockReset().mockReturnValue(true);
   hoisted.getGlobalHookRunnerMock.mockReset().mockReturnValue(undefined);
   hoisted.runContextEngineMaintenanceMock.mockReset().mockResolvedValue(undefined);
