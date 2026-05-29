@@ -21,6 +21,7 @@ vi.mock("../../plugins/providers.js", () => ({
 
 describe("ensureSelectedAgentHarnessPlugin", () => {
   let ensureSelectedAgentHarnessPlugin: typeof import("./runtime-plugin.js").ensureSelectedAgentHarnessPlugin;
+  let runtimePluginTesting: typeof import("./runtime-plugin.js").testing;
 
   beforeEach(async () => {
     mocks.ensurePluginRegistryLoaded.mockReset();
@@ -37,7 +38,9 @@ describe("ensureSelectedAgentHarnessPlugin", () => {
     );
     mocks.resolveActivatableProviderOwnerPluginIds.mockReturnValue([]);
     vi.resetModules();
-    ({ ensureSelectedAgentHarnessPlugin } = await import("./runtime-plugin.js"));
+    ({ ensureSelectedAgentHarnessPlugin, testing: runtimePluginTesting } =
+      await import("./runtime-plugin.js"));
+    runtimePluginTesting.resetSelectedAgentHarnessPluginCache();
   });
 
   it("loads Codex and the provider owner when an explicit runtime override forces the Codex harness", async () => {
@@ -91,6 +94,62 @@ describe("ensureSelectedAgentHarnessPlugin", () => {
         onlyPluginIds: ["codex", "openai"],
       }),
     );
+  });
+
+  it("reuses a completed scoped Codex harness plugin load", async () => {
+    const params = {
+      provider: "openai-codex",
+      modelId: "gpt-5.5-pro",
+      config: {
+        plugins: {
+          allow: ["codex"],
+          entries: {
+            codex: { enabled: true },
+          },
+        },
+      } as OpenClawConfig,
+      workspaceDir: "/tmp/workspace",
+    };
+
+    await ensureSelectedAgentHarnessPlugin(params);
+    await ensureSelectedAgentHarnessPlugin(params);
+
+    expect(mocks.ensurePluginRegistryLoaded).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not reuse a scoped Codex harness plugin load after global plugin enablement changes", async () => {
+    const baseParams = {
+      provider: "openai-codex",
+      modelId: "gpt-5.5-pro",
+      workspaceDir: "/tmp/workspace",
+    };
+
+    await ensureSelectedAgentHarnessPlugin({
+      ...baseParams,
+      config: {
+        plugins: {
+          enabled: false,
+          allow: ["codex"],
+          entries: {
+            codex: { enabled: true },
+          },
+        },
+      } as OpenClawConfig,
+    });
+    await ensureSelectedAgentHarnessPlugin({
+      ...baseParams,
+      config: {
+        plugins: {
+          enabled: true,
+          allow: ["codex"],
+          entries: {
+            codex: { enabled: true },
+          },
+        },
+      } as OpenClawConfig,
+    });
+
+    expect(mocks.ensurePluginRegistryLoaded).toHaveBeenCalledTimes(2);
   });
 
   it("widens a scoped harness allowlist with the provider owner for openai-codex models", async () => {

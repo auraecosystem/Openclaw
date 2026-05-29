@@ -13,6 +13,7 @@ import { resolveMessageSecretScope } from "../../cli/message-secret-scope.js";
 import {
   getRuntimeConfigSnapshot,
   getRuntimeConfigSourceSnapshot,
+  resolveRuntimeConfigCacheKey,
   selectApplicableRuntimeConfig,
   type OpenClawConfig,
 } from "../../config/config.js";
@@ -36,6 +37,79 @@ import { resolveOriginMessageProvider, resolveOriginMessageTo } from "./origin-r
 import type { FollowupRun } from "./queue.js";
 
 const BUN_FETCH_SOCKET_ERROR_RE = /socket connection was closed unexpectedly/i;
+const QUEUED_REPLY_EXECUTION_CONFIG_CACHE = Symbol.for("openclaw.queuedReplyExecutionConfigCache");
+const QUEUED_REPLY_EXECUTION_CONFIG_CACHE_TTL_MS = 60_000;
+
+type QueuedReplyExecutionConfigCache = {
+  weak: WeakMap<OpenClawConfig, Map<string, { createdAt: number; config: OpenClawConfig }>>;
+  primitive: Map<string, { createdAt: number; config: OpenClawConfig }>;
+};
+
+function getQueuedReplyExecutionConfigCache(): QueuedReplyExecutionConfigCache {
+  const globalState = globalThis as typeof globalThis & {
+    [QUEUED_REPLY_EXECUTION_CONFIG_CACHE]?: QueuedReplyExecutionConfigCache;
+  };
+  const existing = globalState[QUEUED_REPLY_EXECUTION_CONFIG_CACHE];
+  if (existing?.weak instanceof WeakMap && existing.primitive instanceof Map) {
+    return existing;
+  }
+  const next: QueuedReplyExecutionConfigCache = {
+    weak: new WeakMap(),
+    primitive: new Map(),
+  };
+  globalState[QUEUED_REPLY_EXECUTION_CONFIG_CACHE] = next;
+  return next;
+}
+
+function buildQueuedReplyExecutionConfigCacheKey(params?: {
+  runtimeConfigKey?: string;
+  originatingChannel?: string;
+  messageProvider?: string;
+  originatingAccountId?: string;
+  agentAccountId?: string;
+}): string {
+  return JSON.stringify({
+    runtimeConfigKey: params?.runtimeConfigKey,
+    originatingChannel: params?.originatingChannel,
+    messageProvider: params?.messageProvider,
+    originatingAccountId: params?.originatingAccountId,
+    agentAccountId: params?.agentAccountId,
+  });
+}
+
+function readQueuedReplyExecutionConfigCache(
+  config: OpenClawConfig,
+  key: string,
+): OpenClawConfig | undefined {
+  const cache = getQueuedReplyExecutionConfigCache();
+  const entry =
+    typeof config === "object" && config !== null
+      ? cache.weak.get(config)?.get(key)
+      : cache.primitive.get(key);
+  if (!entry || Date.now() - entry.createdAt > QUEUED_REPLY_EXECUTION_CONFIG_CACHE_TTL_MS) {
+    return undefined;
+  }
+  return entry.config;
+}
+
+function writeQueuedReplyExecutionConfigCache(
+  config: OpenClawConfig,
+  key: string,
+  resolvedConfig: OpenClawConfig,
+): void {
+  const cache = getQueuedReplyExecutionConfigCache();
+  const entry = { createdAt: Date.now(), config: resolvedConfig };
+  if (typeof config === "object" && config !== null) {
+    const existing = cache.weak.get(config);
+    if (existing) {
+      existing.set(key, entry);
+    } else {
+      cache.weak.set(config, new Map([[key, entry]]));
+    }
+    return;
+  }
+  cache.primitive.set(key, entry);
+}
 
 export function resolveQueuedReplyRuntimeConfig(config: OpenClawConfig): OpenClawConfig {
   const runtimeConfig =
@@ -61,6 +135,12 @@ export async function resolveQueuedReplyExecutionConfig(
   },
 ): Promise<OpenClawConfig> {
   const runtimeConfig = resolveQueuedReplyRuntimeConfig(config);
+  const runtimeConfigKey = resolveRuntimeConfigCacheKey(runtimeConfig);
+  const cacheKey = buildQueuedReplyExecutionConfigCacheKey({ ...params, runtimeConfigKey });
+  const cached = readQueuedReplyExecutionConfigCache(config, cacheKey);
+  if (cached) {
+    return cached;
+  }
   const { resolvedConfig } = await resolveCommandSecretRefsViaGateway({
     config: runtimeConfig,
     commandName: "reply",
@@ -75,6 +155,7 @@ export async function resolveQueuedReplyExecutionConfig(
     fallbackAccountId: params?.agentAccountId,
   });
   if (!scope.channel) {
+    writeQueuedReplyExecutionConfigCache(config, cacheKey, baseResolvedConfig);
     return baseResolvedConfig;
   }
 
@@ -84,6 +165,7 @@ export async function resolveQueuedReplyExecutionConfig(
     accountId: scope.accountId,
   });
   if (scopedTargets.targetIds.size === 0) {
+    writeQueuedReplyExecutionConfigCache(config, cacheKey, baseResolvedConfig);
     return baseResolvedConfig;
   }
 
@@ -93,7 +175,9 @@ export async function resolveQueuedReplyExecutionConfig(
     targetIds: scopedTargets.targetIds,
     ...(scopedTargets.allowedPaths ? { allowedPaths: scopedTargets.allowedPaths } : {}),
   });
-  return scopedResolved.resolvedConfig ?? baseResolvedConfig;
+  const finalConfig = scopedResolved.resolvedConfig ?? baseResolvedConfig;
+  writeQueuedReplyExecutionConfigCache(config, cacheKey, finalConfig);
+  return finalConfig;
 }
 
 /**
@@ -172,6 +256,21 @@ export const formatBunFetchSocketError = (message: string) => {
     trimmed || "Unknown error",
     "```",
   ].join("\n");
+};
+
+export const testing = {
+  resetQueuedReplyExecutionConfigCache() {
+    const cache = getQueuedReplyExecutionConfigCache();
+    cache.primitive.clear();
+    // WeakMap entries are not iterable; replacing the global cache clears them.
+    const globalState = globalThis as typeof globalThis & {
+      [QUEUED_REPLY_EXECUTION_CONFIG_CACHE]?: QueuedReplyExecutionConfigCache;
+    };
+    globalState[QUEUED_REPLY_EXECUTION_CONFIG_CACHE] = {
+      weak: new WeakMap(),
+      primitive: new Map(),
+    };
+  },
 };
 
 export const resolveEnforceFinalTag = (
