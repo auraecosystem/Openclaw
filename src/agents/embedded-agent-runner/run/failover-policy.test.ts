@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { mergeRetryFailoverReason, resolveRunFailoverDecision } from "./failover-policy.js";
+import {
+  isSameProfileRetryFailoverReason,
+  mergeRetryFailoverReason,
+  resolveRunFailoverDecision,
+} from "./failover-policy.js";
 
 describe("resolveRunFailoverDecision", () => {
   it("escalates retry-limit exhaustion for replay-safe failover reasons", () => {
@@ -589,5 +593,21 @@ describe("mergeRetryFailoverReason", () => {
         timedOut: true,
       }),
     ).toBe("timeout");
+  });
+});
+
+describe("isSameProfileRetryFailoverReason", () => {
+  it("returns true for overloaded", () => {
+    expect(isSameProfileRetryFailoverReason("overloaded")).toBe(true);
+  });
+
+  it("returns false for non-overload reasons", () => {
+    expect(isSameProfileRetryFailoverReason("rate_limit")).toBe(false);
+    expect(isSameProfileRetryFailoverReason("server_error")).toBe(false);
+    expect(isSameProfileRetryFailoverReason("auth")).toBe(false);
+    expect(isSameProfileRetryFailoverReason("auth_permanent")).toBe(false);
+    expect(isSameProfileRetryFailoverReason("billing")).toBe(false);
+    expect(isSameProfileRetryFailoverReason("timeout")).toBe(false);
+    expect(isSameProfileRetryFailoverReason(null)).toBe(false);
   });
 });
