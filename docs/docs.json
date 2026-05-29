@@ -1718,6 +1718,7 @@
               {
                 "group": "RPC and API",
                 "pages": [
+                  "reference/api-endpoints",
                   "reference/rpc",
                   "concepts/openclaw-sdk",
                   "reference/openclaw-sdk-api-design",

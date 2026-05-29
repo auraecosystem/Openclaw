@@ -203,6 +203,44 @@ describe("watch-node script", () => {
     });
   });
 
+  it("watches extra linked plugin paths from the environment", async () => {
+    const childA = createAutoExitChild();
+    const childB = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
+    const spawn = vi.fn().mockReturnValueOnce(childA).mockReturnValueOnce(childB);
+    const { watcher, createWatcher, fakeProcess, runPromise } = startWatchRun({
+      env: {
+        OPENCLAW_WATCH_EXTRA_PATHS: [
+          "/tmp/caviclaw-plugin/dist",
+          "/tmp/caviclaw-plugin/openclaw.plugin.json",
+        ].join(path.delimiter),
+      },
+      spawn,
+    });
+
+    const [watchPaths, watchOptions] = requireMockCall(createWatcher, 0) as unknown as [
+      string[],
+      { ignoreInitial: boolean; ignored: (watchPath: string) => boolean },
+    ];
+    expect(watchPaths).toContain("/tmp/caviclaw-plugin/dist");
+    expect(watchPaths).toContain("/tmp/caviclaw-plugin/openclaw.plugin.json");
+    expect(watchOptions.ignored("/tmp/caviclaw-plugin/dist/index.js")).toBe(false);
+    expect(watchOptions.ignored("/tmp/caviclaw-plugin/dist/index.d.ts")).toBe(false);
+    expect(watchOptions.ignored("/tmp/caviclaw-plugin/node_modules/pkg/index.js")).toBe(true);
+    expect(watchOptions.ignored("/tmp/caviclaw-plugin/README.md")).toBe(true);
+
+    watcher.emit("change", "/tmp/caviclaw-plugin/dist/index.js");
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(childA.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(spawn).toHaveBeenCalledTimes(2);
+
+    fakeProcess.emit("SIGINT");
+    const exitCode = await runPromise;
+    expect(exitCode).toBe(130);
+    expect(childB.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
   it("starts the runner before loading chokidar", async () => {
     const child = Object.assign(new EventEmitter(), {
       kill: vi.fn(() => {}),

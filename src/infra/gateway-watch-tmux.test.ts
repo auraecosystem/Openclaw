@@ -78,6 +78,7 @@ describe("gateway-watch tmux wrapper", () => {
         OPENCLAW_GATEWAY_STARTUP_TRACE: "1",
         OPENCLAW_PROFILE: "Dev Profile",
         OPENCLAW_TRACE_SYNC_IO: "0",
+        OPENCLAW_WATCH_EXTRA_PATHS: "../../plugins/demo/dist:../../plugins/demo/package.json",
         SHELL: "/bin/zsh",
       },
       nodePath: "/opt/node",
@@ -95,6 +96,9 @@ describe("gateway-watch tmux wrapper", () => {
     expect(command).toContain("'OPENCLAW_GATEWAY_STARTUP_TRACE=1'");
     expect(command).toContain("'OPENCLAW_PROFILE=Dev Profile'");
     expect(command).toContain("'OPENCLAW_TRACE_SYNC_IO=0'");
+    expect(command).toContain(
+      "'OPENCLAW_WATCH_EXTRA_PATHS=../../plugins/demo/dist:../../plugins/demo/package.json'",
+    );
     expect(command).toContain("/opt/node");
     expect(command).toContain("scripts/watch-node.mjs");
     expect(command).toContain("gateway");

@@ -42,7 +42,7 @@ const isBuildRelevantSourcePath = (relativePath) => {
   return extensionSourceFilePattern.test(normalizedPath) && !isIgnoredSourcePath(normalizedPath);
 };
 
-const isRestartRelevantExtensionPath = (relativePath) => {
+export const isRestartRelevantExtensionPath = (relativePath) => {
   const normalizedPath = normalizeRunNodePath(relativePath);
   if (extensionRestartMetadataFiles.has(path.posix.basename(normalizedPath))) {
     return true;

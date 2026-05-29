@@ -30,6 +30,7 @@ export function runWatchMain(params?: {
     };
   }>;
   watchPaths?: string[];
+  extraWatchPaths?: string[];
   process?: NodeJS.Process;
   cwd?: string;
   args?: string[];

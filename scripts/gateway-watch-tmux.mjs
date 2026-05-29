@@ -34,6 +34,7 @@ const TMUX_CHILD_ENV_KEYS = [
   "OPENCLAW_SKIP_CHANNELS",
   "OPENCLAW_STATE_DIR",
   "OPENCLAW_TRACE_SYNC_IO",
+  "OPENCLAW_WATCH_EXTRA_PATHS",
 ];
 
 const sanitizeSessionPart = (value) => {

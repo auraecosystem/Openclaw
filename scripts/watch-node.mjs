@@ -5,13 +5,19 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { pathToFileURL } from "node:url";
-import { isRestartRelevantRunNodePath, runNodeWatchedPaths } from "./run-node-watch-paths.mjs";
+import {
+  isRestartRelevantExtensionPath,
+  isRestartRelevantRunNodePath,
+  runNodeWatchedPaths,
+} from "./run-node-watch-paths.mjs";
 
 const WATCH_NODE_RUNNER = "scripts/run-node.mjs";
 const WATCH_RESTART_SIGNAL = "SIGTERM";
 const WATCH_RESTARTABLE_CHILD_EXIT_CODES = new Set([143]);
 const WATCH_RESTARTABLE_CHILD_SIGNALS = new Set(["SIGTERM"]);
+const WATCH_EXTRA_PATHS_ENV_KEY = "OPENCLAW_WATCH_EXTRA_PATHS";
 const WATCH_IGNORED_PATH_SEGMENTS = new Set([".git", "dist", "node_modules"]);
+const WATCH_EXTRA_IGNORED_PATH_SEGMENTS = new Set([".git", "node_modules"]);
 const WATCH_LOCK_WAIT_MS = 5_000;
 const WATCH_LOCK_POLL_MS = 100;
 const WATCH_LOCK_DIR = path.join(".local", "watch-node");
@@ -33,17 +39,17 @@ const resolveRepoPath = (filePath, cwd) => {
   return normalizePath(rawPath);
 };
 
-const hasIgnoredPathSegment = (repoPath) =>
+const hasIgnoredPathSegment = (repoPath, ignoredSegments = WATCH_IGNORED_PATH_SEGMENTS) =>
   normalizePath(repoPath)
     .split("/")
-    .some((segment) => WATCH_IGNORED_PATH_SEGMENTS.has(segment));
+    .some((segment) => ignoredSegments.has(segment));
 
 const looksLikeDirectoryPath = (repoPath) => path.posix.extname(normalizePath(repoPath)) === "";
 
-const isDirectoryLikeWatchedPath = (repoPath, watchPaths) => {
+const isDirectoryLikeWatchedPath = (repoPath, watchPaths, cwd) => {
   const normalizedRepoPath = normalizePath(repoPath).replace(/\/$/, "");
   return watchPaths.some((watchPath) => {
-    const normalizedWatchPath = normalizePath(watchPath).replace(/\/$/, "");
+    const normalizedWatchPath = resolveRepoPath(watchPath, cwd).replace(/\/$/, "");
     if (!normalizedWatchPath) {
       return false;
     }
@@ -54,15 +60,32 @@ const isDirectoryLikeWatchedPath = (repoPath, watchPaths) => {
   });
 };
 
-const isIgnoredWatchPath = (filePath, cwd, watchPaths, stats) => {
+const parseExtraWatchPaths = (env) =>
+  String(env?.[WATCH_EXTRA_PATHS_ENV_KEY] ?? "")
+    .split(path.delimiter)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+
+const resolveWatchPaths = (baseWatchPaths, extraWatchPaths) => [
+  ...new Set([...baseWatchPaths, ...extraWatchPaths]),
+];
+
+const isIgnoredWatchPath = (filePath, cwd, watchPaths, extraWatchPaths, stats) => {
   const repoPath = resolveRepoPath(filePath, cwd);
-  if (hasIgnoredPathSegment(repoPath)) {
+  const isExtraPath = isDirectoryLikeWatchedPath(repoPath, extraWatchPaths, cwd);
+  const ignoredSegments = isExtraPath
+    ? WATCH_EXTRA_IGNORED_PATH_SEGMENTS
+    : WATCH_IGNORED_PATH_SEGMENTS;
+  if (hasIgnoredPathSegment(repoPath, ignoredSegments)) {
     return true;
   }
-  if (isDirectoryLikeWatchedPath(repoPath, watchPaths)) {
+  if (isDirectoryLikeWatchedPath(repoPath, watchPaths, cwd)) {
     if (stats?.isDirectory?.() || looksLikeDirectoryPath(repoPath)) {
       return false;
     }
+  }
+  if (isExtraPath) {
+    return !isRestartRelevantExtensionPath(repoPath);
   }
   return !isRestartRelevantRunNodePath(repoPath);
 };
@@ -252,22 +275,26 @@ const releaseWatchLock = (lockHandle) => {
  *     options: { ignoreInitial: boolean; ignored: (watchPath: string) => boolean },
  *   ) => { on: (event: string, cb: (...args: unknown[]) => void) => void; close?: () => Promise<void> };
  *   watchPaths?: string[];
+ *   extraWatchPaths?: string[];
  * }} [params]
  */
 export async function runWatchMain(params = {}) {
+  const env = params.env ? { ...params.env } : { ...process.env };
+  const extraWatchPaths = params.extraWatchPaths ?? parseExtraWatchPaths(env);
   const deps = {
     spawn: params.spawn ?? spawn,
     process: params.process ?? process,
     cwd: params.cwd ?? process.cwd(),
     args: params.args ?? process.argv.slice(2),
-    env: params.env ? { ...params.env } : { ...process.env },
+    env,
     now: params.now ?? Date.now,
     sleep: params.sleep ?? sleep,
     signalProcess: params.signalProcess ?? ((pid, signal) => process.kill(pid, signal)),
     lockDisabled: params.lockDisabled === true,
     createWatcher: params.createWatcher,
     loadChokidar: params.loadChokidar ?? loadChokidar,
-    watchPaths: params.watchPaths ?? runNodeWatchedPaths,
+    extraWatchPaths,
+    watchPaths: params.watchPaths ?? resolveWatchPaths(runNodeWatchedPaths, extraWatchPaths),
   };
 
   const childEnv = { ...deps.env };
@@ -412,7 +439,10 @@ export async function runWatchMain(params = {}) {
     };
 
     const requestRestart = (changedPath) => {
-      if (shuttingDown || isIgnoredWatchPath(changedPath, deps.cwd, deps.watchPaths)) {
+      if (
+        shuttingDown ||
+        isIgnoredWatchPath(changedPath, deps.cwd, deps.watchPaths, deps.extraWatchPaths)
+      ) {
         return;
       }
       if (!watchProcess) {
@@ -432,7 +462,7 @@ export async function runWatchMain(params = {}) {
       watcher = createWatcher(deps.watchPaths, {
         ignoreInitial: true,
         ignored: (watchPath, stats) =>
-          isIgnoredWatchPath(watchPath, deps.cwd, deps.watchPaths, stats),
+          isIgnoredWatchPath(watchPath, deps.cwd, deps.watchPaths, deps.extraWatchPaths, stats),
       });
       watcher.on("add", requestRestart);
       watcher.on("change", requestRestart);
