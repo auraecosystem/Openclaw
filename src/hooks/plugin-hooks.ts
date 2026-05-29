@@ -42,6 +42,7 @@ export function resolvePluginHookDirs(params: {
   );
   const memorySlot = normalizedPlugins.slots.memory;
   let selectedMemoryPluginId: string | null = null;
+  const realpathCache = new Map<string, string>();
   const seen = new Set<string>();
   const resolved: PluginHookDirEntry[] = [];
 
@@ -82,7 +83,12 @@ export function resolvePluginHookDirs(params: {
         log.warn(`plugin hook path not found (${record.id}): ${candidate}`);
         continue;
       }
-      if (!isPathInsideWithRealpath(record.rootDir, candidate, { requireRealpath: true })) {
+      if (
+        !isPathInsideWithRealpath(record.rootDir, candidate, {
+          requireRealpath: true,
+          cache: realpathCache,
+        })
+      ) {
         log.warn(`plugin hook path escapes plugin root (${record.id}): ${candidate}`);
         continue;
       }
