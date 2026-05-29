@@ -35,6 +35,7 @@ export {
   filterWorkspaceSkillEntriesWithOptions,
   loadWorkspaceSkillEntries,
   resolveSkillsPromptForRun,
+  resolveSkillsPromptStateForRun,
   syncSkillsToWorkspace,
 } from "./skills/workspace.js";
 export { buildWorkspaceSkillCommandSpecs } from "./skills/command-specs.js";

@@ -163,8 +163,9 @@ import { detectRuntimeShell } from "../../shell-utils.js";
 import {
   applySkillEnvOverrides,
   applySkillEnvOverridesFromSnapshot,
-  resolveSkillsPromptForRun,
+  resolveSkillsPromptStateForRun,
 } from "../../skills.js";
+import { resolveSkillRoute } from "../../skills/router-integration.js";
 import { buildActiveSubagentSystemPromptAddition } from "../../subagent-active-context.js";
 import {
   isSubagentEnvelopeSession,
@@ -273,6 +274,7 @@ import { abortable as abortableWithSignal } from "./abortable.js";
 import { createEmbeddedAgentSessionWithResourceLoader } from "./attempt-session.js";
 import {
   applyEmbeddedAttemptToolsAllow,
+  isRestrictiveEmbeddedAttemptToolsAllow,
   mergeForcedEmbeddedAttemptToolsAllow,
   resolveEmbeddedAttemptToolConstructionPlan,
   shouldCreateBundleLspRuntimeForAttempt,
@@ -939,18 +941,34 @@ export async function runEmbeddedAttempt(
           config: params.config,
         });
 
-    const skillsPrompt = resolveSkillsPromptForRun({
+    const skillsPromptState = resolveSkillsPromptStateForRun({
       skillsSnapshot: skillsSnapshotForRun,
       entries: shouldLoadSkillEntries ? skillEntries : undefined,
       config: params.config,
       workspaceDir: effectiveWorkspace,
       agentId: sessionAgentId,
     });
+    const skillsPrompt = skillsPromptState.prompt;
+    const isRawModelRun = params.modelRun === true || params.promptMode === "none";
+    const skipSkillRouting =
+      isRawModelRun || isRestrictiveEmbeddedAttemptToolsAllow(params.toolsAllow);
+
+    // Pre-filter: call configured skill router before building the system prompt.
+    // When a router matches, its narrowed result replaces the full skills catalog.
+    const skillRouterConfig = params.config?.skills?.router;
+    const skillRoute = skipSkillRouting
+      ? undefined
+      : await resolveSkillRoute({
+          routerName: skillRouterConfig?.name,
+          routerConfig: skillRouterConfig?.config,
+          resolvedSkills: skillsPromptState.resolvedSkills,
+          query: params.prompt,
+        });
+
     prepStages.mark("skills");
 
     const sessionLabel = params.sessionKey ?? params.sessionId;
     const contextInjectionMode = resolveContextInjectionMode(params.config, sessionAgentId);
-    const isRawModelRun = params.modelRun === true || params.promptMode === "none";
     if (isRawModelRun && log.isEnabled("debug")) {
       log.debug(
         `raw model run enabled: modelRun=${params.modelRun === true} promptMode=${params.promptMode ?? "unset"}`,
@@ -1628,9 +1646,19 @@ export async function runEmbeddedAttempt(
       (isRawModelRun ? "none" : resolvePromptModeForSession(params.sessionKey));
     const promptSurface = resolveAgentPromptSurfaceForSessionKey(params.sessionKey);
 
-    // When toolsAllow is set, use minimal prompt and strip skills catalog
-    const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
-    const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
+    // Restrictive toolsAllow runs use minimal prompt and strip skills catalog.
+    const effectivePromptMode = isRestrictiveEmbeddedAttemptToolsAllow(params.toolsAllow)
+      ? ("minimal" as const)
+      : promptMode;
+    // Suppress full skills catalog when:
+    // - restrictive toolsAllow is set (minimal mode)
+    // - router returned a match (narrowed result goes into user prompt)
+    // - router explicitly said nomatch (no skill applies)
+    // Fall back to full catalog when no router is configured or router failed.
+    const suppressSkillsCatalog =
+      isRestrictiveEmbeddedAttemptToolsAllow(params.toolsAllow) ||
+      (typeof skillRoute === "object" && !("error" in skillRoute));
+    const effectiveSkillsPrompt = suppressSkillsCatalog ? undefined : skillsPrompt;
     const openClawReferences = await resolveOpenClawReferencePaths({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],
@@ -3303,6 +3331,18 @@ export async function runEmbeddedAttempt(
             );
           }
         }
+
+        // Apply skill router result to prompt (narrowed match or full fallback).
+        if (skillRoute && typeof skillRoute === "object") {
+          if ("xml" in skillRoute && !isRawModelRun) {
+            effectivePrompt = skillRoute.xml + "\n\n" + effectivePrompt;
+            log.debug(`skill router: injected ${skillRoute.mode} match`);
+          } else if ("error" in skillRoute) {
+            log.warn(`skill router: ${skillRoute.reason}, falling back to full catalog`);
+          }
+          // { mode: "nomatch" } — no injection, no log. Router said no skill applies.
+        }
+
         const modelAwareSystemPrompt = appendModelIdentitySystemPrompt({
           systemPrompt: systemPromptText,
           model: runtimeInfo.model,
