@@ -15,6 +15,7 @@ Docs: https://docs.openclaw.ai
 - Providers: bound generated media downloads from OpenAI, Runway, xAI, MiniMax, BytePlus, DashScope-compatible, FAL, OpenRouter, Google, Vydra, and Comfy providers.
 - Providers: cap GitHub Copilot OAuth request timeouts before creating abort signals.
 - Cron: retry recurring jobs after transient model rate limits before waiting for the next scheduled slot.
+- WhatsApp: disabling an account via `accounts.<name>.enabled: false` now restarts the channel on hot reload so the running provider is torn down, instead of being treated as a no-op and staying connected until a full gateway restart. (#87951)
 
 ## 2026.5.28
 
