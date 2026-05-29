@@ -76,6 +76,10 @@ export type ProcessGatewayAllowlistParams = {
   trigger?: string;
   agentId?: string;
   sessionKey?: string;
+  /** Session UUID active when the approval was requested; pins the followup. */
+  sessionId?: string;
+  /** Session-store template, so the direct/denied followup can detect a rebind. */
+  sessionStore?: string;
   bashElevated?: ExecElevatedDefaults;
   turnSourceChannel?: string;
   turnSourceTo?: string;
@@ -691,6 +695,8 @@ export async function processGatewayAllowlist(
     const followupTarget = buildExecApprovalFollowupTarget({
       approvalId,
       sessionKey: params.notifySessionKey ?? params.sessionKey,
+      expectedSessionId: params.sessionId,
+      sessionStore: params.sessionStore,
       bashElevated: params.bashElevated,
       turnSourceChannel: params.turnSourceChannel,
       turnSourceTo: params.turnSourceTo,
