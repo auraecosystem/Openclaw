@@ -77,6 +77,10 @@ function hasWildcardToolAllowlist(toolsAllow: string[]): boolean {
   return toolsAllow.some((entry) => normalizeToolName(entry) === "*");
 }
 
+export function isRestrictiveEmbeddedAttemptToolsAllow(toolsAllow?: string[]): boolean {
+  return toolsAllow !== undefined && !hasWildcardToolAllowlist(toolsAllow);
+}
+
 function isKnownLocalCodingToolName(normalized: string): boolean {
   return (
     BASE_CODING_TOOL_FACTORY_NAMES.has(normalized) ||
