@@ -1143,6 +1143,7 @@
                 "group": "Fundamentals",
                 "pages": [
                   "concepts/architecture",
+                  "architecture/production-ai-governance",
                   "concepts/agent",
                   "concepts/agent-loop",
                   "concepts/agent-runtimes",

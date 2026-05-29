@@ -162,10 +162,11 @@ type CronAgentWatchdog = {
 export async function executeJobCoreWithTimeout(
   state: CronServiceState,
   job: CronJob,
+  options?: { taskRunId?: string },
 ): Promise<Awaited<ReturnType<typeof executeJobCore>>> {
   const jobTimeoutMs = resolveCronJobTimeoutMs(job);
   if (typeof jobTimeoutMs !== "number") {
-    return await executeJobCore(state, job);
+    return await executeJobCore(state, job, undefined, { taskRunId: options?.taskRunId });
   }
 
   const runAbortController = new AbortController();
@@ -194,6 +195,7 @@ export async function executeJobCoreWithTimeout(
   const corePromise = executeJobCore(state, job, runAbortController.signal, {
     onExecutionStarted: deferTimeoutUntilExecutionStart ? watchdog.noteRunnerStarted : undefined,
     onExecutionPhase: deferTimeoutUntilExecutionStart ? watchdog.notePhase : undefined,
+    taskRunId: options?.taskRunId,
   });
   watchdog.start();
   void corePromise.catch((err) => {
@@ -1357,7 +1359,7 @@ export async function onTimer(state: CronServiceState) {
       const taskRunId = tryCreateCronTaskRun({ state, job, startedAt });
 
       try {
-        const result = await executeJobCoreWithTimeout(state, job);
+        const result = await executeJobCoreWithTimeout(state, job, { taskRunId });
         return {
           jobId: id,
           job,
@@ -1747,7 +1749,7 @@ async function runStartupCatchupCandidate(
     runAtMs: startedAt,
   });
   try {
-    const result = await executeJobCoreWithTimeout(state, candidate.job);
+    const result = await executeJobCoreWithTimeout(state, candidate.job, { taskRunId });
     return {
       jobId: candidate.jobId,
       job: candidate.job,
@@ -1834,6 +1836,7 @@ export async function executeJobCore(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    taskRunId?: string;
   },
 ): Promise<
   CronRunOutcome &
@@ -2011,6 +2014,7 @@ async function executeDetachedCronJob(
   options?: {
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;
+    taskRunId?: string;
   },
 ): Promise<
   CronRunOutcome &
@@ -2044,6 +2048,7 @@ async function executeDetachedCronJob(
   const res = await state.deps.runIsolatedAgentJob({
     job,
     message: job.payload.message,
+    taskRunId: options?.taskRunId,
     abortSignal,
     onExecutionStarted: options?.onExecutionStarted,
     onExecutionPhase: options?.onExecutionPhase,

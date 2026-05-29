@@ -13,7 +13,14 @@ import { resolveInstalledPluginIndexPolicyHash } from "../plugins/installed-plug
 import type { InstalledPluginIndex } from "../plugins/installed-plugin-index.js";
 import { loadPluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.types.js";
-import { CommandLaneTaskTimeoutError } from "../process/command-queue.js";
+import {
+  CommandLaneTaskTimeoutError,
+  enqueueCommand,
+  GatewayDrainingError,
+  getCommandLaneSnapshot,
+  markGatewayDraining,
+  resetCommandQueueStateForTest,
+} from "../process/command-queue.js";
 import { AUTH_STORE_VERSION } from "./auth-profiles/constants.js";
 import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { classifyEmbeddedAgentRunResultForModelFallback } from "./embedded-agent-runner/result-fallback-classifier.js";
@@ -184,6 +191,7 @@ function resetModelFallbackTestState(): void {
   authRuntimeMock.runtime.ensureAuthProfileStore.mockClear();
   authRuntimeMock.runtime.loadAuthProfileStoreForRuntime.mockClear();
   authSourceCheckMock.hasAnyAuthProfileStoreSource.mockReset().mockReturnValue(false);
+  resetCommandQueueStateForTest();
 }
 
 function setDefaultPluginMetadataSnapshot(): void {
@@ -257,6 +265,7 @@ afterEach(resetModelFallbackTestState);
 
 beforeEach(() => {
   setLoggerOverride({ level: "silent", consoleLevel: "silent" });
+  resetCommandQueueStateForTest();
 });
 
 afterEach(() => {
@@ -1061,6 +1070,94 @@ describe("runWithModelFallback", () => {
       status: 429,
       code: "RESOURCE_EXHAUSTED",
     });
+  });
+
+  it("does not start model fallback while the gateway is draining", async () => {
+    const cfg = makeCfg();
+    const run = vi.fn().mockResolvedValueOnce("ok");
+    markGatewayDraining();
+
+    await expect(
+      runWithModelFallback({
+        cfg,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        run,
+      }),
+    ).rejects.toBeInstanceOf(GatewayDrainingError);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("stops walking fallback candidates when restart drain begins after a failed attempt", async () => {
+    const cfg = makeCfg();
+    const run = vi.fn().mockImplementationOnce(async () => {
+      markGatewayDraining();
+      throw new Error("primary timed out");
+    });
+
+    await expect(
+      runWithModelFallback({
+        cfg,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        run,
+      }),
+    ).rejects.toBeInstanceOf(GatewayDrainingError);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("includes queue pressure on fallback step observations", async () => {
+    const cfg = makeCfg();
+    let releaseActive!: () => void;
+    const activeTask = enqueueCommand(
+      async () =>
+        await new Promise<void>((resolve) => {
+          releaseActive = resolve;
+        }),
+    );
+    await vi.waitFor(() =>
+      expect(getCommandLaneSnapshot()).toMatchObject({ activeCount: 1, queuedCount: 0 }),
+    );
+    const queuedTask = enqueueCommand(async () => undefined);
+    await vi.waitFor(() =>
+      expect(getCommandLaneSnapshot()).toMatchObject({ activeCount: 1, queuedCount: 1 }),
+    );
+
+    const onFallbackStep = vi.fn();
+    const run = vi
+      .fn()
+      .mockRejectedValueOnce(
+        new FailoverError("unsupported primary", {
+          reason: "model_not_found",
+          provider: "openai",
+          model: "gpt-4.1-mini",
+        }),
+      )
+      .mockResolvedValueOnce("ok");
+
+    try {
+      await runWithModelFallback({
+        cfg,
+        provider: "openai",
+        model: "gpt-4.1-mini",
+        run,
+        onFallbackStep,
+      });
+    } finally {
+      releaseActive();
+      await Promise.all([activeTask, queuedTask]);
+    }
+
+    expect(onFallbackStep).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fallbackStepFromModel: "openai/gpt-4.1-mini",
+        fallbackStepToModel: "anthropic/claude-haiku-3-5",
+        fallbackStepFromFailureReason: "model_not_found",
+        fallbackStepQueueActive: 1,
+        fallbackStepQueueQueued: 1,
+        fallbackStepQueueDraining: false,
+      }),
+    );
   });
 
   it("keeps raw provider schema errors in fallback summaries", async () => {

@@ -357,6 +357,7 @@ export function buildGatewayCronService(params: {
     runIsolatedAgentJob: async ({
       job,
       message,
+      taskRunId,
       abortSignal,
       onExecutionStarted,
       onExecutionPhase,
@@ -369,6 +370,7 @@ export function buildGatewayCronService(params: {
           deps: params.deps,
           job,
           message,
+          taskRunId,
           abortSignal,
           onExecutionStarted,
           onExecutionPhase,

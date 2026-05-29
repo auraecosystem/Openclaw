@@ -13,7 +13,11 @@ import {
   getActivePluginRegistryWorkspaceDirFromState,
   getPluginRegistryState,
 } from "../plugins/runtime-state.js";
-import { isCommandLaneTaskTimeoutError } from "../process/command-queue.js";
+import {
+  GatewayDrainingError,
+  isCommandLaneTaskTimeoutError,
+  isGatewayDraining,
+} from "../process/command-queue.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { sanitizeForLog } from "../terminal/ansi.js";
@@ -156,6 +160,12 @@ function isTerminalAbort(signal: AbortSignal | undefined): boolean {
     return true;
   }
   return reason.name === "ClientDisconnectError";
+}
+
+function throwIfGatewayDraining(): void {
+  if (isGatewayDraining()) {
+    throw new GatewayDrainingError();
+  }
 }
 
 function createModelCandidateCollector(allowlist: Set<string> | null | undefined): {
@@ -1190,6 +1200,7 @@ export async function runWithModelFallback<T>(
   const requestedCandidate = candidates[0];
 
   for (let i = 0; i < candidates.length; i += 1) {
+    throwIfGatewayDraining();
     const candidate = candidates[i];
     await assertModelFallbackCandidateHarnessAvailable({
       cfg: params.cfg,

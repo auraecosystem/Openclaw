@@ -108,6 +108,7 @@ export type CronServiceDeps = {
   runIsolatedAgentJob: (params: {
     job: CronJob;
     message: string;
+    taskRunId?: string;
     abortSignal?: AbortSignal;
     onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
     onExecutionPhase?: (info: CronAgentExecutionPhaseUpdate) => void;

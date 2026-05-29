@@ -441,6 +441,7 @@ type RunCronAgentTurnParams = {
   deps: CliDeps;
   job: CronJob;
   message: string;
+  taskRunId?: string;
   abortSignal?: AbortSignal;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
@@ -1202,6 +1203,7 @@ export async function runCronIsolatedAgentTurn(params: {
   deps: CliDeps;
   job: CronJob;
   message: string;
+  taskRunId?: string;
   abortSignal?: AbortSignal;
   signal?: AbortSignal;
   onExecutionStarted?: (info?: CronAgentExecutionStarted) => void;
@@ -1295,6 +1297,7 @@ export async function runCronIsolatedAgentTurn(params: {
       cronSession: prepared.context.cronSession,
       commandBody: prepared.context.commandBody,
       persistSessionEntry: prepared.context.persistSessionEntry,
+      taskRunId: params.taskRunId,
       abortSignal,
       onExecutionStarted: notifyExecutionStarted,
       onExecutionPhase: notifyExecutionPhase,
