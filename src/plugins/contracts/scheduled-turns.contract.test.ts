@@ -130,7 +130,7 @@ function mockCronAdd(response: CronJob) {
 }
 
 function getCronAddBody() {
-  const addCall = workflowMocks.cronAdd.mock.calls.at(0);
+  const addCall = workflowMocks.cronAdd.mock.calls[0];
   if (!addCall) {
     throw new Error("Expected cron add call");
   }
@@ -264,7 +264,8 @@ describe("plugin scheduled turns", () => {
   });
 
   it("builds payloads accepted by the real cron.add protocol validator", async () => {
-    const { validateCronAddParams } = await import("../../gateway/protocol/index.js");
+    const { validateCronAddParams } =
+      await import("../../../packages/gateway-protocol/src/index.js");
     workflowMocks.cronAdd.mockImplementation(async (body: unknown) => {
       expect(validateCronAddParams(body)).toBe(true);
       expect((body as { delivery?: unknown }).delivery).toEqual({

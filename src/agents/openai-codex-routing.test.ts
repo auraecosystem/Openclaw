@@ -4,7 +4,9 @@ import {
   listOpenAIAuthProfileProvidersForAgentRuntime,
   modelSelectionShouldEnsureCodexPlugin,
   openAIProviderUsesCodexRuntimeByDefault,
-  resolveOpenAIRuntimeProviderForPi,
+  resolveContextConfigProviderForRuntime,
+  resolveOpenAIRuntimeProvider,
+  resolveSelectedOpenAIRuntimeProvider,
 } from "./openai-codex-routing.js";
 
 describe("OpenAI Codex routing policy", () => {
@@ -32,31 +34,155 @@ describe("OpenAI Codex routing policy", () => {
 
     expect(openAIProviderUsesCodexRuntimeByDefault({ provider: "openai", config })).toBe(false);
     expect(modelSelectionShouldEnsureCodexPlugin({ model: "openai/gpt-5.5", config })).toBe(false);
+    expect(
+      resolveContextConfigProviderForRuntime({
+        provider: "openai",
+        runtimeId: "codex",
+        config,
+      }),
+    ).toBe("openai");
   });
 
-  it("maps explicit PI plus Codex auth profile to the legacy PI Codex-auth transport", () => {
+  it("uses Codex context config for official OpenAI under the Codex runtime", () => {
+    expect(
+      resolveContextConfigProviderForRuntime({
+        provider: "openai",
+        runtimeId: "codex",
+      }),
+    ).toBe("openai-codex");
+  });
+
+  it("maps explicit OpenClaw plus Codex auth profile to the OpenClaw Codex-auth transport", () => {
     expect(
       listOpenAIAuthProfileProvidersForAgentRuntime({
         provider: "openai",
-        harnessRuntime: "pi",
+        harnessRuntime: "openclaw",
       }),
     ).toEqual(["openai", "openai-codex"]);
     expect(
-      resolveOpenAIRuntimeProviderForPi({
+      resolveOpenAIRuntimeProvider({
         provider: "openai",
-        harnessRuntime: "pi",
+        harnessRuntime: "openclaw",
         authProfileProvider: "openai-codex",
         authProfileId: "openai-codex:work",
       }),
     ).toBe("openai-codex");
   });
 
-  it("ignores session PI pins when validating OpenAI auth profiles", () => {
+  it("keeps explicit OpenAI OpenClaw Codex auth order ahead of API-key backups", () => {
+    const config = {
+      auth: {
+        order: {
+          openai: ["openai-codex:work", "openai:backup"],
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    expect(
+      listOpenAIAuthProfileProvidersForAgentRuntime({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toEqual(["openai-codex", "openai"]);
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toBe("openai-codex");
+    expect(
+      resolveOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toBe("openai");
+  });
+
+  it("keeps explicit OpenAI OpenClaw API-key auth order ahead of Codex backups", () => {
+    const config = {
+      auth: {
+        order: {
+          openai: ["openai:backup", "openai-codex:work"],
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    expect(
+      listOpenAIAuthProfileProvidersForAgentRuntime({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toEqual(["openai", "openai-codex"]);
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toBe("openai");
+  });
+
+  it("does not route custom OpenAI-compatible OpenClaw configs through Codex auth order", () => {
+    const config = {
+      models: {
+        providers: {
+          openai: {
+            baseUrl: "https://proxy.example.test/v1",
+            models: [],
+          },
+        },
+      },
+      auth: {
+        order: {
+          openai: ["openai-codex:work", "openai:backup"],
+        },
+      },
+    } satisfies OpenClawConfig;
+
+    expect(
+      listOpenAIAuthProfileProvidersForAgentRuntime({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toEqual(["openai", "openai-codex"]);
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "openclaw",
+        config,
+      }),
+    ).toBe("openai");
+  });
+
+  it("validates Codex harness auth through the Codex provider contract", () => {
     expect(
       listOpenAIAuthProfileProvidersForAgentRuntime({
         provider: "openai",
         harnessRuntime: "codex",
       }),
     ).toEqual(["openai-codex"]);
+  });
+
+  it("routes openai provider to openai-codex when harness runtime is codex", () => {
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "openai",
+        harnessRuntime: "codex",
+      }),
+    ).toBe("openai-codex");
+  });
+
+  it("does not route non-OpenAI providers when runtime is codex", () => {
+    expect(
+      resolveSelectedOpenAIRuntimeProvider({
+        provider: "anthropic",
+        harnessRuntime: "codex",
+      }),
+    ).toBe("anthropic");
   });
 });

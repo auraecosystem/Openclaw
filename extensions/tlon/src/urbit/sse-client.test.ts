@@ -169,6 +169,35 @@ describe("UrbitSSEClient", () => {
   });
 
   describe("event acking", () => {
+    it("logs malformed SSE JSON with an owned parser error", () => {
+      const logger = { error: vi.fn() };
+      const client = new UrbitSSEClient("https://example.com", "urbauth-~zod=123", {
+        logger,
+      });
+
+      client.processEvent("id: 1\ndata: {not json");
+
+      expect(logger.error).toHaveBeenCalledWith(
+        "Error parsing SSE event: Error: Tlon Urbit SSE event was malformed JSON",
+      );
+    });
+
+    it("ignores malformed event ids when deciding whether to ack", async () => {
+      const mockUrbitFetch = vi.mocked(urbitFetch);
+      mockUrbitFetch.mockResolvedValue({
+        response: { ok: true, status: 200 } as unknown as Response,
+        finalUrl: "https://example.com",
+        release: vi.fn().mockResolvedValue(undefined),
+      });
+      const client = new UrbitSSEClient("https://example.com", "urbauth-~zod=123");
+
+      client.processEvent('id: 25abc\ndata: {"json":{"ok":true}}');
+      await Promise.resolve();
+
+      expect(mockUrbitFetch).not.toHaveBeenCalled();
+      expect((client as unknown as { lastHeardEventId: number }).lastHeardEventId).toBe(-1);
+    });
+
     it("tracks lastHeardEventId and ackThreshold", () => {
       const client = new UrbitSSEClient("https://example.com", "urbauth-~zod=123");
 

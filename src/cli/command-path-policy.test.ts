@@ -56,7 +56,7 @@ describe("command-path-policy", () => {
 
   it("resolves status policy with shared startup semantics", () => {
     expectResolvedPolicy(["status"], {
-      routeConfigGuard: "when-suppressed",
+      routeConfigGuard: "never",
       loadPlugins: "never",
       pluginRegistry: { scope: "channels" },
       ensureCliPath: false,
@@ -189,6 +189,19 @@ describe("command-path-policy", () => {
       bypassConfigGuard: true,
       loadPlugins: "never",
     });
+    expectResolvedPolicy(["config"], {
+      bypassConfigGuard: true,
+      loadPlugins: "never",
+      networkProxy: "bypass",
+    });
+    expectResolvedPolicy(["config", "set"], {
+      loadPlugins: "never",
+      networkProxy: "bypass",
+    });
+    expectResolvedPolicy(["doctor"], {
+      bypassConfigGuard: true,
+      loadPlugins: "never",
+    });
     expectResolvedPolicy(["config", "validate"], {
       bypassConfigGuard: true,
       loadPlugins: "never",
@@ -203,9 +216,20 @@ describe("command-path-policy", () => {
       loadPlugins: "never",
       hideBanner: true,
     });
+    expectResolvedPolicy(["plugins", "list"], {
+      ensureCliPath: false,
+      loadPlugins: "never",
+      networkProxy: "bypass",
+    });
+    for (const commandPath of [["tasks"], ["tasks", "list"], ["tasks", "audit"]]) {
+      expectResolvedPolicy(commandPath, {
+        ensureCliPath: false,
+        loadPlugins: "never",
+        networkProxy: "bypass",
+      });
+    }
     for (const commandPath of [
       ["plugins", "install"],
-      ["plugins", "list"],
       ["plugins", "inspect"],
       ["plugins", "registry"],
       ["plugins", "doctor"],

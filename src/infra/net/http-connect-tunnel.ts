@@ -1,14 +1,18 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
+import { resolveTimerTimeoutMs } from "../../shared/number-coercion.js";
+import type { ManagedProxyTlsOptions } from "./proxy/proxy-tls.js";
 
 export type HttpConnectTunnelParams = {
   proxyUrl: URL;
+  proxyTls?: ManagedProxyTlsOptions;
   targetHost: string;
   targetPort: number;
   timeoutMs?: number;
 };
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
+const MIN_CONNECT_TIMEOUT_MS = 1;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
 type ConnectResponseBuffer = Buffer;
@@ -107,8 +111,9 @@ function isSuccessfulConnectStatusLine(statusLine: string): boolean {
   return /^HTTP\/1\.[01] 2\d\d\b/.test(statusLine);
 }
 
-function connectToProxy(proxy: URL): ProxySocket {
+function connectToProxy(proxy: URL, proxyTls: ManagedProxyTlsOptions | undefined): ProxySocket {
   const proxyHost = resolveProxyHost(proxy);
+  const proxyServername = net.isIP(proxyHost) === 0 ? proxyHost : undefined;
   const connectOptions = {
     host: proxyHost,
     port: resolveProxyPort(proxy),
@@ -116,8 +121,9 @@ function connectToProxy(proxy: URL): ProxySocket {
   if (proxy.protocol === "https:") {
     return tls.connect({
       ...connectOptions,
-      servername: proxyHost,
+      ...(proxyServername ? { servername: proxyServername } : {}),
       ALPNProtocols: ["http/1.1"],
+      ...(proxyTls?.ca ? { ca: proxyTls.ca } : {}),
     });
   }
   return net.connect(connectOptions);
@@ -140,7 +146,7 @@ class HttpConnectTunnelAttempt {
   public start(): void {
     try {
       this.startTimeout();
-      this.proxySocket = connectToProxy(this.proxy);
+      this.proxySocket = connectToProxy(this.proxy, this.params.proxyTls);
       this.proxySocket.once(
         this.proxy.protocol === "https:" ? "secureConnect" : "connect",
         this.onProxyConnected,
@@ -155,11 +161,14 @@ class HttpConnectTunnelAttempt {
   }
 
   private startTimeout(): void {
-    const timeoutMs = this.params.timeoutMs;
-    if (timeoutMs && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+    const timeoutMs =
+      this.params.timeoutMs === undefined || this.params.timeoutMs <= 0
+        ? undefined
+        : resolveTimerTimeoutMs(this.params.timeoutMs, MIN_CONNECT_TIMEOUT_MS);
+    if (timeoutMs !== undefined) {
       this.timeout = setTimeout(() => {
-        this.fail(new Error(`Proxy CONNECT timed out after ${Math.trunc(timeoutMs)}ms`));
-      }, Math.trunc(timeoutMs));
+        this.fail(new Error(`Proxy CONNECT timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
     }
   }
 

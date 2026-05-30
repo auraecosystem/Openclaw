@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { IncomingMessage } from "node:http";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
 import { createMockServerResponse } from "../test-utils/mock-http-response.js";
 import {
   installRequestBodyLimitGuard,
@@ -8,6 +9,7 @@ import {
   type RequestBodyLimitErrorCode,
   readJsonBodyWithLimit,
   readRequestBodyWithLimit,
+  testApi,
 } from "./http-body.js";
 
 type MockIncomingMessage = IncomingMessage & {
@@ -67,7 +69,7 @@ async function expectReadPayloadTooLarge(params: {
     statusCode: 413,
   });
   await waitForMicrotaskTurn();
-  expect(req.__unhandledDestroyError).toBeUndefined();
+  expect(req["__unhandledDestroyError"]).toBeUndefined();
 }
 
 async function expectGuardPayloadTooLarge(params: {
@@ -92,7 +94,7 @@ async function expectGuardPayloadTooLarge(params: {
   expect(guard.isTripped()).toBe(true);
   expect(guard.code()).toBe("PAYLOAD_TOO_LARGE");
   expect(res.statusCode).toBe(413);
-  expect(req.__unhandledDestroyError).toBeUndefined();
+  expect(req["__unhandledDestroyError"]).toBeUndefined();
   return { req, res, guard };
 }
 
@@ -127,7 +129,7 @@ function createMockRequest(params: {
         try {
           req.emit("error", error);
         } catch (err) {
-          req.__unhandledDestroyError = err;
+          req["__unhandledDestroyError"] = err;
         }
       });
     }
@@ -251,7 +253,19 @@ describe("http body limits", () => {
       message: "RequestBodyTimeout",
       statusCode: 408,
     });
-    expect(req.__unhandledDestroyError).toBeUndefined();
+    expect(req["__unhandledDestroyError"]).toBeUndefined();
+  });
+
+  it("does not overflow oversized request body timeouts into immediate failures", async () => {
+    expect(
+      testApi.resolveRequestBodyLimitValues({
+        maxBytes: 128,
+        timeoutMs: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toEqual({
+      maxBytes: 128,
+      timeoutMs: MAX_TIMER_TIMEOUT_MS,
+    });
   });
 
   it("guard clamps invalid maxBytes to one byte", async () => {

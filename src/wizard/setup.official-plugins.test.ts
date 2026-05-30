@@ -15,7 +15,7 @@ vi.mock("../commands/onboarding-plugin-install.js", () => ({
 }));
 
 import {
-  __testing,
+  testing,
   resolveOfficialPluginOnboardingInstallEntries,
   setupOfficialPluginInstalls,
 } from "./setup.official-plugins.js";
@@ -28,6 +28,7 @@ describe("resolveOfficialPluginOnboardingInstallEntries", () => {
     expect(pluginIds).toContain("diagnostics-otel");
     expect(pluginIds).toContain("diagnostics-prometheus");
     expect(pluginIds).toContain("acpx");
+    expect(pluginIds).toContain("tokenjuice");
     expect(pluginIds).not.toContain("brave");
     expect(pluginIds).not.toContain("codex");
     expect(pluginIds).not.toContain("discord");
@@ -61,7 +62,7 @@ describe("resolveOfficialPluginOnboardingInstallEntries", () => {
 describe("formatInstallHint", () => {
   it("describes dual-source npm-default installs as npm first", () => {
     expect(
-      __testing.formatInstallHint({
+      testing.formatInstallHint({
         clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
         npmSpec: "@openclaw/diagnostics-otel",
         defaultChoice: "npm",
@@ -71,7 +72,7 @@ describe("formatInstallHint", () => {
 
   it("keeps dual-source clawhub-default installs ClawHub first", () => {
     expect(
-      __testing.formatInstallHint({
+      testing.formatInstallHint({
         clawhubSpec: "clawhub:@openclaw/diagnostics-otel",
         npmSpec: "@openclaw/diagnostics-otel",
         defaultChoice: "clawhub",
@@ -128,9 +129,19 @@ describe("setupOfficialPluginInstalls", () => {
           hint: "OpenClaw diagnostics Prometheus exporter",
         },
         {
+          value: "diffs-language-pack",
+          label: "Diff Viewer Language Pack",
+          hint: "OpenClaw diffs viewer syntax highlighting language pack",
+        },
+        {
           value: "diffs",
           label: "Diffs",
           hint: "OpenClaw diff viewer plugin",
+        },
+        {
+          value: "copilot",
+          label: "GitHub Copilot agent runtime",
+          hint: "OpenClaw GitHub Copilot agent runtime plugin",
         },
         {
           value: "google-meet",
@@ -146,6 +157,21 @@ describe("setupOfficialPluginInstalls", () => {
           value: "memory-lancedb",
           label: "Memory LanceDB",
           hint: "OpenClaw LanceDB-backed long-term memory plugin with auto-recall/capture",
+        },
+        {
+          value: "openshell",
+          label: "OpenShell Sandbox",
+          hint: "OpenClaw OpenShell sandbox backend",
+        },
+        {
+          value: "pixverse",
+          label: "PixVerse",
+          hint: "OpenClaw PixVerse video generation provider plugin",
+        },
+        {
+          value: "tokenjuice",
+          label: "Tokenjuice",
+          hint: "OpenClaw tokenjuice exec output compaction plugin",
         },
         {
           value: "voice-call",

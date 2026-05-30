@@ -1,8 +1,9 @@
 import type http2 from "node:http2";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
 import type { HttpConnectTunnelParams } from "./net/http-connect-tunnel.js";
 import {
-  _resetActiveManagedProxyStateForTests,
+  resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
 } from "./net/proxy/active-proxy-state.js";
@@ -84,6 +85,24 @@ vi.mock("./net/http-connect-tunnel.js", () => ({
   openHttpConnectTunnel: tunnelSpy,
 }));
 
+function lastTunnelCall(): HttpConnectTunnelParams {
+  const calls = tunnelSpy.mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call) {
+    throw new Error("expected HTTP CONNECT tunnel call");
+  }
+  return call[0];
+}
+
+function lastConnectCall(): [string, http2.ClientSessionOptions] {
+  const calls = connectSpy.mock.calls;
+  const call = calls[calls.length - 1];
+  if (!call) {
+    throw new Error("expected http2 connect call");
+  }
+  return call as unknown as [string, http2.ClientSessionOptions];
+}
+
 describe("connectApnsHttp2Session", () => {
   beforeEach(() => {
     connectSpy.mockClear();
@@ -97,7 +116,7 @@ describe("connectApnsHttp2Session", () => {
     fakeSession.close.mockClear();
     fakeSession.destroy.mockClear();
     fakeSession.request.mockClear();
-    _resetActiveManagedProxyStateForTests();
+    resetActiveManagedProxyStateForTests();
   });
   it("uses direct http2.connect when managed proxy is inactive", async () => {
     const { connectApnsHttp2Session } = await import("./push-apns-http2.js");
@@ -143,7 +162,10 @@ describe("connectApnsHttp2Session", () => {
   });
 
   it("uses an HTTP CONNECT tunnel when managed proxy is active", async () => {
-    const registration = registerActiveManagedProxyUrl(new URL("http://proxy.example:8080"));
+    const registration = registerActiveManagedProxyUrl(new URL("https://proxy.example:8443"), {
+      loopbackMode: "gateway-only",
+      proxyTls: { ca: "active-proxy-ca" },
+    });
     const { connectApnsHttp2Session } = await import("./push-apns-http2.js");
 
     const session = await connectApnsHttp2Session({
@@ -153,24 +175,38 @@ describe("connectApnsHttp2Session", () => {
     stopActiveManagedProxyRegistration(registration);
 
     expect(session).toBe(fakeSession);
-    const tunnelCall = tunnelSpy.mock.calls.at(-1)?.[0];
-    const proxyUrl = tunnelCall?.proxyUrl;
+    const tunnelCall = lastTunnelCall();
+    const proxyUrl = tunnelCall.proxyUrl;
     expect(proxyUrl).toBeInstanceOf(URL);
     if (!(proxyUrl instanceof URL)) {
       throw new Error("expected active managed proxy URL");
     }
-    expect(proxyUrl.href).toBe("http://proxy.example:8080/");
-    expect(tunnelCall?.targetHost).toBe("api.push.apple.com");
-    expect(tunnelCall?.targetPort).toBe(443);
-    expect(tunnelCall?.timeoutMs).toBe(10_000);
+    expect(proxyUrl.href).toBe("https://proxy.example:8443/");
+    expect(tunnelCall.proxyTls).toEqual({ ca: "active-proxy-ca" });
+    expect(tunnelCall.targetHost).toBe("api.push.apple.com");
+    expect(tunnelCall.targetPort).toBe(443);
+    expect(tunnelCall.timeoutMs).toBe(10_000);
     expect(connectSpy).toHaveBeenCalledTimes(1);
-    const connectCall = connectSpy.mock.calls.at(-1) as
-      | [string, http2.ClientSessionOptions]
-      | undefined;
-    expect(connectCall?.[0]).toBe("https://api.push.apple.com");
-    const createConnection = connectCall?.[1].createConnection;
+    const connectCall = lastConnectCall();
+    expect(connectCall[0]).toBe("https://api.push.apple.com");
+    const createConnection = connectCall[1].createConnection;
     expect(typeof createConnection).toBe("function");
     expect(createConnection?.(new URL("https://api.push.apple.com"), {})).toBe(fakeTlsSocket);
+  });
+
+  it("caps oversized managed proxy timeouts before opening the APNs tunnel", async () => {
+    const registration = registerActiveManagedProxyUrl(new URL("https://proxy.example:8443"), {
+      loopbackMode: "gateway-only",
+    });
+    const { connectApnsHttp2Session } = await import("./push-apns-http2.js");
+
+    await connectApnsHttp2Session({
+      authority: "https://api.push.apple.com",
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+    });
+    stopActiveManagedProxyRegistration(registration);
+
+    expect(lastTunnelCall().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
   });
 
   it("ignores ambient proxy env when managed proxy is inactive", async () => {
@@ -201,6 +237,7 @@ describe("connectApnsHttp2Session", () => {
     const result = await probeApnsHttp2ReachabilityViaProxy({
       authority: "https://api.sandbox.push.apple.com",
       proxyUrl: "http://proxy.example:8080",
+      proxyTls: { ca: "probe-proxy-ca" },
       timeoutMs: 10_000,
     });
 
@@ -209,13 +246,14 @@ describe("connectApnsHttp2Session", () => {
       body: '{"reason":"InvalidProviderToken"}',
       responseHeaders: {},
     });
-    const tunnelCall = tunnelSpy.mock.calls.at(-1)?.[0];
-    const proxyUrl = tunnelCall?.proxyUrl;
+    const tunnelCall = lastTunnelCall();
+    const proxyUrl = tunnelCall.proxyUrl;
     expect(proxyUrl).toBeInstanceOf(URL);
     if (!(proxyUrl instanceof URL)) {
       throw new Error("expected explicit proxy URL");
     }
     expect(proxyUrl.href).toBe("http://proxy.example:8080/");
+    expect(tunnelCall.proxyTls).toEqual({ ca: "probe-proxy-ca" });
     expect(tunnelCall?.targetHost).toBe("api.sandbox.push.apple.com");
     expect(tunnelCall?.targetPort).toBe(443);
     expect(tunnelCall?.timeoutMs).toBe(10_000);
@@ -228,6 +266,18 @@ describe("connectApnsHttp2Session", () => {
       "apns-priority": "10",
     });
     expect(fakeSession.close).toHaveBeenCalledOnce();
+  });
+
+  it("caps oversized explicit proxy probe timeouts", async () => {
+    const { probeApnsHttp2ReachabilityViaProxy } = await import("./push-apns-http2.js");
+
+    await probeApnsHttp2ReachabilityViaProxy({
+      authority: "https://api.sandbox.push.apple.com",
+      proxyUrl: "http://proxy.example:8080",
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(lastTunnelCall().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
   });
 
   it("rejects non-APNs authorities", async () => {

@@ -1,9 +1,12 @@
 import http2 from "node:http2";
+import { resolveTimerTimeoutMs } from "../shared/number-coercion.js";
 import { openHttpConnectTunnel } from "./net/http-connect-tunnel.js";
 import {
   getActiveManagedProxyUrl,
+  getActiveManagedProxyTlsOptions,
   type ActiveManagedProxyUrl,
 } from "./net/proxy/active-proxy-state.js";
+import type { ManagedProxyTlsOptions } from "./net/proxy/proxy-tls.js";
 
 const APNS_DEFAULT_PORT = "443";
 
@@ -15,6 +18,7 @@ const APNS_AUTHORITIES = new Set([
 type ApnsAuthority = "https://api.push.apple.com" | "https://api.sandbox.push.apple.com";
 
 export const APNS_HTTP2_CANCEL_CODE = http2.constants.NGHTTP2_CANCEL;
+const APNS_HTTP2_MIN_TIMEOUT_MS = 1000;
 
 export type ConnectApnsHttp2SessionParams = {
   authority: string;
@@ -24,6 +28,7 @@ export type ConnectApnsHttp2SessionParams = {
 export type ProbeApnsHttp2ReachabilityViaProxyParams = {
   authority: string;
   proxyUrl: string;
+  proxyTls?: ManagedProxyTlsOptions;
   timeoutMs: number;
 };
 
@@ -61,11 +66,13 @@ function assertApnsAuthority(authority: string): ApnsAuthority {
 async function openProxiedApnsHttp2Session(params: {
   authority: ApnsAuthority;
   proxyUrl: ActiveManagedProxyUrl;
+  proxyTls?: ManagedProxyTlsOptions;
   timeoutMs: number;
 }): Promise<http2.ClientHttp2Session> {
   const apnsHost = new URL(params.authority).hostname;
   const tlsSocket = await openHttpConnectTunnel({
     proxyUrl: params.proxyUrl,
+    ...(params.proxyTls ? { proxyTls: params.proxyTls } : {}),
     targetHost: apnsHost,
     targetPort: 443,
     timeoutMs: params.timeoutMs,
@@ -80,6 +87,7 @@ export async function connectApnsHttp2Session(
   params: ConnectApnsHttp2SessionParams,
 ): Promise<http2.ClientHttp2Session> {
   const authority = assertApnsAuthority(params.authority);
+  const timeoutMs = resolveApnsHttp2TimeoutMs(params.timeoutMs);
   const proxyUrl = getActiveManagedProxyUrl();
   if (!proxyUrl) {
     return http2.connect(authority);
@@ -88,18 +96,25 @@ export async function connectApnsHttp2Session(
   return await openProxiedApnsHttp2Session({
     authority,
     proxyUrl,
-    timeoutMs: params.timeoutMs,
+    proxyTls: getActiveManagedProxyTlsOptions(),
+    timeoutMs,
   });
+}
+
+function resolveApnsHttp2TimeoutMs(timeoutMs: number): number {
+  return resolveTimerTimeoutMs(timeoutMs, APNS_HTTP2_MIN_TIMEOUT_MS, APNS_HTTP2_MIN_TIMEOUT_MS);
 }
 
 export async function probeApnsHttp2ReachabilityViaProxy(
   params: ProbeApnsHttp2ReachabilityViaProxyParams,
 ): Promise<ProbeApnsHttp2ReachabilityViaProxyResult> {
   const authority = assertApnsAuthority(params.authority);
+  const timeoutMs = resolveApnsHttp2TimeoutMs(params.timeoutMs);
   const session = await openProxiedApnsHttp2Session({
     authority,
     proxyUrl: new URL(params.proxyUrl),
-    timeoutMs: params.timeoutMs,
+    ...(params.proxyTls ? { proxyTls: params.proxyTls } : {}),
+    timeoutMs,
   });
 
   try {
@@ -109,10 +124,8 @@ export async function probeApnsHttp2ReachabilityViaProxy(
       let status: number | undefined;
       let responseHeaders: Record<string, string> = {};
       const timeout = setTimeout(() => {
-        fail(
-          new Error(`APNs reachability probe timed out after ${Math.trunc(params.timeoutMs)}ms`),
-        );
-      }, Math.trunc(params.timeoutMs));
+        fail(new Error(`APNs reachability probe timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
       timeout.unref?.();
 
       const cleanup = () => {

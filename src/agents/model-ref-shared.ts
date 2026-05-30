@@ -1,12 +1,23 @@
-import { normalizeGooglePreviewModelId } from "../plugin-sdk/provider-model-id-normalize.js";
 import { normalizeProviderModelIdWithManifest } from "../plugins/manifest-model-id-normalization.js";
-import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
+import {
+  collectManifestModelIdNormalizationPolicies,
+  type ManifestModelIdNormalizationRecord,
+  normalizeBuiltInProviderModelId,
+  normalizeConfiguredProviderCatalogModelRef,
+  normalizeConfiguredProviderCatalogModelId as normalizeConfiguredProviderCatalogModelIdShared,
+  normalizeStaticProviderModelIdWithPolicies,
+} from "../shared/provider-model-id-normalization.js";
 import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { normalizeProviderId } from "./provider-id.js";
 
 type StaticModelRef = {
   provider: string;
   model: string;
+};
+
+export type ProviderModelIdNormalizationOptions = {
+  allowManifestNormalization?: boolean;
+  manifestPlugins?: readonly ManifestModelIdNormalizationRecord[];
 };
 
 export function modelKey(provider: string, model: string): string {
@@ -28,19 +39,22 @@ export function modelKey(provider: string, model: string): string {
 export function normalizeStaticProviderModelId(
   provider: string,
   model: string,
-  options: {
-    allowManifestNormalization?: boolean;
-    manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
-  } = {},
+  options: ProviderModelIdNormalizationOptions = {},
 ): string {
   const normalizedProvider = normalizeProviderId(provider);
   if (options.allowManifestNormalization === false) {
     return normalizeBuiltInProviderModelId(normalizedProvider, model);
   }
+  if (options.manifestPlugins) {
+    return normalizeStaticProviderModelIdWithPolicies(
+      normalizedProvider,
+      model,
+      collectManifestModelIdNormalizationPolicies(options.manifestPlugins),
+    );
+  }
   const manifestModelId =
     normalizeProviderModelIdWithManifest({
       provider: normalizedProvider,
-      plugins: options.manifestPlugins,
       context: {
         provider: normalizedProvider,
         modelId: model,
@@ -49,22 +63,24 @@ export function normalizeStaticProviderModelId(
   return normalizeBuiltInProviderModelId(normalizedProvider, manifestModelId);
 }
 
-function normalizeBuiltInProviderModelId(provider: string, model: string): string {
-  if (provider === "google" || provider === "google-gemini-cli" || provider === "google-vertex") {
-    return normalizeGooglePreviewModelId(model);
+export function normalizeConfiguredProviderCatalogModelId(
+  provider: string,
+  model: string,
+  options: ProviderModelIdNormalizationOptions = {},
+): string {
+  if (options.allowManifestNormalization === false) {
+    return normalizeConfiguredProviderCatalogModelIdShared(provider, model, new Map());
   }
-  return model;
-}
-
-export function normalizeConfiguredProviderCatalogModelId(provider: string, model: string): string {
-  const providerModel = normalizeStaticProviderModelId(provider, model);
-  const googlePrefix = "google/";
-  if (!providerModel.startsWith(googlePrefix)) {
-    return providerModel;
+  if (options.manifestPlugins) {
+    return normalizeConfiguredProviderCatalogModelIdShared(
+      provider,
+      model,
+      collectManifestModelIdNormalizationPolicies(options.manifestPlugins),
+    );
   }
-  const modelId = providerModel.slice(googlePrefix.length);
-  const normalizedModelId = normalizeGooglePreviewModelId(modelId);
-  return normalizedModelId === modelId ? providerModel : `${googlePrefix}${normalizedModelId}`;
+  return normalizeConfiguredProviderCatalogModelRef(
+    normalizeStaticProviderModelId(provider, model, options),
+  );
 }
 
 function parseStaticModelRef(raw: string, defaultProvider: string): StaticModelRef | null {
