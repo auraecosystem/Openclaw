@@ -27,6 +27,7 @@ import { createNativeTelegramToolProgressDraft } from "./native-tool-progress-dr
 import { recordOutboundMessageForPromptContext } from "./outbound-message-context.js";
 import { editMessageTelegram } from "./send.js";
 import { wasSentByBot } from "./sent-message-cache.js";
+import { generateSpeakeasyVoiceNote } from "./speakeasy-voice.js";
 
 export type TelegramBotDeps = {
   getRuntimeConfig: typeof getRuntimeConfig;
@@ -56,6 +57,7 @@ export type TelegramBotDeps = {
   editMessageTelegram?: typeof editMessageTelegram;
   recordOutboundMessageForPromptContext?: typeof recordOutboundMessageForPromptContext;
   createChannelMessageReplyPipeline?: typeof createChannelMessageReplyPipeline;
+  generateSpeakeasyVoiceNote?: typeof generateSpeakeasyVoiceNote;
 };
 
 export const defaultTelegramBotDeps: TelegramBotDeps = {
@@ -139,5 +141,8 @@ export const defaultTelegramBotDeps: TelegramBotDeps = {
   },
   get createChannelMessageReplyPipeline() {
     return createChannelMessageReplyPipeline;
+  },
+  get generateSpeakeasyVoiceNote() {
+    return generateSpeakeasyVoiceNote;
   },
 };
