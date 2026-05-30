@@ -86,6 +86,10 @@ function expectMainCompactionResult(
   expect(compacted.payload?.compacted).toBe(expectedCompacted);
 }
 
+async function canonicalizeExpectedExistingPath(filePath: string): Promise<string> {
+  return path.join(await fs.realpath(path.dirname(filePath)), path.basename(filePath));
+}
+
 test("sessions.compaction.* lists checkpoints and branches or restores from compacted transcripts", async () => {
   const { dir, storePath } = await createSessionStoreDir();
   const fixture = await createCheckpointFixture(dir, { legacyPreCompactionSnapshot: false });
@@ -400,6 +404,8 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
   await fs.copyFile(preCompactionSessionFile, checkpointFile);
   await fs.utimes(checkpointFile, 1_700_000_000.123, 1_700_000_001.789);
   const expectedCreatedAt = Math.trunc((await fs.stat(checkpointFile)).mtimeMs);
+  const expectedCheckpointFile = await canonicalizeExpectedExistingPath(checkpointFile);
+  const expectedSessionFile = await canonicalizeExpectedExistingPath(fixture.sessionFile);
   await writeSessionStore({
     entries: {
       main: sessionStoreEntry(fixture.sessionId, {
@@ -444,7 +450,7 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
     expect(Number.isInteger(listedCheckpoints.payload?.checkpoints[0]?.createdAt)).toBe(true);
     expect(listedCheckpoints.payload?.checkpoints[0]?.createdAt).toBe(expectedCreatedAt);
     expect(listedCheckpoints.payload?.checkpoints[0]?.preCompaction.sessionFile).toBe(
-      checkpointFile,
+      expectedCheckpointFile,
     );
 
     const checkpoint = await rpcReq<{
@@ -463,12 +469,12 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
       checkpointId,
       preCompaction: {
         sessionId: preCompactionSession.getSessionId(),
-        sessionFile: checkpointFile,
+        sessionFile: expectedCheckpointFile,
         leafId: fixture.preCompactionLeafId,
       },
       postCompaction: {
         sessionId: fixture.sessionId,
-        sessionFile: fixture.sessionFile,
+        sessionFile: expectedSessionFile,
       },
     });
 
@@ -507,7 +513,7 @@ test("sessions.compaction.* discovers checkpoint transcript files when store met
     expect(restored.payload?.entry.compactionCheckpoints?.[0]).toMatchObject({
       checkpointId,
       preCompaction: {
-        sessionFile: checkpointFile,
+        sessionFile: expectedCheckpointFile,
       },
     });
     const restoredSessionFile = restored.payload?.entry.sessionFile;
@@ -545,6 +551,8 @@ test("sessions.compaction.* ignores malformed usable-looking stored checkpoint m
   await fs.copyFile(preCompactionSessionFile, checkpointFile);
   await fs.utimes(checkpointFile, 1_700_000_000.123, 1_700_000_001.789);
   const expectedCreatedAt = Math.trunc((await fs.stat(checkpointFile)).mtimeMs);
+  const expectedCheckpointFile = await canonicalizeExpectedExistingPath(checkpointFile);
+  const expectedSessionFile = await canonicalizeExpectedExistingPath(fixture.sessionFile);
   await writeSessionStore({
     entries: {
       main: sessionStoreEntry(fixture.sessionId, {
@@ -585,7 +593,7 @@ test("sessions.compaction.* ignores malformed usable-looking stored checkpoint m
     expect(listedCheckpoints.payload?.checkpoints[0]?.checkpointId).toBe(checkpointId);
     expect(listedCheckpoints.payload?.checkpoints[0]?.createdAt).toBe(expectedCreatedAt);
     expect(listedCheckpoints.payload?.checkpoints[0]?.preCompaction.sessionFile).toBe(
-      checkpointFile,
+      expectedCheckpointFile,
     );
 
     const checkpoint = await rpcReq<{
@@ -604,12 +612,12 @@ test("sessions.compaction.* ignores malformed usable-looking stored checkpoint m
       checkpointId,
       preCompaction: {
         sessionId: preCompactionSession.getSessionId(),
-        sessionFile: checkpointFile,
+        sessionFile: expectedCheckpointFile,
         leafId: fixture.preCompactionLeafId,
       },
       postCompaction: {
         sessionId: fixture.sessionId,
-        sessionFile: fixture.sessionFile,
+        sessionFile: expectedSessionFile,
       },
     });
 
@@ -648,7 +656,7 @@ test("sessions.compaction.* ignores malformed usable-looking stored checkpoint m
     expect(restored.payload?.entry.compactionCheckpoints?.[0]).toMatchObject({
       checkpointId,
       preCompaction: {
-        sessionFile: checkpointFile,
+        sessionFile: expectedCheckpointFile,
       },
     });
     const restoredSessionFile = restored.payload?.entry.sessionFile;
