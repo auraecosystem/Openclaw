@@ -233,10 +233,14 @@ const CODEX_NATIVE_EXECUTION_SUBCOMMANDS = new Set([
   "steer",
   "model",
   "fast",
+  "plan",
+  "think",
   "permissions",
   "compact",
   "review",
 ]);
+const CODEX_THINK_USAGE =
+  "Usage: /codex think [plan|execute] [default|minimal|low|medium|high|xhigh|status]";
 
 const lastCodexDiagnosticsUploadByThread = new Map<string, number>();
 const lastCodexDiagnosticsUploadByScope = new Map<string, number>();
@@ -331,10 +335,10 @@ export async function handleCodexSubcommand(
     return { text: await setConversationModel(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "plan") {
-    return { text: await setConversationPlanMode(deps, ctx, rest) };
+    return { text: await setConversationPlanMode(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "think") {
-    return { text: await setConversationReasoningEffort(deps, ctx, rest) };
+    return { text: await setConversationReasoningEffort(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "fast") {
     return { text: await setConversationFastMode(deps, ctx, options.pluginConfig, rest) };
@@ -870,6 +874,7 @@ async function setConversationFastMode(
 async function setConversationPlanMode(
   deps: CodexCommandDeps,
   ctx: PluginCommandContext,
+  pluginConfig: unknown,
   args: string[],
 ): Promise<string> {
   if (args.length > 1) {
@@ -887,29 +892,31 @@ async function setConversationPlanMode(
   return await deps.setCodexConversationPlanMode({
     sessionFile,
     mode: parsed,
+    pluginConfig,
   });
 }
 
 async function setConversationReasoningEffort(
   deps: CodexCommandDeps,
   ctx: PluginCommandContext,
+  pluginConfig: unknown,
   args: string[],
 ): Promise<string> {
-  if (args.length > 1) {
-    return "Usage: /codex think [default|minimal|low|medium|high|xhigh|status]";
+  if (args.length > 2) {
+    return CODEX_THINK_USAGE;
   }
   const sessionFile = await resolveControlSessionFile(ctx);
   if (!sessionFile) {
     return "Cannot set Codex think because this command did not include an OpenClaw session file.";
   }
-  const value = args[0];
-  const parsed = parseCodexReasoningEffortArg(value);
-  if (value && !parsed && value.trim().toLowerCase() !== "status") {
-    return "Usage: /codex think [default|minimal|low|medium|high|xhigh|status]";
+  const parsed = parseCodexReasoningEffortArg(args);
+  if (!parsed) {
+    return CODEX_THINK_USAGE;
   }
   return await deps.setCodexConversationReasoningEffort({
     sessionFile,
-    effort: parsed,
+    parsed,
+    pluginConfig,
   });
 }
 

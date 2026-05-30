@@ -10,6 +10,10 @@ import { normalizeTrimmedStringList } from "openclaw/plugin-sdk/string-coerce-ru
 import { detectWindowsSpawnCommandInlineArgs } from "openclaw/plugin-sdk/windows-spawn";
 import { z } from "zod";
 import type { CodexSandboxPolicy, CodexServiceTier } from "./protocol.js";
+import {
+  readCodexAppServerConversationReasoningDefaults,
+  type CodexAppServerConversationReasoningDefaults,
+} from "./reasoning-defaults.js";
 
 const START_OPTIONS_KEY_SECRET_SYMBOL = Symbol.for("openclaw.codexAppServerStartOptionsKeySecret");
 const START_OPTIONS_KEY_SECRET = getStartOptionsKeySecret();
@@ -138,6 +142,7 @@ export type CodexAppServerRuntimeOptions = {
   sandbox: CodexAppServerSandboxMode;
   approvalsReviewer: CodexAppServerApprovalsReviewer;
   serviceTier?: CodexServiceTier;
+  conversationReasoningDefaults?: CodexAppServerConversationReasoningDefaults;
 };
 
 export type CodexPluginConfig = {
@@ -168,6 +173,7 @@ export type CodexPluginConfig = {
     serviceTier?: CodexServiceTier | null;
     defaultWorkspaceDir?: string;
     experimental?: CodexAppServerExperimentalConfig;
+    conversationReasoningDefaults?: CodexAppServerConversationReasoningDefaults;
   };
 };
 
@@ -196,6 +202,7 @@ export const CODEX_APP_SERVER_CONFIG_KEYS = [
   "serviceTier",
   "defaultWorkspaceDir",
   "experimental",
+  "conversationReasoningDefaults",
 ] as const;
 
 export const CODEX_APP_SERVER_EXPERIMENTAL_CONFIG_KEYS = ["sandboxExecServer"] as const;
@@ -250,6 +257,7 @@ const codexAppServerExperimentalSchema = z
     sandboxExecServer: z.boolean().optional(),
   })
   .strict();
+const codexAppServerReasoningEffortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
 
 const codexPluginEntryConfigSchema = z
   .object({
@@ -313,6 +321,13 @@ const codexPluginConfigSchema = z
         serviceTier: codexAppServerServiceTierSchema,
         defaultWorkspaceDir: z.string().optional(),
         experimental: codexAppServerExperimentalSchema.optional(),
+        conversationReasoningDefaults: z
+          .object({
+            execute: codexAppServerReasoningEffortSchema.optional(),
+            plan: codexAppServerReasoningEffortSchema.optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -480,6 +495,9 @@ export function resolveCodexAppServerRuntimeOptions(
     ? normalizedPolicyMode
     : (explicitPolicyMode ?? normalizedPolicyMode ?? defaultPolicy?.mode ?? "yolo");
   const serviceTier = normalizeCodexServiceTier(config.serviceTier);
+  const conversationReasoningDefaults = readCodexAppServerConversationReasoningDefaults(
+    config.conversationReasoningDefaults,
+  );
   if (transport === "websocket" && !url) {
     throw new Error(
       "plugins.entries.codex.config.appServer.url is required when appServer.transport is websocket",
@@ -539,6 +557,7 @@ export function resolveCodexAppServerRuntimeOptions(
       defaultPolicy?.approvalsReviewer ??
       (policyMode === "guardian" ? "auto_review" : "user"),
     ...(serviceTier ? { serviceTier } : {}),
+    ...(conversationReasoningDefaults ? { conversationReasoningDefaults } : {}),
   };
 }
 

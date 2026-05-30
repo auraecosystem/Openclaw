@@ -94,6 +94,10 @@ describe("Codex app-server config", () => {
           approvalsReviewer: "guardian_subagent",
           serviceTier: "flex",
           codeModeOnly: true,
+          conversationReasoningDefaults: {
+            execute: "medium",
+            plan: "xhigh",
+          },
           turnCompletionIdleTimeoutMs: 120_000,
           postToolRawAssistantCompletionIdleTimeoutMs: 180_000,
         },
@@ -110,6 +114,10 @@ describe("Codex app-server config", () => {
       approvalsReviewer: "guardian_subagent",
       serviceTier: "flex",
       codeModeOnly: true,
+      conversationReasoningDefaults: {
+        execute: "medium",
+        plan: "xhigh",
+      },
       turnCompletionIdleTimeoutMs: 120_000,
       postToolRawAssistantCompletionIdleTimeoutMs: 180_000,
     });
@@ -182,6 +190,16 @@ describe("Codex app-server config", () => {
     });
 
     expect(runtime.serviceTier).toBe("batch-preview");
+  });
+
+  it("rejects malformed conversation reasoning defaults", () => {
+    expect(
+      readCodexPluginConfig({
+        appServer: {
+          conversationReasoningDefaults: { execute: "maximum", plan: "xhigh" },
+        },
+      }),
+    ).toStrictEqual({});
   });
 
   it("rejects malformed plugin config instead of treating freeform strings as control values", () => {
