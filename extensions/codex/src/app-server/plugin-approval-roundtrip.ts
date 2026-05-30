@@ -2,6 +2,7 @@ import {
   callGatewayTool,
   type EmbeddedRunAttemptParams,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { isApprovalNotFoundError } from "openclaw/plugin-sdk/error-runtime";
 import { resolveCodexGatewayTimeoutWithGraceMs } from "./attempt-timeouts.js";
 
 const DEFAULT_CODEX_APPROVAL_TIMEOUT_MS = 120_000;
@@ -82,24 +83,31 @@ export async function waitForPluginApprovalDecision(params: {
     { timeoutMs: resolveCodexGatewayTimeoutWithGraceMs(timeoutMs) },
     { id: params.approvalId },
   );
-  if (!params.signal) {
-    return (await waitPromise)?.decision;
-  }
-  let onAbort: (() => void) | undefined;
-  const abortPromise = new Promise<never>((_, reject) => {
-    if (params.signal!.aborted) {
-      reject(params.signal!.reason);
-      return;
-    }
-    onAbort = () => reject(params.signal!.reason);
-    params.signal!.addEventListener("abort", onAbort, { once: true });
-  });
   try {
-    return (await Promise.race([waitPromise, abortPromise]))?.decision;
-  } finally {
-    if (onAbort) {
-      params.signal.removeEventListener("abort", onAbort);
+    if (!params.signal) {
+      return (await waitPromise)?.decision;
     }
+    let onAbort: (() => void) | undefined;
+    const abortPromise = new Promise<never>((_, reject) => {
+      if (params.signal!.aborted) {
+        reject(params.signal!.reason);
+        return;
+      }
+      onAbort = () => reject(params.signal!.reason);
+      params.signal!.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return (await Promise.race([waitPromise, abortPromise]))?.decision;
+    } finally {
+      if (onAbort) {
+        params.signal.removeEventListener("abort", onAbort);
+      }
+    }
+  } catch (error) {
+    if (isApprovalNotFoundError(error)) {
+      return null;
+    }
+    throw error;
   }
 }
 
