@@ -20,7 +20,7 @@ type PendingUserInput = {
   cleanup: () => void;
 };
 
-type UserInputQuestion = {
+export type UserInputQuestion = {
   id: string;
   header: string;
   question: string;
@@ -29,7 +29,7 @@ type UserInputQuestion = {
   options: UserInputOption[] | null;
 };
 
-type UserInputOption = {
+export type UserInputOption = {
   label: string;
   description: string;
 };
@@ -130,7 +130,7 @@ export function createCodexUserInputBridge(params: {
   };
 }
 
-function readUserInputParams(value: JsonValue | undefined):
+export function readUserInputParams(value: JsonValue | undefined):
   | {
       threadId: string;
       turnId: string;
@@ -205,7 +205,7 @@ async function deliverUserInputPrompt(
   await params.onPartialReply?.({ text });
 }
 
-function formatUserInputPrompt(questions: UserInputQuestion[]): string {
+export function formatUserInputPrompt(questions: UserInputQuestion[]): string {
   const lines = ["Codex needs input:"];
   questions.forEach((question, index) => {
     if (questions.length > 1) {
@@ -238,7 +238,10 @@ function formatUserInputPrompt(questions: UserInputQuestion[]): string {
   return lines.join("\n");
 }
 
-function buildUserInputResponse(questions: UserInputQuestion[], inputText: string): JsonObject {
+export function buildUserInputResponse(
+  questions: UserInputQuestion[],
+  inputText: string,
+): JsonObject {
   const answers: JsonObject = {};
   if (questions.length === 1) {
     const question = questions[0];
@@ -301,7 +304,7 @@ function parseKeyedAnswers(inputText: string): Map<string, string> {
   return answers;
 }
 
-function emptyUserInputResponse(): JsonObject {
+export function emptyUserInputResponse(): JsonObject {
   return { answers: {} };
 }
 
