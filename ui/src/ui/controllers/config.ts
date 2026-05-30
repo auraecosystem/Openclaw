@@ -1,6 +1,11 @@
 import { applyMergePatch } from "../../../../src/config/merge-patch.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
-import type { ConfigSchemaResponse, ConfigSnapshot, ConfigUiHints } from "../types.ts";
+import type {
+  ConfigSchemaResponse,
+  ConfigSnapshot,
+  ConfigUiHints,
+  UpdateAvailable,
+} from "../types.ts";
 import type { JsonSchema } from "../views/config-form.shared.ts";
 import { coerceFormValues } from "./config/form-coerce.ts";
 import {
@@ -39,6 +44,7 @@ export type ConfigState = {
   pendingUpdateExpectedVersion: string | null;
   updateStatusBanner: { tone: "danger" | "warn" | "info"; text: string } | null;
   lastError: string | null;
+  updateAvailable?: UpdateAvailable | null;
 };
 
 const autoAllowlistedPluginIdsByState = new WeakMap<ConfigState, Set<string>>();
@@ -206,6 +212,8 @@ function resolveUpdateStatusBanner(params: { status?: string; reason?: string })
       "restart-unhealthy":
         "The replacement process never became healthy. The previous process stayed up so you can recover.",
       "doctor-failed": "Doctor repair failed. Run `openclaw doctor --non-interactive` and retry.",
+      "managed-service-handoff-started":
+        "The update was handed off to the host service. The gateway will restart automatically when the update completes.",
     }[reason] ?? "See the gateway logs for the exact failure and retry once the cause is fixed.";
   return {
     tone,
@@ -281,8 +289,9 @@ export async function runUpdate(state: ConfigState) {
       sessionKey: state.applySessionKey,
     });
     const status = res.result?.status ?? (res.ok === true ? "ok" : "error");
-    if (status === "ok" && res.ok === true) {
-      state.pendingUpdateExpectedVersion = res.result?.after?.version ?? null;
+    if (res.ok === true) {
+      state.pendingUpdateExpectedVersion =
+        res.result?.after?.version ?? state.updateAvailable?.latestVersion ?? null;
       return;
     }
     state.pendingUpdateExpectedVersion = null;
