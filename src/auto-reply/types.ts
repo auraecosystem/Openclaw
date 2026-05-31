@@ -3,6 +3,7 @@ export type {
   GetReplyOptions,
   PartialReplyPayload,
   ReplyThreadingPolicy,
+  SessionMetadataChangedEvent,
   TypingPolicy,
 } from "./get-reply-options.types.js";
 export {

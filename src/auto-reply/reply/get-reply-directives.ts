@@ -632,6 +632,7 @@ export async function resolveReplyDirectives(params: {
     contextTokens,
     effectiveModelDirective,
     typing,
+    onSessionMetadataChanged: opts?.onSessionMetadataChanged,
   });
   if (applyResult.kind === "reply") {
     return { kind: "reply", reply: applyResult.reply };
