@@ -139,7 +139,8 @@ import { ensureOpenClawPluginSdkAlias } from "./plugin-sdk-dist-alias.js";
 import { installOpenClawPluginSdkNativeResolver } from "./plugin-sdk-native-resolver.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import type { PluginRegistryParams } from "./registry-types.js";
-import { createPluginRegistry, type PluginRecord, type PluginRegistry } from "./registry.js";
+import type { PluginRecord, PluginRegistry } from "./registry.js";
+import { createPluginRegistry } from "./registry.js";
 import {
   getActivePluginRegistry,
   getActivePluginRegistryKey,

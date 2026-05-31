@@ -6,7 +6,8 @@ import { runBeforeToolCallHook } from "../agents/agent-tools.before-tool-call.js
 import { resolveToolLoopDetectionConfig } from "../agents/agent-tools.js";
 import { getChannelAgentToolMeta } from "../agents/channel-tools.js";
 import { isKnownCoreToolId } from "../agents/tool-catalog.js";
-import { ToolInputError, type AnyAgentTool } from "../agents/tools/common.js";
+import type { AnyAgentTool } from "../agents/tools/common.js";
+import { ToolInputError } from "../agents/tools/common.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { logWarn } from "../logger.js";

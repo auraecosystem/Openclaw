@@ -55,7 +55,8 @@ import {
   shouldRunPreflightCompaction,
 } from "./memory-flush.js";
 import { readPostCompactionContext } from "./post-compaction-context.js";
-import { refreshQueuedFollowupSession, type FollowupRun } from "./queue.js";
+import type { FollowupRun } from "./queue.js";
+import { refreshQueuedFollowupSession } from "./queue.js";
 import { isRenderablePayload } from "./reply-payloads-base.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
 import { incrementCompactionCount } from "./session-updates.js";

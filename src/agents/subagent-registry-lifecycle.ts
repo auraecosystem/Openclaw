@@ -763,6 +763,7 @@ export function createSubagentRegistryLifecycleController(params: {
       workspaceDir: cleanupParams.entry.workspaceDir,
     });
     cleanupParams.entry.cleanupCompletedAt = cleanupParams.completedAt;
+    params.runs.set(cleanupParams.runId, cleanupParams.entry);
     params.persist();
     retryDeferredCompletedAnnounces(cleanupParams.runId);
   };

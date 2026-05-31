@@ -10,7 +10,8 @@ import { buildAgentRunTerminalOutcomeFromWaitResult } from "./agent-run-terminal
 import { removeInternalSessionEffectsTranscript } from "./internal-session-effects.js";
 import { isRecoverableAgentWaitError, waitForAgentRun } from "./run-wait.js";
 import type { ensureRuntimePluginsLoaded as ensureRuntimePluginsLoadedFn } from "./runtime-plugins.js";
-import { type SubagentRunOutcome, withSubagentOutcomeTiming } from "./subagent-announce-output.js";
+import type { SubagentRunOutcome } from "./subagent-announce-output.js";
+import { withSubagentOutcomeTiming } from "./subagent-announce-output.js";
 import {
   clearDeliveryState,
   ensureCompletionState,
@@ -698,11 +699,8 @@ export function createSubagentRunManager(params: {
     // Always start sweeper — session-mode runs (no archiveAtMs) also need TTL cleanup.
     params.startSweeper();
     // Wait for subagent completion via gateway RPC (cross-process).
-    // Runs that do not expect completion messages remain observable until lifecycle
-    // events or explicit release clean them up.
-    if (registerParams.expectsCompletionMessage !== false) {
-      void waitForSubagentCompletion(runId, waitTimeoutMs, entry);
-    }
+    // The in-process lifecycle listener is a fallback for embedded runs.
+    void waitForSubagentCompletion(runId, waitTimeoutMs, entry);
   };
 
   const releaseSubagentRun = (runId: string) => {

@@ -26,7 +26,8 @@ import {
   registerContextEngineForOwner,
 } from "../context-engine/registry.js";
 import { createPluginGatewayMethodDescriptor } from "../gateway/methods/registry.js";
-import { isOperatorScope, type OperatorScope } from "../gateway/operator-scopes.js";
+import type { OperatorScope } from "../gateway/operator-scopes.js";
+import { isOperatorScope } from "../gateway/operator-scopes.js";
 import type { GatewayRequestHandler, RespondFn } from "../gateway/server-methods/types.js";
 import { registerInternalHook, unregisterInternalHook } from "../hooks/internal-hooks.js";
 import type { HookEntry } from "../hooks/types.js";
@@ -144,9 +145,10 @@ import {
   withPluginRuntimePluginScope,
 } from "./runtime/gateway-request-scope.js";
 import type { PluginRuntime } from "./runtime/types.js";
-import { validateJsonSchemaValue, type JsonSchemaValue } from "./schema-validator.js";
+import type { JsonSchemaValue } from "./schema-validator.js";
+import { validateJsonSchemaValue } from "./schema-validator.js";
 import { normalizeSessionEntrySlotKey } from "./session-entry-slot-keys.js";
-import { type MemoryPluginRole } from "./slot-resolution.js";
+import type { MemoryPluginRole } from "./slot-resolution.js";
 import { defaultSlotIdForKey, hasKind } from "./slots.js";
 import {
   findUndeclaredPluginToolNames,
