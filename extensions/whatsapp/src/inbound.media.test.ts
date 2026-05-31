@@ -155,7 +155,10 @@ vi.mock("./runtime.js", async () => {
         openKeyedStore: () => createInMemoryKeyedStore(),
         openChannelIngressQueue: (
           options?: Omit<Parameters<typeof createChannelIngressQueue>[0], "channelId">,
-        ) => createChannelIngressQueue({ ...options, channelId: "whatsapp" }),
+        ) =>
+          options
+            ? createChannelIngressQueue({ ...options, channelId: "whatsapp" })
+            : createChannelIngressQueue({ channelId: "whatsapp" }),
       },
     }),
     setWhatsAppRuntime: vi.fn(),

@@ -21,6 +21,7 @@ import {
   resetTaskRegistryForTests,
 } from "../../tasks/task-registry.js";
 import { withTempDir } from "../../test-helpers/temp-dir.js";
+import type { CallGatewayOptions } from "../call.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { agentHandlers } from "./agent.js";
 import { chatHandlers } from "./chat.js";
@@ -2831,11 +2832,13 @@ describe("gateway agent handler", () => {
         canonicalKey: childSessionKey,
       });
       subagentRegistryTesting.setDepsForTest({
-        callGateway: async (request: unknown) => {
-          if ((request as { method?: string }).method === "agent.wait") {
-            return { status: "ok", startedAt: Date.now() - 100, endedAt: Date.now() };
+        callGateway: async <T = Record<string, unknown>>(
+          request: CallGatewayOptions,
+        ): Promise<T> => {
+          if (request.method === "agent.wait") {
+            return { status: "ok", startedAt: Date.now() - 100, endedAt: Date.now() } as T;
           }
-          return {};
+          return {} as T;
         },
       });
       mocks.updateSessionStore.mockImplementation(async (_path, updater) => {

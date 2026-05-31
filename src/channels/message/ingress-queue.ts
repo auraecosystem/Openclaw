@@ -186,8 +186,8 @@ function affectedRows(result: { numAffectedRows?: bigint }): number {
   return Number(result.numAffectedRows ?? 0n);
 }
 
-function parseJson(value: string): unknown {
-  return JSON.parse(value) as unknown;
+function parseJson<T>(value: string, _isType?: (parsed: unknown) => parsed is T): T {
+  return JSON.parse(value) as T;
 }
 
 function baseRecord<TPayload, TMetadata>(
@@ -198,8 +198,8 @@ function baseRecord<TPayload, TMetadata>(
     channelId: row.channel_id,
     accountId: row.account_id,
     queueName: row.queue_name,
-    payload: parseJson(row.payload_json) as TPayload,
-    ...(row.metadata_json === null ? {} : { metadata: parseJson(row.metadata_json) as TMetadata }),
+    payload: parseJson<TPayload>(row.payload_json),
+    ...(row.metadata_json === null ? {} : { metadata: parseJson<TMetadata>(row.metadata_json) }),
     receivedAt: row.received_at,
     updatedAt: row.updated_at,
     ...(row.lane_key === null ? {} : { laneKey: row.lane_key }),
@@ -233,7 +233,7 @@ function completedRecord<TCompletedMetadata>(
     completedAt: row.completed_at ?? row.updated_at,
     ...(row.completed_metadata_json === null
       ? {}
-      : { metadata: parseJson(row.completed_metadata_json) as TCompletedMetadata }),
+      : { metadata: parseJson<TCompletedMetadata>(row.completed_metadata_json) }),
   };
 }
 

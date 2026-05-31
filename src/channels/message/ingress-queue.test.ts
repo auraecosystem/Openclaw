@@ -54,6 +54,7 @@ describe("channel ingress queue", () => {
       if (pending.kind !== "pending") {
         throw new Error(`Expected pending duplicate, got ${pending.kind}`);
       }
+      expect(pending.record).toHaveProperty("payload");
       expect(pending.record.payload).toEqual({ text: "first" });
       expect(completed).toEqual({
         kind: "completed",
