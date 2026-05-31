@@ -1,3 +1,5 @@
+import { MEMORY_PLUGIN_SLOT_KEYS } from "./slots.js";
+
 type EnableStateLike = {
   enabled: boolean;
   reason?: string;
@@ -98,6 +100,10 @@ export function toPluginActivationState(
   };
 }
 
+function isSelectedMemorySlot(config: PluginActivationConfigLike, id: string): boolean {
+  return MEMORY_PLUGIN_SLOT_KEYS.some((slotKey) => config.slots[slotKey] === id);
+}
+
 function resolveExplicitPluginSelectionShared<TRootConfig>(params: {
   id: string;
   origin: string;
@@ -117,14 +123,7 @@ function resolveExplicitPluginSelectionShared<TRootConfig>(params: {
   ) {
     return { explicitlyEnabled: true, cause: "bundled-channel-enabled-in-config" };
   }
-  if (
-    params.config.slots.memory === params.id ||
-    params.config.slots["memory.recall"] === params.id ||
-    params.config.slots["memory.compaction"] === params.id ||
-    params.config.slots["memory.capture"] === params.id ||
-    params.config.slots["memory.dreaming"] === params.id ||
-    params.config.slots["memory.userModel"] === params.id
-  ) {
+  if (isSelectedMemorySlot(params.config, params.id)) {
     return { explicitlyEnabled: true, cause: "selected-memory-slot" };
   }
   if (params.config.slots.contextEngine === params.id) {
@@ -205,14 +204,7 @@ export function resolvePluginActivationDecisionShared<TRootConfig>(params: {
       cause: "workspace-disabled-by-default",
     };
   }
-  if (
-    params.config.slots.memory === params.id ||
-    params.config.slots["memory.recall"] === params.id ||
-    params.config.slots["memory.compaction"] === params.id ||
-    params.config.slots["memory.capture"] === params.id ||
-    params.config.slots["memory.dreaming"] === params.id ||
-    params.config.slots["memory.userModel"] === params.id
-  ) {
+  if (isSelectedMemorySlot(params.config, params.id)) {
     return {
       enabled: true,
       activated: true,

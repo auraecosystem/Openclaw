@@ -151,10 +151,7 @@ function resolveMemorySlotStartupPluginIds(params: {
   const addConfiguredAgentRoleSlots = (agentId: string, slots: Record<string, unknown>) => {
     for (const role of MEMORY_PLUGIN_ROLES) {
       const slotKey = memoryRoleToSlotKey(role);
-      if (
-        Object.prototype.hasOwnProperty.call(slots, slotKey) ||
-        (role === "recall" && Object.prototype.hasOwnProperty.call(slots, "memory"))
-      ) {
+      if (Object.hasOwn(slots, slotKey) || (role === "recall" && Object.hasOwn(slots, "memory"))) {
         addSlot(resolveMemoryRoleSlot({ cfg: activationSourceConfig, role, agentId }));
       }
     }

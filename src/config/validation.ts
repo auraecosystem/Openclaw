@@ -23,7 +23,10 @@ import {
   type PluginMetadataSnapshot,
 } from "../plugins/plugin-metadata-snapshot.js";
 import { validateJsonSchemaValue } from "../plugins/schema-validator.js";
-import { listConfiguredMemoryRolePluginIds } from "../plugins/slot-resolution.js";
+import {
+  listConfiguredMemoryRolePluginIds,
+  listMemoryRoleSlotDecisionValues,
+} from "../plugins/slot-resolution.js";
 import { MEMORY_PLUGIN_SLOT_KEYS, hasKind } from "../plugins/slots.js";
 import { resolveWebSearchInstallCatalogEntries } from "../plugins/web-search-install-catalog.js";
 import { collectUnsupportedSecretRefConfigCandidates } from "../secrets/unsupported-surface-policy.js";
@@ -51,8 +54,6 @@ import { OpenClawSchema } from "./zod-schema.js";
 
 const LEGACY_REMOVED_PLUGIN_IDS = new Set(["google-antigravity-auth", "google-gemini-cli-auth"]);
 const BLOCKED_PLUGIN_CANDIDATE_PREFIX = "blocked plugin candidate:";
-const GRANULAR_MEMORY_SLOT_KEYS = MEMORY_PLUGIN_SLOT_KEYS.filter((key) => key !== "memory");
-
 type UnknownIssueRecord = Record<string, unknown>;
 type ConfigPathSegment = string | number;
 type ExplicitPluginReferences = {
@@ -1810,8 +1811,7 @@ function validateConfigObjectWithPluginsBase(
   // Default slot values are inferred; only user-configured slot refs should block startup.
   const pluginSlots = pluginsConfig?.slots;
   for (const slotKey of MEMORY_PLUGIN_SLOT_KEYS) {
-    const hasExplicitSlot =
-      pluginSlots !== undefined && Object.prototype.hasOwnProperty.call(pluginSlots, slotKey);
+    const hasExplicitSlot = pluginSlots !== undefined && Object.hasOwn(pluginSlots, slotKey);
     const slotValue = normalizedPlugins.slots[slotKey];
     if (
       !hasExplicitSlot ||
@@ -1843,7 +1843,7 @@ function validateConfigObjectWithPluginsBase(
       continue;
     }
     for (const slotKey of MEMORY_PLUGIN_SLOT_KEYS) {
-      if (!Object.prototype.hasOwnProperty.call(agentSlots, slotKey)) {
+      if (!Object.hasOwn(agentSlots, slotKey)) {
         continue;
       }
       const rawSlotValue = agentSlots[slotKey];
@@ -1873,12 +1873,13 @@ function validateConfigObjectWithPluginsBase(
   }
 
   const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg: config }));
-  const memorySlots = [
-    ...new Set([
-      ...GRANULAR_MEMORY_SLOT_KEYS.map((slotKey) => normalizedPlugins.slots[slotKey]),
-      ...selectedMemoryRolePluginIds,
-    ]),
-  ];
+  const memorySlots = listMemoryRoleSlotDecisionValues({
+    cfg: config,
+    includeConfiguredAgentSlots: true,
+    slotValues: MEMORY_PLUGIN_SLOT_KEYS.filter((slotKey) => slotKey !== "memory").map(
+      (slotKey) => normalizedPlugins.slots[slotKey],
+    ),
+  });
   let selectedMemoryPluginId: string | null = null;
   const seenPlugins = new Set<string>();
   for (const record of registry.plugins) {

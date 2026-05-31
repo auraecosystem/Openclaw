@@ -96,15 +96,11 @@ export function createPluginActivationSource(params: {
 const hasExplicitMemorySlot = (plugins?: OpenClawConfig["plugins"]) =>
   Boolean(
     plugins?.slots &&
-    (Object.prototype.hasOwnProperty.call(plugins.slots, "memory") ||
-      Object.prototype.hasOwnProperty.call(plugins.slots, "memory.recall")),
+    (Object.hasOwn(plugins.slots, "memory") || Object.hasOwn(plugins.slots, "memory.recall")),
   );
 
 const hasExplicitMemoryEntry = (plugins?: OpenClawConfig["plugins"]) =>
-  Boolean(
-    plugins?.entries &&
-    Object.prototype.hasOwnProperty.call(plugins.entries, defaultSlotIdForKey("memory.recall")),
-  );
+  Boolean(plugins?.entries && Object.hasOwn(plugins.entries, defaultSlotIdForKey("memory.recall")));
 
 export const hasExplicitPluginConfig = (plugins?: OpenClawConfig["plugins"]) =>
   hasExplicitPluginConfigShared(plugins);

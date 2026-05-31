@@ -10,7 +10,7 @@ export type LegacyMemorySlotHit = {
 };
 
 function ownSlot(slots: Record<string, unknown>, key: string): boolean {
-  return Object.prototype.hasOwnProperty.call(slots, key);
+  return Object.hasOwn(slots, key);
 }
 
 function normalizeSlotText(value: unknown): string | undefined {

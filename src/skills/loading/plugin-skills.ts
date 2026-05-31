@@ -10,7 +10,10 @@ import {
   resolveMemorySlotDecision,
 } from "../../plugins/config-policy.js";
 import { resolvePluginMetadataSnapshot } from "../../plugins/plugin-metadata-snapshot.js";
-import { listConfiguredMemoryRolePluginIds } from "../../plugins/slot-resolution.js";
+import {
+  listConfiguredMemoryRolePluginIds,
+  listMemoryRoleSlotDecisionValues,
+} from "../../plugins/slot-resolution.js";
 import { hasKind } from "../../plugins/slots.js";
 import { isPathInsideWithRealpath } from "../../security/scan-paths.js";
 import { CONFIG_DIR } from "../../utils.js";
@@ -52,16 +55,17 @@ export function resolvePluginSkillDirs(params: {
   );
   const acpRuntimeAvailable = isAcpRuntimeSpawnAvailable({ config });
   const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg: config }));
-  const memorySlots = [
-    ...new Set([
+  const memorySlots = listMemoryRoleSlotDecisionValues({
+    cfg: config,
+    includeConfiguredAgentSlots: true,
+    slotValues: [
       normalizedPlugins.slots["memory.recall"],
       normalizedPlugins.slots["memory.compaction"],
       normalizedPlugins.slots["memory.capture"],
       normalizedPlugins.slots["memory.dreaming"],
       normalizedPlugins.slots["memory.userModel"],
-      ...selectedMemoryRolePluginIds,
-    ]),
-  ];
+    ],
+  });
   let selectedMemoryPluginId: string | null = null;
   const seen = new Set<string>();
   const resolved: string[] = [];

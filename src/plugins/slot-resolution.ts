@@ -20,9 +20,7 @@ export function memoryRoleToSlotKey(role: MemoryPluginRole): MemoryPluginRoleSlo
 }
 
 function hasOwnSlot(slots: unknown, slotKey: string): boolean {
-  return Boolean(
-    slots && typeof slots === "object" && Object.prototype.hasOwnProperty.call(slots, slotKey),
-  );
+  return Boolean(slots && typeof slots === "object" && Object.hasOwn(slots, slotKey));
 }
 
 export function resolvePluginSlot(params: {
@@ -156,6 +154,23 @@ export function listConfiguredMemoryRolePluginIds(params: { cfg: OpenClawConfig 
       listConfiguredMemoryRoleSlotSelections(params).map((selection) => selection.pluginId),
     ),
   ].toSorted((left, right) => left.localeCompare(right));
+}
+
+export function listMemoryRoleSlotDecisionValues(params: {
+  cfg: OpenClawConfig;
+  agentId?: string;
+  includeConfiguredAgentSlots?: boolean;
+  slotValues?: Iterable<string | null | undefined>;
+}): (string | null | undefined)[] {
+  return [
+    ...new Set([
+      ...(params.slotValues ??
+        Object.values(resolveMemoryRoleSlots({ cfg: params.cfg, agentId: params.agentId }))),
+      ...(params.includeConfiguredAgentSlots
+        ? listConfiguredMemoryRolePluginIds({ cfg: params.cfg })
+        : []),
+    ]),
+  ];
 }
 
 export function listSelectedMemoryRolePluginIds(params: {

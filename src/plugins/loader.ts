@@ -167,6 +167,7 @@ import {
 } from "./sdk-alias.js";
 import {
   listConfiguredMemoryRolePluginIds,
+  listMemoryRoleSlotDecisionValues,
   listMemoryRolesSelectedForPlugin,
   resolveMemoryRoleSlots,
 } from "./slot-resolution.js";
@@ -1135,7 +1136,7 @@ function collectAgentMemorySlotCacheEntries(config?: OpenClawConfig) {
       const normalizedSlots = normalizePluginsConfig({ slots: rawSlots }).slots;
       const slots: Partial<Record<(typeof MEMORY_PLUGIN_SLOT_KEYS)[number], string | null>> = {};
       for (const slotKey of MEMORY_PLUGIN_SLOT_KEYS) {
-        if (Object.prototype.hasOwnProperty.call(rawSlots, slotKey)) {
+        if (Object.hasOwn(rawSlots, slotKey)) {
           slots[slotKey] = normalizedSlots[slotKey] ?? null;
         }
       }
@@ -2060,9 +2061,11 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     const seenIds = new Map<string, PluginRecord["origin"]>();
     const memoryRoleSlots = resolveMemoryRoleSlots({ cfg });
     const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg }));
-    const memorySlots = [
-      ...new Set([...Object.values(memoryRoleSlots), ...selectedMemoryRolePluginIds]),
-    ];
+    const memorySlots = listMemoryRoleSlotDecisionValues({
+      cfg,
+      slotValues: Object.values(memoryRoleSlots),
+      includeConfiguredAgentSlots: true,
+    });
     const memorySlot = memoryRoleSlots.recall;
     let selectedMemoryPluginId: string | null = null;
     let memorySlotMatched = false;
@@ -3000,9 +3003,11 @@ export async function loadOpenClawPluginCliRegistry(
   const seenIds = new Map<string, PluginRecord["origin"]>();
   const memoryRoleSlots = resolveMemoryRoleSlots({ cfg });
   const selectedMemoryRolePluginIds = new Set(listConfiguredMemoryRolePluginIds({ cfg }));
-  const memorySlots = [
-    ...new Set([...Object.values(memoryRoleSlots), ...selectedMemoryRolePluginIds]),
-  ];
+  const memorySlots = listMemoryRoleSlotDecisionValues({
+    cfg,
+    slotValues: Object.values(memoryRoleSlots),
+    includeConfiguredAgentSlots: true,
+  });
   const memorySlot = memoryRoleSlots.recall;
   let selectedMemoryPluginId: string | null = null;
   const dreamingEngineId = resolveDreamingSidecarEngineId({ cfg, memorySlot });

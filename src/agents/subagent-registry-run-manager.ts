@@ -698,8 +698,11 @@ export function createSubagentRunManager(params: {
     // Always start sweeper — session-mode runs (no archiveAtMs) also need TTL cleanup.
     params.startSweeper();
     // Wait for subagent completion via gateway RPC (cross-process).
-    // The in-process lifecycle listener is a fallback for embedded runs.
-    void waitForSubagentCompletion(runId, waitTimeoutMs, entry);
+    // Runs that do not expect completion messages remain observable until lifecycle
+    // events or explicit release clean them up.
+    if (registerParams.expectsCompletionMessage !== false) {
+      void waitForSubagentCompletion(runId, waitTimeoutMs, entry);
+    }
   };
 
   const releaseSubagentRun = (runId: string) => {
