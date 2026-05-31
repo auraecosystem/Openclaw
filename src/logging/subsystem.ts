@@ -1,5 +1,8 @@
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { Chalk } from "chalk";
+// Initialize hostname env before tslog import; must be first import.
+import "./logger-hostname-init.js";
+
 import type { Logger as TsLogger } from "tslog";
 import { clearActiveProgressLine } from "../../packages/terminal-core/src/progress-line.js";
 import { isVerbose } from "../global-state.js";

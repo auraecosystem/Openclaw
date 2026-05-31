@@ -1,6 +1,9 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+// Initialize hostname env before tslog import; must be first import.
+import "./logger-hostname-init.js";
+
 import { Logger as TsLogger } from "tslog";
 import type { OpenClawConfig } from "../config/types.js";
 import { emitDiagnosticEvent } from "../infra/diagnostic-events.js";
@@ -95,7 +98,17 @@ const MAX_DIAGNOSTIC_LOG_NAME_CHARS = 120;
 const MAX_FILE_LOG_MESSAGE_CHARS = 4 * 1024;
 const MAX_FILE_LOG_CONTEXT_VALUE_CHARS = 512;
 const DIAGNOSTIC_LOG_ATTRIBUTE_KEY_RE = /^[A-Za-z0-9_.:-]{1,64}$/u;
-const HOSTNAME = os.hostname() || "unknown";
+
+// macOS intermittently returns empty hostname during module load.
+// Resolve lazily to avoid caching "unknown" for the entire gateway lifetime.
+let cachedHostname: string | null = null;
+function getHostname(): string {
+  if (cachedHostname === null) {
+    const h = os.hostname();
+    cachedHostname = h || "unknown";
+  }
+  return cachedHostname;
+}
 
 type DiagnosticLogAttributes = Record<string, string | number | boolean>;
 
@@ -361,7 +374,7 @@ function buildStructuredFileLogFields(logObj: TsLogRecord): Record<string, strin
   const sessionId = readFirstContextString(sources, ["session_id", "sessionId", "sessionKey"]);
   const channel = readFirstContextString(sources, ["channel", "messageProvider"]);
   return {
-    hostname: HOSTNAME,
+    hostname: getHostname(),
     ...(message ? { message } : {}),
     ...(agentId ? { agent_id: agentId } : {}),
     ...(sessionId ? { session_id: sessionId } : {}),
