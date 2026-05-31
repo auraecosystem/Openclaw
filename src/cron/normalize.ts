@@ -352,6 +352,52 @@ function unwrapJob(raw: UnknownRecord) {
   return raw;
 }
 
+/**
+ * Recover from local-llamacpp parameter serialization bugs where adjacent
+ * top-level property names get concatenated into a single key.
+ *
+ * Only backfills missing canonical fields; does not overwrite existing ones.
+ * This ensures normal input with canonical keys is not accidentally modified.
+ *
+ * Corruption patterns observed (issue #88439):
+ *   "name" + "payload"        → "namePayload"         (value = payload object)
+ *   "schedule"                → "scheduleKind"        (value = schedule object including nested kind)
+ *   "sessionTarget" + "name"  → "sessionTargetName"   (value = name string)
+ */
+function recoverConcatenatedKeys(obj: UnknownRecord): void {
+  // Early exit for the common case: no recovery keys present
+  if (!("namePayload" in obj || "scheduleKind" in obj || "sessionTargetName" in obj)) {
+    return;
+  }
+
+  // Pattern 1: "namePayload" → extract payload object (only if payload missing)
+  if ("namePayload" in obj) {
+    if (!("payload" in obj) && isRecord(obj.namePayload)) {
+      obj.payload = obj.namePayload as UnknownRecord;
+    }
+    delete obj.namePayload;
+  }
+
+  // Pattern 2: "scheduleKind" → extract schedule object (only if schedule missing)
+  if ("scheduleKind" in obj) {
+    if (!("schedule" in obj) && isRecord(obj.scheduleKind)) {
+      obj.schedule = obj.scheduleKind as UnknownRecord;
+    }
+    delete obj.scheduleKind;
+  }
+
+  // Pattern 3: "sessionTargetName" → extract name (only if name missing)
+  if ("sessionTargetName" in obj) {
+    if (!("name" in obj)) {
+      obj.name = obj.sessionTargetName;
+      if (!("sessionTarget" in obj)) {
+        obj.sessionTarget = "isolated";
+      }
+    }
+    delete obj.sessionTargetName;
+  }
+}
+
 function normalizeSessionTarget(raw: unknown) {
   if (typeof raw !== "string") {
     return undefined;
@@ -463,6 +509,10 @@ export function normalizeCronJobInput(
   const base = unwrapJob(raw);
   const next: UnknownRecord = { ...base };
 
+  // Recover from local-llamacpp serialization bugs where adjacent property
+  // names get concatenated into a single key (issue #88439).
+  recoverConcatenatedKeys(next);
+
   if ("agentId" in base) {
     const agentId = base.agentId;
     if (agentId === null) {
@@ -529,9 +579,9 @@ export function normalizeCronJobInput(
     }
   }
 
-  if (isRecord(base.schedule)) {
-    next.schedule = coerceSchedule(base.schedule);
-  } else if (!isRecord(next.schedule)) {
+  if (isRecord(next.schedule)) {
+    next.schedule = coerceSchedule(next.schedule);
+  } else {
     const inferredSchedule = inferTopLevelSchedule(next);
     if (inferredSchedule) {
       next.schedule = inferredSchedule;
@@ -545,8 +595,8 @@ export function normalizeCronJobInput(
     }
   }
 
-  if (isRecord(base.payload)) {
-    next.payload = coercePayload(base.payload);
+  if (isRecord(next.payload)) {
+    next.payload = coercePayload(next.payload);
   }
 
   if (isRecord(base.delivery)) {
