@@ -50,6 +50,7 @@ import {
   memoryRoleToSlotKey,
   resolveMemoryRoleSlot,
 } from "./slot-resolution.js";
+import { MEMORY_PLUGIN_SLOT_KEYS } from "./slots.js";
 
 export type GatewayStartupPluginPlan = {
   channelPluginIds: readonly string[];
@@ -872,11 +873,32 @@ function addValidationPluginConfigReferences(
   for (const pluginId of Object.keys(params.pluginsConfig.entries)) {
     target.add(pluginId);
   }
+  const addSlotReference = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const normalized = params.normalizePluginId(value);
+    if (!normalized || normalized.toLowerCase() === "none") {
+      return;
+    }
+    target.add(normalized);
+  };
+  const addMemorySlotReferences = (slots: unknown) => {
+    if (!isRecord(slots)) {
+      return;
+    }
+    for (const slotKey of MEMORY_PLUGIN_SLOT_KEYS) {
+      if (Object.hasOwn(slots, slotKey)) {
+        addSlotReference(slots[slotKey]);
+      }
+    }
+  };
+
   const rawSlots = isRecord(params.config.plugins?.slots) ? params.config.plugins.slots : {};
-  const hasExplicitMemorySlot = Object.hasOwn(rawSlots, "memory");
-  const memorySlot = hasExplicitMemorySlot ? params.pluginsConfig.slots.memory : undefined;
-  if (typeof memorySlot === "string") {
-    target.add(params.normalizePluginId(memorySlot));
+  addMemorySlotReferences(rawSlots);
+
+  for (const agent of params.config.agents?.list ?? []) {
+    addMemorySlotReferences(agent?.plugins?.slots);
   }
   const hasExplicitContextEngineSlot = Object.hasOwn(rawSlots, "contextEngine");
   const contextEngineSlot = hasExplicitContextEngineSlot
