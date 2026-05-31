@@ -30,6 +30,7 @@ export type SkillInstallRequest = InstallSafetyOverrides & {
   installId: string;
   timeoutMs?: number;
   config?: OpenClawConfig;
+  allowSetupHooks?: boolean;
 };
 export type { SkillInstallResult } from "./install-types.js";
 
@@ -521,7 +522,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   }
   if (spec.kind === "download") {
     const downloadResult = await installDownloadSpec({ entry, spec, timeoutMs });
-    if (downloadResult.ok) {
+    if (downloadResult.ok && params.allowSetupHooks) {
       const setupResult = await runSkillSetupHook({
         targetDir: path.resolve(entry.skill.baseDir),
         mode: "install",
@@ -590,7 +591,7 @@ export async function installSkill(params: SkillInstallRequest): Promise<SkillIn
   const env = Object.keys(envOverrides).length > 0 ? envOverrides : undefined;
 
   const installResult = await executeInstallCommand({ argv, timeoutMs, env });
-  if (installResult.ok) {
+  if (installResult.ok && params.allowSetupHooks) {
     const setupResult = await runSkillSetupHook({
       targetDir: path.resolve(entry.skill.baseDir),
       mode: "install",

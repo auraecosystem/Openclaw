@@ -790,6 +790,7 @@ async function performClawHubSkillInstall(
             logger: params.logger,
             scan: false,
             rootMarkers: CLAWHUB_SKILL_ARCHIVE_ROOT_MARKERS,
+            allowSetupHooks: true,
           }),
       });
       if (!install.ok) {

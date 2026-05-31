@@ -48,6 +48,14 @@ function expectInstallPackageSourceDir(sourceDir: string) {
   expect(call[0]?.sourceDir).toBe(sourceDir);
 }
 
+function expectClawHubSetupHookEnabled() {
+  const call = installPackageDirMock.mock.calls.at(0);
+  if (!call) {
+    throw new Error("expected installPackageDir call");
+  }
+  expect((call[0] as { afterInstall?: unknown }).afterInstall).toEqual(expect.any(Function));
+}
+
 function expectInstalledSkill(
   result: Awaited<ReturnType<typeof installSkillFromClawHub>>,
   expected: { slug?: string; version?: string; targetDir?: string } = {},
@@ -185,6 +193,7 @@ describe("skills-clawhub", () => {
       baseUrl: undefined,
     });
     expectInstallPackageSourceDir("/tmp/extracted-skill");
+    expectClawHubSetupHookEnabled();
     expectInstalledSkill(result, {
       slug: "agentreceipt",
       version: "1.0.0",
@@ -282,6 +291,7 @@ describe("skills-clawhub", () => {
           baseUrl: "https://legacy.clawhub.ai",
         });
         expectLegacyUpdateSuccess(results, workspaceDir, slug);
+        expectClawHubSetupHookEnabled();
       } finally {
         await fs.rm(workspaceDir, { recursive: true, force: true });
       }
