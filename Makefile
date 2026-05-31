@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 
-PLUGIN_DIR ?=
-PLUGIN_ID ?=
+PLUGIN_DIR ?= ../../plugins/caviclaw-plugin
+PLUGIN_ID ?= caviclaw
 PLUGIN_INSTALL_FLAGS ?= --force
 PLUGIN_WATCH_PATHS ?= $(PLUGIN_DIR)/dist:$(PLUGIN_DIR)/openclaw.plugin.json:$(PLUGIN_DIR)/package.json
 OPENCLAW ?= pnpm openclaw
