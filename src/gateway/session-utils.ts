@@ -488,9 +488,12 @@ function rememberSingleRowChildSessionCandidateCacheEntry(
 }
 
 function buildStoreChildSessionCandidateIndex(
-  store: Record<string, SessionEntry>,
+  store: Record<string, SessionEntry> | null | undefined,
 ): Map<string, string[]> {
   const childSessionsByKey = new Map<string, string[]>();
+  if (!store) {
+    return childSessionsByKey;
+  }
   for (const [key, entry] of Object.entries(store)) {
     if (!entry) {
       continue;
@@ -2076,15 +2079,7 @@ export function buildGatewaySessionRow(params: {
         rowContext: params.rowContext,
       }) ?? resolveNonNegativeNumber(transcriptUsage?.estimatedCostUsd));
   const contextTokens = lightweight
-    ? (resolvePositiveNumber(entry?.contextTokens) ??
-      resolvePositiveNumber(
-        resolveContextTokensForModel({
-          cfg,
-          provider: rowModelProvider,
-          model: rowModel,
-          allowAsyncLoad: false,
-        }),
-      ))
+    ? resolvePositiveNumber(entry?.contextTokens)
     : (resolvePositiveNumber(entry?.contextTokens) ??
       resolvePositiveNumber(transcriptUsage?.contextTokens) ??
       resolvePositiveNumber(
