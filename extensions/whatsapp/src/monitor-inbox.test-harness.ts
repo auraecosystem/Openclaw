@@ -296,8 +296,12 @@ export function getMonitorWebInbox(): MonitorWebInbox {
 }
 
 export async function settleInboundWork() {
-  await new Promise((resolve) => setImmediate(resolve));
-  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
 }
 
 export function resetWebInboundDedupeForTests() {
