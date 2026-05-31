@@ -12,9 +12,12 @@ import type {
   AcpRuntimeStatus,
 } from "@openclaw/acp-core/runtime/types";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
 import { resolveRuntimeConfigCacheKey } from "../../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { redactSensitiveText } from "../../logging/redact.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import { isAcpSessionKey } from "../../sessions/session-key-utils.js";
 import {
@@ -68,6 +71,34 @@ import {
   validateRuntimeOptionPatch,
 } from "./runtime-options.js";
 import { SessionActorQueue } from "./session-actor-queue.js";
+
+const ACP_RECONCILE_LOG_FIELD_MAX_LENGTH = 500;
+const acpManagerLog = createSubsystemLogger("acp/manager");
+
+function sanitizeAcpReconcileLogValue(value: string): string {
+  const normalized = sanitizeForLog(value);
+  const sanitized = sanitizeForLog(redactSensitiveText(normalized)).replace(/\s+/g, " ").trim();
+  if (!sanitized) {
+    return "<empty>";
+  }
+  if (sanitized.length <= ACP_RECONCILE_LOG_FIELD_MAX_LENGTH) {
+    return sanitized;
+  }
+  return `${sanitized.slice(0, ACP_RECONCILE_LOG_FIELD_MAX_LENGTH - 3)}...`;
+}
+
+function logStartupIdentityReconcileFailure(sessionKey: string, error: unknown) {
+  const acpError = toAcpRuntimeError({
+    error,
+    fallbackCode: "ACP_TURN_FAILED",
+    fallbackMessage: "ACP startup identity reconcile failed.",
+  });
+  const safeSessionKey = sanitizeAcpReconcileLogValue(sessionKey);
+  const safeMessage = sanitizeAcpReconcileLogValue(acpError.message);
+  acpManagerLog.warn(
+    `acp-manager: startup identity reconcile failed for ${safeSessionKey}: code=${acpError.code} message=${safeMessage}`,
+  );
+}
 
 export class AcpSessionManager {
   private readonly actorQueue = new SessionActorQueue();
@@ -198,6 +229,7 @@ export class AcpSessionManager {
         }
       } catch (error) {
         failed += 1;
+        logStartupIdentityReconcileFailure(session.sessionKey, error);
         logVerbose(
           `acp-manager: startup identity reconcile failed for ${session.sessionKey}: ${String(error)}`,
         );
