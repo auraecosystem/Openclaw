@@ -54,6 +54,13 @@ export type AcpTurnAttachment = {
   data: string;
 };
 
+export type AcpTurnEndHookContext = {
+  sessionKey: string;
+  success: boolean;
+  durationMs: number;
+  errorCode?: AcpRuntimeError["code"];
+};
+
 export type AcpRunTurnInput = {
   cfg: OpenClawConfig;
   sessionKey: string;
