@@ -146,6 +146,7 @@ import {
 import type { PluginRuntime } from "./runtime/types.js";
 import { validateJsonSchemaValue, type JsonSchemaValue } from "./schema-validator.js";
 import { normalizeSessionEntrySlotKey } from "./session-entry-slot-keys.js";
+import { type MemoryPluginRole } from "./slot-resolution.js";
 import { defaultSlotIdForKey, hasKind } from "./slots.js";
 import {
   findUndeclaredPluginToolNames,
@@ -2554,6 +2555,47 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
     debug: logger.debug,
   });
 
+  const memoryRoleSelected = (record: PluginRecord, role: MemoryPluginRole): boolean => {
+    if (record.memoryRolesSelected) {
+      return record.memoryRolesSelected.includes(role);
+    }
+    // Backward compatibility for tests and older in-process records that only
+    // carry the legacy boolean marker.
+    return record.memorySlotSelected === true;
+  };
+
+  const shouldAllowRecallCapabilityRegistration = (record: PluginRecord): boolean => {
+    if (!hasKind(record.kind, "memory")) {
+      return false;
+    }
+    if (record.memoryRolesSelected) {
+      return memoryRoleSelected(record, "recall");
+    }
+    return (
+      !Array.isArray(record.kind) || record.kind.length <= 1 || record.memorySlotSelected === true
+    );
+  };
+
+  const skipMemoryRecallRegistration = (record: PluginRecord, label: string): boolean => {
+    if (shouldAllowRecallCapabilityRegistration(record)) {
+      return false;
+    }
+    const legacyDualKindMessage =
+      record.memoryRolesSelected === undefined &&
+      Array.isArray(record.kind) &&
+      record.kind.length > 1 &&
+      !record.memorySlotSelected;
+    pushDiagnostic({
+      level: "warn",
+      pluginId: record.id,
+      source: record.source,
+      message: legacyDualKindMessage
+        ? `dual-kind plugin not selected for memory slot; skipping ${label} registration`
+        : `memory plugin not selected for memory.recall slot; skipping ${label} registration`,
+    });
+    return true;
+  };
+
   const pluginRuntimeById = new Map<string, PluginRuntime>();
   const pluginRuntimeRecordById = new Map<string, PluginRecord>();
 
@@ -3005,18 +3047,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 if (!hasKind(record.kind, "memory")) {
                   throwRegistrationError("only memory plugins can register a memory capability");
                 }
-                if (
-                  Array.isArray(record.kind) &&
-                  record.kind.length > 1 &&
-                  !record.memorySlotSelected
-                ) {
-                  pushDiagnostic({
-                    level: "warn",
-                    pluginId: record.id,
-                    source: record.source,
-                    message:
-                      "dual-kind plugin not selected for memory slot; skipping memory capability registration",
-                  });
+                if (skipMemoryRecallRegistration(record, "memory capability")) {
                   return;
                 }
                 registerMemoryCapability(record.id, capability);
@@ -3027,18 +3058,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                     "only memory plugins can register a memory prompt section",
                   );
                 }
-                if (
-                  Array.isArray(record.kind) &&
-                  record.kind.length > 1 &&
-                  !record.memorySlotSelected
-                ) {
-                  pushDiagnostic({
-                    level: "warn",
-                    pluginId: record.id,
-                    source: record.source,
-                    message:
-                      "dual-kind plugin not selected for memory slot; skipping memory prompt section registration",
-                  });
+                if (skipMemoryRecallRegistration(record, "memory prompt section")) {
                   return;
                 }
                 registerMemoryPromptSectionForPlugin(record.id, builder);
@@ -3062,18 +3082,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 if (!hasKind(record.kind, "memory")) {
                   throwRegistrationError("only memory plugins can register a memory flush plan");
                 }
-                if (
-                  Array.isArray(record.kind) &&
-                  record.kind.length > 1 &&
-                  !record.memorySlotSelected
-                ) {
-                  pushDiagnostic({
-                    level: "warn",
-                    pluginId: record.id,
-                    source: record.source,
-                    message:
-                      "dual-kind plugin not selected for memory slot; skipping memory flush plan registration",
-                  });
+                if (skipMemoryRecallRegistration(record, "memory flush plan")) {
                   return;
                 }
                 registerMemoryFlushPlanResolverForPlugin(record.id, resolver);
@@ -3082,18 +3091,7 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
                 if (!hasKind(record.kind, "memory")) {
                   throwRegistrationError("only memory plugins can register a memory runtime");
                 }
-                if (
-                  Array.isArray(record.kind) &&
-                  record.kind.length > 1 &&
-                  !record.memorySlotSelected
-                ) {
-                  pushDiagnostic({
-                    level: "warn",
-                    pluginId: record.id,
-                    source: record.source,
-                    message:
-                      "dual-kind plugin not selected for memory slot; skipping memory runtime registration",
-                  });
+                if (skipMemoryRecallRegistration(record, "memory runtime")) {
                   return;
                 }
                 registerMemoryRuntimeForPlugin(record.id, runtime);
