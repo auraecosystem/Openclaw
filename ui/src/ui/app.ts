@@ -84,6 +84,7 @@ import {
   type RealtimeTalkStatus,
 } from "./chat/realtime-talk.ts";
 import type { ChatRunUiStatus } from "./chat/run-lifecycle.ts";
+import { closeChatSessionPicker } from "./chat/session-controls.ts";
 import type { ChatSideResult } from "./chat/side-result.ts";
 import {
   loadToolsEffective as loadToolsEffectiveInternal,
@@ -284,6 +285,8 @@ export class OpenClawApp extends LitElement {
   @state() chatSessionPickerLoading = false;
   @state() chatSessionPickerError: string | null = null;
   @state() chatSessionPickerResult: SessionsListResult | null = null;
+  @state() chatSessionPickerRenameKey: string | null = null;
+  @state() chatSessionPickerRenameDraft = "";
   private sessionSwitchNoticeSeq = 0;
   private sessionSwitchNoticeTimer: number | null = null;
   private sessionSwitchFlashTimer: number | null = null;
@@ -700,8 +703,7 @@ export class OpenClawApp extends LitElement {
     }
     if (this.chatSessionPickerOpen) {
       e.preventDefault();
-      this.chatSessionPickerOpen = false;
-      this.chatSessionPickerSurface = null;
+      closeChatSessionPicker(this as unknown as AppViewState);
       return;
     }
     if (!this.chatMobileControlsOpen) {
@@ -717,8 +719,7 @@ export class OpenClawApp extends LitElement {
         (node) => path.includes(node),
       );
       if (!insidePicker) {
-        this.chatSessionPickerOpen = false;
-        this.chatSessionPickerSurface = null;
+        closeChatSessionPicker(this as unknown as AppViewState);
       }
     }
     if (!this.chatMobileControlsOpen) {
@@ -902,8 +903,7 @@ export class OpenClawApp extends LitElement {
     const focusTarget = options?.restoreFocus ? this.chatMobileControlsTrigger : null;
     this.chatMobileControlsOpen = false;
     if (this.chatSessionPickerSurface === "mobile") {
-      this.chatSessionPickerOpen = false;
-      this.chatSessionPickerSurface = null;
+      closeChatSessionPicker(this as unknown as AppViewState);
     }
     this.chatMobileControlsTrigger = null;
     if (!(focusTarget instanceof HTMLElement) || !focusTarget.isConnected) {
