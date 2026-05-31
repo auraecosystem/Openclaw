@@ -439,8 +439,57 @@ vi.mock("./model-selection.js", () => {
       allowAny: false,
     };
   };
+  const parseRef = (raw: string, defaultProvider: string) => {
+    const [provider, ...modelParts] = raw.split("/");
+    return modelParts.length > 0
+      ? { provider, model: modelParts.join("/") }
+      : { provider: defaultProvider, model: raw };
+  };
+  const buildModelAliasIndex = ({
+    cfg,
+    defaultProvider,
+  }: {
+    cfg?: unknown;
+    defaultProvider: string;
+  }) => {
+    const modelMap =
+      (cfg as { agents?: { defaults?: { models?: Record<string, { alias?: string }> } } })?.agents
+        ?.defaults?.models ?? {};
+    const byAlias = new Map<string, { alias: string; ref: { provider: string; model: string } }>();
+    const byKey = new Map<string, string[]>();
+    for (const [rawRef, entry] of Object.entries(modelMap)) {
+      if (rawRef.trim().endsWith("/*")) {
+        continue;
+      }
+      const alias = typeof entry?.alias === "string" ? entry.alias.trim() : "";
+      if (!alias) {
+        continue;
+      }
+      const ref = parseRef(rawRef, defaultProvider);
+      byAlias.set(alias.toLowerCase(), { alias, ref });
+      const key = `${ref.provider}/${ref.model}`;
+      byKey.set(key, [...(byKey.get(key) ?? []), alias]);
+    }
+    return { byAlias, byKey };
+  };
+  const resolveModelRefFromString = ({
+    raw,
+    defaultProvider,
+    aliasIndex,
+  }: {
+    raw: string;
+    defaultProvider: string;
+    aliasIndex?: ReturnType<typeof buildModelAliasIndex>;
+  }) => {
+    const aliasMatch = aliasIndex?.byAlias.get(raw.trim().toLowerCase());
+    if (aliasMatch) {
+      return { ref: aliasMatch.ref, alias: aliasMatch.alias };
+    }
+    return { ref: parseRef(raw, defaultProvider) };
+  };
 
   return {
+    buildModelAliasIndex,
     buildAllowedModelSet,
     createModelVisibilityPolicy: (params: {
       cfg?: unknown;
@@ -537,7 +586,7 @@ vi.mock("./model-selection.js", () => {
     },
     modelKey: (p: string, m: string) => `${p}/${m}`,
     normalizeModelRef: (p: string, m: string) => ({ provider: p, model: m }),
-    parseModelRef: (m: string, p: string) => ({ provider: p, model: m }),
+    parseModelRef: parseRef,
     resolveConfiguredModelRef: ({ cfg }: { cfg?: unknown }) => {
       const raw = (cfg as { agents?: { defaults?: { model?: string | { primary?: string } } } })
         ?.agents?.defaults?.model;
@@ -552,6 +601,7 @@ vi.mock("./model-selection.js", () => {
       const [provider, ...modelParts] = (primary ?? "anthropic/claude").split("/");
       return { provider, model: modelParts.join("/") || "claude" };
     },
+    resolveModelRefFromString,
     resolveThinkingDefault: (args: unknown) => state.resolveThinkingDefaultMock(args),
   };
 });
@@ -1763,6 +1813,66 @@ describe("agentCommand – LiveSessionModelSwitchError retry", () => {
       id: "gpt-5.4",
       compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
     });
+  });
+
+  it("resolves explicit model aliases before thinking validation", async () => {
+    state.runtimeConfigMock = {
+      agents: {
+        defaults: {
+          model: { primary: "openai/gpt-5.4" },
+          models: {
+            "openai/*": {},
+            "openai-codex/gpt-5.5": { alias: "code" },
+          },
+        },
+      },
+      models: {
+        providers: {
+          "openai-codex": {
+            models: [
+              {
+                id: "gpt-5.5",
+                name: "GPT 5.5 Codex",
+                reasoning: true,
+                compat: { supportedReasoningEfforts: ["xhigh"] },
+              },
+            ],
+          },
+        },
+      },
+    };
+    state.runWithModelFallbackMock.mockImplementation(async (params: FallbackRunnerParams) => {
+      const result = await params.run(params.provider, params.model);
+      return {
+        result,
+        provider: params.provider,
+        model: params.model,
+        attempts: [],
+      };
+    });
+    state.runAgentAttemptMock.mockResolvedValue(makeSuccessResult("openai-codex", "gpt-5.5"));
+
+    await agentCommand({
+      message: "hello",
+      to: "+1234567890",
+      senderIsOwner: true,
+      model: "code",
+      thinking: "xhigh",
+    });
+
+    const fallbackArgs = requireRecord(
+      mockCallArg(state.runWithModelFallbackMock),
+      "fallback args",
+    );
+    expect(fallbackArgs.provider).toBe("openai-codex");
+    expect(fallbackArgs.model).toBe("gpt-5.5");
+    const thinkingArgs = requireRecord(
+      mockCallArg(state.isThinkingLevelSupportedMock),
+      "thinking args",
+    );
+    expect(thinkingArgs.provider).toBe("openai-codex");
+    expect(thinkingArgs.model).toBe("gpt-5.5");
+    expect(thinkingArgs.level).toBe("xhigh");
   });
 
   it("validates explicit thinking against allowlisted configured model compat when manifest catalog is empty", async () => {
