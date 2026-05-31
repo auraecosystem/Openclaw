@@ -7,6 +7,10 @@ vi.mock("grammy", () => ({
     DEFAULT_UPDATE_TYPES: ["message"],
     ALL_UPDATE_TYPES: ["message"],
   },
+  // The vi.mock factory needs Bot exported as a constructible value, but the
+  // test only ever uses Bot as a type (`as unknown as Bot`) so the runtime
+  // shape is intentionally empty.
+  // oxlint-disable-next-line no-extraneous-class
   Bot: class Bot {},
   HttpError: class HttpError extends Error {},
   InputFile: class InputFile {
