@@ -2617,7 +2617,7 @@ export async function runEmbeddedAgent(
               promptFailoverDecision.action === "rotate_profile" &&
               (await advanceAttemptAuthProfile())
             ) {
-              if (failedPromptProfileId && promptProfileFailureReason) {
+              if (promptProfileFailureReason) {
                 void maybeMarkAuthProfileFailure({
                   profileId: failedPromptProfileId,
                   reason: promptProfileFailureReason,
@@ -2653,7 +2653,7 @@ export async function runEmbeddedAgent(
                 profileRotated: true,
               });
             }
-            if (failedPromptProfileId && promptProfileFailureReason) {
+            if (promptProfileFailureReason) {
               try {
                 await maybeMarkAuthProfileFailure({
                   profileId: failedPromptProfileId,
