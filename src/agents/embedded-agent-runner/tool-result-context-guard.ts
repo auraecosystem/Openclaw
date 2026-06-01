@@ -1,5 +1,6 @@
 import type { ContextEngine, ContextEngineRuntimeContext } from "../../context-engine/types.js";
 import type { AgentMessage } from "../runtime/index.js";
+import { sanitizeToolUseResultPairing } from "../session-transcript-repair.js";
 import {
   CONTEXT_LIMIT_TRUNCATION_NOTICE,
   formatContextLimitTruncationNotice,
@@ -430,8 +431,8 @@ export function installContextEngineLoopHook(params: {
         Array.isArray(assembled.messages) &&
         assembled.messages !== providerMessages
       ) {
-        lastAssembledView = assembled.messages;
-        return assembled.messages;
+        lastAssembledView = sanitizeToolUseResultPairing(assembled.messages);
+        return lastAssembledView;
       }
       lastAssembledView = null;
     } catch {
