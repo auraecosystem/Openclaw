@@ -20,6 +20,7 @@ import {
   resolveCodexContextEngineProjectionMaxChars,
   resolveCodexContextEngineProjectionReserveTokens,
 } from "./context-engine-projection.js";
+import { isDeferredCodexDynamicTool, readCodexDynamicToolName } from "./dynamic-tool-descriptor.js";
 import { invalidInlineImageText, sanitizeInlineImageDataUrl } from "./image-payload-sanitizer.js";
 import {
   isCodexPluginThreadBindingStale,
@@ -1187,9 +1188,9 @@ function buildDeferredDynamicToolManifest(
   const deferredToolNames = [
     ...new Set(
       (dynamicTools ?? [])
-        .filter((tool) => tool.deferLoading === true)
-        .map((tool) => tool.name.trim())
-        .filter(Boolean),
+        .filter(isDeferredCodexDynamicTool)
+        .map(readCodexDynamicToolName)
+        .filter((name): name is string => Boolean(name)),
     ),
   ].toSorted((left, right) => left.localeCompare(right));
   if (deferredToolNames.length === 0) {
@@ -1202,7 +1203,7 @@ function buildSkillWorkshopInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string | undefined {
   const hasSkillWorkshop = (dynamicTools ?? []).some(
-    (tool) => tool.name.trim() === SKILL_WORKSHOP_TOOL_NAME,
+    (tool) => readCodexDynamicToolName(tool) === SKILL_WORKSHOP_TOOL_NAME,
   );
   if (!hasSkillWorkshop) {
     return undefined;
@@ -1215,7 +1216,7 @@ function buildVisibleReplyInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string {
   const messageToolAvailable = dynamicTools
-    ? dynamicTools.some((tool) => tool.name.trim() === "message")
+    ? dynamicTools.some((tool) => readCodexDynamicToolName(tool) === "message")
     : params.disableMessageTool !== true;
   if (params.sourceReplyDeliveryMode === "message_tool_only" && messageToolAvailable) {
     return "Visible source replies are not automatically delivered for this run. Use `message(action=send)` for user-visible source-channel output. Do not repeat that visible content in your final answer.";

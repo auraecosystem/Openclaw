@@ -115,6 +115,43 @@ describe("Codex app-server native code mode config", () => {
     expect(instructions).not.toContain("message,");
   });
 
+  it("skips malformed deferred dynamic tool names in developer instructions", () => {
+    const dynamicTools = [
+      {
+        get name() {
+          throw new Error("deferred dynamic tool name exploded");
+        },
+        description: "poisoned name",
+        inputSchema: { type: "object" },
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+      {
+        name: 42,
+        description: "numeric name",
+        inputSchema: { type: "object" },
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+      {
+        name: " message ",
+        description: "Send a message",
+        inputSchema: { type: "object" },
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+    ] as unknown as NonNullable<Parameters<typeof buildDeveloperInstructions>[1]>["dynamicTools"];
+
+    const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
+      dynamicTools,
+    });
+
+    expect(instructions).toContain(
+      "Deferred searchable OpenClaw dynamic tools available: message.",
+    );
+    expect(instructions).not.toContain("42");
+  });
+
   it("uses the shared Skill Workshop guidance when skill_workshop is available", () => {
     const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
       dynamicTools: [

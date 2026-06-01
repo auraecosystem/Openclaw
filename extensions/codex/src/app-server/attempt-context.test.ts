@@ -77,6 +77,74 @@ describe("Codex app-server attempt context", () => {
     expect(report.tools.schemaChars).toBe(message?.schemaChars);
   });
 
+  it("skips malformed dynamic tool descriptors in system prompt reports", () => {
+    const tools = [
+      {
+        get name() {
+          throw new Error("report dynamic tool name exploded");
+        },
+        description: "poisoned name",
+        inputSchema: { type: "object" },
+      },
+      {
+        name: "description_poisoned",
+        get description() {
+          throw new Error("report dynamic tool description exploded");
+        },
+        inputSchema: { type: "object" },
+      },
+      {
+        name: "schema_poisoned",
+        description: "poisoned schema",
+        get inputSchema() {
+          throw new Error("report dynamic tool schema exploded");
+        },
+      },
+      {
+        name: "valid_tool",
+        description: " Valid dynamic tool. ",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+          },
+        },
+      },
+    ] as unknown as CodexDynamicToolSpec[];
+
+    const report = buildCodexSystemPromptReport({
+      attempt: {
+        sessionId: "session-1",
+        provider: "codex",
+        modelId: "gpt-5.4-codex",
+      } as EmbeddedRunAttemptParams,
+      sessionKey: "agent:main:session-1",
+      workspaceDir: path.join("tmp", "workspace"),
+      developerInstructions: "test developer instructions",
+      workspaceBootstrapContext: {
+        bootstrapFiles: [],
+        contextFiles: [],
+      },
+      skillsPrompt: "",
+      tools,
+    });
+
+    expect(report.tools.entries).toHaveLength(2);
+    expect(report.tools.entries[0]).toMatchObject({
+      name: "description_poisoned",
+      summaryChars: 0,
+      propertiesCount: null,
+    });
+    expect(report.tools.entries[1]).toMatchObject({
+      name: "valid_tool",
+      summaryChars: "Valid dynamic tool.".length,
+      propertiesCount: 1,
+    });
+    expect(report.tools.schemaChars).toBe(
+      (report.tools.entries[0]?.schemaChars ?? 0) + (report.tools.entries[1]?.schemaChars ?? 0),
+    );
+  });
+
   it("keeps MEMORY.md injected when sandbox effective workspace differs", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-memory-workspace-"));
     const sandboxWorkspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-memory-sandbox-"));

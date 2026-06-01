@@ -11,6 +11,12 @@ import {
   type EmbeddedRunAttemptResult,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { resolveAgentWorkspaceDir } from "openclaw/plugin-sdk/agent-runtime";
+import {
+  isDeferredCodexDynamicTool,
+  readCodexDynamicToolDescription,
+  readCodexDynamicToolInputSchema,
+  readCodexDynamicToolName,
+} from "./dynamic-tool-descriptor.js";
 import type { CodexDynamicToolSpec, JsonValue } from "./protocol.js";
 import { isJsonObject } from "./protocol.js";
 import type { CodexAppServerThreadBinding } from "./session-binding.js";
@@ -255,7 +261,10 @@ export function buildCodexSystemPromptReport(params: {
   skillsPrompt: string;
   tools: CodexDynamicToolSpec[];
 }): CodexSystemPromptReport {
-  const toolEntries = params.tools.map(buildCodexToolReportEntry);
+  const toolEntries = params.tools.flatMap((tool) => {
+    const entry = buildCodexToolReportEntry(tool);
+    return entry ? [entry] : [];
+  });
   const schemaChars = toolEntries.reduce((sum, tool) => sum + tool.schemaChars, 0);
   const skillsPrompt = params.skillsPrompt.trim();
   const bootstrapMaxChars = readPositiveNumber(
@@ -319,11 +328,15 @@ function buildCodexSkillReportEntries(
     .filter((entry) => entry.blockChars > 0);
 }
 
-function buildCodexToolReportEntry(tool: CodexDynamicToolSpec): CodexToolReportEntry {
-  const summary = tool.description.trim();
-  if (tool.deferLoading === true) {
+function buildCodexToolReportEntry(tool: CodexDynamicToolSpec): CodexToolReportEntry | undefined {
+  const name = readCodexDynamicToolName(tool);
+  if (!name) {
+    return undefined;
+  }
+  const summary = readCodexDynamicToolDescription(tool);
+  if (isDeferredCodexDynamicTool(tool)) {
     return {
-      name: tool.name,
+      name,
       summaryChars: summary.length,
       summaryHash: sha256Text(summary),
       schemaChars: 0,
@@ -331,11 +344,15 @@ function buildCodexToolReportEntry(tool: CodexDynamicToolSpec): CodexToolReportE
       propertiesCount: null,
     };
   }
+  const inputSchema = readCodexDynamicToolInputSchema(tool);
+  if (inputSchema === undefined) {
+    return undefined;
+  }
   return {
-    name: tool.name,
+    name,
     summaryChars: summary.length,
     summaryHash: sha256Text(summary),
-    ...buildCodexToolSchemaStats(tool.inputSchema),
+    ...buildCodexToolSchemaStats(inputSchema),
   };
 }
 
@@ -775,7 +792,12 @@ export function hasCodexWorkspaceMemoryTools(tools: readonly { name: string }[])
 }
 
 export function getCodexWorkspaceMemoryToolNames(tools: readonly { name: string }[]): string[] {
-  const availableToolNames = new Set(tools.map((tool) => normalizeCodexDynamicToolName(tool.name)));
+  const availableToolNames = new Set(
+    tools
+      .map((tool) => readCodexDynamicToolName(tool as CodexDynamicToolSpec))
+      .filter((name): name is string => Boolean(name))
+      .map(normalizeCodexDynamicToolName),
+  );
   return Array.from(CODEX_MEMORY_TOOL_NAMES).filter((name) => availableToolNames.has(name));
 }
 
