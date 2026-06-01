@@ -50,15 +50,9 @@ type ProjectChatDisplayOptions = {
   mirrorSessionsYieldToolResults?: boolean;
 };
 
-export function resolveEffectiveChatHistoryMaxChars(
-  cfg: { gateway?: { webchat?: { chatHistoryMaxChars?: number } } },
-  maxChars?: number,
-): number {
+export function resolveEffectiveChatHistoryMaxChars(_cfg: unknown, maxChars?: number): number {
   if (typeof maxChars === "number") {
     return maxChars;
-  }
-  if (typeof cfg.gateway?.webchat?.chatHistoryMaxChars === "number") {
-    return cfg.gateway.webchat.chatHistoryMaxChars;
   }
   return DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS;
 }
