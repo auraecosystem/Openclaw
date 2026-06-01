@@ -6,6 +6,7 @@ import {
   resetExecApprovalFollowupRuntimeHandoffsForTests,
 } from "../../agents/bash-tools.exec-approval-followup-state.js";
 import {
+  getSubagentRunByChildSessionKey,
   resetSubagentRegistryForTests,
   testing as subagentRegistryTesting,
 } from "../../agents/subagent-registry.js";
@@ -21,7 +22,6 @@ import {
   resetTaskRegistryForTests,
 } from "../../tasks/task-registry.js";
 import { withTempDir } from "../../test-helpers/temp-dir.js";
-import type { CallGatewayOptions } from "../call.js";
 import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { agentHandlers } from "./agent.js";
 import { chatHandlers } from "./chat.js";
@@ -2836,16 +2836,6 @@ describe("gateway agent handler", () => {
         },
         canonicalKey: childSessionKey,
       });
-      subagentRegistryTesting.setDepsForTest({
-        callGateway: async <T = Record<string, unknown>>(
-          request: CallGatewayOptions,
-        ): Promise<T> => {
-          if (request.method === "agent.wait") {
-            return { status: "ok", startedAt: Date.now() - 100, endedAt: Date.now() } as T;
-          }
-          return {} as T;
-        },
-      });
       mocks.updateSessionStore.mockImplementation(async (_path, updater) => {
         const store: Record<string, unknown> = {
           [childSessionKey]: {
@@ -2899,25 +2889,29 @@ describe("gateway agent handler", () => {
       });
 
       await waitForAssertion(() => {
-        const task = requireValue(
-          listTaskRecords().find((record) => record.runId === runId),
-          "expected plugin subagent task",
-        );
-        expectRecordFields(task, {
-          status: "succeeded",
-          runtime: "subagent",
-          ownerKey: "agent:work:main",
-          childSessionKey,
-          label: "plugin:memory-core",
-          deliveryStatus: "not_applicable",
+        expectRecordFields(getSubagentRunByChildSessionKey(childSessionKey), {
+          cleanupCompletedAt: expect.any(Number),
         });
       });
-      const trackedTask = requireValue(
-        listTaskRecords().find((task) => task.runId === runId),
-        "expected plugin subagent task",
+      const run = requireValue(
+        getSubagentRunByChildSessionKey(childSessionKey),
+        "expected subagent registry run",
       );
+      expectRecordFields(run, {
+        runId,
+        childSessionKey,
+        controllerSessionKey: "agent:work:main",
+        requesterSessionKey: "agent:work:main",
+        requesterDisplayKey: "main",
+        cleanup: "keep",
+        spawnMode: "run",
+        label: "plugin:memory-core",
+      });
+      expectRecordFields(run.completion, { required: false });
+      expectRecordFields(run.delivery, { status: "not_required" });
+
       const commandCallCount = mocks.agentCommand.mock.calls.length;
-      const createdAt = trackedTask.createdAt;
+      const createdAt = run.createdAt;
       await invokeAgent(
         {
           message: "background plugin subagent task",
@@ -2934,7 +2928,7 @@ describe("gateway agent handler", () => {
       expect(mocks.agentCommand).toHaveBeenCalledTimes(commandCallCount);
       const retryTasks = listTaskRecords().filter((task) => task.runId === runId);
       expect(retryTasks).toHaveLength(1);
-      expect(retryTasks[0]?.createdAt).toBe(createdAt);
+      expect(getSubagentRunByChildSessionKey(childSessionKey)?.createdAt).toBe(createdAt);
     });
   });
 

@@ -10,8 +10,7 @@ import { buildAgentRunTerminalOutcomeFromWaitResult } from "./agent-run-terminal
 import { removeInternalSessionEffectsTranscript } from "./internal-session-effects.js";
 import { isRecoverableAgentWaitError, waitForAgentRun } from "./run-wait.js";
 import type { ensureRuntimePluginsLoaded as ensureRuntimePluginsLoadedFn } from "./runtime-plugins.js";
-import type { SubagentRunOutcome } from "./subagent-announce-output.js";
-import { withSubagentOutcomeTiming } from "./subagent-announce-output.js";
+import { type SubagentRunOutcome, withSubagentOutcomeTiming } from "./subagent-announce-output.js";
 import {
   clearDeliveryState,
   ensureCompletionState,
