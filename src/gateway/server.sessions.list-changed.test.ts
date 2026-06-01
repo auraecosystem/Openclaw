@@ -146,7 +146,7 @@ async function invokeSessionMutation({
     context: {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => subscribedConnIds,
-      loadGatewayModelCatalog: async () => ({ providers: [] }),
+      loadGatewayModelCatalog: async () => [],
       getRuntimeConfig,
       ...context,
     } as never,
@@ -159,8 +159,8 @@ async function invokeSessionMutation({
   };
 }
 
-async function invokeSessionsPatch(params: Record<string, unknown>) {
-  return invokeSessionMutation({ method: "sessions.patch", params });
+async function invokeSessionsPatch(params: Record<string, unknown>, context = {}) {
+  return invokeSessionMutation({ method: "sessions.patch", params, context });
 }
 
 async function writeMainSessionStore(options?: SessionStoreEntryOptions) {
@@ -439,6 +439,50 @@ test("sessions.list does not block on slow model catalog discovery", async () =>
   }
 });
 
+test("sessions.changed command metadata does not block on slow model catalog discovery", async () => {
+  await writeMainSessionStore({
+    modelProvider: "test-provider",
+    model: "reasoner",
+  });
+
+  vi.useFakeTimers();
+  try {
+    const deferredCatalog = createDeferred<never>();
+    const broadcastToConnIds = vi.fn();
+    const { getRuntimeConfig } = await getGatewayConfigModule();
+    const request = emitSessionsChanged(
+      {
+        broadcastToConnIds,
+        getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getRuntimeConfig,
+        loadGatewayModelCatalog: vi.fn(() => deferredCatalog.promise),
+        logGateway: {
+          debug: vi.fn(),
+        },
+      } as never,
+      {
+        sessionKey: "agent:main:main",
+        reason: "command-metadata",
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(800);
+    await request;
+
+    const payload = expectChangedBroadcast(broadcastToConnIds, {
+      sessionKey: "agent:main:main",
+      reason: "command-metadata",
+      modelProvider: "test-provider",
+      model: "reasoner",
+    });
+    expect(payload.thinkingLevels).toBeUndefined();
+    expect(payload.thinkingOptions).toBeUndefined();
+    expect(payload.thinkingDefault).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("sessions.changed mutation events include live usage metadata", async () => {
   const { dir } = await createSessionStoreDir();
   await fs.writeFile(
@@ -501,7 +545,7 @@ test("sessions.changed command metadata excludes only the command run from activ
 
   const broadcastToConnIds = vi.fn();
   const { getRuntimeConfig } = await getGatewayConfigModule();
-  emitSessionsChanged(
+  await emitSessionsChanged(
     {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
@@ -536,7 +580,7 @@ test("sessions.changed command metadata ignores hidden internal active runs", as
 
   const broadcastToConnIds = vi.fn();
   const { getRuntimeConfig } = await getGatewayConfigModule();
-  emitSessionsChanged(
+  await emitSessionsChanged(
     {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
@@ -613,7 +657,7 @@ test("sessions.changed command metadata marks selected global runs active", asyn
   clearConfigCache();
 
   const broadcastToConnIds = vi.fn();
-  emitSessionsChanged(
+  await emitSessionsChanged(
     {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
@@ -646,10 +690,10 @@ test("sessions.changed command metadata marks selected global runs active", asyn
 });
 
 test("sessions.changed command metadata scopes untagged global runs to the default agent", async () => {
-  const globalStores = await setupGlobalAgentSessionStores({ writePrimeStore: true });
+  const globalStores = await createConfiguredGlobalAgentSessionStore({ writePrimeStore: true });
 
   const broadcastToConnIds = vi.fn();
-  emitSessionsChanged(
+  await emitSessionsChanged(
     {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
@@ -668,7 +712,7 @@ test("sessions.changed command metadata scopes untagged global runs to the defau
     sessionId: "sess-main-global",
     hasActiveRun: false,
   });
-  await resetGlobalAgentSessionStores(globalStores);
+  await resetConfiguredGlobalAgentSessionStore(globalStores);
 });
 
 test("sessions.changed mutation events include live session setting metadata", async () => {
@@ -697,6 +741,41 @@ test("sessions.changed mutation events include live session setting metadata", a
     "high",
   );
   expect(changedPayload.thinkingDefault).toEqual(expect.any(String));
+});
+
+test("sessions.changed mutation events use catalog-backed thinking metadata", async () => {
+  await writeMainSessionStore({
+    modelProvider: "test-provider",
+    model: "reasoner",
+  });
+  const loadGatewayModelCatalog = vi.fn(async () => [
+    {
+      provider: "test-provider",
+      id: "reasoner",
+      name: "Reasoner",
+      reasoning: true,
+      compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+    },
+  ]);
+
+  const result = await invokeSessionsPatch(
+    {
+      key: "main",
+      label: "Renamed",
+    },
+    { loadGatewayModelCatalog },
+  );
+
+  const changedPayload = expectMainPatchBroadcast(result, {
+    label: "Renamed",
+  });
+  expect(requireArray(changedPayload.thinkingLevels, "broadcast thinking levels")).toContainEqual(
+    expect.objectContaining({ id: "xhigh" }),
+  );
+  expect(requireArray(changedPayload.thinkingOptions, "broadcast thinking options")).toContain(
+    "xhigh",
+  );
+  expect(loadGatewayModelCatalog).toHaveBeenCalledWith({ readOnly: true });
 });
 
 test("sessions.changed mutation events include sendPolicy metadata", async () => {
