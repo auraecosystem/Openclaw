@@ -129,6 +129,18 @@ function countAssistantToolCalls(message: unknown): number {
   return contentToolCalls + (Array.isArray(toolCalls) ? toolCalls.length : 0);
 }
 
+function isSessionsYieldMirrorMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const marker = (message as { openclawSessionsYieldMirror?: unknown })
+    .openclawSessionsYieldMirror;
+  if (!marker || typeof marker !== "object") {
+    return false;
+  }
+  return (marker as { toolName?: unknown }).toolName === "sessions_yield";
+}
+
 function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutputSnapshot {
   const snapshot: SubagentOutputSnapshot = {};
   let previousAssistantCalledYield = false;
@@ -138,7 +150,7 @@ function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutpu
     }
     const role = (message as { role?: unknown }).role;
     if (role === "assistant") {
-      if (assistantCallsSessionsYield(message)) {
+      if (isSessionsYieldMirrorMessage(message) || assistantCallsSessionsYield(message)) {
         snapshot.latestAssistantText = undefined;
         snapshot.latestSilentText = undefined;
         snapshot.waitingForContinuation = true;
