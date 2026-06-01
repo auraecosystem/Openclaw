@@ -268,17 +268,10 @@ describe("skills gateway handlers (clawhub)", () => {
       targetDir: "/tmp/workspace/skills/calendar",
     });
 
-    await skillsHandlers["skills.install"]({
-      params: {
-        source: "clawhub",
-        slug: "calendar",
-        allowSetupHooks: true,
-      },
-      req: {} as never,
-      client: null as never,
-      isWebchatConnect: () => false,
-      context: makeContext() as never,
-      respond: () => undefined,
+    await callSkillsHandler("skills.install", {
+      source: "clawhub",
+      slug: "calendar",
+      allowSetupHooks: true,
     });
 
     expect(installSkillFromClawHubMock).toHaveBeenCalledWith({
@@ -331,17 +324,10 @@ describe("skills gateway handlers (clawhub)", () => {
       code: 0,
     });
 
-    await skillsHandlers["skills.install"]({
-      params: {
-        name: "calendar",
-        installId: "deps",
-        allowSetupHooks: true,
-      },
-      req: {} as never,
-      client: null as never,
-      isWebchatConnect: () => false,
-      context: makeContext() as never,
-      respond: () => undefined,
+    await callSkillsHandler("skills.install", {
+      name: "calendar",
+      installId: "deps",
+      allowSetupHooks: true,
     });
 
     expect(installSkillMock).toHaveBeenCalledWith({
@@ -401,17 +387,10 @@ describe("skills gateway handlers (clawhub)", () => {
   it("forwards ClawHub setup hook opt-in for skills.update", async () => {
     updateSkillsFromClawHubMock.mockResolvedValue([]);
 
-    await skillsHandlers["skills.update"]({
-      params: {
-        source: "clawhub",
-        all: true,
-        allowSetupHooks: true,
-      },
-      req: {} as never,
-      client: null as never,
-      isWebchatConnect: () => false,
-      context: makeContext() as never,
-      respond: () => undefined,
+    await callSkillsHandler("skills.update", {
+      source: "clawhub",
+      all: true,
+      allowSetupHooks: true,
     });
 
     expect(updateSkillsFromClawHubMock).toHaveBeenCalledWith({
