@@ -62,6 +62,8 @@ Scope intent:
 - `channels.slack.botToken`
 - `channels.slack.signingSecret`
 - `channels.slack.userToken`
+- `channels.sms.accounts.*.authToken`
+- `channels.sms.authToken`
 - `channels.telegram.accounts.*.botToken`
 - `channels.telegram.accounts.*.webhookSecret`
 - `channels.telegram.botToken`
