@@ -60,6 +60,7 @@ export async function runManagerTurn(params: {
   recordTurnCompletion: (params: {
     startedAt: number;
     errorCode?: AcpRuntimeError["code"];
+    emitTurnEndHook?: boolean;
   }) => Promise<void> | void;
   reconcileRuntimeSessionIdentifiers: ReconcileManagerRuntimeSessionIdentifiers;
   writeSessionMeta: WriteManagerSessionMeta;
@@ -92,7 +93,10 @@ export async function runManagerTurn(params: {
     fallbackBackends: input.cfg.acp?.fallbacks,
   });
   const backendAttempts: BackendAttempt[] = [];
-  const recordBackendFailure = async (error: AcpRuntimeError) => {
+  const recordBackendFailure = async (
+    error: AcpRuntimeError,
+    options: { emitTurnEndHook?: boolean } = {},
+  ) => {
     const failedBackends = backendAttempts
       .map((attempt) => `${attempt.backend}: ${attempt.error}`)
       .join(" | ");
@@ -106,6 +110,7 @@ export async function runManagerTurn(params: {
     await params.recordTurnCompletion({
       startedAt: turnStartedAt,
       errorCode: errorToRecord.code,
+      emitTurnEndHook: options.emitTurnEndHook,
     });
     if (taskContext) {
       markBackgroundTaskTerminal(taskContext.runId, {
@@ -347,7 +352,7 @@ export async function runManagerTurn(params: {
               candidateBackends,
             })
           ) {
-            await recordBackendFailure(acpError);
+            await recordBackendFailure(acpError, { emitTurnEndHook: activeTurnStarted });
           }
           break;
         } finally {
