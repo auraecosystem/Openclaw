@@ -65,6 +65,7 @@ export const ChatSendParamsSchema = Type.Object(
     sessionKey: ChatSendSessionKeyString,
     agentId: Type.Optional(NonEmptyString),
     sessionId: Type.Optional(NonEmptyString),
+    resumeSession: Type.Optional(Type.Boolean()),
     message: Type.String(),
     thinking: Type.Optional(Type.String()),
     fastMode: Type.Optional(Type.Boolean()),
