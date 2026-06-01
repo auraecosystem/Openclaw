@@ -205,7 +205,7 @@ async function sendRawHttpRequest(params: {
       });
     });
     socket.on("data", (chunk) => {
-      response += chunk;
+      response += chunk.toString();
     });
     socket.once("end", () => {
       finish(() => resolve(response));

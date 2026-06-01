@@ -511,8 +511,11 @@ function buildStoreChildSessionCandidateIndex(
 
 function getSingleRowChildSessionCandidates(params: {
   storePath: string;
-  store: Record<string, SessionEntry>;
+  store: Record<string, SessionEntry> | null | undefined;
 }): Map<string, string[]> {
+  if (!params.store) {
+    return new Map();
+  }
   const storeVersion = getSessionStoreCacheVersion(params.storePath);
   const cached = singleRowChildSessionCandidateCache.get(params.storePath);
   if (cached && cached.store === params.store && cached.storeVersion === storeVersion) {
@@ -2501,6 +2504,9 @@ function filterSessionEntries(params: {
       return true;
     })
     .filter(([key, entry]) => {
+      if (isPhantomAgentStoreListEntry(key, entry)) {
+        return false;
+      }
       if (!spawnedBy) {
         return true;
       }
@@ -2572,6 +2578,15 @@ function filterSessionEntries(params: {
   }
 
   return entries;
+}
+
+function isPhantomAgentStoreListEntry(key: string, entry: SessionEntry | undefined): boolean {
+  const parsed = parseAgentSessionKey(key);
+  return (
+    parsed?.rest === "sessions" &&
+    !normalizeOptionalString(entry?.sessionId) &&
+    entry?.updatedAt == null
+  );
 }
 
 function selectSessionEntries(params: {

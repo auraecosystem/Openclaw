@@ -1010,7 +1010,6 @@ function buildPromptStyleLines(style: ActiveMemoryPromptStyle): string[] {
         "If relevant memory is mostly a stable user preference or recurring habit, lean toward returning it.",
         "If the strongest match is only a one-off historical fact and not a recurring preference or habit, prefer NONE unless the latest user message clearly asks for that fact.",
       ];
-    case "balanced":
     default:
       return [
         "Treat the latest user message as the primary query.",
@@ -1981,7 +1980,7 @@ async function waitForSubagentPartialTimeoutData(
       (await Promise.race([
         subagentPromise.then(
           () => undefined,
-          (error) => readPartialTimeoutData(error),
+          (error: unknown) => readPartialTimeoutData(error),
         ),
         timeoutPromise,
       ])) ?? {}
