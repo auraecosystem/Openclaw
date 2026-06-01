@@ -45,6 +45,8 @@ export type ResolvedCliBackend = {
   textTransforms?: PluginTextTransforms;
   defaultAuthProfileId?: string;
   authEpochMode?: CliBackendAuthEpochMode;
+  acceptsAuthProfileForwarding?: boolean;
+  resolveAuthProfileForExecution?: boolean;
   contextEngineHostCapabilities?: readonly ContextEngineHostCapability[];
   prepareExecution?: CliBackendPlugin["prepareExecution"];
   resolveExecutionArgs?: CliBackendPlugin["resolveExecutionArgs"];
@@ -78,6 +80,8 @@ type FallbackCliBackendPolicy = {
   textTransforms?: PluginTextTransforms;
   defaultAuthProfileId?: string;
   authEpochMode?: CliBackendAuthEpochMode;
+  acceptsAuthProfileForwarding?: boolean;
+  resolveAuthProfileForExecution?: boolean;
   contextEngineHostCapabilities?: readonly ContextEngineHostCapability[];
   prepareExecution?: CliBackendPlugin["prepareExecution"];
   resolveExecutionArgs?: CliBackendPlugin["resolveExecutionArgs"];
@@ -118,6 +122,8 @@ function resolveSetupCliBackendPolicy(provider: string): FallbackCliBackendPolic
     textTransforms: entry.backend.textTransforms,
     defaultAuthProfileId: entry.backend.defaultAuthProfileId,
     authEpochMode: entry.backend.authEpochMode,
+    acceptsAuthProfileForwarding: entry.backend.acceptsAuthProfileForwarding,
+    resolveAuthProfileForExecution: entry.backend.resolveAuthProfileForExecution,
     contextEngineHostCapabilities: entry.backend.contextEngineHostCapabilities,
     prepareExecution: entry.backend.prepareExecution,
     resolveExecutionArgs: entry.backend.resolveExecutionArgs,
@@ -410,6 +416,8 @@ export function resolveCliBackendConfig(
       textTransforms: mergePluginTextTransforms(runtimeTextTransforms, registered.textTransforms),
       defaultAuthProfileId: registered.defaultAuthProfileId,
       authEpochMode: registered.authEpochMode,
+      acceptsAuthProfileForwarding: registered.acceptsAuthProfileForwarding,
+      resolveAuthProfileForExecution: registered.resolveAuthProfileForExecution,
       contextEngineHostCapabilities: registered.contextEngineHostCapabilities,
       prepareExecution: registered.prepareExecution,
       resolveExecutionArgs: registered.resolveExecutionArgs,
@@ -442,6 +450,8 @@ export function resolveCliBackendConfig(
       ),
       defaultAuthProfileId: fallbackPolicy.defaultAuthProfileId,
       authEpochMode: fallbackPolicy.authEpochMode,
+      acceptsAuthProfileForwarding: fallbackPolicy.acceptsAuthProfileForwarding,
+      resolveAuthProfileForExecution: fallbackPolicy.resolveAuthProfileForExecution,
       contextEngineHostCapabilities: fallbackPolicy.contextEngineHostCapabilities,
       prepareExecution: fallbackPolicy.prepareExecution,
       resolveExecutionArgs: fallbackPolicy.resolveExecutionArgs,
@@ -471,6 +481,8 @@ export function resolveCliBackendConfig(
     ),
     defaultAuthProfileId: fallbackPolicy?.defaultAuthProfileId,
     authEpochMode: fallbackPolicy?.authEpochMode,
+    acceptsAuthProfileForwarding: fallbackPolicy?.acceptsAuthProfileForwarding,
+    resolveAuthProfileForExecution: fallbackPolicy?.resolveAuthProfileForExecution,
     contextEngineHostCapabilities: fallbackPolicy?.contextEngineHostCapabilities,
     prepareExecution: fallbackPolicy?.prepareExecution,
     resolveExecutionArgs: fallbackPolicy?.resolveExecutionArgs,
