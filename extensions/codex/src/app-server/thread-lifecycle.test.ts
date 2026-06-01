@@ -1,6 +1,7 @@
 import type { EmbeddedRunAttemptParams } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { describe, expect, it } from "vitest";
 import { CODEX_GPT5_BEHAVIOR_CONTRACT } from "../../prompt-overlay.js";
+import type { CodexDynamicToolSpec } from "./protocol.js";
 import {
   buildDeveloperInstructions,
   buildTurnCollaborationMode,
@@ -115,6 +116,56 @@ describe("Codex app-server native code mode config", () => {
     expect(instructions).not.toContain("message,");
   });
 
+  it("ignores dynamic tools with unreadable names in developer instructions", () => {
+    const unreadableNameTool = {
+      get name(): never {
+        throw new Error("tool name getter exploded");
+      },
+      description: "Broken tool",
+      inputSchema: { type: "object" },
+      namespace: "openclaw",
+      deferLoading: true,
+    };
+    const unreadableDeferredFlagTool = {
+      name: "image_generate",
+      description: "Create images",
+      inputSchema: { type: "object" },
+      namespace: "openclaw",
+      get deferLoading(): never {
+        throw new Error("tool defer flag getter exploded");
+      },
+    };
+
+    const dynamicTools = [
+      null,
+      unreadableNameTool,
+      unreadableDeferredFlagTool,
+      {
+        name: "music_generate",
+        description: "Create music",
+        inputSchema: { type: "object" },
+        namespace: "openclaw",
+        deferLoading: true,
+      },
+      {
+        name: "message",
+        description: "Send a message",
+        inputSchema: { type: "object" },
+      },
+    ] as unknown as CodexDynamicToolSpec[];
+
+    const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
+      dynamicTools,
+    });
+
+    expect(instructions).toContain(
+      "Deferred searchable OpenClaw dynamic tools available: music_generate.",
+    );
+    expect(instructions).toContain("Use `message` only for explicit out-of-band sends");
+    expect(instructions).not.toContain("image_generate");
+    expect(instructions).not.toContain("tool name getter exploded");
+  });
+
   it("uses the shared Skill Workshop guidance when skill_workshop is available", () => {
     const instructions = buildDeveloperInstructions(createAttemptParams({ provider: "openai" }), {
       dynamicTools: [
@@ -178,6 +229,30 @@ describe("Codex app-server native code mode config", () => {
     ]);
 
     expect(searchableFingerprint).toBe(directFingerprint);
+  });
+
+  it("fingerprints malformed dynamic tool descriptors without crashing", () => {
+    const malformedTool = {
+      get name(): never {
+        throw new Error("tool name getter exploded");
+      },
+      get description(): never {
+        throw new Error("tool description getter exploded");
+      },
+      inputSchema: {
+        type: "object",
+        get properties(): never {
+          throw new Error("schema properties getter exploded");
+        },
+      },
+      get deferLoading(): never {
+        throw new Error("tool defer flag getter exploded");
+      },
+    };
+
+    expect(() =>
+      codexDynamicToolsFingerprint([null, malformedTool] as unknown as CodexDynamicToolSpec[]),
+    ).not.toThrow();
   });
 
   it("keeps OpenClaw skill catalogs out of developer instructions", () => {

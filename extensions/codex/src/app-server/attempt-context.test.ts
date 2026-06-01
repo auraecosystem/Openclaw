@@ -77,6 +77,72 @@ describe("Codex app-server attempt context", () => {
     expect(report.tools.schemaChars).toBe(message?.schemaChars);
   });
 
+  it("reports malformed Codex dynamic tool descriptors without crashing", () => {
+    const unreadableTool = {
+      get name(): never {
+        throw new Error("tool name getter exploded");
+      },
+      get description(): never {
+        throw new Error("tool description getter exploded");
+      },
+      get inputSchema(): never {
+        throw new Error("tool schema getter exploded");
+      },
+      get deferLoading(): never {
+        throw new Error("tool defer flag getter exploded");
+      },
+    };
+    const tools = [
+      null,
+      {
+        name: 42,
+        description: 7,
+        inputSchema: undefined,
+      },
+      unreadableTool,
+      {
+        name: "message",
+        description: "Send a message.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+          },
+        },
+      },
+    ] as unknown as CodexDynamicToolSpec[];
+
+    const report = buildCodexSystemPromptReport({
+      attempt: {
+        sessionId: "session-1",
+        provider: "codex",
+        modelId: "gpt-5.4-codex",
+      } as EmbeddedRunAttemptParams,
+      sessionKey: "agent:main:session-1",
+      workspaceDir: path.join("tmp", "workspace"),
+      developerInstructions: "test developer instructions",
+      workspaceBootstrapContext: {
+        bootstrapFiles: [],
+        contextFiles: [],
+        promptContextFiles: [],
+        developerInstructionFiles: [],
+        heartbeatReferenceFiles: [],
+      },
+      skillsPrompt: "",
+      tools,
+    });
+
+    const unnamed = report.tools.entries.find((tool) => tool.name === "<unnamed>");
+    const unreadable = report.tools.entries.find((tool) => tool.name === "<unreadable>");
+    const message = report.tools.entries.find((tool) => tool.name === "message");
+
+    expect(unnamed?.summaryChars).toBe(0);
+    expect(unnamed?.schemaChars).toBe(0);
+    expect(unreadable?.summaryChars).toBe(0);
+    expect(unreadable?.schemaChars).toBe(0);
+    expect(message?.schemaChars).toBeGreaterThan(0);
+  });
+
   it("keeps MEMORY.md injected when sandbox effective workspace differs", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-memory-workspace-"));
     const sandboxWorkspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "codex-memory-sandbox-"));

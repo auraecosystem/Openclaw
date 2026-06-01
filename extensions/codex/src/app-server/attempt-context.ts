@@ -319,11 +319,12 @@ function buildCodexSkillReportEntries(
     .filter((entry) => entry.blockChars > 0);
 }
 
-function buildCodexToolReportEntry(tool: CodexDynamicToolSpec): CodexToolReportEntry {
-  const summary = tool.description.trim();
-  if (tool.deferLoading === true) {
+function buildCodexToolReportEntry(tool: unknown): CodexToolReportEntry {
+  const name = readCodexToolReportName(tool);
+  const summary = readCodexToolDescription(tool);
+  if (isDeferredCodexTool(tool)) {
     return {
-      name: tool.name,
+      name,
       summaryChars: summary.length,
       summaryHash: sha256Text(summary),
       schemaChars: 0,
@@ -332,10 +333,78 @@ function buildCodexToolReportEntry(tool: CodexDynamicToolSpec): CodexToolReportE
     };
   }
   return {
-    name: tool.name,
+    name,
     summaryChars: summary.length,
     summaryHash: sha256Text(summary),
-    ...buildCodexToolSchemaStats(tool.inputSchema),
+    ...buildCodexToolSchemaStatsForTool(tool),
+  };
+}
+
+function readCodexToolReportName(tool: unknown): string {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return "<unnamed>";
+    }
+    const name = Reflect.get(tool, "name");
+    return typeof name === "string" && name.trim() ? name.trim() : "<unnamed>";
+  } catch {
+    return "<unreadable>";
+  }
+}
+
+function readCodexToolDescription(tool: unknown): string {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return "";
+    }
+    const description = Reflect.get(tool, "description");
+    return typeof description === "string" ? description.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function readCodexToolInputSchema(tool: unknown): JsonValue | undefined {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return undefined;
+    }
+    const inputSchema = Reflect.get(tool, "inputSchema");
+    return inputSchema === undefined ? undefined : (inputSchema as JsonValue);
+  } catch {
+    return undefined;
+  }
+}
+
+function isDeferredCodexTool(tool: unknown): boolean {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return false;
+    }
+    const deferLoading = Reflect.get(tool, "deferLoading");
+    return deferLoading === true;
+  } catch {
+    return false;
+  }
+}
+
+function buildCodexToolSchemaStatsForTool(
+  tool: unknown,
+): Pick<CodexToolReportEntry, "schemaChars" | "schemaHash" | "propertiesCount"> {
+  const schema = readCodexToolInputSchema(tool);
+  return schema === undefined
+    ? buildMissingCodexToolSchemaStats()
+    : buildCodexToolSchemaStats(schema);
+}
+
+function buildMissingCodexToolSchemaStats(): Pick<
+  CodexToolReportEntry,
+  "schemaChars" | "schemaHash" | "propertiesCount"
+> {
+  return {
+    schemaChars: 0,
+    schemaHash: stableJsonHash(null),
+    propertiesCount: null,
   };
 }
 
@@ -344,17 +413,32 @@ function buildCodexToolSchemaStats(
 ): Pick<CodexToolReportEntry, "schemaChars" | "schemaHash" | "propertiesCount"> {
   const schemaChars = (() => {
     try {
-      return JSON.stringify(schema).length;
+      const encoded = JSON.stringify(schema);
+      return typeof encoded === "string" ? encoded.length : 0;
     } catch {
       return 0;
     }
   })();
-  const properties =
-    isJsonObject(schema) && isJsonObject(schema.properties) ? schema.properties : null;
+  const schemaHash = (() => {
+    try {
+      return stableJsonHash(schema);
+    } catch {
+      return stableJsonHash(null);
+    }
+  })();
+  const propertiesCount = (() => {
+    try {
+      const properties =
+        isJsonObject(schema) && isJsonObject(schema.properties) ? schema.properties : null;
+      return properties ? Object.keys(properties).length : null;
+    } catch {
+      return null;
+    }
+  })();
   return {
     schemaChars,
-    schemaHash: stableJsonHash(schema),
-    propertiesCount: properties ? Object.keys(properties).length : null,
+    schemaHash,
+    propertiesCount,
   };
 }
 

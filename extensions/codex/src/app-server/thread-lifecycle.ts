@@ -1111,14 +1111,13 @@ function fingerprintDynamicToolSpec(tool: JsonValue): JsonValue {
     return stabilizeJsonValue(tool);
   }
   const stable: JsonObject = {};
-  for (const [key, child] of Object.entries(tool).toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
+  for (const key of readStableJsonObjectKeys(tool)) {
     // Tool-search presentation can change per turn without changing the
     // durable app-server execution contract for an existing thread.
     if (key === "description" || key === "deferLoading" || key === "namespace") {
       continue;
     }
+    const child = readStableJsonObjectValue(tool, key);
     stable[key] = stabilizeJsonValue(child);
   }
   return stable;
@@ -1132,12 +1131,28 @@ function stabilizeJsonValue(value: JsonValue): JsonValue {
     return value;
   }
   const stable: JsonObject = {};
-  for (const [key, child] of Object.entries(value).toSorted(([left], [right]) =>
-    left.localeCompare(right),
-  )) {
+  for (const key of readStableJsonObjectKeys(value)) {
+    const child = readStableJsonObjectValue(value, key);
     stable[key] = stabilizeJsonValue(child);
   }
   return stable;
+}
+
+function readStableJsonObjectKeys(value: JsonObject): string[] {
+  try {
+    return Object.keys(value).toSorted((left, right) => left.localeCompare(right));
+  } catch {
+    return [];
+  }
+}
+
+function readStableJsonObjectValue(value: JsonObject, key: string): JsonValue {
+  try {
+    const child = Reflect.get(value, key);
+    return child === undefined ? null : child;
+  } catch {
+    return null;
+  }
 }
 
 const EMPTY_DYNAMIC_TOOLS_FINGERPRINT = JSON.stringify([]);
@@ -1187,8 +1202,8 @@ function buildDeferredDynamicToolManifest(
   const deferredToolNames = [
     ...new Set(
       (dynamicTools ?? [])
-        .filter((tool) => tool.deferLoading === true)
-        .map((tool) => tool.name.trim())
+        .filter(isDeferredDynamicTool)
+        .map(readDynamicToolInstructionName)
         .filter(Boolean),
     ),
   ].toSorted((left, right) => left.localeCompare(right));
@@ -1202,7 +1217,7 @@ function buildSkillWorkshopInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string | undefined {
   const hasSkillWorkshop = (dynamicTools ?? []).some(
-    (tool) => tool.name.trim() === SKILL_WORKSHOP_TOOL_NAME,
+    (tool) => readDynamicToolInstructionName(tool) === SKILL_WORKSHOP_TOOL_NAME,
   );
   if (!hasSkillWorkshop) {
     return undefined;
@@ -1215,7 +1230,7 @@ function buildVisibleReplyInstruction(
   dynamicTools: readonly CodexDynamicToolSpec[] | undefined,
 ): string {
   const messageToolAvailable = dynamicTools
-    ? dynamicTools.some((tool) => tool.name.trim() === "message")
+    ? dynamicTools.some((tool) => readDynamicToolInstructionName(tool) === "message")
     : params.disableMessageTool !== true;
   if (params.sourceReplyDeliveryMode === "message_tool_only" && messageToolAvailable) {
     return "Visible source replies are not automatically delivered for this run. Use `message(action=send)` for user-visible source-channel output. Do not repeat that visible content in your final answer.";
@@ -1224,6 +1239,30 @@ function buildVisibleReplyInstruction(
     return "For the current source conversation, reply normally in your final assistant message; OpenClaw will deliver it through the active source conversation. Use `message` only for explicit out-of-band sends, media/file sends, or sends to a different target.";
   }
   return "For the current source conversation, reply normally in your final assistant message; OpenClaw will deliver it through the active source conversation.";
+}
+
+function readDynamicToolInstructionName(tool: unknown): string {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return "";
+    }
+    const name = Reflect.get(tool, "name");
+    return typeof name === "string" ? name.trim() : "";
+  } catch {
+    return "";
+  }
+}
+
+function isDeferredDynamicTool(tool: unknown): boolean {
+  try {
+    if (tool === null || typeof tool !== "object") {
+      return false;
+    }
+    const deferLoading = Reflect.get(tool, "deferLoading");
+    return deferLoading === true;
+  } catch {
+    return false;
+  }
 }
 
 function buildUserInput(
