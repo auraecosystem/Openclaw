@@ -13,6 +13,7 @@ import {
   publishTranscriptUpdate,
   readSessionUpdatedAt,
   replaceSessionEntry,
+  resolveSessionTranscriptRuntimeTarget,
   updateSessionEntry,
   upsertSessionEntry,
 } from "./session-accessor.js";
@@ -328,6 +329,31 @@ describe("session accessor file-backed seam", () => {
       fs.realpathSync(expectedTranscriptPath),
     );
     await expect(loadTranscriptEvents(scope)).resolves.toEqual([event]);
+  });
+
+  it("resolves runtime transcript targets from scope without caller-owned paths", async () => {
+    const scope = {
+      agentId: "main",
+      sessionId: "session-1",
+      sessionKey: "agent:main:main",
+      storePath,
+    };
+
+    await upsertSessionEntry(scope, {
+      sessionId: scope.sessionId,
+      updatedAt: 10,
+    });
+
+    const target = await resolveSessionTranscriptRuntimeTarget(scope);
+
+    expect(target).toMatchObject({
+      agentId: "main",
+      sessionId: "session-1",
+      sessionKey: "agent:main:main",
+    });
+    expect(fs.realpathSync(path.dirname(target.sessionFile))).toBe(fs.realpathSync(tempDir));
+    expect(path.basename(target.sessionFile)).toBe("session-1.jsonl");
+    expect(loadSessionEntry(scope)?.sessionFile).toBe(target.sessionFile);
   });
 
   it("persists transcript metadata under the normalized session key", async () => {
