@@ -56,6 +56,14 @@ describe("google gemini cli backend auth bridge", () => {
       home = prepared?.env?.GEMINI_CLI_HOME;
       expect(home).toBeTruthy();
 
+      const settingsRaw = await fs.readFile(
+        path.join(home ?? "", ".gemini", "settings.json"),
+        "utf8",
+      );
+      expect(JSON.parse(settingsRaw)).toEqual({
+        security: { auth: { selectedType: "oauth-personal" } },
+      });
+
       const raw = await fs.readFile(path.join(home ?? "", ".gemini", "oauth_creds.json"), "utf8");
       expect(JSON.parse(raw)).toEqual({
         type: "authorized_user",

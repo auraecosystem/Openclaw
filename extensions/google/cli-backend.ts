@@ -96,6 +96,12 @@ async function prepareGeminiCliOAuthHome(
       { encoding: "utf8", mode: 0o600 },
     );
 
+    await fs.writeFile(
+      path.join(geminiDir, "settings.json"),
+      `${JSON.stringify({ security: { auth: { selectedType: "oauth-personal" } } }, null, 2)}\n`,
+      { mode: 0o600 },
+    );
+
     return {
       env: {
         GEMINI_CLI_HOME: tempHome,
