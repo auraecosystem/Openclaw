@@ -429,6 +429,44 @@ describe("applyExclusiveSlotSelection", () => {
     expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
     expect(result.config.plugins?.entries?.["agent-capture"]?.enabled).toBe(true);
   });
+
+  it("does not disable a memory plugin selected for an agent legacy memory slot", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: { "memory.recall": "memory-core" },
+        entries: {
+          "memory-core": { enabled: true },
+          "agent-recall": { enabled: true },
+        },
+      },
+      agents: {
+        list: [
+          {
+            id: "work",
+            plugins: {
+              slots: { memory: "agent-recall" },
+            },
+          },
+        ],
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "memory-core", kind: "memory" },
+        { id: "agent-recall", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+    expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
+    expect(result.config.plugins?.entries?.["agent-recall"]?.enabled).toBe(true);
+    expect(result.config.agents?.list[0]?.plugins?.slots?.memory).toBe("agent-recall");
+  });
 });
 
 describe("normalizeKinds", () => {

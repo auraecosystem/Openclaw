@@ -141,7 +141,7 @@ function pluginOwnsProtectedAgentSlot(params: {
         return true;
       }
     }
-    if (params.ignoredSlotKey !== "memory.recall" && slots.memory === params.pluginId) {
+    if (slots.memory === params.pluginId) {
       return true;
     }
   }
