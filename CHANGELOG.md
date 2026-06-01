@@ -292,6 +292,7 @@ Docs: https://docs.openclaw.ai
 - Google: stop normalizing `gemini-3.1-flash-lite` to the retired preview endpoint and update Flash Lite alias guidance to the GA model id. Fixes #86151. (#86240) Thanks @SebTardif.
 - Installer: make Alpine apk installs cover Git, verify the Node runtime floor, try `nodejs-current`, and report Alpine version guidance when repositories only provide older Node packages.
 - Agents/status: prefer the active Claude CLI OAuth auth label over an unused Anthropic env API-key label for equivalent runtime aliases. Fixes #80184. (#86570) Thanks @brokemac79.
+- Auth/OpenAI Codex: normalize legacy OAuth profile field aliases and explain stale auth profile mode overrides, so older Codex OAuth accounts do not get masked as missing API keys. Fixes #47964. (#75030) Thanks @liaoandi.
 - Agents/media: send direct fallback for generated media still missing after an active requester wake fails. (#85489) Thanks @fuller-stack-dev.
 - Agents: derive overflow compaction budgets from provider-reported and synthetic over-budget token counts so confirmed context overflows compact before retrying. (#70473) Thanks @fuller-stack-dev.
 - Agents/Codex: recover Codex context-window prompt errors through overflow compaction and surface reset guidance when recovery is exhausted. (#85542) Thanks @fuller-stack-dev.

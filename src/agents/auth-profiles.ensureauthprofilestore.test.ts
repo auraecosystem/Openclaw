@@ -244,6 +244,32 @@ describe("ensureAuthProfileStore", () => {
     });
   });
 
+  it("normalizes legacy OpenAI Codex OAuth field aliases on load", () => {
+    withTempAgentDir("openclaw-auth-codex-legacy-aliases-", (agentDir) => {
+      const expires = Date.now() + 60_000;
+      writeAuthProfileStore(agentDir, {
+        "openai-codex:default": {
+          type: "oauth",
+          provider: "openai-codex",
+          access_token: "legacy-access-token",
+          refreshToken: "legacy-refresh-token",
+          expires_at: String(expires),
+          account_id: "acct_legacy",
+        },
+      });
+
+      const profile = loadAuthProfile(agentDir, "openai-codex:default");
+
+      expect(profile).toMatchObject({
+        type: "oauth",
+        access: "legacy-access-token",
+        refresh: "legacy-refresh-token",
+        expires,
+        accountId: "acct_legacy",
+      });
+    });
+  });
+
   it("merges main auth profiles into agent store and keeps agent overrides", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-auth-merge-"));
     const { mainDir, agentDir, previousStateDir, previousAgentDir } =
