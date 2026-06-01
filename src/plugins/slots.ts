@@ -134,7 +134,7 @@ function pluginOwnsProtectedAgentSlot(params: {
       continue;
     }
     for (const slotKey of PROTECTED_SLOT_KEYS) {
-      if (slotKey === params.ignoredSlotKey || slotKey === "contextEngine") {
+      if (slotKey === "contextEngine") {
         continue;
       }
       if (slots[slotKey] === params.pluginId) {
