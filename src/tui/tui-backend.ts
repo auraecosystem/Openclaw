@@ -59,6 +59,7 @@ export type TuiSessionList = {
       | "goal"
       | "modelProvider"
       | "displayName"
+      | "queueMode"
     > & {
       key: string;
       sessionId?: string;
