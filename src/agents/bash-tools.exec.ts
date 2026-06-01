@@ -1728,12 +1728,19 @@ export function createExecTool(
         timeoutSec: effectiveTimeout,
       });
 
-      const duplicateReuseRequested = backgroundRequested || yieldRequested;
-      if (allowBackground && workdir && duplicateReuseRequested) {
+      const execReuseKey = backgroundRequested
+        ? "explicit-background"
+        : yieldRequested
+          ? "explicit-yield"
+          : allowBackground && yieldWindow !== null
+            ? "default-yield"
+            : undefined;
+      if (workdir && execReuseKey) {
         const matchingSession = findMatchingRunningBackgroundSession({
           command: params.command,
           cwd: workdir,
           executionKey,
+          reuseKey: execReuseKey,
           scopeKey: defaults?.scopeKey,
           sessionKey: notifySessionKey,
         });
@@ -1764,6 +1771,7 @@ export function createExecTool(
         notifyDeliveryContext,
         timeoutSec: effectiveTimeout,
         executionKey,
+        execReuseKey,
         initialBackgrounded: backgroundRequested && allowBackground,
         onUpdate,
       });
