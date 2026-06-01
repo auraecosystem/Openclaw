@@ -743,6 +743,7 @@ describe("modelsStatusCommand auth overview", () => {
       mocks.resolveRuntimeSyntheticAuthProviderRefs.getMockImplementation();
     const originalResolveSyntheticAuthImpl =
       mocks.resolveProviderSyntheticAuthWithPlugin.getMockImplementation();
+    const originalHealthImpl = buildAuthHealthSummaryMock.getMockImplementation();
     mocks.loadConfig.mockReturnValue({
       agents: {
         defaults: {
@@ -756,8 +757,39 @@ describe("modelsStatusCommand auth overview", () => {
       models: { providers: {} },
       env: { shellEnv: { enabled: false } },
     });
-    mocks.store.profiles = {};
+    mocks.store.profiles = {
+      "anthropic:default": {
+        type: "oauth",
+        provider: "anthropic",
+        access: "expired-access",
+        refresh: "expired-refresh",
+        expires: Date.now() - 60_000,
+      },
+    };
     mocks.resolveEnvApiKey.mockImplementation(() => null);
+    buildAuthHealthSummaryMock.mockReturnValue({
+      now: Date.now(),
+      warnAfterMs: 86_400_000,
+      profiles: [
+        {
+          profileId: "anthropic:default",
+          provider: "anthropic",
+          type: "oauth",
+          status: "expired",
+          source: "store",
+          label: "anthropic:default",
+        },
+      ],
+      providers: [
+        {
+          provider: "anthropic",
+          status: "expired",
+          expiresAt: Date.now() - 60_000,
+          remainingMs: -60_000,
+          profiles: [],
+        },
+      ],
+    });
     mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue(["claude-cli"]);
     mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
       ({ provider }: { provider: string }) =>
@@ -802,6 +834,90 @@ describe("modelsStatusCommand auth overview", () => {
       });
       expect(syntheticProbeProviders).toStrictEqual(["claude-cli"]);
       expect(localRuntime.exit).not.toHaveBeenCalledWith(1);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+      if (originalSyntheticImpl) {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockImplementation(originalSyntheticImpl);
+      } else {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue([]);
+      }
+      if (originalResolveSyntheticAuthImpl) {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+          originalResolveSyntheticAuthImpl,
+        );
+      } else {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockReturnValue(undefined);
+      }
+      if (originalHealthImpl) {
+        buildAuthHealthSummaryMock.mockImplementation(originalHealthImpl);
+      }
+    }
+  });
+
+  it("fails --check when CLI runtime synthetic auth is expired", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    const originalSyntheticImpl =
+      mocks.resolveRuntimeSyntheticAuthProviderRefs.getMockImplementation();
+    const originalResolveSyntheticAuthImpl =
+      mocks.resolveProviderSyntheticAuthWithPlugin.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4.6", fallbacks: [] },
+          models: {
+            "anthropic/*": { agentRuntime: { id: "claude-cli" } },
+          },
+          cliBackends: { "claude-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: false } },
+    });
+    mocks.store.profiles = {};
+    mocks.resolveEnvApiKey.mockImplementation(() => null);
+    mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue(["claude-cli"]);
+    mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+      ({ provider }: { provider: string }) =>
+        provider === "claude-cli"
+          ? {
+              apiKey: "expired-claude-cli-runtime-token",
+              source: "Claude CLI native auth",
+              mode: "oauth",
+              expiresAt: Date.now() - 60_000,
+            }
+          : undefined,
+    );
+
+    try {
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual(["claude-cli"]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        {
+          provider: "anthropic",
+          runtime: "claude-cli",
+          authProvider: "claude-cli",
+          status: "missing",
+          effective: {
+            kind: "synthetic",
+            detail: "Claude CLI native auth",
+          },
+        },
+      ]);
+      expect(localRuntime.exit).toHaveBeenCalledWith(1);
     } finally {
       mocks.store.profiles = originalProfiles;
       if (originalLoadConfig) {
@@ -938,7 +1054,6 @@ describe("modelsStatusCommand auth overview", () => {
               apiKey: "codex-runtime-token",
               source: "codex-app-server",
               mode: "token",
-              expiresAt: Date.now() + 60_000,
             }
           : undefined,
     );

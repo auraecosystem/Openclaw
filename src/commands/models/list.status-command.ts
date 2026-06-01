@@ -108,6 +108,22 @@ type StatusSyntheticAuth = {
   expiresAt?: number;
 };
 
+function isUsableStatusSyntheticAuth(auth: StatusSyntheticAuth | undefined): boolean {
+  if (!auth?.mode) {
+    return false;
+  }
+  if (auth.mode === "api-key" || auth.mode === "token") {
+    if (auth.expiresAt === undefined) {
+      return true;
+    }
+  }
+  return (
+    typeof auth.expiresAt === "number" &&
+    Number.isFinite(auth.expiresAt) &&
+    auth.expiresAt > Date.now()
+  );
+}
+
 function loadProviderUsageRuntime(): Promise<ProviderUsageRuntime> {
   return providerUsageRuntimeLoader.load();
 }
@@ -627,8 +643,7 @@ export async function modelsStatusCommand(
       const auth = providerAuthMap.get(normalized);
       return Boolean(
         auth?.env ||
-        auth?.syntheticAuth ||
-        syntheticAuthByProvider.has(normalized) ||
+        isUsableStatusSyntheticAuth(syntheticAuthByProvider.get(normalized)) ||
         resolveUsableCustomProviderApiKey({ cfg, provider: normalized }),
       );
     };
@@ -881,7 +896,6 @@ export async function modelsStatusCommand(
         const cliRuntimeAuthProvider = resolveCliRuntimeAuthProvider(usage);
         if (cliRuntimeAuthProvider) {
           providersInUse.add(cliRuntimeAuthProvider);
-          providersInUse.add(resolveProviderAuthHealthId(cliRuntimeAuthProvider));
           continue;
         }
         providersInUse.add(usage.provider);
