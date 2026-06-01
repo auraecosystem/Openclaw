@@ -262,6 +262,89 @@ describe("applyExclusiveSlotSelection", () => {
     // legacy still owns contextEngine via default — must NOT be disabled
     expect(result.config.plugins?.entries?.legacy?.enabled).not.toBe(false);
   });
+
+  it("does not disable a memory plugin selected for another memory role slot", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: {
+          "memory.recall": "memory-core",
+          "memory.compaction": "memory-compaction",
+          "memory.capture": "memory-capture",
+          "memory.dreaming": "memory-dreaming",
+          "memory.userModel": "memory-user-model",
+        },
+        entries: {
+          "memory-core": { enabled: true },
+          "memory-compaction": { enabled: true },
+          "memory-capture": { enabled: true },
+          "memory-dreaming": { enabled: true },
+          "memory-user-model": { enabled: true },
+        },
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "memory-core", kind: "memory" },
+        { id: "memory-compaction", kind: "memory" },
+        { id: "memory-capture", kind: "memory" },
+        { id: "memory-dreaming", kind: "memory" },
+        { id: "memory-user-model", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+    expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
+    expect(result.config.plugins?.entries?.["memory-compaction"]?.enabled).toBe(true);
+    expect(result.config.plugins?.entries?.["memory-capture"]?.enabled).toBe(true);
+    expect(result.config.plugins?.entries?.["memory-dreaming"]?.enabled).toBe(true);
+    expect(result.config.plugins?.entries?.["memory-user-model"]?.enabled).toBe(true);
+    expect(result.warnings).toEqual([
+      'Exclusive slot "memory.recall" switched from "memory-core" to "new-recall".',
+      'Disabled other "memory.recall" slot plugins: memory-core.',
+    ]);
+  });
+
+  it("does not disable a memory plugin selected for an agent memory role slot", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: { "memory.recall": "memory-core" },
+        entries: {
+          "memory-core": { enabled: true },
+          "agent-capture": { enabled: true },
+        },
+      },
+      agents: {
+        list: [
+          {
+            id: "work",
+            plugins: {
+              slots: { "memory.capture": "agent-capture" },
+            },
+          },
+        ],
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "memory-core", kind: "memory" },
+        { id: "agent-capture", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+    expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
+    expect(result.config.plugins?.entries?.["agent-capture"]?.enabled).toBe(true);
+  });
 });
 
 describe("normalizeKinds", () => {
