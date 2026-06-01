@@ -2082,7 +2082,15 @@ export function buildGatewaySessionRow(params: {
         rowContext: params.rowContext,
       }) ?? resolveNonNegativeNumber(transcriptUsage?.estimatedCostUsd));
   const contextTokens = lightweight
-    ? resolvePositiveNumber(entry?.contextTokens)
+    ? (resolvePositiveNumber(entry?.contextTokens) ??
+      resolvePositiveNumber(
+        resolveContextTokensForModel({
+          cfg,
+          provider: rowModelProvider,
+          model: rowModel,
+          allowAsyncLoad: false,
+        }),
+      ))
     : (resolvePositiveNumber(entry?.contextTokens) ??
       resolvePositiveNumber(transcriptUsage?.contextTokens) ??
       resolvePositiveNumber(
@@ -2374,6 +2382,7 @@ export function buildGatewaySessionInfo(params: {
     now,
     storeChildSessionsByKey,
     skipTranscriptUsageFallback: true,
+    lightweightListRow: true,
   });
 }
 

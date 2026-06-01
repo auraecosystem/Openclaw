@@ -27,10 +27,7 @@ function installTelegramIngressQueueRuntime(resolveStateDir: () => string): void
       resolveStateDir,
       openChannelIngressQueue: (
         options?: Omit<Parameters<typeof createChannelIngressQueue>[0], "channelId">,
-      ) =>
-        options
-          ? createChannelIngressQueue({ ...options, channelId: "telegram" })
-          : createChannelIngressQueue({ channelId: "telegram" }),
+      ) => createChannelIngressQueue({ ...options, channelId: "telegram" }),
     },
   } as TelegramRuntime);
 }

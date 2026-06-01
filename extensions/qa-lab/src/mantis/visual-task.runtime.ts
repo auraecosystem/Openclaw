@@ -522,7 +522,7 @@ export async function runMantisVisualDriver(
     });
     const settleMs = opts.settleMs ?? DEFAULT_SETTLE_MS;
     if (settleMs > 0) {
-      await new Promise<void>((resolve) => {
+      await new Promise((resolve) => {
         setTimeout(resolve, settleMs);
       });
     }

@@ -6,7 +6,6 @@ import { WebSocket, WebSocketServer } from "ws";
 import { createAuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
 import { PLUGIN_NODE_CAPABILITY_PATH_PREFIX } from "./plugin-node-capability.js";
-import { MAX_PREAUTH_PAYLOAD_BYTES } from "./server-constants.js";
 import { attachGatewayUpgradeHandler, createGatewayHttpServer } from "./server-http.js";
 import { createPreauthConnectionBudget } from "./server/preauth-connection-budget.js";
 import type { GatewayWsClient } from "./server/ws-types.js";
@@ -272,10 +271,7 @@ async function withCanvasGatewayHarness(params: {
   }) => Promise<void>;
 }) {
   const clients = new Set<GatewayWsClient>();
-  const canvasWss = new WebSocketServer({
-    noServer: true,
-    maxPayload: MAX_PREAUTH_PAYLOAD_BYTES,
-  });
+  const canvasWss = new WebSocketServer({ noServer: true });
   const canvasHandler: CanvasHostHandler = {
     rootDir: "test",
     basePath: "/canvas",
@@ -317,10 +313,7 @@ async function withCanvasGatewayHarness(params: {
     rateLimiter: params.rateLimiter,
   });
 
-  const wss = new WebSocketServer({
-    noServer: true,
-    maxPayload: MAX_PREAUTH_PAYLOAD_BYTES,
-  });
+  const wss = new WebSocketServer({ noServer: true });
   attachGatewayUpgradeHandler({
     httpServer,
     wss,
