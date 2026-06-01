@@ -1013,4 +1013,90 @@ describe("secrets apply", () => {
       mode: "json",
     });
   });
+
+  it("enables plugin owners for plugin-managed exec provider upserts", async () => {
+    await writeJsonFile(fixture.configPath, {
+      plugins: {
+        entries: {
+          vault: {
+            config: {
+              namespace: "team-a",
+            },
+          },
+        },
+      },
+      secrets: {
+        providers: {
+          vault: {
+            source: "exec",
+            pluginIntegration: {
+              pluginId: "vault",
+              integrationId: "vault",
+            },
+          },
+        },
+      },
+    });
+
+    const plan = createPlan({
+      providerUpserts: {
+        vault: {
+          source: "exec",
+          pluginIntegration: {
+            pluginId: "vault",
+            integrationId: "vault",
+          },
+        },
+      },
+      targets: [],
+    });
+
+    const nextConfig = (await applyTesting.projectConfigForTest({
+      plan,
+      env: fixture.env,
+    })) as {
+      plugins?: {
+        entries?: Record<string, unknown>;
+      };
+    };
+    expect(nextConfig.plugins?.entries?.vault).toEqual({
+      config: {
+        namespace: "team-a",
+      },
+      enabled: true,
+    });
+  });
+
+  it("adds plugin-managed exec provider owners to restrictive plugin allowlists", async () => {
+    await writeJsonFile(fixture.configPath, {
+      plugins: {
+        allow: ["openai"],
+      },
+    });
+
+    const plan = createPlan({
+      providerUpserts: {
+        vault: {
+          source: "exec",
+          pluginIntegration: {
+            pluginId: "vault",
+            integrationId: "vault",
+          },
+        },
+      },
+      targets: [],
+    });
+
+    const nextConfig = (await applyTesting.projectConfigForTest({
+      plan,
+      env: fixture.env,
+    })) as {
+      plugins?: {
+        allow?: string[];
+        entries?: Record<string, unknown>;
+      };
+    };
+    expect(nextConfig.plugins?.allow).toEqual(["openai", "vault"]);
+    expect(nextConfig.plugins?.entries?.vault).toEqual({ enabled: true });
+  });
 });
