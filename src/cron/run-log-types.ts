@@ -29,4 +29,5 @@ export type CronRunLogEntry = {
   runAtMs?: number;
   durationMs?: number;
   nextRunAtMs?: number;
+  warnings?: string[];
 } & CronRunTelemetry;

@@ -634,6 +634,7 @@ export type CronRunLogEntry = {
   delivered?: boolean;
   deliveryStatus?: CronDeliveryStatus;
   deliveryError?: string;
+  warnings?: string[];
   sessionId?: string;
   sessionKey?: string;
   runAtMs?: number;
