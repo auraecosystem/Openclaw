@@ -21,12 +21,9 @@ import { resolvePathEnvKey } from "./windows-cmd-helpers.mjs";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ignoreRepoBinary = process.env.OPENCLAW_CRABBOX_WRAPPER_IGNORE_REPO_BINARY === "1";
 const repoLocal = ignoreRepoBinary ? null : resolveCrabboxBinary(process.env, process.platform);
-const pathLocal = resolvePathBinary("crabbox", process.env, process.platform);
-const binary =
-  repoLocal ??
-  pathLocal ??
-  resolveGitCommonCrabboxBinary(process.env, process.platform) ??
-  "crabbox";
+const pathLocals = resolvePathBinaries("crabbox", process.env, process.platform);
+const binaryCandidates = crabboxBinaryCandidates(process.env, process.platform);
+let binary = binaryCandidates[0] ?? "crabbox";
 const args = process.argv.slice(2);
 
 if (args[0] === "--") {
@@ -58,16 +55,39 @@ function resolveCrabboxBinary(env, platform) {
 }
 
 function resolvePathBinary(command, env, platform) {
+  return resolvePathBinaries(command, env, platform)[0] ?? null;
+}
+
+function resolvePathBinaries(command, env, platform) {
   const pathValue = env[resolvePathEnvKey(env)] ?? "";
+  const paths = [];
   for (const dir of pathValue.split(delimiter).filter(Boolean)) {
     for (const candidate of commandCandidates(command, platform)) {
       const fullPath = resolve(dir, candidate);
       if (isExecutableFile(fullPath, platform)) {
-        return fullPath;
+        paths.push(fullPath);
+        break;
       }
     }
   }
-  return null;
+  return paths;
+}
+
+function pushUnique(values, value) {
+  if (value && !values.includes(value)) {
+    values.push(value);
+  }
+}
+
+function crabboxBinaryCandidates(env, platform) {
+  const candidates = [];
+  pushUnique(candidates, repoLocal);
+  for (const candidate of pathLocals) {
+    pushUnique(candidates, candidate);
+  }
+  pushUnique(candidates, resolveGitCommonCrabboxBinary(env, platform));
+  pushUnique(candidates, "crabbox");
+  return candidates;
 }
 
 function resolveGitCommonCrabboxBinary(env, platform) {
@@ -128,6 +148,7 @@ const cmdMetaCharactersRe = /([()\][%!^"`<>&|;, *?])/g;
 const jsRuntimeEntrypoints = new Set(["pnpm", "npm", "npx", "corepack", "node", "yarn", "bun"]);
 const awsMacosCorepackEntrypoints = new Set(["pnpm", "yarn", "corepack"]);
 const minimumBlacksmithCrabboxVersion = [0, 22, 0];
+const brokeredCloudProviders = new Set(["aws", "azure"]);
 const shellControlCommandPrefixes = new Set([
   "if",
   "while",
@@ -462,18 +483,28 @@ function selectedProvider(commandArgs, advertisedProviders = []) {
   return configuredProvider();
 }
 
-function shouldRequireBrokeredAws(commandArgs, providerName) {
-  if (process.env.OPENCLAW_CRABBOX_ALLOW_DIRECT_AWS === "1") {
+function shouldRequireBrokeredCloud(commandArgs, providerName) {
+  const canonicalProvider = providerAliases.get(providerName) ?? providerName;
+  if (!brokeredCloudProviders.has(canonicalProvider)) {
     return false;
   }
-  const canonicalProvider = providerAliases.get(providerName) ?? providerName;
-  if (canonicalProvider !== "aws") {
+  if (allowsDirectCloudProvider(canonicalProvider)) {
     return false;
   }
   if (commandArgs[0] === "run" || commandArgs[0] === "warmup") {
     return true;
   }
   return commandArgs[0] === "actions" && commandArgs[1] === "hydrate";
+}
+
+function allowsDirectCloudProvider(providerName) {
+  if (process.env.OPENCLAW_CRABBOX_ALLOW_DIRECT_CLOUD === "1") {
+    return true;
+  }
+  if (providerName === "aws" && process.env.OPENCLAW_CRABBOX_ALLOW_DIRECT_AWS === "1") {
+    return true;
+  }
+  return providerName === "azure" && process.env.OPENCLAW_CRABBOX_ALLOW_DIRECT_AZURE === "1";
 }
 
 function brokerAuthConfigured() {
@@ -490,15 +521,22 @@ function brokerAuthConfigured() {
   return Boolean(parsed?.coordinator && parsed?.brokerAuth === "configured");
 }
 
-function enforceBrokeredAws(commandArgs, providerName) {
-  if (!shouldRequireBrokeredAws(commandArgs, providerName) || brokerAuthConfigured()) {
+function enforceBrokeredCloud(commandArgs, providerName) {
+  const canonicalProvider = providerAliases.get(providerName) ?? providerName;
+  if (!shouldRequireBrokeredCloud(commandArgs, canonicalProvider) || brokerAuthConfigured()) {
     return;
   }
+  const envOverride =
+    canonicalProvider === "aws"
+      ? "OPENCLAW_CRABBOX_ALLOW_DIRECT_AWS=1"
+      : canonicalProvider === "azure"
+        ? "OPENCLAW_CRABBOX_ALLOW_DIRECT_AZURE=1"
+        : "OPENCLAW_CRABBOX_ALLOW_DIRECT_CLOUD=1";
   console.error(
     [
-      "[crabbox] provider=aws requires a configured Crabbox broker for OpenClaw proof.",
-      "[crabbox] run `crabbox login --url https://crabbox.openclaw.ai --provider aws`, then retry.",
-      "[crabbox] for intentional direct AWS provider debugging, set OPENCLAW_CRABBOX_ALLOW_DIRECT_AWS=1.",
+      `[crabbox] provider=${canonicalProvider} requires a configured Crabbox broker for OpenClaw proof.`,
+      `[crabbox] run \`crabbox login --url https://crabbox.openclaw.ai --provider ${canonicalProvider}\`, then retry.`,
+      `[crabbox] for intentional direct ${canonicalProvider} provider debugging, set ${envOverride}.`,
     ].join("\n"),
   );
   process.exit(2);
@@ -1540,7 +1578,9 @@ function isWindowsRemoteTarget(commandArgs) {
 }
 
 function isNativeWindowsRemoteTarget(commandArgs) {
-  return isWindowsRemoteTarget(commandArgs) && optionValue(commandArgs, "--windows-mode") !== "wsl2";
+  return (
+    isWindowsRemoteTarget(commandArgs) && optionValue(commandArgs, "--windows-mode") !== "wsl2"
+  );
 }
 
 function isAwsMacosRemoteTarget(commandArgs, providerName) {
@@ -1553,14 +1593,14 @@ function isAwsMacosRemoteTarget(commandArgs, providerName) {
 
 function remoteWindowsHydratedNodeModulesBootstrap() {
   return [
-    '$openclawModulesDir = $env:PNPM_CONFIG_MODULES_DIR',
-    'if ($openclawModulesDir) {',
+    "$openclawModulesDir = $env:PNPM_CONFIG_MODULES_DIR",
+    "if ($openclawModulesDir) {",
     'if (-not (Test-Path $openclawModulesDir)) { throw "PNPM_CONFIG_MODULES_DIR does not exist: $openclawModulesDir" }',
     '$openclawWorkspaceModules = Join-Path (Get-Location).Path "node_modules"',
     '$openclawSelfModules = Join-Path $openclawModulesDir "node_modules"',
     'if (-not (Test-Path $openclawSelfModules)) { cmd /c mklink /J "$openclawSelfModules" "$openclawModulesDir" | Out-Host; if ($LASTEXITCODE -ne 0) { throw "failed to link hydrated pnpm node_modules" } }',
     'if (-not (Test-Path $openclawWorkspaceModules)) { cmd /c mklink /J "$openclawWorkspaceModules" "$openclawModulesDir" | Out-Host; if ($LASTEXITCODE -ne 0) { throw "failed to link workspace node_modules" } }',
-    '}',
+    "}",
   ].join("; ");
 }
 
@@ -1939,8 +1979,6 @@ function cleanupFullCheckout(dir, active) {
   rmSync(dir, { recursive: true, force: true });
 }
 
-const version = checkedOutput(binary, ["--version"]);
-const help = checkedOutput(binary, ["run", "--help"]);
 const providerAliases = new Map([
   ["blacksmith", "blacksmith-testbox"],
   ["cf", "cloudflare"],
@@ -2030,8 +2068,34 @@ function isProviderAdvertised(provider, advertisedProviders) {
   );
 }
 
-const providers = parseProvidersFromHelp(help.text);
-const displayBinary = binary === "crabbox" ? "crabbox" : relative(repoRoot, binary);
+function displayBinaryPath(path) {
+  return path === "crabbox" ? "crabbox" : relative(repoRoot, path);
+}
+
+function selectBlacksmithCapableBinary(candidates, currentBinary) {
+  for (const candidate of candidates) {
+    if (candidate === currentBinary) {
+      continue;
+    }
+    const candidateVersion = checkedOutput(candidate, ["--version"]);
+    const candidateHelp = checkedOutput(candidate, ["run", "--help"]);
+    if (candidateVersion.status !== 0 || candidateHelp.status !== 0) {
+      continue;
+    }
+    if (!satisfiesMinimumCrabboxVersion(candidateVersion.text, minimumBlacksmithCrabboxVersion)) {
+      continue;
+    }
+    if (!isProviderAdvertised("blacksmith-testbox", parseProvidersFromHelp(candidateHelp.text))) {
+      continue;
+    }
+    return { binary: candidate, version: candidateVersion, help: candidateHelp };
+  }
+  return null;
+}
+
+let version = checkedOutput(binary, ["--version"]);
+let help = checkedOutput(binary, ["run", "--help"]);
+let providers = parseProvidersFromHelp(help.text);
 const provider = selectedProvider(args, providers);
 const canonicalProvider = providerAliases.get(provider) ?? provider;
 const commandProviderValue = commandProvider(args);
@@ -2039,6 +2103,24 @@ let normalizedArgs = ensureAwsMacOnDemandMarket(
   ensureAzureWindowsProvider(args, provider, providers),
   provider,
 );
+
+if (
+  canonicalProvider === "blacksmith-testbox" &&
+  !satisfiesMinimumCrabboxVersion(version.text, minimumBlacksmithCrabboxVersion)
+) {
+  const alternate = selectBlacksmithCapableBinary(binaryCandidates, binary);
+  if (alternate) {
+    console.error(
+      `[crabbox] selected ${displayBinaryPath(binary)} is too old for blacksmith-testbox; using ${displayBinaryPath(alternate.binary)} instead`,
+    );
+    binary = alternate.binary;
+    version = alternate.version;
+    help = alternate.help;
+    providers = parseProvidersFromHelp(help.text);
+  }
+}
+
+const displayBinary = displayBinaryPath(binary);
 
 console.error(
   `[crabbox] bin=${displayBinary} version=${version.text || "unknown"} provider=${provider || "unknown"} providers=${providers.join(",") || "unknown"}`,
@@ -2075,7 +2157,7 @@ if (canonicalProvider === "blacksmith-testbox") {
   }
 }
 
-enforceBrokeredAws(normalizedArgs, provider);
+enforceBrokeredCloud(normalizedArgs, provider);
 
 if (canonicalProvider === "blacksmith-testbox") {
   const envProviderLocal = process.env.CRABBOX_PROVIDER?.trim();
