@@ -52,6 +52,7 @@ import {
   type ExecProcessOutcome,
   applyPathPrepend,
   applyShellPath,
+  buildExecSessionExecutionKey,
   normalizeExecAsk,
   normalizePathPrepend,
   resolveExecTarget,
@@ -1715,10 +1716,24 @@ export function createExecTool(
         await validateScriptFileForShellBleed({ command: params.command, workdir });
       }
 
-      if (allowBackground && workdir) {
+      const executionKey = buildExecSessionExecutionKey({
+        command: params.command,
+        execCommand: execCommandOverride,
+        workdir,
+        env,
+        pathPrepend: defaultPathPrepend,
+        sandbox,
+        containerWorkdir,
+        usePty,
+        timeoutSec: effectiveTimeout,
+      });
+
+      const duplicateReuseRequested = backgroundRequested || yieldRequested;
+      if (allowBackground && workdir && duplicateReuseRequested) {
         const matchingSession = findMatchingRunningBackgroundSession({
           command: params.command,
           cwd: workdir,
+          executionKey,
           scopeKey: defaults?.scopeKey,
           sessionKey: notifySessionKey,
         });
@@ -1748,6 +1763,8 @@ export function createExecTool(
         eventRouting: defaults?.eventRouting,
         notifyDeliveryContext,
         timeoutSec: effectiveTimeout,
+        executionKey,
+        initialBackgrounded: backgroundRequested && allowBackground,
         onUpdate,
       });
 
