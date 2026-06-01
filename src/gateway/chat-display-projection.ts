@@ -624,6 +624,31 @@ function extractMessageToolVisibleReplies(
   return replies;
 }
 
+function extractSessionsYieldToolCallIds(message: Record<string, unknown>): string[] {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return [];
+  }
+  const callIds: string[] = [];
+  for (const block of message.content) {
+    const record = readRecord(block);
+    if (!record) {
+      continue;
+    }
+    const type = normalizeToolHistoryType(record.type);
+    if (type !== "toolcall" && type !== "tooluse") {
+      continue;
+    }
+    if (readToolBlockName(record)?.toLowerCase() !== "sessions_yield") {
+      continue;
+    }
+    const toolCallId = readToolBlockCallId(record);
+    if (toolCallId) {
+      callIds.push(toolCallId);
+    }
+  }
+  return callIds;
+}
+
 function isAssistantSilentControlReplyOnly(message: Record<string, unknown>): boolean {
   const text = extractAssistantTextForSilentCheck(message);
   return (
@@ -943,6 +968,7 @@ function mirrorSessionsYieldToolResults(messages: unknown[]): unknown[] {
   let previousAssistantCalledYield = false;
   let previousAssistantYieldText: string | undefined;
   let previousAssistantVisibleText: string | undefined;
+  const pendingYieldCallIds = new Set<string>();
 
   for (const message of messages) {
     const record = readRecord(message);
@@ -953,7 +979,13 @@ function mirrorSessionsYieldToolResults(messages: unknown[]): unknown[] {
       continue;
     }
 
-    const yieldText = readSessionsYieldToolResultMessage(record, previousAssistantCalledYield);
+    const resultCallId = readMessageToolResultCallId(record);
+    const matchesPendingYieldCall =
+      resultCallId !== undefined && pendingYieldCallIds.has(resultCallId);
+    const yieldText = readSessionsYieldToolResultMessage(
+      record,
+      previousAssistantCalledYield || matchesPendingYieldCall,
+    );
     if (yieldText?.trim()) {
       const normalizedYieldText = yieldText.trim();
       const duplicatesPreviousAssistantText =
@@ -964,13 +996,14 @@ function mirrorSessionsYieldToolResults(messages: unknown[]): unknown[] {
           buildSessionsYieldVisibleReplyMirror({
             text: normalizedYieldText,
             anchor: record,
-            ...(readMessageToolResultCallId(record)
-              ? { toolCallId: readMessageToolResultCallId(record) }
-              : {}),
+            ...(resultCallId ? { toolCallId: resultCallId } : {}),
           }),
         );
       }
       changed = true;
+      if (resultCallId) {
+        pendingYieldCallIds.delete(resultCallId);
+      }
       previousAssistantCalledYield = false;
       previousAssistantYieldText = undefined;
       previousAssistantVisibleText = undefined;
@@ -980,10 +1013,18 @@ function mirrorSessionsYieldToolResults(messages: unknown[]): unknown[] {
     next.push(message);
     if (record.role === "assistant") {
       const assistantText = readAssistantSessionsYieldVisibleText(record);
+      for (const callId of extractSessionsYieldToolCallIds(record)) {
+        pendingYieldCallIds.add(callId);
+      }
       previousAssistantCalledYield = assistantCallsSessionsYield(record);
       previousAssistantYieldText = previousAssistantCalledYield ? assistantText : undefined;
       previousAssistantVisibleText = assistantText;
-    } else if (record.role === "user" || record.role === "toolResult" || record.role === "tool") {
+    } else if (record.role === "user") {
+      pendingYieldCallIds.clear();
+      previousAssistantCalledYield = false;
+      previousAssistantYieldText = undefined;
+      previousAssistantVisibleText = undefined;
+    } else if (record.role === "toolResult" || record.role === "tool") {
       previousAssistantCalledYield = false;
       previousAssistantYieldText = undefined;
       previousAssistantVisibleText = undefined;
