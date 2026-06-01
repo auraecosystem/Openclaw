@@ -16,12 +16,17 @@ import {
   type NativeHookRelayEvent,
   type NativeHookRelayRegistrationHandle,
 } from "openclaw/plugin-sdk/agent-harness-runtime";
+import { loadExecApprovals } from "openclaw/plugin-sdk/exec-approvals-runtime";
+import { resolveCodexAppServerForModelProvider } from "./app-server-policy.js";
 import { handleCodexAppServerApprovalRequest } from "./approval-bridge.js";
 import { refreshCodexAppServerAuthTokens } from "./auth-bridge.js";
 import { isCodexAppServerApprovalRequest, type CodexAppServerClient } from "./client.js";
 import {
+  canUseCodexModelBackedApprovalsReviewerForModel,
   readCodexPluginConfig,
+  resolveOpenClawExecPolicyForCodexAppServer,
   resolveCodexAppServerRuntimeOptions,
+  resolveCodexModelBackedReviewerPolicyContext,
   shouldAutoApproveCodexAppServerApprovals,
   type CodexAppServerRuntimeOptions,
 } from "./config.js";
@@ -65,7 +70,7 @@ import {
 import { rememberCodexRateLimits, readRecentCodexRateLimits } from "./rate-limit-cache.js";
 import { formatCodexUsageLimitErrorMessage } from "./rate-limits.js";
 import { resolveCodexNativeExecutionBlock } from "./sandbox-guard.js";
-import { readCodexAppServerBinding } from "./session-binding.js";
+import { isCodexAppServerNativeAuthProfile, readCodexAppServerBinding } from "./session-binding.js";
 import {
   getLeasedSharedCodexAppServerClient,
   releaseLeasedSharedCodexAppServerClient,
@@ -146,8 +151,40 @@ export async function runCodexAppServerSideQuestion(
   }
 
   const pluginConfig = readCodexPluginConfig(options.pluginConfig);
-  const appServer = resolveCodexAppServerRuntimeOptions({ pluginConfig });
+  const { sessionAgentId } = resolveSessionAgentIds({
+    sessionKey: params.sessionKey,
+    config: params.cfg,
+    agentId: params.agentId,
+  });
+  const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
+    approvals: loadExecApprovals(),
+    config: params.cfg,
+    agentId: sessionAgentId,
+  });
   const authProfileId = params.authProfileId ?? binding.authProfileId;
+  const modelProvider = resolveCodexAppServerModelProvider({
+    provider: params.provider,
+    authProfileId,
+    agentDir: params.agentDir,
+    config: params.cfg,
+  });
+  const reviewerPolicyContext = resolveCodexModelBackedReviewerPolicyContext({
+    provider: params.provider,
+    model: params.model,
+    bindingModelProvider: binding.modelProvider,
+    bindingModel: binding.model,
+    nativeAuthProfile: isCodexAppServerNativeAuthProfile({
+      authProfileId,
+      agentDir: params.agentDir,
+      config: params.cfg,
+    }),
+  });
+  const appServer = resolveCodexAppServerRuntimeOptions({
+    pluginConfig,
+    execPolicy,
+    modelProvider: reviewerPolicyContext.modelProvider,
+    model: reviewerPolicyContext.model,
+  });
   const client = await getLeasedSharedCodexAppServerClient({
     startOptions: appServer.start,
     timeoutMs: appServer.requestTimeoutMs,
@@ -175,13 +212,21 @@ export async function runCodexAppServerSideQuestion(
   try {
     const cwd = binding.cwd || params.workspaceDir || process.cwd();
     const sideRunParams = buildSideRunAttemptParams(params, { cwd, authProfileId });
-    const approvalPolicy = binding.approvalPolicy ?? appServer.approvalPolicy;
-    const sandbox = binding.sandbox ?? appServer.sandbox;
-    const { sessionAgentId } = resolveSessionAgentIds({
-      sessionKey: params.sessionKey,
-      config: params.cfg,
-      agentId: params.agentId,
+    const modelScopedAppServer = resolveCodexAppServerForModelProvider({
+      appServer,
+      provider: reviewerPolicyContext.modelProvider,
+      model: reviewerPolicyContext.model,
     });
+    const useModelScopedPolicy = !canUseCodexModelBackedApprovalsReviewerForModel({
+      modelProvider: reviewerPolicyContext.modelProvider,
+      model: reviewerPolicyContext.model,
+    });
+    const approvalPolicy = useModelScopedPolicy
+      ? modelScopedAppServer.approvalPolicy
+      : (binding.approvalPolicy ?? modelScopedAppServer.approvalPolicy);
+    const sandbox = useModelScopedPolicy
+      ? modelScopedAppServer.sandbox
+      : (binding.sandbox ?? modelScopedAppServer.sandbox);
     const toolBridge = await createCodexSideToolBridge({
       params,
       cwd,
@@ -223,6 +268,9 @@ export async function runCodexAppServerSideQuestion(
           threadId: childThreadId,
           turnId,
           nativeHookRelay,
+          execPolicy,
+          execReviewerAgentId: sessionAgentId,
+          internalExecAutoReview: modelScopedAppServer.approvalsReviewer === "user",
           autoApprove: shouldAutoApproveCodexAppServerApprovals({ approvalPolicy, sandbox }),
           signal: runAbortController.signal,
         });
@@ -314,12 +362,6 @@ export async function runCodexAppServerSideQuestion(
     });
     const threadConfig =
       mergeCodexThreadConfigs(nativeHookRelayConfig, runtimeThreadConfig) ?? runtimeThreadConfig;
-    const modelProvider = resolveCodexAppServerModelProvider({
-      provider: params.provider,
-      authProfileId,
-      agentDir: params.agentDir,
-      config: params.cfg,
-    });
     const forkResponse = assertCodexThreadForkResponse(
       await forkCodexSideThread(
         client,
@@ -330,7 +372,7 @@ export async function runCodexAppServerSideQuestion(
           personality: CODEX_NATIVE_PERSONALITY_NONE,
           cwd,
           approvalPolicy,
-          approvalsReviewer: appServer.approvalsReviewer,
+          approvalsReviewer: modelScopedAppServer.approvalsReviewer,
           sandbox,
           ...(serviceTier ? { serviceTier } : {}),
           config: threadConfig,

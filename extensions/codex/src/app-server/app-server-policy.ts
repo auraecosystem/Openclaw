@@ -1,7 +1,8 @@
-import type {
-  CodexAppServerRuntimeOptions,
-  CodexPluginConfig,
-  OpenClawExecPolicyForCodexAppServer,
+import {
+  canUseCodexModelBackedApprovalsReviewerForModel,
+  type CodexAppServerRuntimeOptions,
+  type CodexPluginConfig,
+  type OpenClawExecPolicyForCodexAppServer,
 } from "./config.js";
 
 export function resolveCodexAppServerForOpenClawToolPolicy(params: {
@@ -36,6 +37,27 @@ export function resolveCodexAppServerForOpenClawToolPolicy(params: {
   };
 }
 
+export function resolveCodexAppServerForModelProvider(params: {
+  appServer: CodexAppServerRuntimeOptions;
+  provider?: string;
+  model?: string;
+}): CodexAppServerRuntimeOptions {
+  const explicitProvider = normalizeModelBackedReviewerProvider(params.provider);
+  if (
+    !isCodexModelBackedApprovalsReviewer(params.appServer.approvalsReviewer) ||
+    canUseCodexModelBackedApprovalsReviewerForModel({
+      modelProvider: explicitProvider,
+      model: params.model,
+    })
+  ) {
+    return params.appServer;
+  }
+  return {
+    ...params.appServer,
+    approvalsReviewer: "user",
+  };
+}
+
 function isCodexAppServerPolicyMode(value: unknown): boolean {
   return value === "guardian" || value === "yolo";
 }
@@ -44,4 +66,13 @@ function isCodexAppServerApprovalPolicy(value: unknown): boolean {
   return (
     value === "never" || value === "on-request" || value === "on-failure" || value === "untrusted"
   );
+}
+
+function isCodexModelBackedApprovalsReviewer(value: string): boolean {
+  return value === "auto_review" || value === "guardian_subagent";
+}
+
+function normalizeModelBackedReviewerProvider(provider: string | undefined): string | undefined {
+  const normalized = provider?.trim().toLowerCase();
+  return normalized || undefined;
 }

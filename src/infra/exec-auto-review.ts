@@ -12,7 +12,7 @@ export type ExecAutoReviewDecision =
       risk: ExecAutoReviewRisk;
     };
 
-export type ExecAutoReviewHost = "gateway" | "node";
+export type ExecAutoReviewHost = "gateway" | "node" | "codex-app-server";
 
 export type ExecAutoReviewInput = {
   command: string;

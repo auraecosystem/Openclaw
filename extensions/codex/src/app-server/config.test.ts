@@ -7,10 +7,12 @@ import {
   CODEX_COMPUTER_USE_CONFIG_KEYS,
   CODEX_PLUGIN_ENTRY_CONFIG_KEYS,
   CODEX_PLUGINS_CONFIG_KEYS,
+  canUseCodexModelBackedApprovalsReviewerForModel,
   codexAppServerStartOptionsKey,
   readCodexPluginConfig,
   resolveCodexAppServerRuntimeOptions,
   resolveCodexComputerUseConfig,
+  resolveCodexModelBackedReviewerPolicyContext,
   resolveOpenClawExecModeForCodexAppServer,
   resolveOpenClawExecModeFromConfig,
   resolveOpenClawExecPolicyForCodexAppServer,
@@ -103,6 +105,7 @@ describe("Codex app-server config", () => {
         OPENCLAW_CODEX_APP_SERVER_APPROVAL_POLICY: "never",
         OPENCLAW_CODEX_APP_SERVER_SANDBOX: "read-only",
       },
+      modelProvider: "openai",
     });
 
     expectFields(runtime, "runtime", {
@@ -196,6 +199,7 @@ describe("Codex app-server config", () => {
         },
       },
       env: {},
+      modelProvider: "openai",
     });
 
     expectFields(runtime, "runtime", {
@@ -266,9 +270,67 @@ describe("Codex app-server config", () => {
     });
   });
 
-  it("defaults native Codex approvals to guardian when requirements disallow full access", () => {
+  it("treats only explicit OpenAI model context as safe for Codex-backed auto-review", () => {
+    expect(
+      canUseCodexModelBackedApprovalsReviewerForModel({
+        modelProvider: "openai",
+        model: "gpt-5.5",
+      }),
+    ).toBe(true);
+    expect(
+      canUseCodexModelBackedApprovalsReviewerForModel({
+        modelProvider: "codex",
+        model: "openai/gpt-5.5",
+      }),
+    ).toBe(true);
+    expect(canUseCodexModelBackedApprovalsReviewerForModel({})).toBe(false);
+    expect(
+      canUseCodexModelBackedApprovalsReviewerForModel({
+        modelProvider: "codex",
+        model: "gpt-5.5",
+      }),
+    ).toBe(false);
+    expect(
+      canUseCodexModelBackedApprovalsReviewerForModel({
+        modelProvider: "openrouter",
+        model: "openai/gpt-5.5",
+      }),
+    ).toBe(false);
+    expect(
+      canUseCodexModelBackedApprovalsReviewerForModel({
+        modelProvider: "openai",
+        model: "lmstudio/local-model",
+      }),
+    ).toBe(false);
+    const switchedLocalModel = resolveCodexModelBackedReviewerPolicyContext({
+      model: "lmstudio/local-model",
+      bindingModel: "gpt-5.5",
+      nativeAuthProfile: true,
+    });
+    expect(switchedLocalModel).toEqual({
+      modelProvider: "openai",
+      model: "lmstudio/local-model",
+    });
+    expect(canUseCodexModelBackedApprovalsReviewerForModel(switchedLocalModel)).toBe(false);
+  });
+
+  it("uses user approvals when requirements force prompting but model provider is unknown", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      requirementsToml: 'allowed_sandbox_modes = ["read-only", "workspace-write"]\n',
+    });
+
+    expectRuntimePolicy(runtime, {
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it("defaults native OpenAI Codex approvals to guardian when requirements disallow full access", () => {
+    const runtime = resolveRuntimeForTest({
+      pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: 'allowed_sandbox_modes = ["read-only", "workspace-write"]\n',
     });
 
@@ -282,6 +344,7 @@ describe("Codex app-server config", () => {
   it("uses read-only sandbox for guardian defaults when requirements only allow read-only", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: 'allowed_sandbox_modes = ["read-only"]\n',
     });
 
@@ -295,6 +358,7 @@ describe("Codex app-server config", () => {
   it("defaults native Codex approvals to guardian when requirements disallow never approval", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: 'allowed_approval_policies = ["on-request"]\n',
     });
 
@@ -308,6 +372,7 @@ describe("Codex app-server config", () => {
   it("selects an allowed guardian approval policy when on-request is unavailable", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: 'allowed_approval_policies = ["on-failure"]\n',
     });
 
@@ -334,6 +399,7 @@ describe("Codex app-server config", () => {
   it("defaults native Codex approvals to guardian when requirements disallow user reviewer", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: 'allowed_approvals_reviewers = ["auto_review"]\n',
     });
 
@@ -361,6 +427,7 @@ describe("Codex app-server config", () => {
   it("ignores quoted sandbox modes inside requirements comments", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       requirementsToml: `allowed_sandbox_modes = [
   "read-only",
   # "danger-full-access",
@@ -379,6 +446,7 @@ describe("Codex app-server config", () => {
   it("applies the first matching remote sandbox requirements before resolving local stdio defaults", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       hostName: "BUILD-01.EXAMPLE.COM.",
       requirementsToml: `[[remote_sandbox_config]]
 hostname_patterns = ["build-*.example.com"]
@@ -419,6 +487,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     const runtime = resolveCodexAppServerRuntimeOptions({
       pluginConfig: {},
       env: {},
+      modelProvider: "openai",
       requirementsPath: "/custom/codex/requirements.toml",
       readRequirementsFile: (path) => {
         readPaths.push(path);
@@ -439,6 +508,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     const runtime = resolveCodexAppServerRuntimeOptions({
       pluginConfig: {},
       env: { ProgramData: "D:\\ManagedData" },
+      modelProvider: "openai",
       platform: "win32",
       readRequirementsFile: (path) => {
         readPaths.push(path);
@@ -831,6 +901,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
           mode: "guardian",
         },
       },
+      modelProvider: "openai",
       env: {},
     });
 
@@ -841,9 +912,27 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     });
   });
 
+  it("uses user approvals for explicit guardian mode when model provider is unknown", () => {
+    const runtime = resolveRuntimeForTest({
+      pluginConfig: {
+        appServer: {
+          mode: "guardian",
+        },
+      },
+      env: {},
+    });
+
+    expectRuntimePolicy(runtime, {
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
+  });
+
   it("allows environment mode fallback to opt in to guardian-reviewed local execution", () => {
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
+      modelProvider: "openai",
       env: { OPENCLAW_CODEX_APP_SERVER_MODE: "guardian" },
     });
 
@@ -858,6 +947,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     const runtime = resolveRuntimeForTest({
       pluginConfig: {},
       execMode: "auto",
+      modelProvider: "openai",
     });
 
     expectRuntimePolicy(runtime, {
@@ -881,6 +971,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
         OPENCLAW_CODEX_APP_SERVER_SANDBOX: "danger-full-access",
       },
       execMode: "auto",
+      modelProvider: "openai",
     });
 
     expectRuntimePolicy(runtime, {
@@ -901,11 +992,13 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
         },
       },
       execMode: "auto",
+      modelProvider: "openai",
       env: {},
     });
     const envRuntime = resolveRuntimeForTest({
       pluginConfig: {},
       execMode: "auto",
+      modelProvider: "openai",
       env: {
         OPENCLAW_CODEX_APP_SERVER_MODE: "yolo",
         OPENCLAW_CODEX_APP_SERVER_APPROVAL_POLICY: "never",
@@ -1124,16 +1217,45 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     ).toThrow("tools.exec.mode=auto requires Codex app-server prompting approvals");
   });
 
-  it("fails closed when normalized OpenClaw auto mode cannot use an auto reviewer", () => {
-    expect(() =>
-      resolveRuntimeForTest({
+  it("uses user approvals when normalized OpenClaw auto mode cannot use Codex auto-review", () => {
+    const runtime = resolveRuntimeForTest({
+      pluginConfig: {},
+      execMode: "auto",
+      requirementsToml:
+        'allowed_approval_policies = ["on-request"]\nallowed_approvals_reviewers = ["user"]\n',
+    });
+
+    expectRuntimePolicy(runtime, {
+      approvalPolicy: "on-request",
+      sandbox: "workspace-write",
+      approvalsReviewer: "user",
+    });
+  });
+
+  it.each([
+    { modelProvider: undefined, model: undefined },
+    { modelProvider: "lmstudio", model: "local-model" },
+    { modelProvider: "codex", model: "gpt-5.5" },
+    { modelProvider: "codex", model: "lmstudio/local-model" },
+  ])(
+    "uses user approvals for local-model auto exec before requirements validation",
+    ({ modelProvider, model }) => {
+      const runtime = resolveRuntimeForTest({
         pluginConfig: {},
         execMode: "auto",
+        modelProvider,
+        model,
         requirementsToml:
           'allowed_approval_policies = ["on-request"]\nallowed_approvals_reviewers = ["user"]\n',
-      }),
-    ).toThrow("tools.exec.mode=auto requires Codex app-server auto approvals");
-  });
+      });
+
+      expectRuntimePolicy(runtime, {
+        approvalPolicy: "on-request",
+        sandbox: "workspace-write",
+        approvalsReviewer: "user",
+      });
+    },
+  );
 
   it("keeps normalized OpenClaw auto mode when legacy app-server yolo was schema-defaulted", () => {
     const runtime = resolveRuntimeForTest({
@@ -1149,6 +1271,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
         codexDynamicToolsExclude: [],
       },
       execMode: "auto",
+      modelProvider: "openai",
     });
 
     expectRuntimePolicy(runtime, {
@@ -1177,6 +1300,7 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
         },
       },
       execMode: "auto",
+      modelProvider: "openai",
     });
 
     expectRuntimePolicy(runtime, {
@@ -1652,12 +1776,14 @@ allowed_sandbox_modes = ["read-only", "workspace-write"]
     expect(
       resolveRuntimeForTest({
         pluginConfig: { appServer: { approvalsReviewer: "auto_review" } },
+        modelProvider: "openai",
         env: {},
       }).approvalsReviewer,
     ).toBe("auto_review");
     expect(
       resolveRuntimeForTest({
         pluginConfig: { appServer: { approvalsReviewer: "guardian_subagent" } },
+        modelProvider: "openai",
         env: {},
       }).approvalsReviewer,
     ).toBe("guardian_subagent");
