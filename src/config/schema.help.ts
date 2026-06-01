@@ -1123,7 +1123,7 @@ export const FIELD_HELP: Record<string, string> = {
   "agents.defaults.bootstrapTier":
     'Bootstrap loading tier: "minimal" (AGENTS.md + TOOLS.md + SOUL.md + IDENTITY.md + USER.md), "standard" (all recognized files, default), or "full" (standard + extra patterns).',
   "agents.defaults.bootstrapMaxChars":
-    "Max characters of each workspace bootstrap file injected into the system prompt before truncation (default: 12000).",
+    "Max characters of each workspace bootstrap file injected into the system prompt before truncation (default: 20000).",
   "agents.defaults.bootstrapTotalMaxChars":
     "Max total characters across all injected workspace bootstrap files (default: 60000).",
   "agents.defaults.experimental":
