@@ -2686,7 +2686,7 @@ describe("chrome.ts internal", () => {
       }
     });
 
-    it("clears a proven stale lock before surfacing a still-held loopback port", async () => {
+    it("clears a proven stale lock before surfacing launch readiness failure", async () => {
       const originalPlatform = process.platform;
       const profileName = `loopback-held-${Date.now()}`;
       const stalePid = 76543;
@@ -2703,12 +2703,18 @@ describe("chrome.ts internal", () => {
       const userDataDir = resolveOpenClawUserDataDir(profileName);
       await fsp.mkdir(userDataDir, { recursive: true });
       await fsp.symlink(`${os.hostname()}-${stalePid}`, path.join(userDataDir, "SingletonLock"));
-      mockLinuxProcCommandLine(stalePid, [
-        "/usr/bin/google-chrome",
-        `--remote-debugging-port=${cdpPort}`,
-        `--user-data-dir=${userDataDir}`,
-        "--no-first-run",
-      ]);
+      let staleAlive = true;
+      mockLinuxProcCommandLine(
+        stalePid,
+        [
+          "/usr/bin/google-chrome",
+          `--remote-debugging-port=${cdpPort}`,
+          `--user-data-dir=${userDataDir}`,
+          "--no-first-run",
+        ],
+        "123456",
+        () => staleAlive,
+      );
       mockChromeProcessProbeExecutables();
 
       const realExistsSync = fs.existsSync;
@@ -2719,8 +2725,6 @@ describe("chrome.ts internal", () => {
         }
         return realExistsSync(p);
       });
-
-      let staleAlive = true;
       const realKill = process.kill.bind(process);
       const processKillSpy = vi.spyOn(process, "kill").mockImplementation(((
         pid: number,
@@ -2773,11 +2777,12 @@ describe("chrome.ts internal", () => {
         } as unknown as ResolvedBrowserConfig;
 
         await expect(launchOpenClawChrome(resolved, profile)).rejects.toThrow(
-          `Port ${cdpPort} is already in use.`,
+          `Failed to start Chrome CDP on port ${cdpPort}`,
         );
 
         expect(processKillSpy).toHaveBeenCalledWith(stalePid, "SIGTERM");
         expect(ensurePortAvailableMock).toHaveBeenCalledTimes(1);
+        expect(serverClosed).toBe(true);
         expect(fs.existsSync(path.join(userDataDir, "SingletonLock"))).toBe(false);
       } finally {
         Object.defineProperty(process, "platform", { value: originalPlatform });
