@@ -204,7 +204,7 @@ async function withMockChromeCdpServer(params: {
     res.writeHead(404);
     res.end();
   });
-  const wss = new WebSocketServer({ noServer: true });
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
   server.on("upgrade", (req, socket, head) => {
     if (req.url !== params.wsPath) {
       socket.destroy();
@@ -1292,7 +1292,7 @@ describe("chrome.ts internal", () => {
         res.writeHead(404);
         res.end();
       });
-      const wss = new WebSocketServer({ noServer: true });
+      const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
       wss.on("connection", (ws) => {
         ws.on("message", (raw) => {
           const message = JSON.parse(rawDataToString(raw)) as {
