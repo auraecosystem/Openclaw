@@ -6,8 +6,6 @@ const os = require("node:os");
 
 let monolithicSdk = null;
 let diagnosticEventsModule = null;
-let monolithicSdkPreferSourceGraph = null;
-let diagnosticEventsModulePreferSourceGraph = null;
 const moduleLoaders = new Map();
 const pluginSdkSubpathsCache = new Map();
 const pluginSdkPackageNames = ["openclaw/plugin-sdk", "@openclaw/plugin-sdk"];
@@ -52,12 +50,11 @@ const isDistRootAlias = __filename.includes(
 // Source plugin entry loading must stay on the source graph end-to-end. Mixing a
 // source root alias with dist compat/runtime shims can split singleton deps
 // (for example matrix-js-sdk) across two module graphs.
-function shouldPreferSourceGraph() {
-  return (
-    process.env.OPENCLAW_PLUGIN_SDK_SOURCE_IN_TESTS === "1" ||
-    (!isDistRootAlias && (process.env.NODE_ENV !== "production" || Boolean(process.env.VITEST)))
-  );
-}
+const shouldPreferSourceGraph =
+  !isDistRootAlias &&
+  (process.env.NODE_ENV !== "production" ||
+    Boolean(process.env.VITEST) ||
+    process.env.OPENCLAW_PLUGIN_SDK_SOURCE_IN_TESTS === "1");
 
 function emptyPluginConfigSchema() {
   function error(message) {
@@ -473,16 +470,14 @@ function getModuleLoader(tryNative) {
 }
 
 function loadMonolithicSdk() {
-  const preferSourceGraph = shouldPreferSourceGraph();
-  if (monolithicSdk && monolithicSdkPreferSourceGraph === preferSourceGraph) {
+  if (monolithicSdk) {
     return monolithicSdk;
   }
 
   const distCandidate = path.resolve(__dirname, "..", "..", "dist", "plugin-sdk", "compat.js");
-  if (!preferSourceGraph && fs.existsSync(distCandidate)) {
+  if (!shouldPreferSourceGraph && fs.existsSync(distCandidate)) {
     try {
       monolithicSdk = getModuleLoader(true)(distCandidate);
-      monolithicSdkPreferSourceGraph = preferSourceGraph;
       return monolithicSdk;
     } catch {
       // Fall through to source alias if dist is unavailable or stale.
@@ -492,13 +487,11 @@ function loadMonolithicSdk() {
   monolithicSdk = getModuleLoader(false)(
     path.join(getPackageRoot(), "src", "plugin-sdk", "compat.ts"),
   );
-  monolithicSdkPreferSourceGraph = preferSourceGraph;
   return monolithicSdk;
 }
 
 function loadDiagnosticEventsModule() {
-  const preferSourceGraph = shouldPreferSourceGraph();
-  if (diagnosticEventsModule && diagnosticEventsModulePreferSourceGraph === preferSourceGraph) {
+  if (diagnosticEventsModule) {
     return diagnosticEventsModule;
   }
 
@@ -510,7 +503,7 @@ function loadDiagnosticEventsModule() {
     "infra",
     "diagnostic-events.js",
   );
-  if (!preferSourceGraph) {
+  if (!shouldPreferSourceGraph) {
     const distCandidate =
       (fs.existsSync(directDistCandidate) && directDistCandidate) ||
       findDistChunkByPrefix("diagnostic-events");
@@ -519,7 +512,6 @@ function loadDiagnosticEventsModule() {
         diagnosticEventsModule = normalizeDiagnosticEventsModule(
           getModuleLoader(true)(distCandidate),
         );
-        diagnosticEventsModulePreferSourceGraph = preferSourceGraph;
         return diagnosticEventsModule;
       } catch {
         // Fall through to source path if dist is unavailable or stale.
@@ -530,7 +522,6 @@ function loadDiagnosticEventsModule() {
   diagnosticEventsModule = normalizeDiagnosticEventsModule(
     getModuleLoader(false)(path.join(getPackageRoot(), "src", "infra", "diagnostic-events.ts")),
   );
-  diagnosticEventsModulePreferSourceGraph = preferSourceGraph;
   return diagnosticEventsModule;
 }
 
