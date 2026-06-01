@@ -465,7 +465,7 @@ describe("applyExclusiveSlotSelection", () => {
     expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
     expect(result.config.plugins?.entries?.["memory-core"]?.enabled).toBe(false);
     expect(result.config.plugins?.entries?.["agent-recall"]?.enabled).toBe(true);
-    expect(result.config.agents?.list[0]?.plugins?.slots?.memory).toBe("agent-recall");
+    expect(result.config.agents?.list?.[0]?.plugins?.slots?.memory).toBe("agent-recall");
   });
 });
 
