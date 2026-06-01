@@ -58,6 +58,7 @@ describe("google gemini cli backend auth bridge", () => {
 
       const raw = await fs.readFile(path.join(home ?? "", ".gemini", "oauth_creds.json"), "utf8");
       expect(JSON.parse(raw)).toEqual({
+        type: "authorized_user",
         access_token: "access-token",
         refresh_token: "refresh-token",
         id_token: "id-token",

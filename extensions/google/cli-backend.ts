@@ -80,6 +80,7 @@ async function prepareGeminiCliOAuthHome(
 
     const idToken = normalizeString(oauth.idToken);
     const oauthCreds: Record<string, string | number> = {
+      type: "authorized_user",
       access_token: oauth.access,
       refresh_token: oauth.refresh,
       expiry_date: oauth.expires,
