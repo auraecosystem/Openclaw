@@ -27,12 +27,12 @@ import type { ChatSideResult } from "./chat/side-result.ts";
 import { executeSlashCommand } from "./chat/slash-command-executor.ts";
 import { parseSlashCommand, refreshSlashCommands } from "./chat/slash-commands.ts";
 import { formatConnectError } from "./connect-error.ts";
+import { resolveControlUiAuthHeader } from "./control-ui-auth.ts";
 import {
   controlUiNowMs,
   recordControlUiPerformanceEvent,
   roundedControlUiDurationMs,
 } from "./control-ui-performance.ts";
-import { resolveControlUiAuthHeader } from "./control-ui-auth.ts";
 import {
   abortChatRun,
   appendUserChatMessage,
@@ -394,8 +394,9 @@ function enqueuePendingSendMessage(
   attachments?: ChatAttachment[],
   refreshSessions?: boolean,
   submittedAtMs = controlUiNowMs(),
-  sendState: ChatQueueItem["sendState"] =
-    host.connected && host.client ? "sending" : "waiting-reconnect",
+  sendState: ChatQueueItem["sendState"] = host.connected && host.client
+    ? "sending"
+    : "waiting-reconnect",
 ): ChatQueueItem | null {
   const trimmed = text.trim();
   const hasAttachments = Boolean(attachments && attachments.length > 0);
@@ -538,9 +539,9 @@ function cancelPendingSendBeforeRequest(
     restoreComposer && opts.previousDraft != null && !host.chatMessage.trim();
   const willRestoreAttachments = Boolean(
     restoreComposer &&
-      opts.previousAttachments?.length &&
-      host.chatAttachments.length === 0 &&
-      (willRestoreDraft || !host.chatMessage.trim()),
+    opts.previousAttachments?.length &&
+    host.chatAttachments.length === 0 &&
+    (willRestoreDraft || !host.chatMessage.trim()),
   );
   if (restoreComposer) {
     if (willRestoreDraft) {
