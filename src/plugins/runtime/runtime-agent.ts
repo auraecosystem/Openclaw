@@ -11,18 +11,60 @@ import { normalizeThinkLevel, resolveThinkingProfile } from "../../auto-reply/th
 import { getRuntimeConfig } from "../../config/config.js";
 import { resolveSessionFilePath, resolveStorePath } from "../../config/sessions/paths.js";
 import {
-  getSessionEntry,
-  listSessionEntries,
+  listSessionEntries as listAccessorSessionEntries,
+  loadSessionEntry,
+  patchSessionEntry as patchAccessorSessionEntry,
+  replaceSessionEntry,
+  updateSessionEntry,
+} from "../../config/sessions/session-accessor.js";
+import {
   loadSessionStore,
-  patchSessionEntry,
   saveSessionStore,
   updateSessionStore,
-  updateSessionStoreEntry,
-  upsertSessionEntry,
 } from "../../config/sessions/store.js";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import { createLazyRuntimeMethod, createLazyRuntimeModule } from "../../shared/lazy-runtime.js";
 import { defineCachedValue } from "./runtime-cache.js";
 import type { PluginRuntime } from "./types.js";
+
+type RuntimeSessionStoreReadParams = {
+  agentId?: string;
+  env?: NodeJS.ProcessEnv;
+  hydrateSkillPromptRefs?: boolean;
+  sessionKey: string;
+  storePath?: string;
+};
+
+type RuntimeSessionStoreListParams = Partial<Omit<RuntimeSessionStoreReadParams, "sessionKey">>;
+
+type RuntimeSessionStoreEntrySummary = {
+  sessionKey: string;
+  entry: SessionEntry;
+};
+
+type RuntimeSessionStoreEntryUpdateParams = {
+  storePath: string;
+  sessionKey: string;
+  update: (
+    entry: SessionEntry,
+  ) => Promise<Partial<SessionEntry> | null> | Partial<SessionEntry> | null;
+  skipMaintenance?: boolean;
+  takeCacheOwnership?: boolean;
+};
+
+type RuntimeSessionStoreEntryPatchParams = RuntimeSessionStoreReadParams & {
+  fallbackEntry?: SessionEntry;
+  preserveActivity?: boolean;
+  replaceEntry?: boolean;
+  update: (
+    entry: SessionEntry,
+    context: { existingEntry?: SessionEntry },
+  ) => Promise<Partial<SessionEntry> | null> | Partial<SessionEntry> | null;
+};
+
+type RuntimeUpsertSessionEntryParams = RuntimeSessionStoreReadParams & {
+  entry: SessionEntry;
+};
 
 const loadEmbeddedAgentRuntime = createLazyRuntimeModule(
   () => import("./runtime-embedded-agent.runtime.js"),
@@ -36,6 +78,80 @@ function resolveRuntimeThinkingCatalog(
   }
   const configuredCatalog = buildConfiguredModelCatalog({ cfg: getRuntimeConfig() });
   return configuredCatalog.length > 0 ? configuredCatalog : undefined;
+}
+
+function getSessionEntry(params: RuntimeSessionStoreReadParams): SessionEntry | undefined {
+  return loadSessionEntry({
+    agentId: params.agentId,
+    env: params.env,
+    hydrateSkillPromptRefs: params.hydrateSkillPromptRefs,
+    sessionKey: params.sessionKey,
+    storePath: params.storePath,
+  });
+}
+
+function listSessionEntries(
+  params: RuntimeSessionStoreListParams = {},
+): RuntimeSessionStoreEntrySummary[] {
+  return listAccessorSessionEntries({
+    agentId: params.agentId,
+    env: params.env,
+    hydrateSkillPromptRefs: params.hydrateSkillPromptRefs,
+    storePath: params.storePath,
+  });
+}
+
+async function patchSessionEntry(
+  params: RuntimeSessionStoreEntryPatchParams,
+): Promise<SessionEntry | null> {
+  return await patchAccessorSessionEntry(
+    {
+      agentId: params.agentId,
+      env: params.env,
+      hydrateSkillPromptRefs: params.hydrateSkillPromptRefs,
+      sessionKey: params.sessionKey,
+      storePath: params.storePath,
+    },
+    params.update,
+    {
+      fallbackEntry: params.fallbackEntry,
+      preserveActivity: params.preserveActivity,
+      replaceEntry: params.replaceEntry,
+    },
+  );
+}
+
+async function updateSessionStoreEntry(
+  params: RuntimeSessionStoreEntryUpdateParams,
+): Promise<SessionEntry | null> {
+  // Preserve the plugin runtime's object-parameter API while routing the actual
+  // mutation through the storage-neutral session accessor seam.
+  return await updateSessionEntry(
+    {
+      sessionKey: params.sessionKey,
+      storePath: params.storePath,
+    },
+    params.update,
+    {
+      skipMaintenance: params.skipMaintenance,
+      takeCacheOwnership: params.takeCacheOwnership,
+    },
+  );
+}
+
+async function upsertSessionEntry(params: RuntimeUpsertSessionEntryParams): Promise<void> {
+  // The public runtime helper historically replaced the full entry. Use the
+  // replace seam so removed fields do not survive as merge leftovers.
+  await replaceSessionEntry(
+    {
+      agentId: params.agentId,
+      env: params.env,
+      hydrateSkillPromptRefs: params.hydrateSkillPromptRefs,
+      sessionKey: params.sessionKey,
+      storePath: params.storePath,
+    },
+    params.entry,
+  );
 }
 
 export function createRuntimeAgent(): PluginRuntime["agent"] {
