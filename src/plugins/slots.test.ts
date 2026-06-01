@@ -263,6 +263,90 @@ describe("applyExclusiveSlotSelection", () => {
     expect(result.config.plugins?.entries?.legacy?.enabled).not.toBe(false);
   });
 
+  it("keeps an existing legacy memory selector in sync when selecting recall", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: { memory: "legacy-memory" },
+        entries: {
+          "legacy-memory": { enabled: true },
+          "new-recall": { enabled: true },
+        },
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "legacy-memory", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.memory).toBe("new-recall");
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+    expect(result.config.plugins?.entries?.["legacy-memory"]?.enabled).toBe(false);
+    expect(result.warnings).toEqual([
+      'Exclusive slot "memory.recall" switched from "legacy-memory" to "new-recall".',
+      'Disabled other "memory.recall" slot plugins: legacy-memory.',
+    ]);
+  });
+
+  it("repairs stale legacy memory selector drift even when canonical recall already matches", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: { memory: "legacy-memory", "memory.recall": "new-recall" },
+        entries: {
+          "legacy-memory": { enabled: true },
+          "new-recall": { enabled: true },
+        },
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "legacy-memory", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.memory).toBe("new-recall");
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+    expect(result.config.plugins?.entries?.["legacy-memory"]?.enabled).toBe(false);
+    expect(result.warnings).toEqual([
+      'Disabled other "memory.recall" slot plugins: legacy-memory.',
+    ]);
+  });
+
+  it("does not create legacy memory selector when selecting recall for canonical-only configs", () => {
+    const config: OpenClawConfig = {
+      plugins: {
+        slots: { "memory.recall": "memory-core" },
+        entries: {
+          "memory-core": { enabled: true },
+          "new-recall": { enabled: true },
+        },
+      },
+    };
+    const result = applyExclusiveSlotSelection({
+      config,
+      selectedId: "new-recall",
+      selectedKind: "memory",
+      registry: buildSelectionRegistry([
+        { id: "memory-core", kind: "memory" },
+        { id: "new-recall", kind: "memory" },
+      ]),
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.config.plugins?.slots?.memory).toBeUndefined();
+    expect(result.config.plugins?.slots?.["memory.recall"]).toBe("new-recall");
+  });
+
   it("does not disable a memory plugin selected for another memory role slot", () => {
     const config: OpenClawConfig = {
       plugins: {

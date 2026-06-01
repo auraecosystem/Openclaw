@@ -92,6 +92,27 @@ function slotValueForOwnership(
   return slots?.[slotKey] ?? defaultSlotIdForKey(slotKey);
 }
 
+function slotValueForSelection(
+  slots: Partial<Record<PluginSlotKey, string | undefined>>,
+  slotKey: PluginSlotKey,
+): string | undefined {
+  if (slotKey === "memory.recall") {
+    return slots["memory.recall"] ?? slots.memory;
+  }
+  return slots[slotKey];
+}
+
+function syncLegacyMemorySlotForRecallSelection(
+  slots: Partial<Record<PluginSlotKey, string | undefined>>,
+  selectedId: string,
+): boolean {
+  if (!Object.hasOwn(slots, "memory") || slots.memory === selectedId) {
+    return false;
+  }
+  slots.memory = selectedId;
+  return true;
+}
+
 function pluginOwnsProtectedRootSlot(params: {
   slots: Partial<Record<PluginSlotKey, string | undefined>>;
   pluginId: string;
@@ -190,8 +211,11 @@ export function applyExclusiveSlotSelection(params: {
   const slots = { ...pluginsConfig.slots };
 
   for (const slotKey of slotKeys) {
-    const prevSlot = slots[slotKey];
+    const prevSlot = slotValueForSelection(slots, slotKey);
     slots[slotKey] = params.selectedId;
+    const syncedLegacyMemorySlot =
+      slotKey === "memory.recall" &&
+      syncLegacyMemorySlotForRecallSelection(slots, params.selectedId);
 
     const inferredPrevSlot = prevSlot ?? defaultSlotIdForKey(slotKey);
     if (inferredPrevSlot && inferredPrevSlot !== params.selectedId) {
@@ -237,7 +261,7 @@ export function applyExclusiveSlotSelection(params: {
       );
     }
 
-    if (prevSlot !== params.selectedId || disabledIds.length > 0) {
+    if (prevSlot !== params.selectedId || disabledIds.length > 0 || syncedLegacyMemorySlot) {
       anyChanged = true;
     }
   }
