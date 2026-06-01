@@ -212,6 +212,26 @@ only for behavior that really belongs to the backend.
 Keep these hooks provider-owned. Do not add CLI-specific branches to core when a
 backend hook can express the behavior.
 
+### Auth epoch modes
+
+`authEpochMode` decides which credentials contribute to the per-session
+auth-epoch fingerprint OpenClaw uses to decide whether a stored CLI session is
+still safe to resume. Three values are supported:
+
+| Mode           | Auth-epoch fingerprint                                 | Use when…                                                                                                                                                                                                                                                                                             |
+| -------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `combined`     | host CLI credential + OpenClaw auth profile credential | The CLI may run either on its own on-disk login or on a credential bridged from the selected OpenClaw auth profile. This is the default and most conservative shape.                                                                                                                                  |
+| `profile-only` | OpenClaw auth profile credential only                  | The CLI runs entirely against credentials injected from the selected OpenClaw auth profile (typically via a `prepareExecution` bridge that writes a per-run CLI home), so host login state is irrelevant.                                                                                             |
+| `host-only`    | host CLI credential only                               | The CLI **never** consumes the selected OpenClaw auth profile — for example its config strips every provider env var and the backend has no `prepareExecution` credential bridge. The profile selection is cosmetic, so a cosmetic auth-profile rotation must not invalidate a resumable CLI session. |
+
+**Guardrail for `host-only`.** Declare it only when the backend is verified
+not to inject the selected OpenClaw auth profile into the spawned process —
+i.e. the backend `clearEnv`s every provider env var the CLI would otherwise
+honour and does not define a `prepareExecution` credential bridge. If a
+backend later starts injecting profile credentials, switch it back to
+`combined` (or `profile-only`) so a real credential change still invalidates
+the stored CLI session.
+
 ## MCP tool bridge
 
 CLI backends do not receive OpenClaw tools by default. If the CLI can consume an

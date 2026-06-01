@@ -23,6 +23,7 @@ import {
   prepareCliRunContext,
   setCliRunnerPrepareTestDeps,
   shouldSkipLocalCliCredentialEpoch,
+  shouldSkipProfileCliCredentialEpoch,
 } from "./prepare.js";
 
 const getRuntimeConfigMock = vi.hoisted(() => vi.fn(() => ({})));
@@ -209,6 +210,18 @@ function appendTranscriptEntry(
     "utf-8",
   );
 }
+
+describe("shouldSkipProfileCliCredentialEpoch", () => {
+  it("skips the profile credential for host-only backends", () => {
+    expect(shouldSkipProfileCliCredentialEpoch({ authEpochMode: "host-only" })).toBe(true);
+  });
+
+  it("keeps the profile credential for combined and profile-only backends", () => {
+    expect(shouldSkipProfileCliCredentialEpoch({ authEpochMode: "combined" })).toBe(false);
+    expect(shouldSkipProfileCliCredentialEpoch({ authEpochMode: "profile-only" })).toBe(false);
+    expect(shouldSkipProfileCliCredentialEpoch({ authEpochMode: undefined })).toBe(false);
+  });
+});
 
 describe("shouldSkipLocalCliCredentialEpoch", () => {
   beforeEach(() => {

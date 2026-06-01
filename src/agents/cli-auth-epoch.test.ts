@@ -645,6 +645,112 @@ describe("resolveCliAuthEpoch", () => {
     expect(fourth).not.toBe(third);
   });
 
+  it("ignores the auth profile for host-only backends so cosmetic rotation keeps the epoch stable", async () => {
+    // Reproduces the claude-cli `reason=auth-profile` reset: the host CLI
+    // login never changes, but an automatic auth-profile rotation flips the
+    // session between two distinct OpenClaw profiles. The claude-cli backend
+    // never injects the profile into the spawned process, so the rotation is
+    // cosmetic and must not move the epoch.
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "anthropic:claude-cli": {
+          type: "oauth",
+          provider: "claude-cli",
+          access: "profile-access",
+          refresh: "profile-refresh",
+          expires: 1,
+        },
+        "anthropic:default": {
+          type: "token",
+          provider: "anthropic",
+          token: "profile-token",
+        },
+      },
+    };
+    setCliAuthEpochTestDeps({
+      readClaudeCliCredentialsCached: () => ({
+        type: "oauth",
+        provider: "anthropic",
+        access: "host-access",
+        refresh: "host-refresh",
+        expires: 1,
+      }),
+      loadAuthProfileStoreForRuntime: () => store,
+    });
+
+    // Bug: with the profile credential mixed in, the two profiles produce
+    // different epochs, so `resolveCliSessionReuse` invalidates as
+    // `auth-profile` on every rotation.
+    const combinedA = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:claude-cli",
+    });
+    const combinedB = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:default",
+    });
+    expectCliAuthEpoch(combinedA);
+    expectCliAuthEpoch(combinedB);
+    expect(combinedB).not.toBe(combinedA);
+
+    // Fix: host-only backends drop the profile credential, so a cosmetic
+    // rotation between the two profiles yields an identical epoch and the
+    // resumable CLI session survives.
+    const hostOnlyA = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:claude-cli",
+      skipProfileCredential: true,
+    });
+    const hostOnlyB = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:default",
+      skipProfileCredential: true,
+    });
+    expectCliAuthEpoch(hostOnlyA);
+    expect(hostOnlyB).toBe(hostOnlyA);
+  });
+
+  it("still moves the host-only epoch when the host CLI credential changes", async () => {
+    let hostToken = "host-token-a";
+    const store: AuthProfileStore = {
+      version: 1,
+      profiles: {
+        "anthropic:default": {
+          type: "token",
+          provider: "anthropic",
+          token: "profile-token",
+        },
+      },
+    };
+    setCliAuthEpochTestDeps({
+      readClaudeCliCredentialsCached: () => ({
+        type: "token",
+        provider: "anthropic",
+        token: hostToken,
+        expires: 1,
+      }),
+      loadAuthProfileStoreForRuntime: () => store,
+    });
+
+    const first = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:default",
+      skipProfileCredential: true,
+    });
+    hostToken = "host-token-b";
+    const second = await resolveCliAuthEpoch({
+      provider: "claude-cli",
+      authProfileId: "anthropic:default",
+      skipProfileCredential: true,
+    });
+
+    expectCliAuthEpoch(first);
+    expectCliAuthEpoch(second);
+    // A genuine host re-login must still invalidate the session.
+    expect(second).not.toBe(first);
+  });
+
   it("uses non-prompting Codex CLI credential reads for epoch fingerprints", async () => {
     const readCodexCliCredentialsCached = vi.fn(() => ({
       type: "oauth" as const,

@@ -29,6 +29,14 @@ export function buildAnthropicCliBackend(): CliBackendPlugin {
     bundleMcp: true,
     bundleMcpMode: "claude-config-file",
     nativeToolMode: "always-on",
+    // The claude-cli backend never injects the selected OpenClaw auth profile
+    // into the spawned `claude` process — CLAUDE_CLI_CLEAR_ENV strips every
+    // ANTHROPIC_* env var and there is no prepareExecution credential bridge,
+    // so the process always authenticates via its own on-disk CLI login. The
+    // OpenClaw auth-profile selection is therefore cosmetic here; keep it out
+    // of the session auth epoch so a cosmetic profile rotation does not reset
+    // a resumable CLI session.
+    authEpochMode: "host-only",
     config: {
       command: "claude",
       args: [

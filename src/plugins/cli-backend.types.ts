@@ -59,7 +59,7 @@ export type CliBackendResolveExecutionArgs = (
   ctx: CliBackendResolveExecutionArgsContext,
 ) => readonly string[] | null | undefined;
 
-export type CliBackendAuthEpochMode = "combined" | "profile-only";
+export type CliBackendAuthEpochMode = "combined" | "profile-only" | "host-only";
 
 export type CliBackendNativeToolMode = "none" | "always-on";
 
@@ -158,6 +158,11 @@ export type CliBackendPlugin = {
    * `combined` keeps the legacy "host credential + auth profile" fingerprint.
    * `profile-only` treats the selected OpenClaw auth profile as the sole auth
    * owner for session invalidation when one is present.
+   * `host-only` treats the host CLI credential as the sole auth owner and
+   * ignores the selected OpenClaw auth profile for session invalidation. Use
+   * this for backends that never inject the profile credential into the
+   * spawned process (the profile selection is cosmetic), so a cosmetic
+   * auth-profile rotation does not needlessly reset the CLI session.
    */
   authEpochMode?: CliBackendAuthEpochMode;
   /**
