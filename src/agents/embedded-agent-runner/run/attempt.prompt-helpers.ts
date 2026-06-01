@@ -17,6 +17,7 @@ import { joinPresentTextSegments } from "../../../shared/text/join-segments.js";
 import { resolveProcessToolScopeKey } from "../../agent-tools.js";
 import { listActiveProcessSessionReferences } from "../../bash-process-references.js";
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
+import { wrapPluginSystemContextSection } from "../../hook-system-context-boundary.js";
 import { buildActiveImageGenerationTaskPromptContextForSession } from "../../image-generation-task-status.js";
 import { buildActiveMusicGenerationTaskPromptContextForSession } from "../../music-generation-task-status.js";
 import { prependSystemPromptAdditionAfterCacheBoundary } from "../../system-prompt-cache-boundary.js";
@@ -197,12 +198,12 @@ export async function resolvePromptBuildHookResult(params: {
       beforeAgentStartResult?.appendContext,
     ]),
     prependSystemContext: joinPresentTextSegments([
-      promptBuildResult?.prependSystemContext,
-      beforeAgentStartResult?.prependSystemContext,
+      wrapPluginSystemContextSection(promptBuildResult?.prependSystemContext),
+      wrapPluginSystemContextSection(beforeAgentStartResult?.prependSystemContext),
     ]),
     appendSystemContext: joinPresentTextSegments([
-      promptBuildResult?.appendSystemContext,
-      beforeAgentStartResult?.appendSystemContext,
+      wrapPluginSystemContextSection(promptBuildResult?.appendSystemContext),
+      wrapPluginSystemContextSection(beforeAgentStartResult?.appendSystemContext),
     ]),
   };
 }
@@ -439,8 +440,8 @@ function extractUserMessagePromptText(content: unknown): string | undefined {
   }
   const text = content
     .flatMap((part) => {
-      const text = stringifyStructuredContentPart(part);
-      return text ? [text] : [];
+      const textLocal = stringifyStructuredContentPart(part);
+      return textLocal ? [textLocal] : [];
     })
     .join("\n")
     .trim();
@@ -499,22 +500,21 @@ export function prependSystemPromptAddition(params: {
   return prependSystemPromptAdditionAfterCacheBoundary(params);
 }
 
-export function resolveAttemptPrependSystemContext(params: {
+// Per-turn media-generation task hints depend on live session state, so they must
+// be routed BELOW the system-prompt cache boundary (via prependSystemPromptAddition)
+// rather than placed in the static prepend slot — keeping them above the boundary
+// shifted the cacheable prefix turn-to-turn and broke prompt caching (#85203).
+export function resolveAttemptMediaTaskSystemPromptAddition(params: {
   sessionKey?: string;
   trigger?: EmbeddedRunAttemptParams["trigger"];
-  hookPrependSystemContext?: string;
 }): string | undefined {
-  const activeMediaTaskPromptContexts =
-    params.trigger === "user" || params.trigger === "manual"
-      ? [
-          buildActiveImageGenerationTaskPromptContextForSession(params.sessionKey),
-          buildActiveVideoGenerationTaskPromptContextForSession(params.sessionKey),
-          buildActiveMusicGenerationTaskPromptContextForSession(params.sessionKey),
-        ]
-      : [];
+  if (params.trigger !== "user" && params.trigger !== "manual") {
+    return undefined;
+  }
   return joinPresentTextSegments([
-    ...activeMediaTaskPromptContexts,
-    params.hookPrependSystemContext,
+    buildActiveImageGenerationTaskPromptContextForSession(params.sessionKey),
+    buildActiveVideoGenerationTaskPromptContextForSession(params.sessionKey),
+    buildActiveMusicGenerationTaskPromptContextForSession(params.sessionKey),
   ]);
 }
 
@@ -533,6 +533,7 @@ type AfterTurnRuntimeContextAttempt = Pick<
   | "senderId"
   | "provider"
   | "modelId"
+  | "agentHarnessId"
   | "thinkLevel"
   | "reasoningLevel"
   | "bashElevated"
@@ -547,6 +548,7 @@ type AfterTurnRuntimeContextAttempt = Pick<
 export function buildAfterTurnRuntimeContext(params: {
   attempt: AfterTurnRuntimeContextAttempt;
   workspaceDir: string;
+  cwd?: string;
   agentDir: string;
   activeAgentId?: string;
   contextEnginePluginId?: string;
@@ -565,12 +567,14 @@ export function buildAfterTurnRuntimeContext(params: {
       currentMessageId: params.attempt.currentMessageId,
       authProfileId: params.attempt.authProfileId,
       workspaceDir: params.workspaceDir,
+      cwd: params.cwd,
       agentDir: params.agentDir,
       config: params.attempt.config,
       skillsSnapshot: params.attempt.skillsSnapshot,
       senderId: params.attempt.senderId,
       provider: params.attempt.provider,
       modelId: params.attempt.modelId,
+      harnessRuntime: params.attempt.agentHarnessId,
       thinkLevel: params.attempt.thinkLevel,
       reasoningLevel: params.attempt.reasoningLevel,
       bashElevated: params.attempt.bashElevated,

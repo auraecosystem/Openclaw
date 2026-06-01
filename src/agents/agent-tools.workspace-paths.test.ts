@@ -5,8 +5,8 @@ import { describe, expect, it, vi } from "vitest";
 import "./test-helpers/fast-coding-tools.js";
 import "./test-helpers/fast-openclaw-tools.js";
 import type { OpenClawConfig } from "../config/config.js";
+import { createCanonicalFixtureSkill } from "../skills/test-support/test-helpers.js";
 import { createOpenClawCodingTools } from "./agent-tools.js";
-import { createCanonicalFixtureSkill } from "./skills.test-helpers.js";
 import { expectReadWriteEditTools, getTextContent } from "./test-helpers/agent-tools-fs-helpers.js";
 import { createAgentToolsSandboxContext } from "./test-helpers/agent-tools-sandbox-context.js";
 import { createHostSandboxFsBridge } from "./test-helpers/host-sandbox-fs-bridge.js";
@@ -59,6 +59,23 @@ async function expectExecCwdResolvesTo(
 }
 
 describe("workspace path resolution", () => {
+  it("uses cwd for coding filesystem tools while workspaceDir remains the agent workspace", async () => {
+    await withTempDir("openclaw-agent-ws-", async (workspaceDir) => {
+      await withTempDir("openclaw-task-cwd-", async (cwd) => {
+        const tools = createOpenClawCodingTools({ workspaceDir, cwd });
+        const { readTool, writeTool } = expectReadWriteEditTools(tools);
+
+        await fs.writeFile(path.join(cwd, "task.txt"), "task cwd read ok", "utf8");
+        const readResult = await readTool.execute("cwd-read", { path: "task.txt" });
+        expect(getTextContent(readResult)).toContain("task cwd read ok");
+
+        await writeTool.execute("cwd-write", { path: "created.txt", content: "task cwd write ok" });
+        expect(await fs.readFile(path.join(cwd, "created.txt"), "utf8")).toBe("task cwd write ok");
+        await expect(fs.access(path.join(workspaceDir, "created.txt"))).rejects.toThrow();
+      });
+    });
+  });
+
   it("resolves relative read/write/edit paths against workspaceDir even after cwd changes", async () => {
     await withTempDir("openclaw-ws-", async (workspaceDir) => {
       await withTempDir("openclaw-cwd-", async (otherDir) => {

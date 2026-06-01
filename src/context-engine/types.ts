@@ -196,6 +196,8 @@ export type ContextEnginePromptCacheInfo = {
 };
 
 export type ContextEngineRuntimeContext = Record<string, unknown> & {
+  /** Runtime task working directory; workspaceDir remains the agent bootstrap workspace. */
+  cwd?: string;
   /**
    * True when the host has explicitly opted this maintenance run into
    * consuming deferred compaction debt.
@@ -203,6 +205,8 @@ export type ContextEngineRuntimeContext = Record<string, unknown> & {
   allowDeferredCompactionExecution?: boolean;
   /** Runtime-resolved context window budget for the active model call. */
   tokenBudget?: number;
+  /** Selected agent harness id when compaction delegates back to the runtime. */
+  agentHarnessId?: string;
   /** Best-effort current prompt/context token estimate for this turn. */
   currentTokenCount?: number;
   /** Optional prompt-cache telemetry for cache-aware engines. */

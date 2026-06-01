@@ -1,5 +1,4 @@
 import OpenAI from "openai";
-import type { Api } from "openclaw/plugin-sdk/llm";
 import type { ProviderRuntimeModel } from "openclaw/plugin-sdk/plugin-entry";
 import { describe, expect, it } from "vitest";
 import { buildOpenAIProvider } from "./openai-provider.js";
@@ -39,7 +38,7 @@ function resolveLiveModelCase(modelId: string): LiveModelCase {
         templateId: "gpt-5.5",
         templateName: "GPT-5.5",
         cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 0 },
-        contextWindow: 272_000,
+        contextWindow: 1_000_000,
         maxTokens: 128_000,
         reasoning: true,
         textVerbosity: "low",
@@ -183,6 +182,6 @@ describeLive("buildOpenAIProvider live", () => {
 
       expect(response.output_text.trim()).toMatch(/^OK[.!]?$/);
     },
-    30_000,
+    180_000,
   );
 });

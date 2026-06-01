@@ -2,10 +2,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { statSync } from "node:fs";
 import fs from "node:fs/promises";
 import { isDeepStrictEqual } from "node:util";
+import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { withOwnedSessionTranscriptWrites } from "../../../config/sessions/transcript-write-context.js";
 import { resolveGlobalSingleton } from "../../../shared/global-singleton.js";
-import { normalizeStringEntries } from "../../../shared/string-normalization.js";
-import { isSessionWriteLockTimeoutError } from "../../session-write-lock-error.js";
+import { isSessionWriteLockAcquireError } from "../../session-write-lock-error.js";
 import type { acquireSessionWriteLock } from "../../session-write-lock.js";
 import { resolveEmbeddedSessionFileKey } from "../session-file-key.js";
 
@@ -26,128 +26,15 @@ type SessionWriteLockRunOptions = {
   publishOwnedWrite?: boolean;
 };
 
-type SessionEventProcessor = {
-  _handleAgentEvent?: AwaitableSessionEventHandler;
-  _disconnectFromAgent?: () => void;
-  _reconnectToAgent?: () => void;
-  _extensionRunner?: {
-    hasHandlers?: (eventType: string) => boolean;
-  };
-  __openclawSessionEventWriteLockInstalled?: boolean;
-};
-
-type SessionEventQueueOwner = {
-  _agentEventQueue?: PromiseLike<unknown>;
-};
-
-type SessionEventQueueBridge = SessionEventQueueOwner & {
-  _handleAgentEvent?: AwaitableSessionEventHandler;
-  _disconnectFromAgent?: () => void;
-  _reconnectToAgent?: () => void;
-};
-
-type AwaitableSessionEventHandler = ((event: unknown, signal?: unknown) => unknown) & {
-  __openclawSessionEventQueueAwaitInstalled?: boolean;
-};
-
 type SessionWithAgentPrompt = {
   agent?: {
     streamFn?: PromptReleaseStreamFn;
   };
 };
 
-type SessionWithExternalHooks = SessionEventProcessor & {
-  compact?: LockableFunction;
-  agent?: {
-    beforeToolCall?: LockableFunction;
-    afterToolCall?: LockableFunction;
-    onPayload?: LockableFunction;
-    onResponse?: LockableFunction;
-  };
-};
-
 type PromptReleaseStreamFn = ((...args: unknown[]) => unknown) & {
   __openclawSessionLockPromptReleaseInstalled?: boolean;
 };
-
-type LockableFunction = ((...args: unknown[]) => unknown) & {
-  __openclawSessionWriteLockInstalled?: boolean;
-};
-
-type SessionEventHookContext = {
-  session: unknown;
-  active: boolean;
-};
-
-const sessionEventHookContext = new AsyncLocalStorage<SessionEventHookContext>();
-
-function isProcessingAgentEventInCurrentChain(session: unknown): boolean {
-  const context = sessionEventHookContext.getStore();
-  return context?.active === true && context.session === session;
-}
-
-async function withProcessingAgentEvent<T>(
-  session: unknown,
-  run: () => Promise<T> | T,
-): Promise<T> {
-  const context: SessionEventHookContext = { session, active: true };
-  return await sessionEventHookContext.run(context, async () => {
-    try {
-      return await run();
-    } finally {
-      context.active = false;
-    }
-  });
-}
-
-function sessionHasExtensionHandlers(session: SessionEventProcessor, eventType: string): boolean {
-  const extensionRunner = session["_extensionRunner"];
-  const hasHandlers = extensionRunner?.hasHandlers;
-  if (typeof hasHandlers !== "function") {
-    return false;
-  }
-  try {
-    return hasHandlers.call(extensionRunner, eventType);
-  } catch {
-    return true;
-  }
-}
-
-function eventMayReachTranscriptWriters(session: SessionEventProcessor, event: unknown): boolean {
-  const type = (event as { type?: unknown } | null)?.type;
-  if (type === "message_update" || type === "message_end" || type === "agent_end") {
-    return true;
-  }
-  if (typeof type !== "string") {
-    return false;
-  }
-  return sessionHasExtensionHandlers(session, type);
-}
-
-function installLockableFunction(params: {
-  owner: Record<string, unknown>;
-  key: string;
-  shouldLock: () => boolean;
-  waitBeforeLock?: () => Promise<void>;
-  withSessionWriteLock: <T>(run: () => Promise<T> | T) => Promise<T>;
-}): void {
-  const current = params.owner[params.key] as LockableFunction | undefined;
-  if (typeof current !== "function" || current["__openclawSessionWriteLockInstalled"] === true) {
-    return;
-  }
-  const wrapped: LockableFunction = async function lockedExternalHook(
-    this: unknown,
-    ...args: unknown[]
-  ) {
-    if (!params.shouldLock()) {
-      return await current.apply(this, args);
-    }
-    await params.waitBeforeLock?.();
-    return await params.withSessionWriteLock(async () => await current.apply(this, args));
-  };
-  wrapped["__openclawSessionWriteLockInstalled"] = true;
-  params.owner[params.key] = wrapped;
-}
 
 type SessionFileFingerprint =
   | { exists: false }
@@ -490,7 +377,9 @@ function waitForSessionFileOwnerRelease(params: {
   signal?: AbortSignal;
 }): Promise<void> {
   if (params.signal?.aborted) {
-    return Promise.reject(abortOwnerWaitReason(params.signal));
+    return Promise.reject(
+      toLintErrorObject(abortOwnerWaitReason(params.signal), "Non-Error rejection"),
+    );
   }
   return new Promise<void>((resolve, reject) => {
     const waiter: SessionFileOwnerWaiter = {
@@ -513,7 +402,7 @@ function waitForSessionFileOwnerRelease(params: {
     };
     waiter.reject = (error) => {
       cleanup();
-      reject(error);
+      reject(toLintErrorObject(error, "Non-Error rejection"));
     };
     if (params.timeoutMs !== undefined && Number.isFinite(params.timeoutMs)) {
       waiter.timer = setTimeout(
@@ -629,7 +518,7 @@ function isTrustedSessionFileState(
   fingerprint: SessionFileFingerprint,
 ): boolean {
   const trusted = trustedSessionFileStates.get(sessionFileKey);
-  return !!trusted && sameSessionFileFingerprint(trusted.fingerprint, fingerprint);
+  return trusted !== undefined && sameSessionFileFingerprint(trusted.fingerprint, fingerprint);
 }
 
 async function readSessionFileFingerprint(sessionFile: string): Promise<SessionFileFingerprint> {
@@ -670,163 +559,13 @@ function readSessionFileFingerprintSync(sessionFile: string): SessionFileFingerp
   }
 }
 
-async function waitForSessionEventQueue(session: unknown): Promise<void> {
-  const owner = session as SessionEventQueueOwner;
-  for (let attempts = 0; attempts < 5; attempts += 1) {
-    const queue = owner?.["_agentEventQueue"];
-    if (!queue || typeof queue.then !== "function") {
-      return;
-    }
-    await Promise.resolve(queue).catch(() => {});
-    if (owner?.["_agentEventQueue"] === queue) {
-      return;
-    }
-  }
-  const queue = owner?.["_agentEventQueue"];
-  if (queue && typeof queue.then === "function") {
-    await Promise.resolve(queue).catch(() => {});
-  }
-}
-
-async function waitForSessionEventQueueBeforeHook(session: unknown): Promise<void> {
-  // Hook calls made by _handleAgentEvent are already inside the current queue
-  // entry. Draining there waits on itself; detached/external hook work still drains.
-  if (isProcessingAgentEventInCurrentChain(session)) {
-    return;
-  }
-  await waitForSessionEventQueue(session);
-}
-
-function installAwaitableSessionEventQueue(session: unknown): void {
-  const owner = session as SessionEventQueueBridge;
-  const original = owner["_handleAgentEvent"];
-  if (
-    typeof original !== "function" ||
-    original["__openclawSessionEventQueueAwaitInstalled"] === true
-  ) {
-    return;
-  }
-
-  const canReconnect =
-    typeof owner["_disconnectFromAgent"] === "function" &&
-    typeof owner["_reconnectToAgent"] === "function";
-  if (canReconnect) {
-    owner["_disconnectFromAgent"]?.();
-  }
-
-  const wrapped: AwaitableSessionEventHandler = function awaitableSessionEventQueue(
-    ...args: [event: unknown, signal?: unknown]
-  ) {
-    const result = original(...args);
-    const queue = owner["_agentEventQueue"];
-    if (queue && typeof queue.then === "function") {
-      return Promise.resolve(queue);
-    }
-    return result;
-  };
-  wrapped["__openclawSessionEventQueueAwaitInstalled"] = true;
-  owner["_handleAgentEvent"] = wrapped;
-
-  if (canReconnect) {
-    owner["_reconnectToAgent"]?.();
-  }
-}
+async function waitForSessionEventQueue(_session: unknown): Promise<void> {}
 
 export class EmbeddedAttemptSessionTakeoverError extends Error {
   constructor(sessionFile: string) {
     super(`session file changed while embedded prompt lock was released: ${sessionFile}`);
     this.name = "EmbeddedAttemptSessionTakeoverError";
   }
-}
-
-export function installSessionEventWriteLock(params: {
-  session: unknown;
-  withSessionWriteLock: <T>(run: () => Promise<T> | T) => Promise<T>;
-}): void {
-  installAwaitableSessionEventQueue(params.session);
-  const session = params.session as SessionEventProcessor;
-  const original = session["_handleAgentEvent"];
-  if (
-    typeof original !== "function" ||
-    session["__openclawSessionEventWriteLockInstalled"] === true
-  ) {
-    return;
-  }
-
-  const canReconnect =
-    typeof session["_disconnectFromAgent"] === "function" &&
-    typeof session["_reconnectToAgent"] === "function";
-  if (canReconnect) {
-    session["_disconnectFromAgent"]?.();
-  }
-
-  session["__openclawSessionEventWriteLockInstalled"] = true;
-  const wrapped: AwaitableSessionEventHandler = async function lockedSessionEventHandler(
-    this: unknown,
-    event: unknown,
-    signal?: unknown,
-  ) {
-    return await withProcessingAgentEvent(session, async () => {
-      if (!eventMayReachTranscriptWriters(session, event)) {
-        return await original.call(this, event, signal);
-      }
-      return await params.withSessionWriteLock(
-        async () => await original.call(this, event, signal),
-      );
-    });
-  };
-  wrapped["__openclawSessionEventQueueAwaitInstalled"] =
-    original["__openclawSessionEventQueueAwaitInstalled"];
-  session["_handleAgentEvent"] = wrapped;
-
-  if (canReconnect) {
-    session["_reconnectToAgent"]?.();
-  }
-}
-
-export function installSessionExternalHookWriteLock(params: {
-  session: unknown;
-  withSessionWriteLock: <T>(run: () => Promise<T> | T) => Promise<T>;
-}): void {
-  const session = params.session as SessionWithExternalHooks;
-  const agent = session.agent;
-  if (agent) {
-    installLockableFunction({
-      owner: agent as Record<string, unknown>,
-      key: "beforeToolCall",
-      shouldLock: () => true,
-      waitBeforeLock: () => waitForSessionEventQueueBeforeHook(session),
-      withSessionWriteLock: params.withSessionWriteLock,
-    });
-    installLockableFunction({
-      owner: agent as Record<string, unknown>,
-      key: "afterToolCall",
-      shouldLock: () => sessionHasExtensionHandlers(session, "tool_result"),
-      waitBeforeLock: () => waitForSessionEventQueueBeforeHook(session),
-      withSessionWriteLock: params.withSessionWriteLock,
-    });
-    installLockableFunction({
-      owner: agent as Record<string, unknown>,
-      key: "onPayload",
-      shouldLock: () => sessionHasExtensionHandlers(session, "before_provider_request"),
-      waitBeforeLock: () => waitForSessionEventQueueBeforeHook(session),
-      withSessionWriteLock: params.withSessionWriteLock,
-    });
-    installLockableFunction({
-      owner: agent as Record<string, unknown>,
-      key: "onResponse",
-      shouldLock: () => sessionHasExtensionHandlers(session, "after_provider_response"),
-      waitBeforeLock: () => waitForSessionEventQueueBeforeHook(session),
-      withSessionWriteLock: params.withSessionWriteLock,
-    });
-  }
-  installLockableFunction({
-    owner: session as Record<string, unknown>,
-    key: "compact",
-    shouldLock: () => true,
-    waitBeforeLock: () => waitForSessionEventQueue(session),
-    withSessionWriteLock: params.withSessionWriteLock,
-  });
 }
 
 export type EmbeddedAttemptSessionLockController = {
@@ -863,19 +602,102 @@ export async function createEmbeddedAttemptSessionLockController(params: {
   let fenceGeneration = 0;
   let fenceActive = false;
   let takeoverDetected = false;
+  let retainedLockUseCount = 0;
+  const retainedLockIdleWaiters = new Set<() => void>();
+  let heldLockDraining = false;
+  let heldLockDrainOwner: symbol | undefined;
+  const heldLockDrainWaiters = new Set<() => void>();
   const sessionFileFenceKey = resolveSessionFileFenceKey(params.lockOptions.sessionFile);
 
-  async function acquireWriteLock(): Promise<{ lock: SessionLock; owned: boolean }> {
+  function beginRetainedLockUse(): () => void {
+    retainedLockUseCount += 1;
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      retainedLockUseCount -= 1;
+      if (retainedLockUseCount === 0 && retainedLockIdleWaiters.size > 0) {
+        const waiters = Array.from(retainedLockIdleWaiters);
+        retainedLockIdleWaiters.clear();
+        for (const resolve of waiters) {
+          resolve();
+        }
+      }
+    };
+  }
+
+  async function waitForRetainedLockIdle(): Promise<boolean> {
+    if (retainedLockUseCount === 0) {
+      return true;
+    }
+    if (activeWriteLock.getStore()?.active === true) {
+      return false;
+    }
+    await new Promise<void>((resolve) => {
+      retainedLockIdleWaiters.add(resolve);
+    });
+    return true;
+  }
+
+  async function acquireWriteLock(): Promise<{
+    lock: SessionLock;
+    owned: boolean;
+    releaseRetainedUse?: () => void;
+  }> {
+    await waitForHeldLockDrain();
     if (heldLock) {
-      return { lock: heldLock, owned: false };
+      return { lock: heldLock, owned: false, releaseRetainedUse: beginRetainedLockUse() };
     }
     try {
       return { lock: await acquireLock(), owned: true };
     } catch (err) {
-      if (isSessionWriteLockTimeoutError(err)) {
+      if (isSessionWriteLockAcquireError(err)) {
         takeoverDetected = true;
       }
       throw err;
+    }
+  }
+
+  async function waitForHeldLockDrain(): Promise<void> {
+    for (;;) {
+      if (!heldLockDraining) {
+        return;
+      }
+      await new Promise<void>((resolve) => {
+        heldLockDrainWaiters.add(resolve);
+      });
+    }
+  }
+
+  async function beginHeldLockDrain(): Promise<symbol> {
+    for (;;) {
+      if (!heldLockDraining) {
+        const owner = Symbol("held-lock-drain");
+        heldLockDraining = true;
+        heldLockDrainOwner = owner;
+        return owner;
+      }
+      await new Promise<void>((resolve) => {
+        heldLockDrainWaiters.add(resolve);
+      });
+    }
+  }
+
+  function finishHeldLockDrain(owner: symbol): void {
+    if (!heldLockDraining || heldLockDrainOwner !== owner) {
+      return;
+    }
+    heldLockDraining = false;
+    heldLockDrainOwner = undefined;
+    if (heldLockDrainWaiters.size === 0) {
+      return;
+    }
+    const waiters = Array.from(heldLockDrainWaiters);
+    heldLockDrainWaiters.clear();
+    for (const resolve of waiters) {
+      resolve();
     }
   }
 
@@ -966,21 +788,107 @@ export async function createEmbeddedAttemptSessionLockController(params: {
 
   async function releaseHeldLockWithFence(): Promise<void> {
     if (!heldLock) {
+      await waitForHeldLockDrain();
       return;
     }
-    const lock = heldLock;
-    heldLock = undefined;
-    const fingerprint = await readSessionFileFingerprint(params.lockOptions.sessionFile);
-    const ownedWrite = ownedSessionFileWrites.get(sessionFileFenceKey);
-    const trustedGeneration = trustSessionFileState(sessionFileFenceKey, fingerprint);
-    fenceFingerprint = fingerprint;
-    fenceSnapshot = await readSessionFileFenceSnapshot(params.lockOptions.sessionFile);
-    fenceGeneration =
-      ownedWrite && sameSessionFileFingerprint(ownedWrite.fingerprint, fingerprint)
-        ? ownedWrite.generation
-        : (trustedGeneration ?? fenceGeneration);
-    fenceActive = true;
-    await lock.release();
+    const drainOwner = await beginHeldLockDrain();
+    try {
+      if (!(await waitForRetainedLockIdle())) {
+        return;
+      }
+      if (!heldLock) {
+        return;
+      }
+      const lock = heldLock;
+      heldLock = undefined;
+      const fingerprint = await readSessionFileFingerprint(params.lockOptions.sessionFile);
+      const ownedWrite = ownedSessionFileWrites.get(sessionFileFenceKey);
+      const trustedGeneration = trustSessionFileState(sessionFileFenceKey, fingerprint);
+      fenceFingerprint = fingerprint;
+      fenceSnapshot = await readSessionFileFenceSnapshot(params.lockOptions.sessionFile);
+      fenceGeneration =
+        ownedWrite && sameSessionFileFingerprint(ownedWrite.fingerprint, fingerprint)
+          ? ownedWrite.generation
+          : (trustedGeneration ?? fenceGeneration);
+      fenceActive = true;
+      await lock.release();
+    } finally {
+      finishHeldLockDrain(drainOwner);
+    }
+  }
+
+  async function takeHeldLockAfterRetainedIdle(): Promise<SessionLock | undefined> {
+    if (!heldLock) {
+      return undefined;
+    }
+    const drainOwner = await beginHeldLockDrain();
+    try {
+      if (!(await waitForRetainedLockIdle())) {
+        return undefined;
+      }
+      if (!heldLock) {
+        return undefined;
+      }
+      const lock = heldLock;
+      heldLock = undefined;
+      return lock;
+    } finally {
+      finishHeldLockDrain(drainOwner);
+    }
+  }
+
+  async function disposeHeldLockAfterRetainedIdle(): Promise<void> {
+    if (!heldLock) {
+      await waitForHeldLockDrain();
+      return;
+    }
+    const drainOwner = await beginHeldLockDrain();
+    try {
+      if (!(await waitForRetainedLockIdle())) {
+        return;
+      }
+      if (!heldLock) {
+        return;
+      }
+      const lock = heldLock;
+      heldLock = undefined;
+      await lock.release();
+    } finally {
+      finishHeldLockDrain(drainOwner);
+    }
+  }
+
+  async function acquireCleanupLock(): Promise<SessionLock | undefined> {
+    const retainedLock = await takeHeldLockAfterRetainedIdle();
+    if (retainedLock) {
+      return retainedLock;
+    }
+    await waitForHeldLockDrain();
+    try {
+      return await acquireLock();
+    } catch (err) {
+      if (isSessionWriteLockAcquireError(err)) {
+        takeoverDetected = true;
+        return undefined;
+      }
+      throw err;
+    }
+  }
+
+  async function runWithRetainedLock<T>(
+    run: () => Promise<T>,
+    releaseRetainedUse: () => void,
+  ): Promise<T> {
+    try {
+      const activeLockState: ActiveWriteLockState = { active: true };
+      try {
+        return await activeWriteLock.run(activeLockState, run);
+      } finally {
+        activeLockState.active = false;
+      }
+    } finally {
+      releaseRetainedUse();
+    }
   }
 
   return {
@@ -997,6 +905,7 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       }
     },
     async reacquireAfterPrompt(): Promise<void> {
+      await waitForHeldLockDrain();
       if (takeoverDetected || heldLock) {
         return;
       }
@@ -1029,30 +938,33 @@ export async function createEmbeddedAttemptSessionLockController(params: {
           await publishOwnedSessionFileFence(beforeWrite);
         }
       }
-      const { lock, owned } = await acquireWriteLock();
+      const { lock, owned, releaseRetainedUse } = await acquireWriteLock();
       try {
-        await assertSessionFileFence();
-        const beforeWrite = await readSessionFileFingerprint(params.lockOptions.sessionFile);
-        const runWithLock = async () => {
-          try {
-            return await run();
-          } finally {
-            if (options?.publishOwnedWrite === true) {
-              await publishOwnedSessionFileFence(beforeWrite);
-            } else {
-              await refreshSessionFileFence(beforeWrite);
+        const runLockedOperation = async () => {
+          await assertSessionFileFence();
+          const beforeWrite = await readSessionFileFingerprint(params.lockOptions.sessionFile);
+          const runWithLock = async () => {
+            try {
+              return await run();
+            } finally {
+              if (options?.publishOwnedWrite === true) {
+                await publishOwnedSessionFileFence(beforeWrite);
+              } else {
+                await refreshSessionFileFence(beforeWrite);
+              }
             }
-          }
+          };
+          return await runWithLock();
         };
         if (owned) {
           const activeLockState: ActiveWriteLockState = { active: true };
           try {
-            return await activeWriteLock.run(activeLockState, runWithLock);
+            return await activeWriteLock.run(activeLockState, runLockedOperation);
           } finally {
             activeLockState.active = false;
           }
         }
-        return await runWithLock();
+        return await runWithRetainedLock(runLockedOperation, releaseRetainedUse ?? (() => {}));
       } finally {
         if (owned) {
           await lock.release();
@@ -1066,17 +978,10 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       if (takeoverDetected) {
         return noopLock;
       }
-      try {
-        heldLock ??= await acquireLock();
-      } catch (err) {
-        if (isSessionWriteLockTimeoutError(err)) {
-          takeoverDetected = true;
-          return noopLock;
-        }
-        throw err;
+      const cleanupLock = await acquireCleanupLock();
+      if (!cleanupLock) {
+        return noopLock;
       }
-      const cleanupLock = heldLock;
-      heldLock = undefined;
       try {
         await assertSessionFileFence();
       } catch (err) {
@@ -1092,12 +997,7 @@ export async function createEmbeddedAttemptSessionLockController(params: {
       return takeoverDetected;
     },
     async dispose(): Promise<void> {
-      if (!heldLock) {
-        return;
-      }
-      const lock = heldLock;
-      heldLock = undefined;
-      await lock.release();
+      await disposeHeldLockAfterRetainedIdle();
     },
   };
 }
@@ -1145,4 +1045,18 @@ export function installPromptSubmissionLockRelease(params: {
   };
   wrappedStreamFn["__openclawSessionLockPromptReleaseInstalled"] = true;
   agent.streamFn = wrappedStreamFn;
+}
+
+function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
+  if (value instanceof Error) {
+    return value;
+  }
+  if (typeof value === "string") {
+    return new Error(value);
+  }
+  const error = new Error(fallbackMessage, { cause: value });
+  if ((typeof value === "object" && value !== null) || typeof value === "function") {
+    Object.assign(error, value);
+  }
+  return error;
 }

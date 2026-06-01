@@ -169,6 +169,42 @@ function createTwoCalendarAppPolicyContext() {
 setupRunAttemptTestHooks();
 
 describe("Codex app-server thread lifecycle bindings", () => {
+  it("does not write a binding when thread start resolves after abort", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    const workspaceDir = path.join(tempDir, "workspace");
+    const params = createParams(sessionFile, workspaceDir);
+    const appServer = createThreadLifecycleAppServerOptions();
+    const abortController = new AbortController();
+    let resolveStart: ((value: ReturnType<typeof threadStartResult>) => void) | undefined;
+    const request = vi.fn(async (method: string) => {
+      if (method === "thread/start") {
+        return await new Promise<ReturnType<typeof threadStartResult>>((resolve) => {
+          resolveStart = resolve;
+        });
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+
+    const run = startOrResumeThread({
+      client: { request } as never,
+      params,
+      cwd: workspaceDir,
+      dynamicTools: [],
+      appServer,
+      signal: abortController.signal,
+    });
+    await vi.waitFor(() =>
+      expect(request).toHaveBeenCalledWith("thread/start", expect.any(Object), {
+        signal: abortController.signal,
+      }),
+    );
+    abortController.abort("test_abort");
+    resolveStart?.(threadStartResult("thread-after-abort"));
+
+    await expect(run).rejects.toThrow("test_abort");
+    await expect(readCodexAppServerBinding(sessionFile)).resolves.toBeUndefined();
+  });
+
   it("resumes a bound Codex thread when only dynamic tool descriptions change", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
     const workspaceDir = path.join(tempDir, "workspace");
@@ -640,6 +676,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       ...config,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     };
 
     await startOrResumeThread({
@@ -708,6 +745,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       "features.hooks": true,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
       hooks: { PreToolUse: [] },
       ...createPluginAppConfigPatch(),
     });
@@ -786,6 +824,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       "features.hooks": true,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
       "hooks.PreToolUse": finalConfigPatch["hooks.PreToolUse"],
       ...createPluginAppConfigPatch(),
     });
@@ -793,6 +832,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       "features.hooks": true,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
       "hooks.PreToolUse": finalConfigPatch["hooks.PreToolUse"],
     });
   });
@@ -854,12 +894,14 @@ describe("Codex app-server thread lifecycle bindings", () => {
       "features.hooks": true,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
       ...createPluginAppConfigPatch(),
     });
     expect(requestCalls[1]?.[1].config).toEqual({
       "features.hooks": true,
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
   });
 
@@ -922,6 +964,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     expect(requestCalls[0]?.[1].config).toEqual({
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
       apps: {
         _default: {
           enabled: false,
@@ -980,6 +1023,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     expect(requestCalls[0]?.[1].config).toEqual({
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-existing");
@@ -1039,6 +1083,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       ...createPluginAppConfigPatch(),
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
@@ -1104,6 +1149,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
     expect(requestCalls[0]?.[1].config).toEqual({
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
   });
 
@@ -1159,6 +1205,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       ...createTwoPluginAppConfigPatch(),
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
@@ -1223,6 +1270,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       ...createTwoCalendarAppConfigPatch(),
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-recovered");
@@ -1276,6 +1324,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       ...createPluginAppConfigPatch(),
       "features.code_mode": true,
       "features.code_mode_only": false,
+      "features.apply_patch_streaming_events": true,
     });
     const binding = await readCodexAppServerBinding(sessionFile);
     expect(binding?.threadId).toBe("thread-plugins");
@@ -1323,7 +1372,7 @@ describe("Codex app-server thread lifecycle bindings", () => {
       cwd: workspaceDir,
       model: "gpt-5.4-codex",
       modelProvider: "openai",
-      authProfileId: "openai-codex:bound",
+      authProfileId: "openai:bound",
     });
     const params = createParams(sessionFile, workspaceDir);
     delete params.authProfileId;
@@ -1357,6 +1406,6 @@ describe("Codex app-server thread lifecycle bindings", () => {
       },
     });
 
-    expect(binding.authProfileId).toBe("openai-codex:bound");
+    expect(binding.authProfileId).toBe("openai:bound");
   });
 });

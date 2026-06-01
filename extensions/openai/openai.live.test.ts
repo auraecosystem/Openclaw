@@ -5,7 +5,6 @@ import OpenAI from "openai";
 import type { ResolvedTtsConfig } from "openclaw/plugin-sdk/agent-runtime";
 import { AuthStorage, ModelRegistry } from "openclaw/plugin-sdk/agent-sessions";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
 import { encodePngRgba, fillPixel } from "openclaw/plugin-sdk/media-runtime";
 import {
   registerProviderPlugin,
@@ -287,6 +286,8 @@ describeLive("openai plugin live", () => {
       fileName: "openai-plugin-live.mp3",
       mime: "audio/mpeg",
       apiKey: OPENAI_API_KEY,
+      language: "en",
+      prompt: "Speech transcription check okay.",
       timeoutMs: 30_000,
     });
 
@@ -311,7 +312,9 @@ describeLive("openai plugin live", () => {
 
     try {
       await session.connect();
-      await new Promise((resolve) => setTimeout(resolve, 1_000));
+      await new Promise((resolve) => {
+        setTimeout(resolve, 1_000);
+      });
       expect(errors).toStrictEqual([]);
       expect(session.isConnected()).toBe(true);
     } finally {

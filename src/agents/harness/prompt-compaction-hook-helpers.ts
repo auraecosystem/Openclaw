@@ -5,6 +5,7 @@ import type {
   PluginHookBeforePromptBuildResult,
 } from "../../plugins/types.js";
 import { joinPresentTextSegments } from "../../shared/text/join-segments.js";
+import { wrapPluginSystemContextSection } from "../hook-system-context-boundary.js";
 import type { AgentMessage } from "../runtime/index.js";
 import { buildAgentHookContext, type AgentHarnessHookContext } from "./hook-context.js";
 
@@ -35,13 +36,13 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   };
 
   const promptBuildResult = hookRunner.hasHooks("before_prompt_build")
-    ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error) => {
+    ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error: unknown) => {
         log.warn(`before_prompt_build hook failed: ${String(error)}`);
         return undefined;
       })
     : undefined;
   const beforeAgentStartResult = hookRunner.hasHooks("before_agent_start")
-    ? await hookRunner.runBeforeAgentStart(promptEvent, hookCtx).catch((error) => {
+    ? await hookRunner.runBeforeAgentStart(promptEvent, hookCtx).catch((error: unknown) => {
         log.warn(`deprecated before_agent_start hook failed during prompt build: ${String(error)}`);
         return undefined;
       })
@@ -61,11 +62,11 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
       ]) ?? params.prompt,
     developerInstructions:
       joinPresentTextSegments([
-        promptBuildResult?.prependSystemContext,
-        beforeAgentStartResult?.prependSystemContext,
+        wrapPluginSystemContextSection(promptBuildResult?.prependSystemContext),
+        wrapPluginSystemContextSection(beforeAgentStartResult?.prependSystemContext),
         systemPrompt,
-        promptBuildResult?.appendSystemContext,
-        beforeAgentStartResult?.appendSystemContext,
+        wrapPluginSystemContextSection(promptBuildResult?.appendSystemContext),
+        wrapPluginSystemContextSection(beforeAgentStartResult?.appendSystemContext),
       ]) ?? systemPrompt,
   };
 }

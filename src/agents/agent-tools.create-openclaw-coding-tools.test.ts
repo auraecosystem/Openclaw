@@ -371,6 +371,81 @@ describe("createOpenClawCodingTools", () => {
     expect(toolNameList(tools)).toContain("message");
   });
 
+  it("preserves runtime-allowed message through local model lean filtering", () => {
+    const tools = createOpenClawCodingTools({
+      config: {
+        agents: {
+          defaults: {
+            experimental: {
+              localModelLean: true,
+            },
+          },
+        },
+        tools: { profile: "minimal" },
+      },
+      runtimeToolAllowlist: ["message"],
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: false,
+        includeOpenClawTools: true,
+        includePluginTools: false,
+      },
+    });
+
+    expect(toolNameList(tools)).toContain("message");
+  });
+
+  it("preserves forced message through local model lean filtering without runtime allowlist", () => {
+    const tools = createOpenClawCodingTools({
+      config: {
+        agents: {
+          defaults: {
+            experimental: {
+              localModelLean: true,
+            },
+          },
+        },
+        tools: { profile: "minimal" },
+      },
+      forceMessageTool: true,
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: false,
+        includeOpenClawTools: true,
+        includePluginTools: false,
+      },
+    });
+
+    expect(toolNameList(tools)).toContain("message");
+  });
+
+  it("preserves message-tool-only replies through local model lean filtering without runtime allowlist", () => {
+    const tools = createOpenClawCodingTools({
+      config: {
+        agents: {
+          defaults: {
+            experimental: {
+              localModelLean: true,
+            },
+          },
+        },
+        tools: { profile: "minimal" },
+      },
+      sourceReplyDeliveryMode: "message_tool_only",
+      toolConstructionPlan: {
+        includeBaseCodingTools: false,
+        includeShellTools: false,
+        includeChannelTools: false,
+        includeOpenClawTools: true,
+        includePluginTools: false,
+      },
+    });
+
+    expect(toolNameList(tools)).toContain("message");
+  });
+
   it("preserves runtime allowlist groups containing message through restrictive profiles", () => {
     for (const runtimeToolAllowlist of [["group:messaging"], ["group:openclaw"], ["*"]]) {
       const tools = createOpenClawCodingTools({
@@ -698,7 +773,7 @@ describe("createOpenClawCodingTools", () => {
 
     const codexTools = createOpenClawCodingTools({
       config: testConfig,
-      modelProvider: "openai-codex",
+      modelProvider: "openai",
       modelId: "gpt-5.4",
     });
     expect(toolNameList(codexTools)).toContain("apply_patch");
@@ -1050,6 +1125,14 @@ describe("createOpenClawCodingTools", () => {
     expect(toolNameList(tools)).toContain("heartbeat_respond");
   });
 
+  it("keeps skill_workshop available under the coding profile", () => {
+    const tools = createOpenClawCodingTools({
+      config: { tools: { profile: "coding" } },
+    });
+
+    expect(toolNameList(tools)).toContain("skill_workshop");
+  });
+
   it("can keep message available when a cron route needs it under a provider coding profile", () => {
     const providerProfileTools = createOpenClawCodingTools({
       config: { tools: { byProvider: { openai: { profile: "coding" } } } },
@@ -1253,6 +1336,40 @@ describe("createOpenClawCodingTools", () => {
       expect(combinedText).toContain("hello universe");
     } finally {
       await fs.rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("roots memory flush append-only writes in the workspace when cwd differs", async () => {
+    const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-workspace-"));
+    const taskCwd = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-memory-cwd-"));
+    const memoryRelativePath = "memory/2026-03-24.md";
+    const workspaceMemoryFile = path.join(workspaceDir, memoryRelativePath);
+    const taskMemoryFile = path.join(taskCwd, memoryRelativePath);
+
+    try {
+      await fs.mkdir(path.dirname(workspaceMemoryFile), { recursive: true });
+      await fs.writeFile(workspaceMemoryFile, "seed", "utf8");
+
+      const tools = createOpenClawCodingTools({
+        workspaceDir,
+        cwd: taskCwd,
+        trigger: "memory",
+        memoryFlushWritePath: memoryRelativePath,
+      });
+      const writeExecute = requireToolExecute(requireTool(tools, "write"));
+
+      await writeExecute("tool-memory-flush-workspace", {
+        path: memoryRelativePath,
+        content: "new durable note",
+      });
+
+      await expect(fs.readFile(workspaceMemoryFile, "utf8")).resolves.toBe(
+        "seed\nnew durable note",
+      );
+      await expect(fs.stat(taskMemoryFile)).rejects.toThrow();
+    } finally {
+      await fs.rm(workspaceDir, { recursive: true, force: true });
+      await fs.rm(taskCwd, { recursive: true, force: true });
     }
   });
 

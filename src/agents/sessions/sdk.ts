@@ -4,7 +4,7 @@ import { streamSimple } from "../../llm/stream.js";
 import type { Message, Model } from "../../llm/types.js";
 import { getAgentDir } from "../config.js";
 import { Agent, type AgentMessage, type ThinkingLevel } from "../runtime/index.js";
-import { AgentSession } from "./agent-session.js";
+import { AgentSession, type AgentSessionWriteLockRunner } from "./agent-session.js";
 import { formatNoModelsAvailableMessage } from "./auth-guidance.js";
 import { AuthStorage } from "./auth-storage.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
@@ -22,7 +22,6 @@ import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
 import { isInstallTelemetryEnabled } from "./telemetry.js";
-import { time } from "./timings.js";
 import {
   createBashTool,
   createCodingTools,
@@ -84,6 +83,8 @@ export interface CreateAgentSessionOptions {
   settingsManager?: SettingsManager;
   /** Session start event metadata for extension runtime startup. */
   sessionStartEvent?: SessionStartEvent;
+  /** Optional lock used before session-file writes or write-capable extension hooks. */
+  withSessionWriteLock?: AgentSessionWriteLockRunner;
 }
 
 /** Result from createAgentSession */
@@ -108,7 +109,7 @@ export type {
   ToolDefinition,
 } from "./extensions/index.js";
 export type { PromptTemplate } from "./prompt-templates.js";
-export type { Skill } from "./skills.js";
+export type { Skill } from "../../skills/loading/session.js";
 export type { Tool } from "./tools/index.js";
 
 export {
@@ -216,7 +217,6 @@ export async function createAgentSession(
   if (!resourceLoader) {
     resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
     await resourceLoader.reload();
-    time("resourceLoader.reload");
   }
 
   // Check if session has existing data to restore
@@ -294,8 +294,6 @@ export async function createAgentSession(
         ? customToolNames
         : defaultActiveToolNames;
 
-  let agent: Agent;
-
   // Create convertToLlm wrapper that filters images if blockImages is enabled (defense-in-depth)
   const convertToLlmWithBlockImages = (messages: AgentMessage[]): Message[] => {
     const converted = convertToLlm(messages);
@@ -337,8 +335,10 @@ export async function createAgentSession(
   };
 
   const extensionRunnerRef: { current?: ExtensionRunner } = {};
+  const runWithSessionWriteLock = async <T>(run: () => Promise<T> | T): Promise<T> =>
+    options.withSessionWriteLock ? await options.withSessionWriteLock(run) : await run();
 
-  agent = new Agent({
+  const agent: Agent = new Agent({
     initialState: {
       systemPrompt: "",
       model,
@@ -346,44 +346,49 @@ export async function createAgentSession(
       tools: [],
     },
     convertToLlm: convertToLlmWithBlockImages,
-    streamFn: async (model, context, options) => {
-      const auth = await modelRegistry.getApiKeyAndHeaders(model);
+    streamFn: async (modelResult, context, optionsLocal) => {
+      const auth = await modelRegistry.getApiKeyAndHeaders(modelResult);
       if (!auth.ok) {
         throw new Error(auth.error);
       }
       const providerRetrySettings = settingsManager.getProviderRetrySettings();
-      const attributionHeaders = getAttributionHeaders(model, settingsManager);
-      return streamSimple(model, context, {
-        ...options,
+      const attributionHeaders = getAttributionHeaders(modelResult, settingsManager);
+      return streamSimple(modelResult, context, {
+        ...optionsLocal,
         apiKey: auth.apiKey,
-        timeoutMs: options?.timeoutMs ?? providerRetrySettings.timeoutMs,
-        maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
-        maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
+        timeoutMs: optionsLocal?.timeoutMs ?? providerRetrySettings.timeoutMs,
+        maxRetries: optionsLocal?.maxRetries ?? providerRetrySettings.maxRetries,
+        maxRetryDelayMs: optionsLocal?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
         headers:
-          attributionHeaders || auth.headers || options?.headers
-            ? { ...attributionHeaders, ...auth.headers, ...options?.headers }
+          attributionHeaders || auth.headers || optionsLocal?.headers
+            ? { ...attributionHeaders, ...auth.headers, ...optionsLocal?.headers }
             : undefined,
       });
     },
-    onPayload: async (payload, model) => {
-      void model;
+    onPayload: async (payload, modelValue) => {
+      void modelValue;
       const runner = extensionRunnerRef.current;
       if (!runner?.hasHandlers("before_provider_request")) {
         return payload;
       }
-      return runner.emitBeforeProviderRequest(payload);
+      return await runWithSessionWriteLock(
+        async () => await runner.emitBeforeProviderRequest(payload),
+      );
     },
-    onResponse: async (response, model) => {
-      void model;
+    onResponse: async (response, modelLocal) => {
+      void modelLocal;
       const runner = extensionRunnerRef.current;
       if (!runner?.hasHandlers("after_provider_response")) {
         return;
       }
-      await runner.emit({
-        type: "after_provider_response",
-        status: response.status,
-        headers: response.headers,
-      });
+      await runWithSessionWriteLock(
+        async () =>
+          await runner.emit({
+            type: "after_provider_response",
+            status: response.status,
+            headers: response.headers,
+          }),
+      );
     },
     sessionId: sessionManager.getSessionId(),
     transformContext: async (messages) => {
@@ -428,6 +433,7 @@ export async function createAgentSession(
     disableBuiltInTools,
     extensionRunnerRef,
     sessionStartEvent: options.sessionStartEvent,
+    withSessionWriteLock: options.withSessionWriteLock,
   });
   const extensionsResult = resourceLoader.getExtensions();
 
