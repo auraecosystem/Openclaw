@@ -1,4 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { markGatewayShuttingDown, resetGatewayShuttingDownForTest } from "./server-close.js";
+import { resetGatewayHealthzShuttingDownLogForTest } from "./server-http.js";
 import {
   AUTH_TOKEN,
   AUTH_NONE,
@@ -22,6 +24,11 @@ async function sendGatewayRequest(
   await dispatchRequest(server, req, res);
   return { res, getBody };
 }
+
+afterEach(() => {
+  resetGatewayShuttingDownForTest();
+  resetGatewayHealthzShuttingDownLogForTest();
+});
 
 describe("gateway OpenAI-compatible disabled HTTP routes", () => {
   it("returns 404 when compat endpoints are disabled", async () => {
@@ -332,6 +339,70 @@ describe("gateway probe endpoints", () => {
           path: "/readyz",
           method: "HEAD",
         });
+
+        expect(res.statusCode).toBe(503);
+        expect(getBody()).toBe("");
+      },
+    });
+  });
+
+  it("returns 503 on /healthz when the gateway is shutting down", async () => {
+    await withGatewayServer({
+      prefix: "probe-healthz-shutting-down",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getShuttingDown: () => true },
+      run: async (server) => {
+        const req = createRequest({ path: "/healthz" });
+        const { res, getBody } = createResponse();
+        await dispatchRequest(server, req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(JSON.parse(getBody())).toEqual({ live: false, phase: "shutting_down" });
+      },
+    });
+  });
+
+  it("returns 503 on /health when the gateway is shutting down", async () => {
+    await withGatewayServer({
+      prefix: "probe-health-shutting-down",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getShuttingDown: () => true },
+      run: async (server) => {
+        const req = createRequest({ path: "/health" });
+        const { res, getBody } = createResponse();
+        await dispatchRequest(server, req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(JSON.parse(getBody())).toEqual({ live: false, phase: "shutting_down" });
+      },
+    });
+  });
+
+  it("respects the module-level shutting-down flag without an injected getter", async () => {
+    await withGatewayServer({
+      prefix: "probe-healthz-module-flag",
+      resolvedAuth: AUTH_NONE,
+      run: async (server) => {
+        markGatewayShuttingDown();
+        const req = createRequest({ path: "/healthz" });
+        const { res, getBody } = createResponse();
+        await dispatchRequest(server, req, res);
+
+        expect(res.statusCode).toBe(503);
+        expect(JSON.parse(getBody())).toEqual({ live: false, phase: "shutting_down" });
+      },
+    });
+  });
+
+  it("returns shutting-down HEAD /healthz without a body but with 503", async () => {
+    await withGatewayServer({
+      prefix: "probe-healthz-head-shutting-down",
+      resolvedAuth: AUTH_NONE,
+      overrides: { getShuttingDown: () => true },
+      run: async (server) => {
+        const req = createRequest({ path: "/healthz", method: "HEAD" });
+        const { res, getBody } = createResponse();
+        await dispatchRequest(server, req, res);
 
         expect(res.statusCode).toBe(503);
         expect(getBody()).toBe("");
