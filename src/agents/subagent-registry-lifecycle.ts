@@ -112,6 +112,13 @@ function resolveExpiredExplicitRunDeadlineMs(params: {
   return deadlineMs !== undefined && params.nextEndedAt > deadlineMs ? deadlineMs : undefined;
 }
 
+function doesNotRequireCompletionDelivery(entry: SubagentRunRecord): boolean {
+  return (
+    entry.expectsCompletionMessage === false ||
+    (entry.completion?.required === false && entry.delivery?.status === "not_required")
+  );
+}
+
 export function createSubagentRegistryLifecycleController(params: {
   runs: Map<string, SubagentRunRecord>;
   resumedRuns: Set<string>;
@@ -802,7 +809,7 @@ export function createSubagentRegistryLifecycleController(params: {
     if (!entry) {
       return;
     }
-    if (entry.expectsCompletionMessage === false) {
+    if (doesNotRequireCompletionDelivery(entry)) {
       clearPendingFinalDelivery(entry);
       entry.wakeOnDescendantSettle = undefined;
       const shouldDeleteAttachments = cleanup === "delete" || !entry.retainAttachmentsOnKeep;
@@ -979,7 +986,7 @@ export function createSubagentRegistryLifecycleController(params: {
     if (!beginSubagentCleanup(runId)) {
       return false;
     }
-    if (entry.expectsCompletionMessage === false) {
+    if (doesNotRequireCompletionDelivery(entry)) {
       void (async () => {
         if (entry.cleanup === "delete") {
           await deleteSubagentSessionForCleanup({
@@ -1208,6 +1215,21 @@ export function createSubagentRegistryLifecycleController(params: {
       outcome,
     });
 
+    const suppressedForSteerRestart = params.suppressAnnounceForSteerRestart(entry);
+    if (
+      completeParams.triggerCleanup &&
+      !suppressedForSteerRestart &&
+      doesNotRequireCompletionDelivery(entry) &&
+      typeof entry.cleanupCompletedAt !== "number"
+    ) {
+      completeCleanupBookkeeping({
+        runId: completeParams.runId,
+        entry,
+        cleanup: entry.cleanup,
+        completedAt: Date.now(),
+      });
+    }
+
     try {
       await persistSubagentSessionTiming(entry);
     } catch (err) {
@@ -1218,7 +1240,6 @@ export function createSubagentRegistryLifecycleController(params: {
       });
     }
 
-    const suppressedForSteerRestart = params.suppressAnnounceForSteerRestart(entry);
     if (mutated && !suppressedForSteerRestart) {
       emitSessionLifecycleEvent({
         sessionKey: entry.childSessionKey,
@@ -1248,6 +1269,10 @@ export function createSubagentRegistryLifecycleController(params: {
     }
 
     if (!completeParams.triggerCleanup || suppressedForSteerRestart) {
+      return;
+    }
+
+    if (doesNotRequireCompletionDelivery(entry)) {
       return;
     }
 
