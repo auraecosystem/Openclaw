@@ -17,6 +17,7 @@ import { shouldIncludeHeartbeatGuidanceForSystemPrompt } from "./heartbeat-syste
 import {
   DEFAULT_HEARTBEAT_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
+  type BootstrapTier,
   filterBootstrapFilesForSession,
   isWorkspaceSetupCompleted,
   isWorkspaceBootstrapPending,
@@ -286,6 +287,7 @@ export async function resolveBootstrapFilesForRun(params: {
 }): Promise<WorkspaceBootstrapFile[]> {
   const excludeHeartbeatBootstrapFile = shouldExcludeHeartbeatBootstrapFile(params);
   const sessionKey = params.sessionKey ?? params.sessionId;
+  const tierOverride = params.config?.agents?.defaults?.bootstrapTier as BootstrapTier | undefined;
   const workspaceSetupCompleted = await isWorkspaceSetupCompletedForContext(params.workspaceDir);
   const rawFiles = params.sessionKey
     ? await getOrLoadBootstrapFiles({
@@ -295,7 +297,7 @@ export async function resolveBootstrapFilesForRun(params: {
     : await loadWorkspaceBootstrapFiles(params.workspaceDir);
   const bootstrapFiles = applyContextModeFilter({
     files: filterCompletedWorkspaceBootstrapFile(
-      filterBootstrapFilesForSession(rawFiles, sessionKey),
+      filterBootstrapFilesForSession(rawFiles, sessionKey, tierOverride),
       workspaceSetupCompleted,
       params.workspaceDir,
     ),
