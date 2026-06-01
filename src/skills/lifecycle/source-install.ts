@@ -199,6 +199,7 @@ async function installLocalSkillDir(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
+  allowSetupHooks?: boolean;
   logger?: Logger;
   git?: SkillSourceOrigin["git"];
 }): Promise<SkillSourceInstallResult> {
@@ -214,6 +215,7 @@ async function installLocalSkillDir(params: {
     mode: params.force ? "update" : "install",
     timeoutMs: params.timeoutMs,
     logger: params.logger,
+    allowSetupHooks: params.allowSetupHooks,
     scan: {
       installId: params.source,
       origin: params.sourceSpec,
@@ -249,6 +251,7 @@ async function installGitSkill(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {
   const parsed = parseGitPluginSpec(params.spec);
@@ -328,6 +331,7 @@ async function installGitSkill(params: {
       slug: params.slug,
       force: params.force,
       timeoutMs: params.timeoutMs,
+      allowSetupHooks: params.allowSetupHooks,
       logger: params.logger,
       git,
     });
@@ -340,6 +344,7 @@ async function installPathSkill(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {
   const sourceDir = resolveUserPath(params.spec);
@@ -361,6 +366,7 @@ async function installPathSkill(params: {
     slug: params.slug,
     force: params.force,
     timeoutMs: params.timeoutMs,
+    allowSetupHooks: params.allowSetupHooks,
     logger: params.logger,
   });
 }
@@ -382,6 +388,7 @@ export async function installSkillFromSource(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {
   const spec = params.spec.trim();

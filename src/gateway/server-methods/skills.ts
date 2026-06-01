@@ -427,12 +427,14 @@ export const skillsHandlers: GatewayRequestHandlers = {
         slug: string;
         version?: string;
         force?: boolean;
+        allowSetupHooks?: boolean;
       };
       const result = await installSkillFromClawHub({
         workspaceDir: workspaceDirRaw,
         slug: p.slug,
         version: p.version,
         force: Boolean(p.force),
+        allowSetupHooks: p.allowSetupHooks === true,
       });
       respond(
         result.ok,
@@ -460,6 +462,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
         force?: boolean;
         sha256?: string;
         timeoutMs?: number;
+        allowSetupHooks?: boolean;
       };
       const result = await installUploadedSkillArchive({
         uploadId: p.uploadId,
@@ -469,6 +472,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
         timeoutMs: p.timeoutMs,
         workspaceDir: workspaceDirRaw,
         config: context.getRuntimeConfig(),
+        allowSetupHooks: p.allowSetupHooks === true,
         log: context.logGateway,
       });
       const errorCode =
@@ -494,6 +498,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
       installId: string;
       dangerouslyForceUnsafeInstall?: boolean;
       timeoutMs?: number;
+      allowSetupHooks?: boolean;
     };
     const result = await installSkill({
       workspaceDir: workspaceDirRaw,
@@ -502,6 +507,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
       dangerouslyForceUnsafeInstall: p.dangerouslyForceUnsafeInstall,
       timeoutMs: p.timeoutMs,
       config: cfg,
+      allowSetupHooks: p.allowSetupHooks === true,
     });
     respond(
       result.ok,
@@ -518,6 +524,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
         source: "clawhub";
         slug?: string;
         all?: boolean;
+        allowSetupHooks?: boolean;
       };
       if (!p.slug && !p.all) {
         respond(
@@ -543,6 +550,7 @@ export const skillsHandlers: GatewayRequestHandlers = {
       const results = await updateSkillsFromClawHub({
         workspaceDir,
         slug: p.slug,
+        allowSetupHooks: p.allowSetupHooks === true,
       });
       const errors = results.filter((result) => !result.ok);
       respond(

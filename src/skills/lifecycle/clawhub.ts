@@ -129,6 +129,7 @@ type ClawHubInstallParams = {
   version?: string;
   baseUrl?: string;
   force?: boolean;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 };
 
@@ -790,7 +791,7 @@ async function performClawHubSkillInstall(
             logger: params.logger,
             scan: false,
             rootMarkers: CLAWHUB_SKILL_ARCHIVE_ROOT_MARKERS,
-            allowSetupHooks: true,
+            allowSetupHooks: params.allowSetupHooks,
           }),
       });
       if (!install.ok) {
@@ -892,6 +893,7 @@ export async function installSkillFromClawHub(params: {
   version?: string;
   baseUrl?: string;
   force?: boolean;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<InstallClawHubSkillResult> {
   return await installRequestedSkillFromClawHub(params);
@@ -901,6 +903,7 @@ export async function updateSkillsFromClawHub(params: {
   workspaceDir: string;
   slug?: string;
   baseUrl?: string;
+  allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<UpdateClawHubSkillResult[]> {
   const lock = await readClawHubSkillsLockfile(params.workspaceDir);
@@ -933,6 +936,7 @@ export async function updateSkillsFromClawHub(params: {
       slug: tracked.slug,
       baseUrl: tracked.baseUrl,
       force: true,
+      allowSetupHooks: params.allowSetupHooks,
       logger: params.logger,
     });
     if (!install.ok) {
