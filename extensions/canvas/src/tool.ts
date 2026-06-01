@@ -11,18 +11,15 @@ import {
   jsonResult,
   readStringParam,
 } from "openclaw/plugin-sdk/channel-actions";
+import { readFiniteNumberParam, readPositiveIntegerParam } from "openclaw/plugin-sdk/param-readers";
 import type { AnyAgentTool, OpenClawConfig } from "openclaw/plugin-sdk/plugin-entry";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
+import { normalizeCanvasSnapshotFileExtension, parseCanvasSnapshotPayload } from "./cli-helpers.js";
 import { CanvasToolSchema } from "./tool-schema.js";
 
 type CanvasToolOptions = {
   config?: OpenClawConfig;
   workspaceDir?: string;
-};
-
-type CanvasSnapshotPayload = {
-  format: string;
-  base64: string;
 };
 
 type CanvasImageSanitizationLimits = {
@@ -33,7 +30,7 @@ function readGatewayCallOptions(params: Record<string, unknown>) {
   return {
     gatewayUrl: readStringParam(params, "gatewayUrl", { trim: false }),
     gatewayToken: readStringParam(params, "gatewayToken", { trim: false }),
-    timeoutMs: typeof params.timeoutMs === "number" ? params.timeoutMs : undefined,
+    timeoutMs: readPositiveIntegerParam(params, "timeoutMs"),
   };
 }
 
@@ -45,23 +42,10 @@ async function resolveNodeId(
   return resolveNodeIdFromList(await listNodes(opts), query, allowDefault);
 }
 
-function parseCanvasSnapshotPayload(value: unknown): CanvasSnapshotPayload {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("invalid canvas.snapshot payload");
-  }
-  const record = value as Record<string, unknown>;
-  const format = typeof record.format === "string" ? record.format : "";
-  const base64 = typeof record.base64 === "string" ? record.base64 : "";
-  if (!format || !base64) {
-    throw new Error("invalid canvas.snapshot payload");
-  }
-  return { format, base64 };
-}
-
 async function writeBase64ToTempFile(params: { base64: string; ext: string }): Promise<string> {
   const dir = resolvePreferredOpenClawTmpDir();
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  const ext = params.ext.startsWith(".") ? params.ext : `.${params.ext}`;
+  const ext = `.${normalizeCanvasSnapshotFileExtension(params.ext)}`;
   const filePath = path.join(dir, `openclaw-canvas-snapshot-${randomUUID()}${ext}`);
   await fs.writeFile(filePath, Buffer.from(params.base64, "base64"));
   return filePath;
@@ -70,7 +54,7 @@ async function writeBase64ToTempFile(params: { base64: string; ext: string }): P
 function isPathInsideRoot(root: string, candidate: string): boolean {
   const relative = path.relative(root, candidate);
   return (
-    relative === "" || (!!relative && !relative.startsWith("..") && !path.isAbsolute(relative))
+    relative === "" || (relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative))
   );
 }
 
@@ -131,10 +115,10 @@ export function createCanvasTool(options?: CanvasToolOptions): AnyAgentTool {
       switch (action) {
         case "present": {
           const placement = {
-            x: typeof params.x === "number" ? params.x : undefined,
-            y: typeof params.y === "number" ? params.y : undefined,
-            width: typeof params.width === "number" ? params.width : undefined,
-            height: typeof params.height === "number" ? params.height : undefined,
+            x: readFiniteNumberParam(params, "x"),
+            y: readFiniteNumberParam(params, "y"),
+            width: readFiniteNumberParam(params, "width"),
+            height: readFiniteNumberParam(params, "height"),
           };
           const invokeParams: Record<string, unknown> = {};
           const presentTarget =
@@ -186,14 +170,11 @@ export function createCanvasTool(options?: CanvasToolOptions): AnyAgentTool {
               ? params.outputFormat.trim().toLowerCase()
               : "png";
           const format = formatRaw === "jpg" || formatRaw === "jpeg" ? "jpeg" : "png";
-          const maxWidth =
-            typeof params.maxWidth === "number" && Number.isFinite(params.maxWidth)
-              ? params.maxWidth
-              : undefined;
-          const quality =
-            typeof params.quality === "number" && Number.isFinite(params.quality)
-              ? params.quality
-              : undefined;
+          const maxWidth = readPositiveIntegerParam(params, "maxWidth");
+          const quality = readFiniteNumberParam(params, "quality", {
+            min: 0,
+            max: 1,
+          });
           const raw = (await invoke("canvas.snapshot", {
             format,
             maxWidth,
