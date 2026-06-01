@@ -1161,6 +1161,30 @@ describe("chat slash menu accessibility", () => {
   });
 });
 
+describe("chat composer IME composition", () => {
+  it("defers draft sync while IME composition is active", () => {
+    const onDraftChange = vi.fn();
+    const container = renderChatView({ onDraftChange });
+    const textarea = requireElement(
+      container,
+      ".agent-chat__composer-combobox > textarea",
+      "composer textarea",
+    ) as HTMLTextAreaElement;
+
+    textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+    textarea.value = "dangqian";
+    textarea.dispatchEvent(new InputEvent("input", { bubbles: true, isComposing: true }));
+
+    expect(onDraftChange).not.toHaveBeenCalled();
+
+    textarea.value = "当前";
+    textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true }));
+
+    expect(onDraftChange).toHaveBeenCalledTimes(1);
+    expect(onDraftChange).toHaveBeenLastCalledWith("当前");
+  });
+});
+
 describe("chat attachment picker", () => {
   it("converts pasted data image text into an attachment", () => {
     const onAttachmentsChange = vi.fn();
