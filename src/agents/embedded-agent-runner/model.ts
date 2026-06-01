@@ -31,8 +31,11 @@ import { listOpenAIAuthProfileProvidersForAgentRuntime } from "../openai-routing
 import { attachModelProviderLocalService } from "../provider-local-service.js";
 import {
   attachModelProviderRequestTransport,
+  mergeModelProviderRequestOverrides,
+  resolveAgentProviderRequest,
   resolveProviderRequestConfig,
   sanitizeConfiguredModelProviderRequest,
+  type ModelProviderRequestTransportOverrides,
 } from "../provider-request-config.js";
 import {
   AuthStorage as AgentAuthStorageClass,
@@ -572,10 +575,12 @@ function applyConfiguredProviderOverrides(params: {
   providerConfig?: InlineProviderConfig;
   modelId: string;
   cfg?: OpenClawConfig;
+  agentId?: string;
   runtimeHooks?: ProviderRuntimeHooks;
   preferDiscoveredModelMetadata?: boolean;
   preferDiscoveredTransport?: boolean;
   workspaceDir?: string;
+  jobProviderRequest?: ModelProviderRequestTransportOverrides;
 }): ProviderRuntimeModel {
   const { discoveredModel, providerConfig, modelId } = params;
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
@@ -584,7 +589,14 @@ function applyConfiguredProviderOverrides(params: {
     provider: params.provider,
     modelId,
   });
+  // Resolve agent/job-level overrides before the no-providerConfig path so
+  // agent-only headers still apply to discovered models without global config.
+  const agentRequest = resolveAgentProviderRequest(params.cfg, params.agentId, params.provider);
   if (!providerConfig) {
+    const mergedRequest = mergeModelProviderRequestOverrides(
+      agentRequest,
+      params.jobProviderRequest,
+    );
     const resolvedParams = mergeModelParams(
       readModelParams(discoveredModel.params),
       defaultModelParams,
@@ -606,6 +618,24 @@ function applyConfiguredProviderOverrides(params: {
       // Discovered models originate from models.json and may contain persistence markers.
       headers: requestConfig.headers,
     };
+    if (mergedRequest) {
+      const requestConfig = resolveProviderRequestConfig({
+        provider: params.provider,
+        api: normalizeResolvedTransportApi(discoveredModel.api) ?? "openai-responses",
+        baseUrl: discoveredModel.baseUrl,
+        discoveredHeaders: sanitizeModelHeaders(discoveredModel.headers, {
+          stripSecretRefMarkers: true,
+        }),
+        request: mergedRequest,
+        capability: "llm",
+        transport: "stream",
+      });
+      return attachModelProviderRequestTransport(
+        { ...base, headers: requestConfig.headers },
+        mergedRequest,
+      );
+    }
+    return base;
   }
   const configuredModel =
     findConfiguredProviderModel(providerConfig, params.provider, modelId) ??
@@ -623,6 +653,11 @@ function applyConfiguredProviderOverrides(params: {
     stripSecretRefMarkers: true,
   });
   const providerRequest = sanitizeConfiguredModelProviderRequest(providerConfig.request);
+  const mergedRequest = mergeModelProviderRequestOverrides(
+    providerRequest,
+    agentRequest,
+    params.jobProviderRequest,
+  );
   const configuredHeaders = sanitizeModelHeaders(configuredModel?.headers, {
     stripSecretRefMarkers: true,
   });
@@ -650,6 +685,7 @@ function applyConfiguredProviderOverrides(params: {
     !providerHeaders &&
     !providerRequest &&
     !providerParams &&
+    !mergedRequest &&
     !providerConfig.localService
   ) {
     const resolvedParams = mergeModelParams(
@@ -726,7 +762,7 @@ function applyConfiguredProviderOverrides(params: {
     providerHeaders,
     modelHeaders: configuredHeaders,
     authHeader: providerConfig.authHeader,
-    request: providerRequest,
+    request: mergedRequest,
     capability: "llm",
     transport: "stream",
   });
@@ -757,7 +793,7 @@ function applyConfiguredProviderOverrides(params: {
           metadataOverrideModel?.mediaInput,
         ),
       },
-      providerRequest,
+      mergedRequest,
     ),
     providerConfig.localService,
   );
@@ -767,11 +803,22 @@ function resolveExplicitModelWithRegistry(params: {
   modelId: string;
   modelRegistry: CoreModelRegistry;
   cfg?: OpenClawConfig;
+  agentId?: string;
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
+  jobProviderRequest?: ModelProviderRequestTransportOverrides;
 }): { kind: "resolved"; model: Model } | { kind: "suppressed" } | undefined {
-  const { provider, modelId, modelRegistry, cfg, agentDir, workspaceDir, runtimeHooks } = params;
+  const {
+    provider,
+    modelId,
+    modelRegistry,
+    cfg,
+    agentDir,
+    workspaceDir,
+    runtimeHooks,
+    jobProviderRequest,
+  } = params;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
   const inlineMatch = findInlineModelMatch({
@@ -850,8 +897,10 @@ function resolveExplicitModelWithRegistry(params: {
           providerConfig,
           modelId,
           cfg,
+          agentId,
           runtimeHooks,
           workspaceDir,
+          jobProviderRequest,
         }),
         runtimeHooks,
       }),
@@ -955,13 +1004,24 @@ function resolvePluginDynamicModelWithRegistry(params: {
   modelId: string;
   modelRegistry: CoreModelRegistry;
   cfg?: OpenClawConfig;
+  agentId?: string;
   agentDir?: string;
   workspaceDir?: string;
   authProfileId?: string;
   preferredProfile?: string;
   runtimeHooks?: ProviderRuntimeHooks;
+  jobProviderRequest?: ModelProviderRequestTransportOverrides;
 }): Model | undefined {
-  const { provider, modelId, modelRegistry, cfg, agentDir, workspaceDir } = params;
+  const {
+    provider,
+    modelId,
+    modelRegistry,
+    cfg,
+    agentId,
+    agentDir,
+    workspaceDir,
+    jobProviderRequest,
+  } = params;
   const runtimeHooks = params.runtimeHooks ?? DEFAULT_PROVIDER_RUNTIME_HOOKS;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const authProfile = resolveDynamicModelAuthProfile({
@@ -1003,9 +1063,11 @@ function resolvePluginDynamicModelWithRegistry(params: {
     providerConfig,
     modelId,
     cfg,
+    agentId,
     runtimeHooks,
     workspaceDir,
     preferDiscoveredModelMetadata,
+    jobProviderRequest,
   });
   return normalizeResolvedModel({
     provider,
@@ -1021,11 +1083,22 @@ function resolveConfiguredFallbackModel(params: {
   provider: string;
   modelId: string;
   cfg?: OpenClawConfig;
+  agentId?: string;
   agentDir?: string;
   workspaceDir?: string;
   runtimeHooks?: ProviderRuntimeHooks;
+  jobProviderRequest?: ModelProviderRequestTransportOverrides;
 }): Model | undefined {
-  const { provider, modelId, cfg, agentDir, workspaceDir, runtimeHooks } = params;
+  const {
+    provider,
+    modelId,
+    cfg,
+    agentId,
+    agentDir,
+    workspaceDir,
+    runtimeHooks,
+    jobProviderRequest,
+  } = params;
   const providerConfig = resolveConfiguredProviderConfig(cfg, provider);
   const requestTimeoutMs = resolveProviderRequestTimeoutMs(providerConfig?.timeoutSeconds);
   const configuredModel = findConfiguredProviderModel(providerConfig, provider, modelId);
@@ -1048,6 +1121,12 @@ function resolveConfiguredFallbackModel(params: {
     stripSecretRefMarkers: true,
   });
   const providerRequest = sanitizeConfiguredModelProviderRequest(providerConfig?.request);
+  const agentRequest = resolveAgentProviderRequest(cfg, agentId, provider);
+  const mergedRequest = mergeModelProviderRequestOverrides(
+    providerRequest,
+    agentRequest,
+    jobProviderRequest,
+  );
   const modelHeaders = sanitizeModelHeaders(metadataModel?.headers, {
     stripSecretRefMarkers: true,
   });
@@ -1083,7 +1162,7 @@ function resolveConfiguredFallbackModel(params: {
     providerHeaders,
     modelHeaders,
     authHeader: providerConfig?.authHeader,
-    request: providerRequest,
+    request: mergedRequest,
     capability: "llm",
     transport: "stream",
   });
@@ -1136,7 +1215,7 @@ function resolveConfiguredFallbackModel(params: {
           compat: fallbackCompat,
           mediaInput: fallbackMediaInput,
         } as Model,
-        providerRequest,
+        mergedRequest,
       ),
       providerConfig?.localService,
     ),
@@ -1270,12 +1349,14 @@ export function resolveModelWithRegistry(params: {
   modelId: string;
   modelRegistry: CoreModelRegistry;
   cfg?: OpenClawConfig;
+  agentId?: string;
   agentDir?: string;
   workspaceDir?: string;
   authProfileId?: string;
   preferredProfile?: string;
   runtimeHooks?: ProviderRuntimeHooks;
   skipConfiguredFallback?: boolean;
+  jobProviderRequest?: ModelProviderRequestTransportOverrides;
 }): Model | undefined {
   const workspaceDir = params.workspaceDir ?? params.cfg?.agents?.defaults?.workspace;
   const normalizedRef = normalizeProviderModelRef({ ...params, workspaceDir });
@@ -1389,6 +1470,7 @@ export async function resolveModelAsync(
   agentDir?: string,
   cfg?: OpenClawConfig,
   options?: {
+    agentId?: string;
     authStorage?: AuthStorage;
     modelRegistry?: ModelRegistry;
     allowBundledStaticCatalogFallback?: boolean;
@@ -1400,6 +1482,7 @@ export async function resolveModelAsync(
     workspaceDir?: string;
     authProfileId?: string;
     preferredProfile?: string;
+    jobProviderRequest?: ModelProviderRequestTransportOverrides;
   },
 ): Promise<{
   model?: Model;
@@ -1434,9 +1517,11 @@ export async function resolveModelAsync(
     modelId: normalizedRef.model,
     modelRegistry,
     cfg,
+    agentId: options?.agentId,
     agentDir: resolvedAgentDir,
     workspaceDir,
     runtimeHooks,
+    jobProviderRequest: options?.jobProviderRequest,
   });
   if (explicitModel?.kind === "suppressed") {
     return {
@@ -1523,12 +1608,14 @@ export async function resolveModelAsync(
       modelId: normalizedRef.model,
       modelRegistry,
       cfg,
+      agentId: options?.agentId,
       agentDir: resolvedAgentDir,
       workspaceDir,
       authProfileId: options?.authProfileId,
       preferredProfile: options?.preferredProfile,
       runtimeHooks,
       ...(options?.allowBundledStaticCatalogFallback ? { skipConfiguredFallback: true } : {}),
+      jobProviderRequest: options?.jobProviderRequest,
     });
   };
   const providerRuntimeMetadataShouldWin = shouldCompareProviderRuntimeResolvedModel({
@@ -1558,9 +1645,11 @@ export async function resolveModelAsync(
       provider: normalizedRef.provider,
       modelId: normalizedRef.model,
       cfg,
+      agentId: options?.agentId,
       agentDir: resolvedAgentDir,
       workspaceDir,
       runtimeHooks,
+      jobProviderRequest: options?.jobProviderRequest,
     });
   }
   if (model && options?.allowBundledStaticCatalogFallback) {
