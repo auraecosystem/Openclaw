@@ -26,6 +26,11 @@ const shouldSuppressFeishuTextForVoiceMediaMock = vi.hoisted(
     params.audioAsVoice === true || /\.(?:ogg|opus)(?:[?#]|$)/i.test(params.mediaUrl ?? ""),
 );
 
+const flushMicrotasks = async () => {
+  await Promise.resolve();
+  await Promise.resolve();
+};
+
 function mergeStreamingText(
   previousText: string | undefined,
   nextText: string | undefined,
@@ -389,6 +394,41 @@ describe("createFeishuReplyDispatcher streaming behavior", () => {
     expectMockArgFields(addTypingIndicatorMock, "typing indicator params", {
       messageId: "om_parent",
     });
+  });
+
+  it("waits for typing cleanup before reporting idle", async () => {
+    let releaseRemove: (() => void) | undefined;
+    removeTypingIndicatorMock.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseRemove = resolve;
+        }),
+    );
+
+    const { options } = createDispatcherHarness({
+      replyToMessageId: "om_parent",
+      messageCreateTimeMs: Date.now(),
+    });
+    await options.onReplyStart?.();
+
+    const idlePromise = options.onIdle?.();
+    await flushMicrotasks();
+
+    expect(removeTypingIndicatorMock).toHaveBeenCalledTimes(1);
+    let idleResolved = false;
+    void idlePromise?.then(() => {
+      idleResolved = true;
+    });
+    await flushMicrotasks();
+    expect(idleResolved).toBe(false);
+
+    if (!releaseRemove) {
+      throw new Error("Expected typing cleanup resolver to be initialized");
+    }
+    releaseRemove();
+    await idlePromise;
+
+    expect(idleResolved).toBe(true);
   });
 
   it("streams auto mode plain final text when streaming is enabled", async () => {

@@ -7,7 +7,7 @@ import { createTypingStartGuard } from "./typing-start-guard.js";
 
 export type TypingCallbacks = {
   onReplyStart: () => Promise<void>;
-  onIdle?: () => void;
+  onIdle?: () => Promise<void> | void;
   /** Called when the typing controller is cleaned up (e.g. on NO_REPLY). */
   onCleanup?: () => void;
 };
@@ -73,7 +73,7 @@ export function createTypingCallbacks(params: CreateTypingCallbacksParams): Typi
     ttlTimer = setTimeout(() => {
       if (!closed) {
         console.warn(`[typing] TTL exceeded (${maxDurationMs}ms), auto-stopping typing indicator`);
-        fireStop();
+        void stopOnce();
       }
     }, maxDurationMs);
     ttlTimer.unref?.();
@@ -105,7 +105,7 @@ export function createTypingCallbacks(params: CreateTypingCallbacksParams): Typi
     await Promise.resolve();
   };
 
-  const fireStop = () => {
+  const stopOnce = async (): Promise<void> => {
     closed = true;
     keepaliveLoop.stop();
     clearTtlTimer(); // Clear TTL timer on normal stop
@@ -113,8 +113,16 @@ export function createTypingCallbacks(params: CreateTypingCallbacksParams): Typi
       return;
     }
     stopSent = true;
-    void stop().catch((err) => (params.onStopError ?? params.onStartError)(err));
+    try {
+      await stop();
+    } catch (err) {
+      (params.onStopError ?? params.onStartError)(err);
+    }
   };
 
-  return { onReplyStart, onIdle: fireStop, onCleanup: fireStop };
+  const onCleanup = () => {
+    void stopOnce();
+  };
+
+  return { onReplyStart, onIdle: stopOnce, onCleanup };
 }

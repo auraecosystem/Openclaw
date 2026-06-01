@@ -137,11 +137,41 @@ describe("createTypingCallbacks", () => {
       stop: vi.fn().mockRejectedValue(new Error("stop")),
     });
 
-    callbacks.onIdle?.();
-    await flushMicrotasks();
+    await callbacks.onIdle?.();
 
     expect(stop).toHaveBeenCalledTimes(1);
     expect(onStopError).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for pending stop cleanup on idle", async () => {
+    let releaseStop: (() => void) | undefined;
+    const { stop, callbacks } = createTypingHarness({
+      stop: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            releaseStop = resolve;
+          }),
+      ),
+    });
+
+    const idlePromise = callbacks.onIdle?.();
+    await flushMicrotasks();
+
+    expect(stop).toHaveBeenCalledTimes(1);
+    let idleResolved = false;
+    void idlePromise?.then(() => {
+      idleResolved = true;
+    });
+    await flushMicrotasks();
+    expect(idleResolved).toBe(false);
+
+    if (!releaseStop) {
+      throw new Error("Expected typing stop resolver to be initialized");
+    }
+    releaseStop();
+    await idlePromise;
+
+    expect(idleResolved).toBe(true);
   });
 
   it("sends typing keepalive pings until idle cleanup", async () => {
