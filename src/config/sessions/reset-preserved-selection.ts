@@ -33,12 +33,12 @@ export function resolveResetPreservedSelection(params: {
   const preserved: Partial<ResetPreservedSelectionState> = {};
   const recoveredAutoFallbackOverride =
     entry.modelOverrideSource === undefined && hasSessionAutoModelFallbackProvenance(entry);
+  const hasModelOverride = Boolean(entry.modelOverride);
   const preserveLegacyUserModelOverride =
-    entry.modelOverrideSource === "user" ||
-    (entry.modelOverrideSource === undefined &&
-      Boolean(entry.modelOverride) &&
-      !recoveredAutoFallbackOverride);
-  if (preserveLegacyUserModelOverride && entry.modelOverride) {
+    hasModelOverride &&
+    (entry.modelOverrideSource === "user" ||
+      (entry.modelOverrideSource === undefined && !recoveredAutoFallbackOverride));
+  if (preserveLegacyUserModelOverride) {
     preserved.providerOverride = entry.providerOverride;
     preserved.modelOverride = entry.modelOverride;
     preserved.modelOverrideSource = "user";

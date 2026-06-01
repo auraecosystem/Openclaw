@@ -19,6 +19,8 @@ export type BuildStatusTextParams = {
   workspaceDir?: string;
   provider: string;
   model: string;
+  activeModelProvider?: string;
+  activeModel?: string;
   contextTokens?: number;
   resolvedThinkLevel?: ThinkLevel;
   resolvedFastMode?: boolean;
