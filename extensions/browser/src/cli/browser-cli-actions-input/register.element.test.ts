@@ -29,6 +29,12 @@ vi.spyOn(cliCoreApiModule.defaultRuntime, "exit").mockImplementation(browserCliR
 
 const { registerBrowserElementCommands } = await import("./register.element.js");
 
+type BrowserRequestTestCall = [
+  unknown,
+  { body?: { delayMs?: number; timeoutMs?: number } },
+  { timeoutMs?: number }?,
+];
+
 function createElementProgram(): Command {
   const { program, browser, parentOpts } = createBrowserProgram();
   registerBrowserElementCommands(browser, parentOpts);
@@ -75,8 +81,10 @@ describe("browser element commands", () => {
     await delayProgram.parseAsync(["browser", "click-coords", "10", "20", "--delay-ms", "+0005"], {
       from: "user",
     });
-    const delayCall = mocks.callBrowserRequest.mock.calls.at(-1) as unknown[] | undefined;
-    const delayRequest = delayCall?.[1] as { body?: { delayMs?: number } } | undefined;
+    const delayCall = mocks.callBrowserRequest.mock.calls.at(-1) as
+      | BrowserRequestTestCall
+      | undefined;
+    const delayRequest = delayCall?.[1];
     expect(delayRequest?.body?.delayMs).toBe(5);
 
     const timeoutProgram = createElementProgram();
@@ -84,9 +92,11 @@ describe("browser element commands", () => {
       ["browser", "scrollintoview", "ref-1", "--timeout-ms", "+020000"],
       { from: "user" },
     );
-    const timeoutCall = mocks.callBrowserRequest.mock.calls.at(-1) as unknown[] | undefined;
-    const timeoutRequest = timeoutCall?.[1] as { body?: { timeoutMs?: number } } | undefined;
-    const timeoutOptions = timeoutCall?.[2] as { timeoutMs?: number } | undefined;
+    const timeoutCall = mocks.callBrowserRequest.mock.calls.at(-1) as
+      | BrowserRequestTestCall
+      | undefined;
+    const timeoutRequest = timeoutCall?.[1];
+    const timeoutOptions = timeoutCall?.[2];
     expect(timeoutRequest?.body?.timeoutMs).toBe(20_000);
     expect(timeoutOptions?.timeoutMs).toBeGreaterThan(20_000);
   });
