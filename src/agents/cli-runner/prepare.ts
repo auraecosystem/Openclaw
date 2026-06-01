@@ -25,8 +25,9 @@ import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
 import { resolveUserPath } from "../../utils.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../agent-scope.js";
 import { externalCliDiscoveryForProviderAuth } from "../auth-profiles/external-cli-discovery.js";
+import { resolveApiKeyForProfile } from "../auth-profiles/oauth.js";
 import { loadAuthProfileStoreForRuntime } from "../auth-profiles/store.js";
-import type { AuthProfileCredential } from "../auth-profiles/types.js";
+import type { AuthProfileCredential, AuthProfileStore } from "../auth-profiles/types.js";
 import {
   buildBootstrapInjectionStats,
   buildBootstrapPromptWarning,
@@ -179,9 +180,36 @@ export async function prepareCliRunContext(
   const requestedAuthProfileId = params.authProfileId?.trim() || undefined;
   const effectiveAuthProfileId =
     requestedAuthProfileId ?? backendResolved.defaultAuthProfileId?.trim() ?? undefined;
+  let authStore: AuthProfileStore | undefined;
   let authCredential: AuthProfileCredential | undefined;
   if (effectiveAuthProfileId) {
-    const authStore = loadAuthProfileStoreForRuntime(agentDir, {
+    authStore = loadAuthProfileStoreForRuntime(agentDir, {
+      readOnly: true,
+      externalCli: externalCliDiscoveryForProviderAuth({
+        provider: params.provider,
+        profileId: effectiveAuthProfileId,
+      }),
+    });
+    authCredential = authStore.profiles[effectiveAuthProfileId];
+  }
+  if (
+    backendResolved.resolveAuthProfileForExecution === true &&
+    effectiveAuthProfileId &&
+    authCredential?.type === "oauth"
+  ) {
+    const writableAuthStore = loadAuthProfileStoreForRuntime(agentDir, {
+      externalCli: externalCliDiscoveryForProviderAuth({
+        provider: params.provider,
+        profileId: effectiveAuthProfileId,
+      }),
+    });
+    await resolveApiKeyForProfile({
+      cfg: params.config,
+      store: writableAuthStore,
+      profileId: effectiveAuthProfileId,
+      agentDir,
+    });
+    authStore = loadAuthProfileStoreForRuntime(agentDir, {
       readOnly: true,
       externalCli: externalCliDiscoveryForProviderAuth({
         provider: params.provider,
@@ -300,6 +328,7 @@ export async function prepareCliRunContext(
     provider: params.provider,
     modelId,
     authProfileId: effectiveAuthProfileId,
+    authCredential,
   });
   const skipLocalCredentialEpoch = shouldSkipLocalCliCredentialEpoch({
     authEpochMode: backendResolved.authEpochMode,
