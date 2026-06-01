@@ -10,7 +10,6 @@ import {
 import { isRecord } from "../utils.js";
 import {
   resolveAgentCredentialsForDiscovery,
-  scrubLegacyStaticAuthJsonEntriesForDiscovery,
   type DiscoverAuthStorageOptions,
 } from "./agent-auth-discovery.js";
 import { resolveModelPluginMetadataSnapshot } from "./model-discovery-context.js";
@@ -150,10 +149,6 @@ export function discoverAuthStorage(
 ): AgentAuthStorage {
   const credentials =
     options?.skipCredentials === true ? {} : resolveAgentCredentialsForDiscovery(agentDir, options);
-  const authPath = path.join(agentDir, "auth.json");
-  if (options?.readOnly !== true) {
-    scrubLegacyStaticAuthJsonEntriesForDiscovery(authPath);
-  }
   return AuthStorage.inMemory(credentials);
 }
 
@@ -173,6 +168,5 @@ export function discoverModels(
 export {
   addEnvBackedAgentCredentials,
   resolveAgentCredentialsForDiscovery,
-  scrubLegacyStaticAuthJsonEntriesForDiscovery,
   type DiscoverAuthStorageOptions,
 } from "./agent-auth-discovery.js";
