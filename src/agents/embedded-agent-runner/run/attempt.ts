@@ -5097,7 +5097,11 @@ export async function runEmbeddedAttempt(
           ? new EmbeddedAttemptSessionTakeoverError(params.sessionFile)
           : undefined;
       const cleanupFailure = cleanupError ?? synthesizedCleanupTakeoverError;
-      const userInitiatedAbort = Boolean(params.abortSignal?.aborted);
+      const userInitiatedAbort =
+        Boolean(params.abortSignal?.aborted) &&
+        !timedOut &&
+        !idleTimedOut &&
+        !timedOutDuringCompaction;
       const shouldSuppressTakeover = shouldSuppressTakeoverErrorOnUserAbort({
         cleanupError: cleanupFailure,
         userInitiatedAbort,
