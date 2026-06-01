@@ -207,9 +207,10 @@ async function deliverTextReply(params: {
           replyMarkup,
         },
       );
-      if (firstDeliveredMessageId == null) {
+      if (messageId != null && firstDeliveredMessageId == null) {
         firstDeliveredMessageId = messageId;
       }
+      return messageId;
     },
   });
   return firstDeliveredMessageId;
@@ -238,7 +239,7 @@ async function sendPendingFollowUpText(params: {
     replyMarkup: params.replyMarkup,
     markDelivered,
     sendChunk: async ({ chunk, replyToMessageId, replyMarkup }) => {
-      await sendTelegramText(params.bot, params.chatId, chunk.html, params.runtime, {
+      return await sendTelegramText(params.bot, params.chatId, chunk.html, params.runtime, {
         replyToMessageId,
         thread: params.thread,
         textMode: "html",
@@ -311,6 +312,12 @@ async function sendTelegramVoiceFallbackText(opts: {
       silent: opts.silent,
       replyMarkup: !appliedReplyTo ? opts.replyMarkup : undefined,
     });
+    // Skipped sends (sendTelegramText returns undefined for empty post-strip HTML
+    // such as bare <br> / &nbsp;) leave reply-target state untouched so the next
+    // real chunk still carries the reply reference, quote text, and buttons.
+    if (messageId == null) {
+      continue;
+    }
     if (firstDeliveredMessageId == null) {
       firstDeliveredMessageId = messageId;
     }
