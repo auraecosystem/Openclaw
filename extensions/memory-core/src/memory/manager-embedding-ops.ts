@@ -12,6 +12,7 @@ import {
   chunkMarkdown,
   hashText,
   remapChunkLines,
+  retryTransientMemoryRead,
   runWithConcurrency,
   type MemoryChunk,
   type MemorySource,
@@ -794,7 +795,13 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
       };
     }
 
-    const content = options.content ?? entry.content ?? (await fs.readFile(entry.absPath, "utf-8"));
+    const content =
+      options.content ??
+      entry.content ??
+      (await retryTransientMemoryRead(
+        () => fs.readFile(entry.absPath, "utf-8"),
+        `read memory markdown for indexing ${entry.absPath}`,
+      ));
     const baseChunks = filterNonEmptyMemoryChunks(chunkMarkdown(content, this.settings.chunking));
     const chunks = this.provider
       ? enforceEmbeddingMaxInputTokens(this.provider, baseChunks, EMBEDDING_BATCH_MAX_TOKENS)
