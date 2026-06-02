@@ -712,7 +712,7 @@ export async function runEmbeddedAgent(
             // first generating OpenClaw models.json. This keeps one-shot model runs from
             // blocking on unrelated provider discovery.
             skipAgentDiscovery: true,
-            allowBundledStaticCatalogFallback: pluginHarnessOwnsTransport,
+            allowBundledStaticCatalogFallback: true,
             preferBundledStaticCatalogTransport: pluginHarnessOwnsTransport,
             workspaceDir: resolvedWorkspace,
             authProfileId: params.authProfileId,
