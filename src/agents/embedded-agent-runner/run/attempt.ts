@@ -1146,9 +1146,10 @@ export async function runEmbeddedAttempt(
       sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
     });
     const shouldConstructTools =
-      toolConstructionPlan.constructTools ||
-      toolSearchControlsEnabledForRun ||
-      codeModeControlsEnabledForRun;
+      toolsEnabled &&
+      (toolConstructionPlan.constructTools ||
+        toolSearchControlsEnabledForRun ||
+        codeModeControlsEnabledForRun);
     let toolSearchCatalogExecutor: ToolSearchCatalogToolExecutor | undefined;
     toolSearchCatalogRef =
       toolSearchControlsEnabledForRun || codeModeControlsEnabledForRun
