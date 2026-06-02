@@ -418,7 +418,7 @@ export type SessionEntry = {
 
 export function isTerminalSessionStatus(
   status: unknown,
-): status is Exclude<NonNullable<SessionEntry["status"]>, "running"> {
+): status is Exclude<NonNullable<SessionEntry["status"]>, "running" | "paused"> {
   return status === "done" || status === "failed" || status === "killed" || status === "timeout";
 }
 
