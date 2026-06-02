@@ -1519,13 +1519,6 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           },
           undefined,
         );
-        emitSessionsChanged(context, {
-          sessionKey: resetResult.key,
-          ...(resetResult.key === "global" && parentSelectedAgentId
-            ? { agentId: parentSelectedAgentId }
-            : {}),
-          reason: "new",
-        });
         return;
       }
     }
