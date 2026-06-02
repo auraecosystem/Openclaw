@@ -22,6 +22,7 @@ import {
   collectMissingDefaultAccountBindingWarnings,
   collectMissingExplicitDefaultAccountWarnings,
 } from "./doctor/shared/default-account-warnings.js";
+import { collectPromptCacheConfigWarnings } from "./doctor/shared/prompt-cache-config-warnings.js";
 
 function hasLegacyInternalHookHandlers(raw: unknown): boolean {
   const handlers = (raw as { hooks?: { internal?: { handlers?: unknown } } })?.hooks?.internal
@@ -234,6 +235,10 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   const missingExplicitDefaultWarnings = collectMissingExplicitDefaultAccountWarnings(candidate);
   if (missingExplicitDefaultWarnings.length > 0) {
     note(missingExplicitDefaultWarnings.join("\n"), "Doctor warnings");
+  }
+  const promptCacheConfigWarnings = collectPromptCacheConfigWarnings(candidate);
+  if (promptCacheConfigWarnings.length > 0) {
+    note(sanitizeDoctorNote(promptCacheConfigWarnings.join("\n")), "Doctor warnings");
   }
 
   if (shouldRepair) {
