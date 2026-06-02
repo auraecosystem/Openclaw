@@ -827,6 +827,34 @@ describe("clearProviderAuthProfileCooldowns", () => {
     expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:plugin-refresh"]);
   });
 
+  it("keeps provider-wide cleanup alias-aware when filtering explicit lock ids", async () => {
+    const localStore = makeStore({});
+    const freshStore = makeStore({
+      "moonshot:legacy": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 2,
+        failureCounts: { billing: 2 },
+      },
+    });
+    freshStore.profiles["moonshot:legacy"] = {
+      type: "api_key",
+      provider: "moonshotai",
+      key: "sk-moonshot-test",
+    };
+    storeMocks.updateAuthProfileStoreWithLock.mockImplementation(async ({ updater }) => {
+      expect(updater(freshStore)).toBe(true);
+      return freshStore;
+    });
+
+    await clearProviderAuthProfileCooldowns({
+      store: localStore,
+      provider: "moonshot",
+    });
+
+    expectProfileErrorStateCleared(localStore.usageStats?.["moonshot:legacy"]);
+  });
+
   it("falls back to the provided store when the lock update is unavailable", async () => {
     const store = makeStore({
       "anthropic:default": {

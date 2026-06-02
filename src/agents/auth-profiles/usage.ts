@@ -8,6 +8,7 @@ import {
 } from "@openclaw/normalization-core/number-coercion";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { resolveProviderIdForAuth } from "../provider-auth-aliases.js";
 import { resolveProviderRequestHeaders } from "../provider-request-config.js";
 import { listProfilesForProvider } from "./profile-list.js";
 import { logAuthProfileFailureStateChange } from "./state-observation.js";
@@ -581,7 +582,7 @@ function clearProviderCooldownEntries(
           const profileProvider = store.profiles[profileId]?.provider;
           return (
             profileProvider === undefined ||
-            normalizeProviderId(profileProvider) === normalizeProviderId(provider)
+            resolveProviderIdForAuth(profileProvider) === resolveProviderIdForAuth(provider)
           );
         });
   let changed = false;
