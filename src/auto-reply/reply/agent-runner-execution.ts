@@ -67,6 +67,7 @@ import { isDiagnosticsEnabled } from "../../infra/diagnostic-events.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { logSessionTurnCreated } from "../../logging/diagnostic.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { CommandLaneClearedError, GatewayDrainingError } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -1994,6 +1995,7 @@ export async function runAgentTurnWithFallback(params: {
               step,
             });
           },
+          exposeNextCandidateToRun: true,
           classifyResult: async ({ result, provider, model }) => {
             const classification = outcomePlan.classifyRunResult({
               result,
@@ -2286,6 +2288,7 @@ export async function runAgentTurnWithFallback(params: {
                     provider: embeddedRunProvider,
                     agentHarnessId: embeddedRunHarnessOverride,
                     agentHarnessRuntimeOverride: embeddedRunHarnessOverride,
+                    nextModelFallbackCandidate: runOptions?.nextCandidate,
                     sandboxSessionKey: params.runtimePolicySessionKey,
                     prompt: params.commandBody,
                     transcriptPrompt: params.transcriptCommandBody,
@@ -2873,11 +2876,21 @@ export async function runAgentTurnWithFallback(params: {
       }
 
       defaultRuntime.error(`Embedded agent failed before reply: ${message}`);
+
+      const isFallbackSummary = isFallbackSummaryError(err);
+      const terminalKind = isFallbackSummary ? "all_models_failed" : "run_failed_before_reply";
+      const terminalAttempts = isFallbackSummary
+        ? err.attempts.map((a) => ({
+            provider: a.provider,
+            model: a.model,
+            reason: a.reason ?? null,
+          }))
+        : undefined;
+
       // Only classify as rate-limit when we have concrete evidence from the
       // underlying error. FallbackSummaryError messages embed per-attempt
       // reason labels like `(rate_limit)`, so string-matching the summary text
       // would misclassify mixed-cause exhaustion as a pure transient cooldown.
-      const isFallbackSummary = isFallbackSummaryError(err);
       const isPureTransientSummary = isFallbackSummary
         ? isPureTransientRateLimitSummary(err)
         : false;
@@ -2927,6 +2940,29 @@ export async function runAgentTurnWithFallback(params: {
         suppressInNonDirect: Boolean(isRateLimit || rateLimitOrOverloadedCopy),
         cfg: params.followupRun.run.config,
       });
+
+      // Emit model_failure_terminal after resolving the actual delivered failure copy
+      // so plugins do not receive raw fallback summaries as user-facing text.
+      const terminalHookRunner = getGlobalHookRunner();
+      if (terminalHookRunner?.hasHooks("model_failure_terminal")) {
+        void terminalHookRunner.runModelFailureTerminal(
+          {
+            runId,
+            agentId: params.followupRun.run.agentId,
+            sessionId: params.followupRun.run.sessionId,
+            sessionKey: params.sessionKey,
+            finalMessage: userVisibleFallbackText,
+            kind: terminalKind,
+            attempts: terminalAttempts,
+          },
+          {
+            runId,
+            agentId: params.followupRun.run.agentId,
+            sessionId: params.followupRun.run.sessionId,
+            sessionKey: params.sessionKey,
+          },
+        );
+      }
 
       params.replyOperation?.fail("run_failed", err);
       return {

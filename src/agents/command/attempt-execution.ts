@@ -428,6 +428,7 @@ export function runAgentAttempt(params: {
   metadataSnapshot?: PluginMetadataSnapshot;
   allowTransientCooldownProbe?: boolean;
   modelFallbacksOverride?: string[];
+  nextModelFallbackCandidate?: { provider: string; model: string };
   sessionHasHistory?: boolean;
   suppressPromptPersistenceOnRetry?: boolean;
   onUserMessagePersisted?: (message: Extract<AgentMessage, { role: "user" }>) => void;
@@ -678,6 +679,7 @@ export function runAgentAttempt(params: {
     provider: embeddedAgentProvider,
     model: params.modelOverride,
     modelFallbacksOverride: params.modelFallbacksOverride,
+    nextModelFallbackCandidate: params.nextModelFallbackCandidate,
     authProfileId,
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     thinkLevel: params.resolvedThinkLevel,
