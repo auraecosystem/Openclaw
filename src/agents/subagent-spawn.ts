@@ -240,9 +240,20 @@ async function callSubagentGateway(
   // Only admin-only methods are pinned to ADMIN_SCOPE; other methods (e.g.
   // "agent" -> write) keep their least-privilege scope.
   const scopes = params.scopes ?? (isAdminOnlyMethod(params.method) ? [ADMIN_SCOPE] : undefined);
+  const cfg = subagentSpawnDeps.loadConfig();
+  const configuredMs = cfg.agents?.defaults?.subagents?.gatewayTimeoutMs;
+  const floorMs =
+    typeof configuredMs === "number" && configuredMs > 0
+      ? configuredMs
+      : params.method === "agent"
+        ? 30_000
+        : 20_000;
+  const effectiveTimeoutMs = Math.max(params.timeoutMs ?? 0, floorMs);
+
   return await subagentSpawnDeps.callGateway({
     ...params,
     ...(scopes != null ? { scopes } : {}),
+    timeoutMs: effectiveTimeoutMs,
   });
 }
 
