@@ -5,6 +5,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { OpenClawConfig } from "../config/config.js";
 import { createDiagnosticLogRecordCapture } from "../logging/test-helpers/diagnostic-log-capture.js";
 import type { AuthProfileStore } from "./auth-profiles.js";
+import { clearAgentHarnesses, registerAgentHarness } from "./harness/registry.js";
+import type { AgentHarness } from "./harness/types.js";
 import { makeModelFallbackCfg } from "./test-helpers/model-fallback-config-fixture.js";
 
 // Mock auth-profile submodules — must be before importing model-fallback
@@ -340,6 +342,7 @@ describe("runWithModelFallback – probe logic", () => {
     cleanupLogCapture = undefined;
     setLoggerOverride(null);
     resetLogger();
+    clearAgentHarnesses();
     vi.restoreAllMocks();
   });
 
@@ -415,6 +418,45 @@ describe("runWithModelFallback – probe logic", () => {
     const result = await runPrimaryCandidate(cfg, run);
 
     expectPrimaryProbeSuccess(result, run, "recovered");
+  });
+
+  it("treats harness-backed fallbacks as available despite provider cooldown state", async () => {
+    const cfg = makeCfg({
+      agents: {
+        defaults: {
+          model: {
+            primary: "openai/gpt-4.1-mini",
+            fallbacks: ["anthropic/claude-haiku-3-5"],
+          },
+          models: {
+            "anthropic/*": { agentRuntime: { id: "claude-tmux" } },
+          },
+        },
+      },
+    } as Partial<OpenClawConfig>);
+    registerAgentHarness(
+      {
+        id: "claude-tmux",
+        label: "Claude tmux",
+        supports: ({ provider }) =>
+          provider === "anthropic" ? { supported: true } : { supported: false },
+        runAttempt: vi.fn<AgentHarness["runAttempt"]>(async () => {
+          throw new Error("probe test should not invoke the harness runtime");
+        }),
+      },
+      { ownerPluginId: "claude-tmux-test" },
+    );
+    mockedIsProfileInCooldown.mockReturnValue(true);
+    mockedGetSoonestCooldownExpiry.mockReturnValue(NOW + 30 * 60 * 1000);
+    mockedResolveProfilesUnavailableReason.mockReturnValue("billing");
+
+    const run = vi.fn().mockResolvedValue("fallback-ok");
+
+    const result = await runPrimaryCandidate(cfg, run);
+
+    expect(result.result).toBe("fallback-ok");
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledWith("anthropic", "claude-haiku-3-5");
   });
 
   it("decides when cooldowned primary probes are allowed", () => {

@@ -439,9 +439,9 @@ function isCliAgentRuntime(runtime: string | undefined, cfg: OpenClawConfig | un
   return isCliRuntimeAlias(normalized) || isCliProvider(normalized, cfg);
 }
 
-async function resolveModelFallbackCandidateHarnessAuthPrecheck(
+function resolveModelFallbackCandidateHarnessAuthCooldownPolicy(
   params: ModelFallbackRuntimeContext & ModelCandidate,
-): Promise<{ skipsProviderAuthCooldown: boolean }> {
+): { skipsProviderAuthCooldown: boolean; agentRuntime?: string } {
   if (!params.cfg) {
     return { skipsProviderAuthCooldown: false };
   }
@@ -477,6 +477,27 @@ async function resolveModelFallbackCandidateHarnessAuthPrecheck(
   if (agentRuntime === "auto" || (agentRuntime === "codex" && agentRuntimeSource === "implicit")) {
     return { skipsProviderAuthCooldown: false };
   }
+  return {
+    skipsProviderAuthCooldown: agentRuntime !== "codex",
+    agentRuntime,
+  };
+}
+
+async function resolveModelFallbackCandidateHarnessAuthPrecheck(
+  params: ModelFallbackRuntimeContext & ModelCandidate,
+): Promise<{ skipsProviderAuthCooldown: boolean }> {
+  const policy = resolveModelFallbackCandidateHarnessAuthCooldownPolicy(params);
+  if (!policy.skipsProviderAuthCooldown) {
+    return { skipsProviderAuthCooldown: false };
+  }
+  const agentRuntime = policy.agentRuntime;
+  if (!agentRuntime) {
+    return { skipsProviderAuthCooldown: false };
+  }
+  const agentHarnessRuntimeOverride = params.resolveAgentHarnessRuntimeOverride?.(
+    params.provider,
+    params.model,
+  );
   await params.prepareAgentHarnessRuntime?.({
     provider: params.provider,
     model: params.model,
@@ -1097,11 +1118,24 @@ function hasLaterAvailableAuthFallbackCandidate(params: {
   cfg: OpenClawConfig | undefined;
   authRuntime: ModelFallbackAuthRuntime;
   authStore: AuthProfileStore;
+  agentId?: string;
+  sessionKey?: string;
+  resolveAgentHarnessRuntimeOverride?: (provider: string, model: string) => string | undefined;
 }): boolean {
   for (let i = params.currentIndex + 1; i < params.candidates.length; i += 1) {
     const candidate = params.candidates[i];
     if (!candidate) {
       continue;
+    }
+    const harnessAuth = resolveModelFallbackCandidateHarnessAuthCooldownPolicy({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+      resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
+      ...candidate,
+    });
+    if (harnessAuth.skipsProviderAuthCooldown) {
+      return true;
     }
     const profileIds = params.authRuntime.resolveAuthProfileOrder({
       cfg: params.cfg,
@@ -1397,6 +1431,9 @@ export async function runWithModelFallback<T>(
             cfg: params.cfg,
             authRuntime,
             authStore,
+            agentId: params.agentId,
+            sessionKey: params.sessionKey,
+            resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
           }),
           now,
           probeThrottleKey,
