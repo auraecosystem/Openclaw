@@ -18,6 +18,7 @@ import {
 import { CURRENT_MESSAGE_MARKER } from "openclaw/plugin-sdk/channel-mention-gating";
 import {
   createChannelMessageReplyPipeline,
+  createPreviewMessageReceipt,
   createOutboundPayloadPlan,
   deriveDurableFinalDeliveryRequirements,
   projectOutboundPayloadPlanForDelivery,
@@ -50,6 +51,7 @@ import { chunkMarkdownTextWithMode } from "openclaw/plugin-sdk/reply-chunking";
 import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
 import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
+import type { BlockReplyContext } from "openclaw/plugin-sdk/reply-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import {
   createSubsystemLogger,
@@ -940,15 +942,33 @@ export const dispatchTelegramMessage = async ({
   let streamToolProgressLines: Array<string | ChannelProgressDraftLine> = [];
   let lastAnswerPartialText = "";
   let activeAnswerDraftIsToolProgressOnly = false;
+  let activeAnswerBlockAssistantMessageIndex: number | undefined;
+  let lastAnswerBlockPayload: ReplyPayload | undefined;
+  let lastAnswerBlockText: string | undefined;
+  let lastAnswerBlockButtons: TelegramInlineButtons | undefined;
+  let materializeAnswerLaneBeforeRotation: (() => Promise<boolean>) | undefined;
+  type QueuedAnswerBlockRotation = {
+    assistantMessageIndex?: number;
+    text?: string;
+    shouldRotateBeforeDelivery: boolean;
+  };
+  const queuedAnswerBlockRotations: QueuedAnswerBlockRotation[] = [];
+  let queuedAnswerBlockAssistantMessageIndex: number | undefined;
+  let pendingAnswerBlockAssistantMessageIndex: number | undefined;
+  let rotateAnswerLaneWhenQueuedBlocksSettle = false;
   function resetAnswerToolProgressDraft() {
     activeAnswerDraftIsToolProgressOnly = false;
   }
   async function prepareAnswerLaneForToolProgress() {
+    if (answerLane.finalized) {
+      answerLane.stream?.forceNewMessage();
+      resetDraftLaneState(answerLane);
+    }
     if (activeAnswerDraftIsToolProgressOnly) {
       return;
     }
     if (answerLane.hasStreamedMessage) {
-      await rotateLaneForNewMessage(answerLane);
+      await rotateAnswerLaneForNewMessage();
     }
     activeAnswerDraftIsToolProgressOnly = true;
   }
@@ -989,7 +1009,7 @@ export const dispatchTelegramMessage = async ({
     if (!answerLane.stream) {
       return false;
     }
-    if (answerLane.finalized || finalAnswerDeliveryStarted || finalAnswerDelivered) {
+    if (finalAnswerDeliveryStarted || finalAnswerDelivered) {
       return false;
     }
     if (options?.toolName !== undefined && !isChannelProgressDraftWorkToolName(options.toolName)) {
@@ -1124,6 +1144,10 @@ export const dispatchTelegramMessage = async ({
     lane.finalized = false;
     if (lane === answerLane) {
       resetAnswerToolProgressDraft();
+      pendingAnswerBlockAssistantMessageIndex = undefined;
+      lastAnswerBlockPayload = undefined;
+      lastAnswerBlockText = undefined;
+      lastAnswerBlockButtons = undefined;
     }
   };
   const rotateLaneForNewMessage = async (lane: DraftLaneState) => {
@@ -1135,6 +1159,12 @@ export const dispatchTelegramMessage = async ({
     lane.stream?.forceNewMessage();
     resetDraftLaneState(lane);
   };
+  const rotateAnswerLaneForNewMessage = async () => {
+    if (materializeAnswerLaneBeforeRotation) {
+      await materializeAnswerLaneBeforeRotation();
+    }
+    await rotateLaneForNewMessage(answerLane);
+  };
   const rotateAnswerLaneAfterToolProgress = async () => {
     nativeToolProgressDraft?.stop();
     if (!activeAnswerDraftIsToolProgressOnly) {
@@ -1145,17 +1175,153 @@ export const dispatchTelegramMessage = async ({
     resetDraftLaneState(answerLane);
     streamToolProgressSuppressed = true;
     streamToolProgressLines = [];
+    rotateAnswerLaneWhenQueuedBlocksSettle = false;
     return true;
   };
-  const prepareAnswerLaneForText = async () => {
+  const rotateAnswerLaneAfterQueuedBlocksSettle = async () => {
+    if (!rotateAnswerLaneWhenQueuedBlocksSettle || queuedAnswerBlockRotations.length > 0) {
+      return false;
+    }
+    rotateAnswerLaneWhenQueuedBlocksSettle = false;
+    if (!answerLane.hasStreamedMessage || activeAnswerDraftIsToolProgressOnly) {
+      return false;
+    }
+    await rotateAnswerLaneForNewMessage();
+    return true;
+  };
+  const prepareAnswerLaneForText = async (): Promise<boolean> => {
     nativeToolProgressDraft?.stop();
     if (await rotateAnswerLaneAfterToolProgress()) {
-      return;
+      return true;
+    }
+    if (await rotateAnswerLaneAfterQueuedBlocksSettle()) {
+      return true;
     }
     if (!answerLane.finalized) {
+      return false;
+    }
+    answerLane.stream?.forceNewMessage();
+    resetDraftLaneState(answerLane);
+    rotateAnswerLaneWhenQueuedBlocksSettle = false;
+    return true;
+  };
+  const prepareQueuedAnswerBlock = async (
+    payload: ReplyPayload,
+    blockContext?: BlockReplyContext,
+  ) => {
+    const hasAnswerText = splitTextIntoLaneSegments(
+      { text: payload.text },
+      payload.isReasoning,
+    ).segments.some((segment) => segment.lane === "answer");
+    if (!hasAnswerText) {
       return;
     }
-    await rotateLaneForNewMessage(answerLane);
+    streamToolProgressSuppressed = false;
+    streamToolProgressLines = [];
+    const assistantMessageIndex = blockContext?.assistantMessageIndex;
+    if (assistantMessageIndex === undefined) {
+      queuedAnswerBlockRotations.push({
+        text: payload.text,
+        shouldRotateBeforeDelivery: false,
+      });
+      return;
+    }
+    const previousAssistantMessageIndex =
+      queuedAnswerBlockAssistantMessageIndex ??
+      activeAnswerBlockAssistantMessageIndex ??
+      pendingAnswerBlockAssistantMessageIndex;
+    const shouldRotateBeforeDelivery =
+      previousAssistantMessageIndex !== undefined &&
+      assistantMessageIndex !== previousAssistantMessageIndex;
+    queuedAnswerBlockRotations.push({
+      assistantMessageIndex,
+      text: payload.text,
+      shouldRotateBeforeDelivery,
+    });
+    queuedAnswerBlockAssistantMessageIndex = assistantMessageIndex;
+  };
+  const recomputeQueuedAnswerBlockRotations = () => {
+    let previousAssistantMessageIndex =
+      activeAnswerBlockAssistantMessageIndex ?? pendingAnswerBlockAssistantMessageIndex;
+    queuedAnswerBlockAssistantMessageIndex = undefined;
+    for (const entry of queuedAnswerBlockRotations) {
+      if (entry.assistantMessageIndex === undefined) {
+        continue;
+      }
+      entry.shouldRotateBeforeDelivery =
+        previousAssistantMessageIndex !== undefined &&
+        entry.assistantMessageIndex !== previousAssistantMessageIndex;
+      previousAssistantMessageIndex = entry.assistantMessageIndex;
+      queuedAnswerBlockAssistantMessageIndex = entry.assistantMessageIndex;
+    }
+  };
+  const queuedAnswerBlockRotationTextMatchesPayload = (
+    entry: QueuedAnswerBlockRotation,
+    payload: ReplyPayload,
+  ) => {
+    return entry.text !== undefined && payload.text !== undefined && entry.text === payload.text;
+  };
+  const queuedAnswerBlockRotationMatchesDelivery = (
+    entry: QueuedAnswerBlockRotation,
+    payload: ReplyPayload,
+    assistantMessageIndex?: number,
+  ) => {
+    if (assistantMessageIndex !== undefined && entry.assistantMessageIndex !== undefined) {
+      return assistantMessageIndex === entry.assistantMessageIndex;
+    }
+    return queuedAnswerBlockRotationTextMatchesPayload(entry, payload);
+  };
+  const takeQueuedAnswerBlockRotation = (
+    payload: ReplyPayload,
+    assistantMessageIndex?: number,
+  ): boolean => {
+    if (queuedAnswerBlockRotations.length === 0) {
+      return false;
+    }
+    const matchIndex = queuedAnswerBlockRotations.findIndex((entry) =>
+      queuedAnswerBlockRotationMatchesDelivery(entry, payload, assistantMessageIndex),
+    );
+    const consumeIndex = Math.max(matchIndex, 0);
+    const matchedEntries = queuedAnswerBlockRotations.splice(0, consumeIndex + 1);
+    const matchedEntry = matchedEntries.at(-1);
+    const shouldRotateBeforeDelivery = matchedEntry?.shouldRotateBeforeDelivery ?? false;
+    if (matchedEntry?.assistantMessageIndex !== undefined) {
+      activeAnswerBlockAssistantMessageIndex = matchedEntry.assistantMessageIndex;
+      pendingAnswerBlockAssistantMessageIndex = undefined;
+    }
+    recomputeQueuedAnswerBlockRotations();
+    return shouldRotateBeforeDelivery;
+  };
+  const dropQueuedAnswerBlockRotation = (
+    payload: ReplyPayload,
+    assistantMessageIndex?: number,
+  ) => {
+    let matchIndex = queuedAnswerBlockRotations.findIndex((entry) =>
+      queuedAnswerBlockRotationMatchesDelivery(entry, payload, assistantMessageIndex),
+    );
+    if (matchIndex < 0 && assistantMessageIndex === undefined) {
+      matchIndex = queuedAnswerBlockRotations.findIndex(
+        (entry) => entry.assistantMessageIndex === undefined,
+      );
+    }
+    if (matchIndex >= 0) {
+      const matchedEntry = queuedAnswerBlockRotations[matchIndex];
+      queuedAnswerBlockRotations.splice(matchIndex, 1);
+      if (
+        matchIndex === 0 &&
+        matchedEntry?.assistantMessageIndex !== undefined &&
+        rotateAnswerLaneWhenQueuedBlocksSettle &&
+        activeAnswerBlockAssistantMessageIndex === undefined &&
+        answerLane.hasStreamedMessage
+      ) {
+        pendingAnswerBlockAssistantMessageIndex = matchedEntry.assistantMessageIndex;
+      }
+      recomputeQueuedAnswerBlockRotations();
+    }
+  };
+  const getReplyDispatchAssistantMessageIndex = (info: object): number | undefined => {
+    const value = (info as { assistantMessageIndex?: unknown }).assistantMessageIndex;
+    return typeof value === "number" ? value : undefined;
   };
   const updateDraftFromPartial = (lane: DraftLaneState, update: DraftPartialTextUpdate) => {
     const laneStream = lane.stream;
@@ -1572,6 +1738,53 @@ export const dispatchTelegramMessage = async ({
         deliveryState.markDelivered();
       },
     });
+    materializeAnswerLaneBeforeRotation = async () => {
+      if (
+        !lastAnswerBlockPayload ||
+        !answerLane.stream ||
+        !answerLane.hasStreamedMessage ||
+        answerLane.finalized ||
+        activeAnswerDraftIsToolProgressOnly
+      ) {
+        return false;
+      }
+      const text = answerLane.lastPartialText || lastAnswerPartialText || lastAnswerBlockText;
+      if (!text?.trim()) {
+        return false;
+      }
+      const deliveredText = answerLane.stream.lastDeliveredText?.();
+      const messageId = answerLane.stream.messageId();
+      if (
+        !lastAnswerBlockButtons &&
+        deliveredText === text.trimEnd() &&
+        typeof messageId === "number"
+      ) {
+        await answerLane.stream.stop();
+        answerLane.finalized = true;
+        deliveryState.markDelivered();
+        await emitPreviewFinalizedHook({
+          kind: "preview-finalized",
+          delivery: {
+            content: text,
+            promptContextContent: deliveredText,
+            messageId,
+            receipt: createPreviewMessageReceipt({ id: messageId }),
+          },
+        });
+        return true;
+      }
+      const result = await deliverLaneText({
+        laneName: "answer",
+        text,
+        payload: lastAnswerBlockPayload,
+        infoKind: "block",
+        buttons: lastAnswerBlockButtons,
+        finalizePreview: true,
+        durable: false,
+      });
+      await emitPreviewFinalizedHook(result);
+      return result.kind !== "skipped";
+    };
     const deliverProgressModeFinalAnswer = async (
       payload: ReplyPayload,
       text: string,
@@ -1667,6 +1880,16 @@ export const dispatchTelegramMessage = async ({
                 dispatcherOptions: {
                   ...replyPipeline,
                   beforeDeliver: async (payload) => payload,
+                  onBeforeDeliverCancelled: (payload, info) => {
+                    if (info.kind === "block") {
+                      return enqueueDraftLaneEvent(async () => {
+                        dropQueuedAnswerBlockRotation(
+                          payload,
+                          getReplyDispatchAssistantMessageIndex(info),
+                        );
+                      });
+                    }
+                  },
                   deliver: async (payload, info) => {
                     if (isDispatchSuperseded()) {
                       return;
@@ -1725,7 +1948,9 @@ export const dispatchTelegramMessage = async ({
                       if (streamMode === "progress") {
                         return deliverProgressModeFinalAnswer(answerPayload, finalText);
                       }
-                      await rotateAnswerLaneAfterToolProgress();
+                      if (!(await rotateAnswerLaneAfterToolProgress())) {
+                        await rotateAnswerLaneAfterQueuedBlocksSettle();
+                      }
                       const result = await deliverLaneText({
                         laneName: "answer",
                         text: finalText,
@@ -1755,6 +1980,13 @@ export const dispatchTelegramMessage = async ({
                     };
 
                     let blockDelivered = false;
+                    const hasAnswerSegment = segments.some((segment) => segment.lane === "answer");
+                    if (info.kind === "block" && !hasAnswerSegment) {
+                      dropQueuedAnswerBlockRotation(
+                        effectivePayload,
+                        getReplyDispatchAssistantMessageIndex(info),
+                      );
+                    }
                     for (const segment of segments) {
                       if (
                         segment.lane === "answer" &&
@@ -1796,6 +2028,20 @@ export const dispatchTelegramMessage = async ({
                         }
                         await prepareAnswerLaneForToolProgress();
                       }
+                      if (segment.lane === "answer" && info.kind === "block") {
+                        const preparedAnswerLane = await prepareAnswerLaneForText();
+                        const shouldRotateQueuedBlock = takeQueuedAnswerBlockRotation(
+                          effectivePayload,
+                          getReplyDispatchAssistantMessageIndex(info),
+                        );
+                        if (shouldRotateQueuedBlock && !preparedAnswerLane) {
+                          await rotateAnswerLaneForNewMessage();
+                          rotateAnswerLaneWhenQueuedBlocksSettle = false;
+                        }
+                        resetAnswerToolProgressDraft();
+                        streamToolProgressSuppressed = false;
+                        streamToolProgressLines = [];
+                      }
                       const result =
                         segment.lane === "answer" && info.kind === "final"
                           ? await deliverFinalAnswerText(
@@ -1810,8 +2056,19 @@ export const dispatchTelegramMessage = async ({
                               infoKind: info.kind,
                               buttons: telegramButtons,
                             });
-                      if (info.kind === "final") {
+                      if (segment.lane === "answer" && result.kind === "preview-finalized") {
                         await emitPreviewFinalizedHook(result);
+                      }
+                      if (
+                        segment.lane === "answer" &&
+                        info.kind === "block" &&
+                        (result.kind === "preview-updated" ||
+                          result.kind === "preview-finalized" ||
+                          result.kind === "preview-retained")
+                      ) {
+                        lastAnswerBlockPayload = effectivePayload;
+                        lastAnswerBlockText = segment.update.text;
+                        lastAnswerBlockButtons = telegramButtons;
                       }
                       blockDelivered = blockDelivered || result.kind !== "skipped";
                       if (segment.lane === "reasoning") {
@@ -1883,6 +2140,14 @@ export const dispatchTelegramMessage = async ({
                     trackBlockMedia(delivered);
                   },
                   onSkip: (payload, info) => {
+                    if (info.kind === "block") {
+                      void enqueueDraftLaneEvent(async () => {
+                        dropQueuedAnswerBlockRotation(
+                          payload,
+                          getReplyDispatchAssistantMessageIndex(info),
+                        );
+                      });
+                    }
                     if (payload.isError === true) {
                       hadErrorReplyFailureOrSkip = true;
                     }
@@ -1947,6 +2212,12 @@ export const dispatchTelegramMessage = async ({
                             await ingestDraftLaneSegments(payload);
                           })
                       : undefined,
+                  onBlockReplyQueued: answerLane.stream
+                    ? (payload, blockContext) =>
+                        enqueueDraftLaneEvent(async () => {
+                          await prepareQueuedAnswerBlock(payload, blockContext);
+                        })
+                    : undefined,
                   onReasoningStream: reasoningLane.stream
                     ? (payload) =>
                         enqueueDraftLaneEvent(async () => {
@@ -1966,6 +2237,12 @@ export const dispatchTelegramMessage = async ({
                           streamToolProgressLines = [];
                           if (answerLane.finalized) {
                             await rotateLaneForNewMessage(answerLane);
+                            rotateAnswerLaneWhenQueuedBlocksSettle = false;
+                          } else if (
+                            answerLane.hasStreamedMessage &&
+                            !activeAnswerDraftIsToolProgressOnly
+                          ) {
+                            rotateAnswerLaneWhenQueuedBlocksSettle = true;
                           }
                         })
                     : undefined,
