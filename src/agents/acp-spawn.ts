@@ -18,6 +18,7 @@ import {
 import { isAcpEnabledByPolicy, resolveAcpAgentPolicyError } from "../acp/policy.js";
 import { readAcpSessionMeta } from "../acp/runtime/session-meta.js";
 import { DEFAULT_HEARTBEAT_EVERY } from "../auto-reply/heartbeat.js";
+import { resolveAcpProjectionSettings } from "../auto-reply/reply/acp-stream-settings.js";
 import { formatThinkingLevels } from "../auto-reply/thinking.js";
 import {
   resolveChannelDefaultBindingPlacement,
@@ -1551,6 +1552,7 @@ export async function spawnAcpDirect(
     ? resolveEventSessionRoutingPolicy({ cfg, sessionKey: parentSessionKey })
     : undefined;
   const assistantCommentary = cfg.acp?.stream?.assistantCommentary === true;
+  const acpProjectionSettings = resolveAcpProjectionSettings(cfg);
   if (effectiveStreamToParent && parentSessionKey) {
     // Register relay before dispatch so fast lifecycle failures are not missed.
     parentRelay = startAcpSpawnParentStreamRelay({
@@ -1565,6 +1567,7 @@ export async function spawnAcpDirect(
       deliveryContext: parentDeliveryCtx,
       emitStartNotice: false,
       assistantCommentary,
+      acpProjectionSettings,
     });
   }
   const gatewayAttachments = toGatewayImageAttachments(params.attachments);
@@ -1625,6 +1628,7 @@ export async function spawnAcpDirect(
         deliveryContext: parentDeliveryCtx,
         emitStartNotice: false,
         assistantCommentary,
+        acpProjectionSettings,
       });
     }
     parentRelay?.notifyStarted();

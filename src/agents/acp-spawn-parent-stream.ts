@@ -3,6 +3,11 @@ import path from "node:path";
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { readAcpSessionEntry } from "../acp/runtime/session-meta.js";
+import {
+  isAcpTagVisible,
+  resolveAcpProjectionSettings,
+  type AcpProjectionSettings,
+} from "../auto-reply/reply/acp-stream-settings.js";
 import { resolveSessionFilePath, resolveSessionFilePathOptions } from "../config/sessions/paths.js";
 import { onAgentEvent } from "../infra/agent-events.js";
 import {
@@ -23,16 +28,6 @@ const DEFAULT_NO_OUTPUT_POLL_MS = 15_000;
 const DEFAULT_MAX_RELAY_LIFETIME_MS = 6 * 60 * 60 * 1000;
 const STREAM_BUFFER_MAX_CHARS = 4_000;
 const STREAM_SNIPPET_MAX_CHARS = 220;
-const HIDDEN_ACP_STATUS_TAGS = new Set([
-  "agent_thought_chunk",
-  "available_commands_update",
-  "config_option_update",
-  "current_mode_update",
-  "session_info_update",
-  "tool_call",
-  "tool_call_update",
-  "usage_update",
-]);
 
 function compactWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -66,14 +61,12 @@ function shouldRelayAcpStatusProgress(params: {
   eventType: string | undefined;
   tag: string | undefined;
   text: string | undefined;
+  projectionSettings: AcpProjectionSettings;
 }): boolean {
   if (params.eventType !== "status" || !params.text) {
     return false;
   }
-  if (!params.tag) {
-    return true;
-  }
-  return !HIDDEN_ACP_STATUS_TAGS.has(params.tag);
+  return isAcpTagVisible(params.projectionSettings, params.tag);
 }
 
 function resolveAcpStreamLogPathFromSessionFile(sessionFile: string, sessionId: string): string {
@@ -139,6 +132,7 @@ export function startAcpSpawnParentStreamRelay(params: {
   maxRelayLifetimeMs?: number;
   emitStartNotice?: boolean;
   assistantCommentary?: boolean;
+  acpProjectionSettings?: AcpProjectionSettings;
 }): AcpSpawnParentRelayHandle {
   const runId = normalizeOptionalString(params.runId) ?? "";
   const parentSessionKey = normalizeOptionalString(params.parentSessionKey) ?? "";
@@ -232,6 +226,7 @@ export function startAcpSpawnParentStreamRelay(params: {
   };
   const shouldSurfaceUpdates = params.surfaceUpdates !== false;
   const shouldRelayAssistantCommentary = params.assistantCommentary === true;
+  const acpProjectionSettings = params.acpProjectionSettings ?? resolveAcpProjectionSettings({});
   const eventRouting = params.eventRouting ?? {
     mainKey: params.mainKey,
     sessionScope: params.sessionScope,
@@ -488,6 +483,7 @@ export function startAcpSpawnParentStreamRelay(params: {
             eventType,
             tag,
             text,
+            projectionSettings: acpProjectionSettings,
           })
         ) {
           appendVisibleProgress(`${text}\n\n`);
