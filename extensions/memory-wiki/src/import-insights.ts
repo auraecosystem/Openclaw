@@ -304,7 +304,9 @@ function compareItemsByUpdated(
 export async function listMemoryWikiImportInsights(
   config: ResolvedMemoryWikiConfig,
 ): Promise<MemoryWikiImportInsightsStatus> {
-  const pages = await readQueryableWikiPages(config.vault.path);
+  const pages = await readQueryableWikiPages(config.vault.path, {
+    pageGroups: config.pageGroups,
+  });
   const items = pages
     .flatMap((page) => {
       if (page.pageType !== "source") {

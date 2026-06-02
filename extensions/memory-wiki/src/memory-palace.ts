@@ -102,7 +102,9 @@ function comparePalaceItems(left: MemoryWikiPalaceItem, right: MemoryWikiPalaceI
 export async function listMemoryWikiPalace(
   config: ResolvedMemoryWikiConfig,
 ): Promise<MemoryWikiPalaceStatus> {
-  const pages = await readQueryableWikiPages(config.vault.path);
+  const pages = await readQueryableWikiPages(config.vault.path, {
+    pageGroups: config.pageGroups,
+  });
   const pageCounts = pages.reduce<MemoryWikiPalacePageCounts>((counts, page) => {
     counts[page.kind] += 1;
     return counts;

@@ -8,6 +8,7 @@ import { root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { compileMemoryWikiVault, type CompileMemoryWikiResult } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import {
   parseWikiMarkdown,
   renderWikiMarkdown,
@@ -199,7 +200,9 @@ async function resolveWritablePage(params: {
   config: ResolvedMemoryWikiConfig;
   lookup: string;
 }): Promise<QueryableWikiPage | null> {
-  const pages = await readQueryableWikiPages(params.config.vault.path);
+  const pages = await readQueryableWikiPages(params.config.vault.path, {
+    pageGroups: params.config.pageGroups,
+  });
   return resolveQueryableWikiPageByLookup(pages, params.lookup);
 }
 
@@ -208,16 +211,17 @@ async function applyCreateSynthesisMutation(params: {
   mutation: CreateSynthesisMemoryWikiMutation;
 }): Promise<{ changed: boolean; pagePath: string; pageId: string }> {
   const slug = slugifyWikiSegment(params.mutation.title);
-  const pagePath = path.join("syntheses", `${slug}.md`).replace(/\\/g, "/");
+  const synthesisDir = getDefaultDirForKind(params.config.pageGroups, "synthesis");
+  const relativePath = path.join(synthesisDir, `${slug}.md`).replace(/\\/g, "/");
   const root = await fsRoot(params.config.vault.path);
-  const existing = await root.readText(pagePath).catch(() => "");
+  const existing = await root.readText(relativePath).catch(() => "");
   const parsed = parseWikiMarkdown(existing);
   const pageId =
     (typeof parsed.frontmatter.id === "string" && parsed.frontmatter.id.trim()) ||
     `synthesis.${slug}`;
   const changed = await writeWikiPage({
     rootDir: params.config.vault.path,
-    relativePath: pagePath,
+    relativePath: relativePath,
     frontmatter: {
       ...parsed.frontmatter,
       pageType: "synthesis",
@@ -243,7 +247,7 @@ async function applyCreateSynthesisMutation(params: {
       generatedBody: params.mutation.body.trim(),
     }),
   });
-  return { changed, pagePath, pageId };
+  return { changed, pagePath: relativePath, pageId };
 }
 
 function buildUpdatedFrontmatter(params: {
