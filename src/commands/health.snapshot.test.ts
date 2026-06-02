@@ -9,6 +9,14 @@ import { MAX_TIMER_TIMEOUT_MS } from "../shared/number-coercion.js";
 import type { HealthSummary } from "./health.js";
 
 let testConfig: Record<string, unknown> = {};
+let testDiskSourceConfig: Record<string, unknown> | null = null;
+let testRuntimeSourceConfig: Record<string, unknown> | null = null;
+let testRuntimeConfigSnapshotMetadata: {
+  revision: number;
+  fingerprint: string;
+  sourceFingerprint: string | null;
+  updatedAtMs: number;
+} | null = null;
 let testStore: Record<string, { updatedAt?: number }> = {};
 let healthPluginsForTest: HealthTestPlugin[] = [];
 
@@ -22,6 +30,20 @@ let probeTelegramAccountForTestOverride:
   | undefined;
 
 type HealthTestPlugin = Pick<ChannelPlugin, "id" | "meta" | "capabilities" | "config" | "status">;
+
+function stableTestConfigStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableTestConfigStringify(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .toSorted()
+    .map((key) => `${JSON.stringify(key)}:${stableTestConfigStringify(record[key])}`)
+    .join(",")}}`;
+}
 
 type TelegramHealthAccount = {
   accountId: string;
@@ -53,6 +75,12 @@ async function loadFreshHealthModulesForTest() {
   vi.doMock("../config/config.js", () => ({
     getRuntimeConfig: () => testConfig,
     loadConfig: () => testConfig,
+    readSourceConfigBestEffort: async () =>
+      testDiskSourceConfig ?? testRuntimeSourceConfig ?? testConfig,
+    getRuntimeConfigSourceSnapshot: () => testRuntimeSourceConfig,
+    getRuntimeConfigSnapshotMetadata: () => testRuntimeConfigSnapshotMetadata,
+    hashRuntimeConfigValue: (config: Record<string, unknown>) =>
+      `test:${stableTestConfigStringify(config)}`,
   }));
   vi.doMock("../config/sessions.js", () => ({
     resolveStorePath: () => "/tmp/sessions.json",
@@ -460,6 +488,11 @@ describe("getHealthSnapshot", () => {
   });
 
   beforeEach(() => {
+    testConfig = {};
+    testDiskSourceConfig = null;
+    testRuntimeSourceConfig = null;
+    testRuntimeConfigSnapshotMetadata = null;
+    testStore = {};
     buildTelegramHealthSummaryForTest = buildTelegramHealthSummary;
     probeTelegramAccountForTestOverride = undefined;
     healthPluginsForTest = [createTelegramHealthPlugin()];
@@ -541,6 +574,40 @@ describe("getHealthSnapshot", () => {
         error: "failed to load plugin dependency: ENOSPC",
       },
     ]);
+  });
+
+  it("surfaces model/provider runtime config drift between live gateway and disk", async () => {
+    testConfig = {
+      session: { store: "/tmp/x" },
+      agents: { defaults: { model: "openai-codex/gpt-5.5" } },
+    };
+    testRuntimeSourceConfig = {
+      session: { store: "/tmp/x" },
+      agents: { defaults: { model: "openai-codex/gpt-5.5" } },
+    };
+    testDiskSourceConfig = {
+      session: { store: "/tmp/x" },
+      agents: { defaults: { model: "openai/gpt-5.5" } },
+    };
+    testRuntimeConfigSnapshotMetadata = {
+      revision: 7,
+      fingerprint: "runtime-fingerprint",
+      sourceFingerprint: "live-source-fingerprint",
+      updatedAtMs: 123,
+    };
+
+    const snap = await getHealthSnapshot({ timeoutMs: 10, probe: false });
+
+    expect(snap.runtimeConfig).toEqual({
+      state: "drift",
+      liveSourceFingerprint: "live-source-fingerprint",
+      diskSourceFingerprint: `test:${stableTestConfigStringify(testDiskSourceConfig)}`,
+      liveDefaultModel: "openai-codex/gpt-5.5",
+      diskDefaultModel: "openai/gpt-5.5",
+      driftPaths: ["agents.defaults.model"],
+      message:
+        "Live gateway runtime config differs from disk for model/provider/auth paths; restart is required or pending.",
+    });
   });
 
   it("skips telegram probe when not configured", async () => {

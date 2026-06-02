@@ -50,6 +50,16 @@ export type ContextEngineHealthSummary = {
 export type ModelPricingHealthSummary =
   import("../gateway/model-pricing-cache-state.js").GatewayModelPricingHealth;
 
+export type RuntimeConfigHealthSummary = {
+  state: "ok" | "drift" | "unknown";
+  liveSourceFingerprint?: string | null;
+  diskSourceFingerprint?: string | null;
+  liveDefaultModel?: string | null;
+  diskDefaultModel?: string | null;
+  driftPaths?: string[];
+  message?: string;
+};
+
 export type HealthSummary = {
   ok: true;
   ts: number;
@@ -58,6 +68,7 @@ export type HealthSummary = {
   plugins?: PluginHealthSummary;
   contextEngines?: ContextEngineHealthSummary;
   modelPricing?: ModelPricingHealthSummary;
+  runtimeConfig?: RuntimeConfigHealthSummary;
   channels: Record<string, ChannelHealthSummary>;
   channelOrder: string[];
   channelLabels: Record<string, string>;

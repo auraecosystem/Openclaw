@@ -14,6 +14,7 @@ import { buildChannelAccountSnapshotFromAccount } from "../channels/plugins/stat
 import type { ChannelPlugin } from "../channels/plugins/types.plugin.js";
 import type { ChannelAccountSnapshot } from "../channels/plugins/types.public.js";
 import { withProgress } from "../cli/progress.js";
+import type { RuntimeConfigSnapshotMetadata } from "../config/config.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { listContextEngineQuarantines } from "../context-engine/registry.js";
@@ -47,6 +48,7 @@ import type {
   HealthSummary,
   PluginHealthErrorSummary,
   PluginHealthSummary,
+  RuntimeConfigHealthSummary,
 } from "./health.types.js";
 import { logGatewayConnectionDetails } from "./status.gateway-connection.js";
 export { formatHealthChannelLines } from "./health-format.js";
@@ -157,6 +159,145 @@ export function formatModelPricingHealthLine(summary: HealthSummary): string | n
   }
   const detail = modelPricing.detail ? ` (${modelPricing.detail})` : "";
   return `Model pricing: warning (optional pricing refresh degraded)${detail}`;
+}
+
+const RUNTIME_CONFIG_DRIFT_PATHS = [
+  "agents.defaults.model",
+  "agents.defaults.models",
+  "agents.list",
+  "models",
+  "auth",
+  "secrets.providers",
+] as const;
+
+type RuntimeHealthConfigState = {
+  config: OpenClawConfig;
+  sourceConfig: OpenClawConfig | null;
+  metadata: RuntimeConfigSnapshotMetadata | null;
+  diskSourceConfig: OpenClawConfig | null;
+  diskReadError?: string;
+  hashConfigValue: (config: OpenClawConfig) => string;
+};
+
+function stableHealthValueStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value) ?? "null";
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((entry) => stableHealthValueStringify(entry)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).toSorted();
+  return `{${keys
+    .map((key) => `${JSON.stringify(key)}:${stableHealthValueStringify(record[key])}`)
+    .join(",")}}`;
+}
+
+function readConfigPathValue(config: OpenClawConfig, path: string): unknown {
+  let current: unknown = config;
+  for (const part of path.split(".")) {
+    const record = asNullableRecord(current);
+    if (!record || !Object.hasOwn(record, part)) {
+      return undefined;
+    }
+    current = record[part];
+  }
+  return current;
+}
+
+function readPrimaryModelLabel(value: unknown): string | null {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+  const record = asNullableRecord(value);
+  const primary = record?.primary;
+  return typeof primary === "string" && primary.trim() ? primary.trim() : null;
+}
+
+function resolveDefaultModelLabel(config: OpenClawConfig): string | null {
+  const agents = asNullableRecord(config.agents);
+  const defaults = asNullableRecord(agents?.defaults);
+  return readPrimaryModelLabel(defaults?.model) ?? readPrimaryModelLabel(defaults?.models);
+}
+
+function listRuntimeConfigDriftPaths(params: {
+  liveSourceConfig: OpenClawConfig;
+  diskSourceConfig: OpenClawConfig;
+}): string[] {
+  const driftPaths: string[] = [];
+  for (const path of RUNTIME_CONFIG_DRIFT_PATHS) {
+    const liveValue = readConfigPathValue(params.liveSourceConfig, path);
+    const diskValue = readConfigPathValue(params.diskSourceConfig, path);
+    if (stableHealthValueStringify(liveValue) !== stableHealthValueStringify(diskValue)) {
+      driftPaths.push(path);
+    }
+  }
+  return driftPaths;
+}
+
+function buildRuntimeConfigHealthSummary(
+  state: RuntimeHealthConfigState,
+): RuntimeConfigHealthSummary | undefined {
+  const liveSourceConfig = state.sourceConfig;
+  if (!liveSourceConfig) {
+    return state.metadata
+      ? {
+          state: "unknown",
+          liveSourceFingerprint: state.metadata.sourceFingerprint,
+          message: "Runtime source config snapshot is unavailable.",
+        }
+      : undefined;
+  }
+  if (!state.diskSourceConfig) {
+    return {
+      state: "unknown",
+      liveSourceFingerprint:
+        state.metadata?.sourceFingerprint ?? state.hashConfigValue(liveSourceConfig),
+      liveDefaultModel: resolveDefaultModelLabel(liveSourceConfig),
+      message: state.diskReadError
+        ? `Could not read disk config source snapshot: ${state.diskReadError}`
+        : "Disk config source snapshot is unavailable.",
+    };
+  }
+  const diskSourceFingerprint = state.hashConfigValue(state.diskSourceConfig);
+  const driftPaths = listRuntimeConfigDriftPaths({
+    liveSourceConfig,
+    diskSourceConfig: state.diskSourceConfig,
+  });
+  const liveDefaultModel = resolveDefaultModelLabel(liveSourceConfig);
+  const diskDefaultModel = resolveDefaultModelLabel(state.diskSourceConfig);
+  return {
+    state: driftPaths.length > 0 ? "drift" : "ok",
+    liveSourceFingerprint:
+      state.metadata?.sourceFingerprint ?? state.hashConfigValue(liveSourceConfig),
+    diskSourceFingerprint,
+    liveDefaultModel,
+    diskDefaultModel,
+    ...(driftPaths.length > 0
+      ? {
+          driftPaths,
+          message:
+            "Live gateway runtime config differs from disk for model/provider/auth paths; restart is required or pending.",
+        }
+      : {}),
+  };
+}
+
+export function formatRuntimeConfigHealthLine(summary: HealthSummary): string | null {
+  const runtimeConfig = summary.runtimeConfig;
+  if (!runtimeConfig || runtimeConfig.state !== "drift") {
+    return null;
+  }
+  const paths = runtimeConfig.driftPaths?.length
+    ? runtimeConfig.driftPaths.join(", ")
+    : "model/provider/auth config";
+  const modelDetail =
+    runtimeConfig.liveDefaultModel || runtimeConfig.diskDefaultModel
+      ? `; live=${runtimeConfig.liveDefaultModel ?? "unknown"} disk=${
+          runtimeConfig.diskDefaultModel ?? "unknown"
+        }`
+      : "";
+  return `Runtime config: warning (live gateway differs from disk for ${paths}; restart required or pending${modelDetail})`;
 }
 
 function buildContextEngineHealthSummary(): ContextEngineHealthSummary | undefined {
@@ -403,7 +544,8 @@ export async function getHealthSnapshot(params?: {
   eventLoop?: HealthSummary["eventLoop"];
 }): Promise<HealthSummary> {
   const timeoutMs = params?.timeoutMs;
-  const cfg = await readRuntimeHealthConfig();
+  const runtimeConfigState = await readRuntimeHealthConfigState();
+  const cfg = runtimeConfigState.config;
   const { defaultAgentId, ordered } = resolveAgentOrder(cfg);
   const channelBindings = buildChannelAccountBindings(cfg);
   const sessionCache = new Map<string, HealthSummary["sessions"]>();
@@ -591,6 +733,7 @@ export async function getHealthSnapshot(params?: {
 
   const pluginHealth = buildPluginHealthSummary();
   const contextEngineHealth = buildContextEngineHealthSummary();
+  const runtimeConfigHealth = buildRuntimeConfigHealthSummary(runtimeConfigState);
   const summary: HealthSummary = {
     ok: true,
     ts: Date.now(),
@@ -599,6 +742,7 @@ export async function getHealthSnapshot(params?: {
     ...(pluginHealth ? { plugins: pluginHealth } : {}),
     ...(contextEngineHealth ? { contextEngines: contextEngineHealth } : {}),
     modelPricing: getGatewayModelPricingHealth({ enabled: isGatewayModelPricingEnabled(cfg) }),
+    ...(runtimeConfigHealth ? { runtimeConfig: runtimeConfigHealth } : {}),
     channels,
     channelOrder,
     channelLabels,
@@ -803,6 +947,10 @@ export async function healthCommand(
     if (modelPricingLine) {
       runtime.log(styleHealthChannelLine(modelPricingLine, rich));
     }
+    const runtimeConfigLine = formatRuntimeConfigHealthLine(summary);
+    if (runtimeConfigLine) {
+      runtime.log(styleHealthChannelLine(runtimeConfigLine, rich));
+    }
     const contextEngineLine = formatContextEngineHealthLine(summary);
     if (contextEngineLine) {
       runtime.log(styleHealthChannelLine(contextEngineLine, rich));
@@ -909,7 +1057,22 @@ async function readBestEffortHealthConfig(): Promise<OpenClawConfig> {
   return await readBestEffortConfig();
 }
 
-async function readRuntimeHealthConfig(): Promise<OpenClawConfig> {
-  const { getRuntimeConfig } = await loadConfigRuntime();
-  return getRuntimeConfig();
+async function readRuntimeHealthConfigState(): Promise<RuntimeHealthConfigState> {
+  const configRuntime = await loadConfigRuntime();
+  const config = configRuntime.getRuntimeConfig();
+  let diskSourceConfig: OpenClawConfig | null = null;
+  let diskReadError: string | undefined;
+  try {
+    diskSourceConfig = await configRuntime.readSourceConfigBestEffort();
+  } catch (error) {
+    diskReadError = formatErrorMessage(error);
+  }
+  return {
+    config,
+    sourceConfig: configRuntime.getRuntimeConfigSourceSnapshot(),
+    metadata: configRuntime.getRuntimeConfigSnapshotMetadata(),
+    diskSourceConfig,
+    ...(diskReadError ? { diskReadError } : {}),
+    hashConfigValue: configRuntime.hashRuntimeConfigValue,
+  };
 }
