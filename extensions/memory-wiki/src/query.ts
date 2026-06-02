@@ -13,10 +13,13 @@ import {
   createSessionVisibilityGuard,
   resolveEffectiveSessionToolsVisibility,
 } from "openclaw/plugin-sdk/session-visibility";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  normalizeLowercaseStringOrEmpty,
+  uniqueStrings,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../api.js";
 import { assessClaimFreshness, isClaimContestedStatus } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus, WikiPageGroup } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
 import {
   parseWikiMarkdown,
   toWikiPageSummary,
@@ -26,6 +29,7 @@ import {
 } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
 
+const QUERY_DIRS = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
 const AGENT_DIGEST_PATH = ".openclaw-wiki/cache/agent-digest.json";
 const CLAIMS_DIGEST_PATH = ".openclaw-wiki/cache/claims.jsonl";
 const RELATED_BLOCK_PATTERN =
@@ -80,6 +84,12 @@ const ROUTE_QUESTION_STOP_WORDS = new Set([
   "with",
   "would",
 ]);
+
+function normalizePositiveInteger(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.max(1, Math.floor(value))
+    : fallback;
+}
 
 export const WIKI_SEARCH_MODES = [
   "auto",
@@ -231,34 +241,23 @@ function mergeWikiSearchCorpusResults(params: {
 
 async function listWikiMarkdownFiles(
   rootDir: string,
-  pageGroupDirs: string[],
+  pageGroupDirs?: string[],
 ): Promise<string[]> {
+  const dirs = (pageGroupDirs && pageGroupDirs.length > 0) ? pageGroupDirs : [...QUERY_DIRS];
   const files = (
     await Promise.all(
-      pageGroupDirs.map(async (relativeDir) => {
-        const result: string[] = [];
-        await walkDir(rootDir, relativeDir, result);
-        return result;
+      dirs.map(async (relativeDir) => {
+        const dirPath = path.join(rootDir, relativeDir);
+        const entries = await fs.readdir(dirPath, { withFileTypes: true }).catch(() => []);
+        return entries
+          .filter(
+            (entry) => entry.isFile() && entry.name.endsWith(".md") && entry.name !== "index.md",
+          )
+          .map((entry) => path.join(relativeDir, entry.name));
       }),
     )
   ).flat();
   return files.toSorted((left, right) => left.localeCompare(right));
-}
-
-async function walkDir(
-  absRoot: string,
-  relativeDir: string,
-  result: string[],
-): Promise<void> {
-  const absDir = path.join(absRoot, relativeDir);
-  const entries = await fs.readdir(absDir, { withFileTypes: true }).catch(() => []);
-  for (const entry of entries) {
-    if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== "index.md") {
-      result.push(path.join(relativeDir, entry.name));
-    } else if (entry.isDirectory()) {
-      await walkDir(absRoot, path.join(relativeDir, entry.name), result);
-    }
-  }
 }
 
 export async function readQueryableWikiPages(
@@ -978,7 +977,7 @@ function normalizeLookupKey(value: string): string {
 function buildLookupCandidates(lookup: string): string[] {
   const normalized = normalizeLookupKey(lookup);
   const withExtension = normalized.endsWith(".md") ? normalized : `${normalized}.md`;
-  return [...new Set([normalized, withExtension])];
+  return uniqueStrings([normalized, withExtension]);
 }
 
 function shouldEnforceSessionVisibility(params: {
@@ -1184,8 +1183,8 @@ function buildClaimResultMetadata(claim: WikiClaim | undefined): Partial<WikiSea
     ...(claim.id ? { matchedClaimId: claim.id } : {}),
     ...(claim.status ? { matchedClaimStatus: claim.status } : {}),
     ...(typeof claim.confidence === "number" ? { matchedClaimConfidence: claim.confidence } : {}),
-    evidenceKinds: [...new Set(claim.evidence.flatMap((evidence) => evidence.kind ?? []))],
-    evidenceSourceIds: [...new Set(claim.evidence.flatMap((evidence) => evidence.sourceId ?? []))],
+    evidenceKinds: uniqueStrings(claim.evidence.flatMap((evidence) => evidence.kind ?? [])),
+    evidenceSourceIds: uniqueStrings(claim.evidence.flatMap((evidence) => evidence.sourceId ?? [])),
   };
 }
 
@@ -1310,6 +1309,7 @@ async function createSessionMemoryPathVisibilityChecker(params: {
     if (!identity) {
       return false;
     }
+    const isQmdSessionPath = relPath.replace(/\\/g, "/").startsWith("qmd/");
     const normalizedScopedAgentId = normalizeLowercaseStringOrEmpty(scopedAgentId);
     const normalizedOwnerAgentId = normalizeLowercaseStringOrEmpty(identity.ownerAgentId);
     if (
@@ -1321,18 +1321,32 @@ async function createSessionMemoryPathVisibilityChecker(params: {
     }
     const archivedOwnerMatchesScope = Boolean(
       identity.archived &&
-      identity.ownerAgentId &&
-      (!normalizedScopedAgentId || normalizedOwnerAgentId === normalizedScopedAgentId),
+      ((identity.ownerAgentId &&
+        (!normalizedScopedAgentId || normalizedOwnerAgentId === normalizedScopedAgentId)) ||
+        (isQmdSessionPath && scopedAgentId)),
     );
-    const archivedOwnerAgentId = archivedOwnerMatchesScope ? identity.ownerAgentId : undefined;
+    const archivedOwnerAgentId = archivedOwnerMatchesScope
+      ? (identity.ownerAgentId ?? scopedAgentId)
+      : undefined;
+    const liveKeys = identity.liveStem
+      ? resolveTranscriptStemToSessionKeys({
+          store: combinedSessionStore,
+          stem: identity.liveStem,
+          allowQmdSlugFallback: false,
+        })
+      : [];
     const keys = filterSessionKeysByScopedAgent({
       cfg: params.cfg,
       scopedAgentId,
-      keys: resolveTranscriptStemToSessionKeys({
-        store: combinedSessionStore,
-        stem: identity.stem,
-        ...(archivedOwnerAgentId ? { archivedOwnerAgentId } : {}),
-      }),
+      keys:
+        liveKeys.length > 0
+          ? liveKeys
+          : resolveTranscriptStemToSessionKeys({
+              store: combinedSessionStore,
+              stem: identity.stem,
+              allowQmdSlugFallback: isQmdSessionPath && !identity.archived,
+              ...(archivedOwnerAgentId ? { archivedOwnerAgentId } : {}),
+            }),
     });
     if (!guard) {
       return Boolean(scopedAgentId && keys.length > 0);
@@ -1385,7 +1399,6 @@ async function searchWikiCorpus(params: {
   query: string;
   maxResults: number;
   mode: WikiSearchMode;
-  pageGroups?: WikiPageGroup[];
 }): Promise<WikiSearchResult[]> {
   const digest = await readQueryDigestBundle(params.rootDir);
   const candidatePaths = digest
@@ -1470,16 +1483,16 @@ export async function searchMemoryWiki(params: {
     operation: "wiki_search",
   });
   await initializeMemoryWikiVault(effectiveConfig);
-  const maxResults = Math.max(1, params.maxResults ?? 10);
+  const maxResults = normalizePositiveInteger(params.maxResults, 10);
   const mode = params.mode ?? "auto";
 
   const wikiResults = shouldSearchWiki(effectiveConfig)
     ? await searchWikiCorpus({
+        pageGroups: effectiveConfig.pageGroups,
         rootDir: effectiveConfig.vault.path,
         query: params.query,
         maxResults,
         mode,
-        pageGroups: effectiveConfig.pageGroups,
       })
     : [];
 
@@ -1538,20 +1551,20 @@ export async function getMemoryWikiPage(params: {
     operation: "wiki_get",
   });
   await initializeMemoryWikiVault(effectiveConfig);
-  const fromLine = Math.max(1, params.fromLine ?? 1);
-  const lineCount = Math.max(1, params.lineCount ?? 200);
+  const fromLine = normalizePositiveInteger(params.fromLine, 1);
+  const lineCount = normalizePositiveInteger(params.lineCount, 200);
 
   if (shouldSearchWiki(effectiveConfig)) {
     const digest = await readQueryDigestBundle(effectiveConfig.vault.path);
     const digestClaimPagePath = digest ? resolveDigestClaimLookup(digest, params.lookup) : null;
     const digestLookupPage = digestClaimPagePath
       ? ((
-          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath], effectiveConfig.pageGroups)
+          await readQueryableWikiPagesByPaths(effectiveConfig.vault.path, [digestClaimPagePath])
         )[0] ?? null)
       : null;
     const pages = digestLookupPage
       ? [digestLookupPage]
-      : await readQueryableWikiPages(effectiveConfig.vault.path, { pageGroups: effectiveConfig.pageGroups });
+      : await readQueryableWikiPages(effectiveConfig.vault.path);
     const page = digestLookupPage ?? resolveQueryableWikiPageByLookup(pages, params.lookup);
     if (page) {
       const parsed = parseWikiMarkdown(page.raw);
