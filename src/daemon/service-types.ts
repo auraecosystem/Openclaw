@@ -29,6 +29,11 @@ export type GatewayServiceRestartResult = { outcome: "completed" } | { outcome: 
 
 export type GatewayServiceEnvArgs = {
   env?: GatewayServiceEnv;
+  timeoutMs?: number;
+};
+
+export type GatewayServiceRuntimeArgs = {
+  timeoutMs?: number;
 };
 
 export type GatewayServiceEnvironmentValueSource = "inline" | "file" | "inline-and-file";

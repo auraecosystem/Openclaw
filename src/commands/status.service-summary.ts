@@ -19,9 +19,13 @@ export type ServiceStatusSummary = {
 export async function readServiceStatusSummary(
   service: GatewayService,
   fallbackLabel: string,
+  options: { timeoutMs?: number } = {},
 ): Promise<ServiceStatusSummary> {
   try {
-    const state = await readGatewayServiceState(service, { env: process.env });
+    const state = await readGatewayServiceState(service, {
+      env: process.env,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
     const layout = await summarizeGatewayServiceLayout(state.command);
     const managedByOpenClaw = state.installed;
     const externallyManaged = !managedByOpenClaw && state.running;

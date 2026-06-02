@@ -31,7 +31,10 @@ export async function statusAllCommand(
       },
     });
     progress.setLabel("Checking services…");
-    const [daemon, nodeService] = await resolveStatusServiceSummaries();
+    const [daemon, nodeService] =
+      opts?.timeoutMs === undefined
+        ? await resolveStatusServiceSummaries()
+        : await resolveStatusServiceSummaries({ timeoutMs: opts.timeoutMs });
     const nodeOnlyGateway = await resolveNodeOnlyGatewayInfo({
       daemon,
       node: nodeService,

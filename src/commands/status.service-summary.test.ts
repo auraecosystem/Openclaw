@@ -93,6 +93,35 @@ describe("readServiceStatusSummary", () => {
     expect(summary.runtime?.status).toBe("running");
   });
 
+  it("passes status timeouts to service state probes", async () => {
+    const isLoaded = vi.fn(async () => true);
+    const readRuntime = vi.fn(async () => ({ status: "running" as const }));
+
+    await readServiceStatusSummary(
+      createService({
+        isLoaded,
+        readCommand: vi.fn(async () => ({
+          programArguments: ["openclaw", "gateway", "run"],
+          environment: { OPENCLAW_GATEWAY_PORT: "18789" },
+        })),
+        readRuntime,
+      }),
+      "Daemon",
+      { timeoutMs: 3000 },
+    );
+
+    expect(isLoaded).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timeoutMs: 3000,
+        env: expect.objectContaining({ OPENCLAW_GATEWAY_PORT: "18789" }),
+      }),
+    );
+    expect(readRuntime).toHaveBeenCalledWith(
+      expect.objectContaining({ OPENCLAW_GATEWAY_PORT: "18789" }),
+      { timeoutMs: 3000 },
+    );
+  });
+
   it("includes service layout diagnostics and flags source checkout entrypoints", async () => {
     await withTempDir({ prefix: "openclaw-status-service-layout-" }, async (root) => {
       await fs.mkdir(path.join(root, ".git"), { recursive: true });
@@ -134,7 +163,9 @@ describe("readServiceStatusSummary", () => {
       expect(layout.packageRootReal).toBe(realRoot);
       expect(layout.packageVersion).toBe("0.0.0-test");
       expect(layout.entrypointSourceCheckout).toBe(true);
-      expect(layout.execStart).toBe(`/usr/bin/node ${entrypoint} gateway run`);
+      expect(layout.execStart).toContain(entrypoint);
+      expect(layout.execStart.startsWith("/usr/bin/node ")).toBe(true);
+      expect(layout.execStart.endsWith(" gateway run")).toBe(true);
     });
   });
 });

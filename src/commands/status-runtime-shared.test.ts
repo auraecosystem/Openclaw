@@ -229,6 +229,15 @@ describe("status-runtime-shared", () => {
     ]);
   });
 
+  it("passes the status timeout into daemon summaries", async () => {
+    await expect(resolveStatusServiceSummaries({ timeoutMs: 3456 })).resolves.toEqual([
+      { label: "LaunchAgent" },
+      { label: "node" },
+    ]);
+    expect(mocks.getDaemonStatusSummary).toHaveBeenCalledWith({ timeoutMs: 3456 });
+    expect(mocks.getNodeDaemonStatusSummary).toHaveBeenCalledWith({ timeoutMs: 3456 });
+  });
+
   it("resolves shared runtime details with optional usage and deep fields", async () => {
     await expect(
       resolveStatusRuntimeDetails({
@@ -261,6 +270,8 @@ describe("status-runtime-shared", () => {
       timeoutMs: 1234,
       config: { gateway: {} },
     });
+    expect(mocks.getDaemonStatusSummary).toHaveBeenCalledWith({ timeoutMs: 1234 });
+    expect(mocks.getNodeDaemonStatusSummary).toHaveBeenCalledWith({ timeoutMs: 1234 });
   });
 
   it("skips optional runtime details when flags are off", async () => {

@@ -63,9 +63,9 @@ export function resolveNodeService(): GatewayService {
       return base.restart({ ...args, env: withNodeServiceEnv(args.env ?? {}) });
     },
     isLoaded: async (args) => {
-      return base.isLoaded({ env: withNodeServiceEnv(args.env ?? {}) });
+      return base.isLoaded({ ...args, env: withNodeServiceEnv(args.env ?? {}) });
     },
     readCommand: (env) => base.readCommand(withNodeServiceEnv(env)),
-    readRuntime: (env) => base.readRuntime(withNodeServiceEnv(env)),
+    readRuntime: (env, args) => base.readRuntime(withNodeServiceEnv(env), args),
   };
 }

@@ -151,8 +151,17 @@ export async function resolveStatusLastHeartbeat(params: {
   }).catch(() => null);
 }
 
-export async function resolveStatusServiceSummaries() {
-  return await Promise.all([getDaemonStatusSummary(), getNodeDaemonStatusSummary()]);
+export async function resolveStatusServiceSummaries(params: { timeoutMs?: number } = {}) {
+  const summaryOptions =
+    params.timeoutMs === undefined ? undefined : { timeoutMs: params.timeoutMs };
+  return await Promise.all([
+    summaryOptions === undefined
+      ? getDaemonStatusSummary()
+      : getDaemonStatusSummary(summaryOptions),
+    summaryOptions === undefined
+      ? getNodeDaemonStatusSummary()
+      : getNodeDaemonStatusSummary(summaryOptions),
+  ]);
 }
 
 type StatusUsageSummary = Awaited<ReturnType<typeof resolveStatusUsageSummary>>;
@@ -201,7 +210,10 @@ export async function resolveStatusRuntimeDetails(params: {
         gatewayReachable: params.gatewayReachable,
       })
     : null;
-  const [gatewayService, nodeService] = await resolveStatusServiceSummaries();
+  const [gatewayService, nodeService] =
+    params.timeoutMs === undefined
+      ? await resolveStatusServiceSummaries()
+      : await resolveStatusServiceSummaries({ timeoutMs: params.timeoutMs });
   const result = {
     usage,
     health,

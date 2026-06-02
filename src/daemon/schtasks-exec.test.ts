@@ -49,4 +49,25 @@ describe("execSchtasks", () => {
       code: 124,
     });
   });
+
+  it("honors caller-provided schtasks timeouts", async () => {
+    runCommandWithTimeout.mockResolvedValue({
+      stdout: "",
+      stderr: "",
+      code: null,
+      signal: "SIGTERM",
+      killed: true,
+      termination: "timeout",
+    });
+
+    await expect(execSchtasks(["/Query"], { timeoutMs: 3000 })).resolves.toEqual({
+      stdout: "",
+      stderr: "schtasks timed out after 3000ms",
+      code: 124,
+    });
+    expect(runCommandWithTimeout).toHaveBeenCalledWith(["schtasks", "/Query"], {
+      timeoutMs: 3000,
+      noOutputTimeoutMs: 30_000,
+    });
+  });
 });

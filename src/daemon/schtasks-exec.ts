@@ -5,14 +5,21 @@ const SCHTASKS_NO_OUTPUT_TIMEOUT_MS = 30_000;
 
 export async function execSchtasks(
   args: string[],
+  options: { timeoutMs?: number } = {},
 ): Promise<{ stdout: string; stderr: string; code: number }> {
+  const timeoutMs =
+    typeof options.timeoutMs === "number" &&
+    Number.isFinite(options.timeoutMs) &&
+    options.timeoutMs > 0
+      ? Math.floor(options.timeoutMs)
+      : SCHTASKS_TIMEOUT_MS;
   const result = await runCommandWithTimeout(["schtasks", ...args], {
-    timeoutMs: SCHTASKS_TIMEOUT_MS,
+    timeoutMs,
     noOutputTimeoutMs: SCHTASKS_NO_OUTPUT_TIMEOUT_MS,
   });
   const timeoutDetail =
     result.termination === "timeout"
-      ? `schtasks timed out after ${SCHTASKS_TIMEOUT_MS}ms`
+      ? `schtasks timed out after ${timeoutMs}ms`
       : result.termination === "no-output-timeout"
         ? `schtasks produced no output for ${SCHTASKS_NO_OUTPUT_TIMEOUT_MS}ms`
         : "";

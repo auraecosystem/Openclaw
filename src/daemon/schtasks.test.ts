@@ -53,10 +53,7 @@ describe("schtasks runtime parsing", () => {
 
 describe("scheduled task runtime derivation", () => {
   async function readRuntimeFromQueryOutput(output: string) {
-    schtasksResponses.push(
-      { code: 0, stdout: "", stderr: "" },
-      { code: 0, stdout: output, stderr: "" },
-    );
+    schtasksResponses.push({ code: 0, stdout: output, stderr: "" });
     return await readScheduledTaskRuntime({
       USERPROFILE: "C:\\Users\\test",
       OPENCLAW_PROFILE: "default",

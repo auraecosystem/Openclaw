@@ -33,6 +33,7 @@ import type {
   GatewayServiceInstallArgs,
   GatewayServiceManageArgs,
   GatewayServiceRestartResult,
+  GatewayServiceRuntimeArgs,
   GatewayServiceStartRepairIssue,
   GatewayServiceStartResult,
   GatewayServiceStageArgs,
@@ -56,6 +57,7 @@ export type {
   GatewayServiceInstallArgs,
   GatewayServiceManageArgs,
   GatewayServiceRestartResult,
+  GatewayServiceRuntimeArgs,
   GatewayServiceStartRepairIssue,
   GatewayServiceStartResult,
   GatewayServiceStageArgs,
@@ -81,7 +83,10 @@ export type GatewayService = {
   restart: (args: GatewayServiceControlArgs) => Promise<GatewayServiceRestartResult>;
   isLoaded: (args: GatewayServiceEnvArgs) => Promise<boolean>;
   readCommand: (env: GatewayServiceEnv) => Promise<GatewayServiceCommandConfig | null>;
-  readRuntime: (env: GatewayServiceEnv) => Promise<GatewayServiceRuntime>;
+  readRuntime: (
+    env: GatewayServiceEnv,
+    args?: GatewayServiceRuntimeArgs,
+  ) => Promise<GatewayServiceRuntime>;
 };
 
 function mergeGatewayServiceEnv(
@@ -177,9 +182,14 @@ export async function readGatewayServiceState(
   const baseEnv = args.env ?? (process.env as GatewayServiceEnv);
   const command = await service.readCommand(baseEnv).catch(() => null);
   const env = mergeGatewayServiceEnv(baseEnv, command);
+  const loadedArgs = args.timeoutMs !== undefined ? { env, timeoutMs: args.timeoutMs } : { env };
+  const runtimeArgs = args.timeoutMs !== undefined ? { timeoutMs: args.timeoutMs } : undefined;
   const [loaded, runtime] = await Promise.all([
-    service.isLoaded({ env }).catch(() => false),
-    service.readRuntime(env).catch(() => undefined),
+    service.isLoaded(loadedArgs).catch(() => false),
+    (runtimeArgs === undefined
+      ? service.readRuntime(env)
+      : service.readRuntime(env, runtimeArgs)
+    ).catch(() => undefined),
   ]);
   return {
     installed: command !== null,
