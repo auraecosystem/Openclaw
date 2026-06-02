@@ -2055,6 +2055,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     const callGateway = createGatewayMock({
       result: {
         payloads: [{ text: "child completion output" }],
+        didSendViaMessagingTool: true,
       },
     });
     const sendMessage = createSendMessageMock();
@@ -2110,6 +2111,7 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
         debounceMs: 500,
         waitForTranscriptCommit: true,
         deliveryTimeoutMs: 10,
+        sourceReplyDeliveryMode: "message_tool_only",
       },
     );
     expect(callGateway).toHaveBeenCalledTimes(1);
