@@ -161,7 +161,10 @@ function resolveStreamingCardAppendContent(previousText: string, nextText: strin
   if (!previousText) {
     return nextText;
   }
-  return nextText.startsWith(previousText) ? nextText.slice(previousText.length) : nextText;
+  // Feishu CardKit uses overwrite mode for content updates — each PUT
+  // replaces the entire card content. Always send the full text so the
+  // card displays the complete response, not just the latest delta.
+  return nextText;
 }
 
 export function mergeStreamingText(

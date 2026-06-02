@@ -180,7 +180,7 @@ describe("FeishuStreamingSession", () => {
 
     expect(updateBodies).toHaveLength(1);
     expect(JSON.parse(updateBodies[0] ?? "{}")).toEqual({
-      content: " small",
+      content: "hello small",
       sequence: 2,
       uuid: "s_card_1_2",
     });
@@ -212,20 +212,20 @@ describe("FeishuStreamingSession", () => {
 
     expect(updateBodies).toHaveLength(1);
     expect(JSON.parse(updateBodies[0] ?? "{}")).toEqual({
-      content: "!",
+      content: "hello!",
       sequence: 2,
       uuid: "s_card_2_2",
     });
   });
 
-  it("retries unsent suffix content after a failed delta update", async () => {
+  it("retries unsent content after a failed content update", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(3_000);
     const updateBodies: string[] = [];
     mockFetches(updateBodies, new Set([0]));
 
     const session = new FeishuStreamingSession({} as never, {
-      appId: "app_failed_delta_retry",
+      appId: "app_failed_content_retry",
       appSecret: "secret",
     });
     setStreamingSessionInternals(session, {
@@ -245,25 +245,25 @@ describe("FeishuStreamingSession", () => {
 
     expect(updateBodies).toHaveLength(2);
     expect(JSON.parse(updateBodies[0] ?? "{}")).toEqual({
-      content: " world",
+      content: "hello world",
       sequence: 2,
       uuid: "s_card_3_2",
     });
     expect(JSON.parse(updateBodies[1] ?? "{}")).toEqual({
-      content: " world!",
+      content: "hello world!",
       sequence: 3,
       uuid: "s_card_3_3",
     });
   });
 
-  it("retries unsent suffix content after a non-OK delta update", async () => {
+  it("retries unsent content after a non-OK content update", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(3_500);
     const updateBodies: string[] = [];
     mockFetches(updateBodies, new Set<number>(), [], new Map([[0, 429]]));
 
     const session = new FeishuStreamingSession({} as never, {
-      appId: "app_non_ok_delta_retry",
+      appId: "app_non_ok_content_retry",
       appSecret: "secret",
     });
     setStreamingSessionInternals(session, {
@@ -283,12 +283,12 @@ describe("FeishuStreamingSession", () => {
 
     expect(updateBodies).toHaveLength(2);
     expect(JSON.parse(updateBodies[0] ?? "{}")).toEqual({
-      content: " world",
+      content: "hello world",
       sequence: 2,
       uuid: "s_card_5_2",
     });
     expect(JSON.parse(updateBodies[1] ?? "{}")).toEqual({
-      content: " world!",
+      content: "hello world!",
       sequence: 3,
       uuid: "s_card_5_3",
     });
