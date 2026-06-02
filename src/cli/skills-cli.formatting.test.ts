@@ -77,6 +77,7 @@ describe("skills-cli (e2e)", () => {
           disabled: false,
           blockedByAllowlist: false,
           blockedByAgentFilter: false,
+          blockedByPlatform: false,
           modelVisible: true,
           userInvocable: true,
           commandVisible: true,
