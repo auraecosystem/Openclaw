@@ -26,7 +26,7 @@ import {
   type WikiFreshnessLevel,
   type WikiPageContradictionCluster,
 } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig, WikiPageKind, WikiPageGroup } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiPageKind } from "./config.js";
 import { findDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
@@ -51,10 +51,6 @@ function deriveAllPageGroups(
     dir: g.dir,
     heading: g.heading ?? g.dir.charAt(0).toUpperCase() + g.dir.slice(1),
   }));
-}
-
-function getReportDir(config: ResolvedMemoryWikiConfig): string {
-  return findDirForKind(config.pageGroups, "report") ?? "reports";
 }
 
 const COMPILE_PAGE_GROUPS: Array<{ kind: WikiPageKind; dir: string; heading: string }> = [
