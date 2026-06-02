@@ -3,6 +3,7 @@ import {
   clearHistoryEntriesIfEnabled,
   recordPendingHistoryEntryWithMedia,
 } from "../../auto-reply/reply/history.js";
+import type { FinalizedMsgContext } from "../../auto-reply/templating.js";
 import {
   createDiagnosticTraceContextFromActiveScope,
   runWithDiagnosticTraceContext,
