@@ -2308,6 +2308,47 @@ describe("openai transport stream", () => {
     expect(params.top_p).toBe(0.9);
   });
 
+  it("drops orphaned tool results before building chat completions request params", () => {
+    const params = buildOpenAICompletionsParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-completions",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: false,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-completions">,
+      {
+        systemPrompt: "system",
+        messages: [
+          { role: "user", content: "old request", timestamp: 1 },
+          {
+            role: "toolResult",
+            toolCallId: "call_orphan",
+            toolName: "read",
+            content: [{ type: "text", text: "orphaned output" }],
+            isError: false,
+            timestamp: 2,
+          },
+          { role: "user", content: "continue after model switch", timestamp: 3 },
+        ],
+        tools: [],
+      } as never,
+      undefined,
+    );
+
+    expect(params.messages).toEqual([
+      { role: "system", content: "system" },
+      { role: "user", content: "old request" },
+      { role: "user", content: "continue after model switch" },
+    ]);
+    expect(JSON.stringify(params.messages)).not.toContain("call_orphan");
+  });
+
   it("forwards penalty params and seed to chat completions request params", () => {
     const params = buildOpenAICompletionsParams(
       {

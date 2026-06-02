@@ -787,6 +787,25 @@ describe("installContextEngineLoopHook", () => {
     expect(transformed).toBe(compactedView);
   });
 
+  it("repairs orphaned tool results returned by a context engine assembled view", async () => {
+    const agent = makeGuardableAgent();
+    const compactedUser = makeUser("compacted");
+    const orphanToolResult = makeToolResult("call_orphan", "orphaned output");
+    const compactedView = [compactedUser, orphanToolResult];
+    const engine = makeMockEngine({
+      assemble: async () => ({ messages: compactedView, estimatedTokens: 0 }),
+    });
+    installHook(agent, engine);
+
+    const { transformed } = await callAfterInitialToolResult(agent, {
+      includeSecondUser: false,
+      firstResultText: "r",
+    });
+
+    expect(transformed).toEqual([compactedUser]);
+    expect(JSON.stringify(transformed)).not.toContain("call_orphan");
+  });
+
   it("clears an assembled view when the engine fails on a later source", async () => {
     const agent = makeGuardableAgent();
     const compactedView = [makeUser("compacted")];
