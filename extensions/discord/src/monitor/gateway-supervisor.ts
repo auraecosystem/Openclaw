@@ -197,6 +197,7 @@ export function createDiscordGatewaySupervisor(params: {
       if (phase === "disposed") {
         return;
       }
+      emitter.off("error", onGatewayError);
       lifecycleHandler = undefined;
       phase = "disposed";
       pending.length = 0;
