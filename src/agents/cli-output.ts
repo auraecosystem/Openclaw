@@ -18,6 +18,9 @@ export type CliOutput = {
   sessionId?: string;
   usage?: CliUsage;
   finalPromptText?: string;
+  /** True when the CLI backend completed a turn and returned a result event,
+   *  even if the assistant message contains no text (e.g. thinking-only). */
+  completedTurn?: boolean;
 };
 
 export type CliStreamingDelta = {
@@ -365,11 +368,16 @@ function parseClaudeCliJsonlResult(params: {
   ) {
     const resultText = unwrapNestedCliResultText(params.parsed.result).trim();
     if (resultText) {
-      return { text: resultText, sessionId: params.sessionId, usage: params.usage };
+      return {
+        text: resultText,
+        sessionId: params.sessionId,
+        usage: params.usage,
+        completedTurn: true,
+      };
     }
-    // Claude may finish with an empty result after tool-only work. Keep the
-    // resolved session handle and usage instead of dropping them.
-    return { text: "", sessionId: params.sessionId, usage: params.usage };
+    // Claude may finish with an empty result after tool-only or thinking-only
+    // work. Keep the resolved session handle and usage instead of dropping them.
+    return { text: "", sessionId: params.sessionId, usage: params.usage, completedTurn: true };
   }
   return null;
 }

@@ -243,6 +243,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "Claude says hello",
       sessionId: "session-123",
+      completedTurn: true,
       usage: {
         input: 12,
         output: 3,
@@ -276,6 +277,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "dialect says hello",
       sessionId: "session-dialect",
+      completedTurn: true,
       usage: {
         input: 5,
         output: 2,
@@ -313,6 +315,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "Claude says hello",
       sessionId: "session-cache-123",
+      completedTurn: true,
       usage: {
         input: 12,
         output: 3,
@@ -390,6 +393,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "",
       sessionId: "session-456",
+      completedTurn: true,
       usage: {
         input: 18,
         output: undefined,
@@ -428,6 +432,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "actual response text",
       sessionId: "session-nested-jsonl",
+      completedTurn: true,
       usage: undefined,
     });
   });
@@ -446,6 +451,7 @@ describe("parseCliJsonl", () => {
     expect(result).toEqual({
       text: "done",
       sessionId: "session-999",
+      completedTurn: true,
       usage: undefined,
     });
   });

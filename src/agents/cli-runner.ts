@@ -535,13 +535,20 @@ export async function runPreparedCliAgent(
     const output = await executePreparedCliRun(attemptContext, cliSessionIdToUse);
     const assistantText = output.text.trim();
     if (!assistantText) {
-      throw new FailoverError("CLI backend returned an empty response.", {
-        reason: "empty_response",
-        provider: params.provider,
-        model: context.modelId,
-        sessionId: params.sessionId,
-        lane: params.lane,
-      });
+      // A completed CLI turn with a result event and no text (e.g.
+      // thinking-only end_turn) is a valid "nothing to say" when the
+      // caller's group policy allows empty assistant replies as silent.
+      // Otherwise keep the failover path so a different model can
+      // produce a visible reply.
+      if (!output.completedTurn || !params.allowEmptyAssistantReplyAsSilent) {
+        throw new FailoverError("CLI backend returned an empty response.", {
+          reason: "empty_response",
+          provider: params.provider,
+          model: context.modelId,
+          sessionId: params.sessionId,
+          lane: params.lane,
+        });
+      }
     }
     const assistantTexts = assistantText ? [assistantText] : [];
     const lastAssistant =
