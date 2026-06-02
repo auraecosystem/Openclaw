@@ -132,7 +132,7 @@ export function createTypingController(params: {
   });
 
   const triggerTyping = async () => {
-    if (triggerInFlight) {
+    if (runComplete || sealed || triggerInFlight) {
       return;
     }
     triggerInFlight = true;
@@ -229,6 +229,7 @@ export function createTypingController(params: {
 
   const markRunComplete = () => {
     runComplete = true;
+    typingLoop.stop();
     maybeStopOnIdle();
     if (!sealed && !dispatchIdle) {
       dispatchIdleTimer = setTimeout(() => {
