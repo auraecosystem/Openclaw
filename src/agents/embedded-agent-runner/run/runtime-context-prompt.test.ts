@@ -323,6 +323,61 @@ describe("runtime context prompt submission", () => {
     ).toBe("Current event:\nBob: yes\n\n[OpenClaw room event]");
   });
 
+  it("keeps current-turn inbound metadata out of user prompt text", () => {
+    const parts = resolveRuntimeContextPromptParts({
+      effectivePrompt: "Please execute your workflow",
+      transcriptPrompt: "Please execute your workflow",
+      currentInboundContext: {
+        text: [
+          "Conversation info (untrusted metadata):",
+          "```json",
+          JSON.stringify({ channel: "telegram", message_id: "14636" }),
+          "```",
+          "",
+          "Sender (untrusted metadata):",
+          "```json",
+          JSON.stringify({ id: "1782981446", name: "Sherina" }),
+          "```",
+        ].join("\n"),
+      },
+    });
+
+    expect(parts.prompt).toBe("Please execute your workflow");
+    expect(parts.modelPrompt).toBeUndefined();
+    expect(parts.runtimeContext).toContain("Conversation info (untrusted metadata):");
+    expect(parts.runtimeContext).toContain("Sender (untrusted metadata):");
+  });
+
+  it("combines current-turn inbound metadata with extracted hidden runtime context", () => {
+    const parts = resolveRuntimeContextPromptParts({
+      effectivePrompt: ["private hook context", "", "Visible ask", "", "private hook tail"].join(
+        "\n",
+      ),
+      transcriptPrompt: "Visible ask",
+      currentInboundContext: { text: "Conversation info (untrusted metadata):\nchannel=telegram" },
+    });
+
+    expect(parts.prompt).toBe("Visible ask");
+    expect(parts.runtimeContext).toBe(
+      [
+        "Conversation info (untrusted metadata):\nchannel=telegram",
+        "private hook context\n\nprivate hook tail",
+      ].join("\n\n"),
+    );
+  });
+
+  it("preserves current-turn inbound metadata as runtime context for model-prompt empty transcripts", () => {
+    const parts = resolveRuntimeContextPromptParts({
+      effectivePrompt: "[OpenClaw room event]",
+      transcriptPrompt: "",
+      currentInboundContext: { text: "inbound_event_kind: room_event" },
+      emptyTranscriptMode: "model-prompt",
+    });
+
+    expect(parts.prompt).toBe("[OpenClaw room event]");
+    expect(parts.runtimeContext).toBe("inbound_event_kind: room_event");
+  });
+
   it("builds runtime context as prompt-local custom context before the current user prompt", () => {
     expect(buildRuntimeContextCustomMessage("secret runtime context")).toMatchObject({
       role: "custom",
