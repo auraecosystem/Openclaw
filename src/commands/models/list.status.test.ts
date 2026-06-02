@@ -42,6 +42,11 @@ const mocks = vi.hoisted(() => {
     resolveAgentExplicitModelPrimary: vi.fn().mockReturnValue(undefined),
     resolveAgentEffectiveModelPrimary: vi.fn().mockReturnValue(undefined),
     resolveAgentModelFallbacksOverride: vi.fn().mockReturnValue(undefined),
+    resolveSessionAgentIds: vi.fn(({ agentId }: { agentId?: string }) => ({
+      sessionAgentId: agentId ?? "main",
+      requestedAgentId: agentId,
+    })),
+    listAgentEntries: vi.fn().mockReturnValue([]),
     listAgentIds: vi.fn().mockReturnValue(["main", "jeremiah"]),
     ensureAuthProfileStore: vi.fn().mockReturnValue(store),
     listProfilesForProvider: vi.fn((s: typeof store, provider: string) => {
@@ -157,6 +162,8 @@ vi.mock("../../agents/agent-scope.js", () => ({
   resolveAgentExplicitModelPrimary: mocks.resolveAgentExplicitModelPrimary,
   resolveAgentEffectiveModelPrimary: mocks.resolveAgentEffectiveModelPrimary,
   resolveAgentModelFallbacksOverride: mocks.resolveAgentModelFallbacksOverride,
+  resolveSessionAgentIds: mocks.resolveSessionAgentIds,
+  listAgentEntries: mocks.listAgentEntries,
   listAgentIds: mocks.listAgentIds,
 }));
 vi.mock("../../agents/workspace.js", () => ({
@@ -640,6 +647,384 @@ describe("modelsStatusCommand auth overview", () => {
     }
   });
 
+  it("reports Gemini CLI OAuth for canonical Google models routed through the CLI runtime", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "google/gemini-3-flash-preview", fallbacks: [] },
+          models: {
+            "google/*": { agentRuntime: { id: "google-gemini-cli" } },
+          },
+          cliBackends: { "google-gemini-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: true } },
+    });
+    mocks.store.profiles = {
+      "google-gemini-cli:user@example.test": {
+        type: "oauth",
+        provider: "google-gemini-cli",
+        access: "gemini-cli-access-token",
+        refresh: "gemini-cli-refresh-token",
+        expires: Date.now() + 60_000,
+      },
+    };
+    mocks.resolveEnvApiKey.mockImplementation((provider: string) =>
+      provider === "google"
+        ? {
+            apiKey: "AIzaSyD-google-env-key-0123456789",
+            source: "env: GEMINI_API_KEY",
+          }
+        : null,
+    );
+
+    try {
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual([]);
+      expect(
+        requireRecord(
+          requireProvider(payload.auth.providers, "google").effective,
+          "google effective",
+        ),
+      ).toEqual(
+        expect.objectContaining({
+          kind: "env",
+        }),
+      );
+      expect(
+        requireRecord(
+          requireProvider(payload.auth.providers, "google-gemini-cli").effective,
+          "google-gemini-cli effective",
+        ),
+      ).toEqual({
+        kind: "profiles",
+        detail: "/tmp/openclaw-agent/auth-profiles.json",
+      });
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        {
+          provider: "google",
+          runtime: "google-gemini-cli",
+          authProvider: "google-gemini-cli",
+          status: "usable",
+          effective: {
+            kind: "profiles",
+            detail: "/tmp/openclaw-agent/auth-profiles.json",
+          },
+        },
+      ]);
+      expect(localRuntime.exit).not.toHaveBeenCalledWith(1);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+    }
+  });
+
+  it("uses plugin-owned synthetic auth for CLI runtime routes", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    const originalSyntheticImpl =
+      mocks.resolveRuntimeSyntheticAuthProviderRefs.getMockImplementation();
+    const originalResolveSyntheticAuthImpl =
+      mocks.resolveProviderSyntheticAuthWithPlugin.getMockImplementation();
+    const originalHealthImpl = buildAuthHealthSummaryMock.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4.6", fallbacks: [] },
+          models: {
+            "anthropic/*": { agentRuntime: { id: "claude-cli" } },
+          },
+          cliBackends: { "claude-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: false } },
+    });
+    mocks.store.profiles = {
+      "anthropic:default": {
+        type: "oauth",
+        provider: "anthropic",
+        access: "expired-access",
+        refresh: "expired-refresh",
+        expires: Date.now() - 60_000,
+      },
+    };
+    mocks.resolveEnvApiKey.mockImplementation(() => null);
+    buildAuthHealthSummaryMock.mockReturnValue({
+      now: Date.now(),
+      warnAfterMs: 86_400_000,
+      profiles: [
+        {
+          profileId: "anthropic:default",
+          provider: "anthropic",
+          type: "oauth",
+          status: "expired",
+          source: "store",
+          label: "anthropic:default",
+        },
+      ],
+      providers: [
+        {
+          provider: "anthropic",
+          status: "expired",
+          expiresAt: Date.now() - 60_000,
+          remainingMs: -60_000,
+          profiles: [],
+        },
+      ],
+    });
+    mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue(["claude-cli"]);
+    mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+      ({ provider }: { provider: string }) =>
+        provider === "claude-cli"
+          ? {
+              apiKey: "claude-cli-runtime-token",
+              source: "Claude CLI native auth",
+              mode: "oauth",
+              expiresAt: Date.now() + 60_000,
+            }
+          : undefined,
+    );
+
+    try {
+      const syntheticProbeStart = mocks.resolveProviderSyntheticAuthWithPlugin.mock.calls.length;
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      const syntheticProbeProviders = mocks.resolveProviderSyntheticAuthWithPlugin.mock.calls
+        .slice(syntheticProbeStart)
+        .map(([arg]) => (arg as { provider: string }).provider);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual([]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        {
+          provider: "anthropic",
+          runtime: "claude-cli",
+          authProvider: "claude-cli",
+          status: "usable",
+          effective: {
+            kind: "synthetic",
+            detail: "Claude CLI native auth",
+          },
+        },
+      ]);
+      expect(
+        requireRecord(
+          requireProvider(payload.auth.providers, "claude-cli").effective,
+          "claude-cli effective",
+        ),
+      ).toEqual({
+        kind: "synthetic",
+        detail: "Claude CLI native auth",
+      });
+      expect(syntheticProbeProviders).toStrictEqual(["claude-cli"]);
+      expect(localRuntime.exit).not.toHaveBeenCalledWith(1);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+      if (originalSyntheticImpl) {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockImplementation(originalSyntheticImpl);
+      } else {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue([]);
+      }
+      if (originalResolveSyntheticAuthImpl) {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+          originalResolveSyntheticAuthImpl,
+        );
+      } else {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockReturnValue(undefined);
+      }
+      if (originalHealthImpl) {
+        buildAuthHealthSummaryMock.mockImplementation(originalHealthImpl);
+      }
+    }
+  });
+
+  it("fails --check when CLI runtime synthetic auth is expired", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    const originalSyntheticImpl =
+      mocks.resolveRuntimeSyntheticAuthProviderRefs.getMockImplementation();
+    const originalResolveSyntheticAuthImpl =
+      mocks.resolveProviderSyntheticAuthWithPlugin.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4.6", fallbacks: [] },
+          models: {
+            "anthropic/*": { agentRuntime: { id: "claude-cli" } },
+          },
+          cliBackends: { "claude-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: false } },
+    });
+    mocks.store.profiles = {};
+    mocks.resolveEnvApiKey.mockImplementation(() => null);
+    mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue(["claude-cli"]);
+    mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+      ({ provider }: { provider: string }) =>
+        provider === "claude-cli"
+          ? {
+              apiKey: "expired-claude-cli-runtime-token",
+              source: "Claude CLI native auth",
+              mode: "oauth",
+              expiresAt: Date.now() - 60_000,
+            }
+          : undefined,
+    );
+
+    try {
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual(["claude-cli"]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        {
+          provider: "anthropic",
+          runtime: "claude-cli",
+          authProvider: "claude-cli",
+          status: "missing",
+          effective: {
+            kind: "synthetic",
+            detail: "Claude CLI native auth",
+          },
+        },
+      ]);
+      expect(localRuntime.exit).toHaveBeenCalledWith(1);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+      if (originalSyntheticImpl) {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockImplementation(originalSyntheticImpl);
+      } else {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue([]);
+      }
+      if (originalResolveSyntheticAuthImpl) {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+          originalResolveSyntheticAuthImpl,
+        );
+      } else {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockReturnValue(undefined);
+      }
+    }
+  });
+
+  it("does not use canonical provider auth for CLI runtime routes", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    const originalSyntheticImpl =
+      mocks.resolveRuntimeSyntheticAuthProviderRefs.getMockImplementation();
+    const originalResolveSyntheticAuthImpl =
+      mocks.resolveProviderSyntheticAuthWithPlugin.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4.6", fallbacks: [] },
+          models: {
+            "anthropic/*": { agentRuntime: { id: "claude-cli" } },
+          },
+          cliBackends: { "claude-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: true } },
+    });
+    mocks.store.profiles = {
+      "anthropic:default": originalProfiles["anthropic:default"],
+    };
+    mocks.resolveEnvApiKey.mockImplementation((provider: string) =>
+      provider === "anthropic"
+        ? {
+            apiKey: "sk-ant-oat01-ACCESS-TOKEN-1234567890",
+            source: "env: ANTHROPIC_OAUTH_TOKEN",
+          }
+        : null,
+    );
+    mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue(["claude-cli"]);
+    mocks.resolveProviderSyntheticAuthWithPlugin.mockReturnValue(undefined);
+
+    try {
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual(["claude-cli"]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([
+        {
+          provider: "anthropic",
+          runtime: "claude-cli",
+          authProvider: "claude-cli",
+          status: "missing",
+          effective: {
+            kind: "missing",
+            detail: "missing",
+          },
+        },
+      ]);
+      expect(localRuntime.exit).toHaveBeenCalledWith(1);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+      if (originalSyntheticImpl) {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockImplementation(originalSyntheticImpl);
+      } else {
+        mocks.resolveRuntimeSyntheticAuthProviderRefs.mockReturnValue([]);
+      }
+      if (originalResolveSyntheticAuthImpl) {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockImplementation(
+          originalResolveSyntheticAuthImpl,
+        );
+      } else {
+        mocks.resolveProviderSyntheticAuthWithPlugin.mockReturnValue(undefined);
+      }
+    }
+  });
+
   it("uses Codex synthetic auth for canonical OpenAI text routes", async () => {
     const localRuntime = createRuntime();
     const originalLoadConfig = mocks.loadConfig.getMockImplementation();
@@ -669,7 +1054,6 @@ describe("modelsStatusCommand auth overview", () => {
               apiKey: "codex-runtime-token",
               source: "codex-app-server",
               mode: "token",
-              expiresAt: Date.now() + 60_000,
             }
           : undefined,
     );
@@ -1263,6 +1647,59 @@ describe("modelsStatusCommand auth overview", () => {
       const payload = parseFirstJsonLog(localRuntime);
       expect(payload.auth.missingProvidersInUse).toEqual([]);
       expect(localRuntime.exit).toHaveBeenCalledWith(0);
+    } finally {
+      mocks.store.profiles = originalProfiles;
+      if (originalLoadConfig) {
+        mocks.loadConfig.mockImplementation(originalLoadConfig);
+      }
+      if (originalEnvImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(originalEnvImpl);
+      } else if (defaultResolveEnvApiKeyImpl) {
+        mocks.resolveEnvApiKey.mockImplementation(defaultResolveEnvApiKeyImpl);
+      } else {
+        mocks.resolveEnvApiKey.mockImplementation(() => null);
+      }
+    }
+  });
+
+  it("keeps CLI runtime auth scoped away from Google image routes", async () => {
+    const localRuntime = createRuntime();
+    const originalLoadConfig = mocks.loadConfig.getMockImplementation();
+    const originalProfiles = { ...mocks.store.profiles };
+    const originalEnvImpl = mocks.resolveEnvApiKey.getMockImplementation();
+    mocks.loadConfig.mockReturnValue({
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-sonnet-4.6", fallbacks: [] },
+          imageModel: { primary: "google/gemini-2.5-flash-image-preview", fallbacks: [] },
+          models: {
+            "anthropic/claude-sonnet-4.6": {},
+            "google/*": { agentRuntime: { id: "google-gemini-cli" } },
+          },
+          cliBackends: { "google-gemini-cli": {} },
+        },
+      },
+      models: { providers: {} },
+      env: { shellEnv: { enabled: true } },
+    });
+    mocks.store.profiles = {
+      "anthropic:default": originalProfiles["anthropic:default"],
+    };
+    mocks.resolveEnvApiKey.mockImplementation((provider: string) =>
+      provider === "google"
+        ? {
+            apiKey: "AIzaSyD-google-env-key-0123456789",
+            source: "env: GEMINI_API_KEY",
+          }
+        : null,
+    );
+
+    try {
+      await modelsStatusCommand({ json: true, check: true }, localRuntime as never);
+      const payload = parseFirstJsonLog(localRuntime);
+      expect(payload.auth.missingProvidersInUse).toStrictEqual([]);
+      expect(payload.auth.runtimeAuthRoutes).toEqual([]);
+      expect(localRuntime.exit).not.toHaveBeenCalledWith(1);
     } finally {
       mocks.store.profiles = originalProfiles;
       if (originalLoadConfig) {

@@ -23,6 +23,7 @@ import {
   resolveProviderEnvAuthLookupMaps,
 } from "../../agents/model-auth-env-vars.js";
 import { resolveEnvApiKey, resolveUsableCustomProviderApiKey } from "../../agents/model-auth.js";
+import { resolveCliRuntimeExecutionProvider } from "../../agents/model-runtime-aliases.js";
 import {
   buildModelAliasIndex,
   isCliProvider,
@@ -106,6 +107,22 @@ type StatusSyntheticAuth = {
   mode?: ProviderSyntheticAuthResult["mode"];
   expiresAt?: number;
 };
+
+function isUsableStatusSyntheticAuth(auth: StatusSyntheticAuth | undefined): boolean {
+  if (!auth?.mode) {
+    return false;
+  }
+  if (auth.mode === "api-key" || auth.mode === "token") {
+    if (auth.expiresAt === undefined) {
+      return true;
+    }
+  }
+  return (
+    typeof auth.expiresAt === "number" &&
+    Number.isFinite(auth.expiresAt) &&
+    auth.expiresAt > Date.now()
+  );
+}
 
 function loadProviderUsageRuntime(): Promise<ProviderUsageRuntime> {
   return providerUsageRuntimeLoader.load();
@@ -355,12 +372,17 @@ export async function modelsStatusCommand(
       })?.ref;
     };
     const providersFromModels = new Set<string>();
-    const providerUses: Array<{ provider: string; allowCodexRuntimeFallback: boolean }> = [];
+    const providerUses: Array<{
+      provider: string;
+      model: string;
+      allowCodexRuntimeFallback: boolean;
+    }> = [];
     const addProviderUse = (raw: string | undefined, allowCodexRuntimeFallback: boolean) => {
       const ref = resolveStatusModelRef(raw);
       if (ref?.provider) {
         providerUses.push({
           provider: normalizeProviderId(ref.provider),
+          model: ref.model,
           allowCodexRuntimeFallback,
         });
       }
@@ -432,10 +454,35 @@ export async function modelsStatusCommand(
         usage.allowCodexRuntimeFallback &&
         openAIProviderUsesCodexRuntimeByDefault({ provider: usage.provider, config: cfg }),
     );
+    const cliRuntimeAuthUsages = providerUses
+      .filter((usage) => usage.allowCodexRuntimeFallback)
+      .map((usage) => {
+        const runtimeProvider = resolveCliRuntimeExecutionProvider({
+          provider: usage.provider,
+          modelId: usage.model,
+          cfg,
+          agentId: workspaceAgentId,
+        });
+        const normalizedRuntime = runtimeProvider
+          ? normalizeProviderId(runtimeProvider)
+          : undefined;
+        return normalizedRuntime && normalizedRuntime !== usage.provider
+          ? {
+              allowCodexRuntimeFallback: usage.allowCodexRuntimeFallback,
+              model: usage.model,
+              provider: usage.provider,
+              runtime: normalizedRuntime,
+            }
+          : undefined;
+      })
+      .filter((usage): usage is NonNullable<typeof usage> => Boolean(usage));
     if (codexRuntimeAuthUsages.length > 0) {
       syntheticProvidersToProbe.add(codexProvider);
       syntheticProvidersToProbe.add(codexProviderAlias);
       syntheticProvidersToProbe.add("codex");
+    }
+    for (const usage of cliRuntimeAuthUsages) {
+      syntheticProvidersToProbe.add(usage.runtime);
     }
     for (const provider of syntheticProvidersToProbe) {
       const normalized = normalizeProviderId(provider);
@@ -482,6 +529,7 @@ export async function modelsStatusCommand(
         ...(codexRuntimeAuthUsages.length > 0 && syntheticAuthByProvider.has(codexProvider)
           ? [codexProvider]
           : []),
+        ...cliRuntimeAuthUsages.map((usage) => usage.runtime),
       ]),
     )
       .toSorted((a, b) => a.localeCompare(b))
@@ -564,43 +612,88 @@ export async function modelsStatusCommand(
       }
       return providerAuthMap.get(provider)?.effective ?? missingProviderAuthEffective;
     };
+    const resolveDirectRuntimeAuthRouteEffective = (
+      provider: string,
+    ): ProviderAuthOverview["effective"] => {
+      const normalized = normalizeProviderId(provider);
+      const direct = providerAuthMap.get(normalized)?.effective;
+      if (direct && direct.kind !== "missing") {
+        return direct;
+      }
+      const orderedProfiles = resolveAuthProfileOrder({
+        cfg,
+        store,
+        provider: normalized,
+      });
+      const profileId = orderedProfiles[0];
+      const credential = profileId ? store.profiles[profileId] : undefined;
+      if (profileId && credential) {
+        const source = providerAuthMap.get(normalized)?.effective;
+        return source && source.kind !== "missing"
+          ? source
+          : {
+              kind: "profiles",
+              detail: `${profileId} (${credential.provider})`,
+            };
+      }
+      return providerAuthMap.get(normalized)?.effective ?? missingProviderAuthEffective;
+    };
+    const hasUsableDirectNonProfileAuth = (provider: string): boolean => {
+      const normalized = normalizeProviderId(provider);
+      const auth = providerAuthMap.get(normalized);
+      return Boolean(
+        auth?.env ||
+        isUsableStatusSyntheticAuth(syntheticAuthByProvider.get(normalized)) ||
+        resolveUsableCustomProviderApiKey({ cfg, provider: normalized }),
+      );
+    };
     const hasUsableNonProfileAuth = (
       provider: string,
       options?: { includeLegacyOpenAICodex?: boolean },
     ): boolean => {
       for (const candidate of listRuntimeAuthProviderCandidates(provider, options)) {
-        const auth = providerAuthMap.get(candidate);
-        if (
-          auth?.env ||
-          auth?.syntheticAuth ||
-          syntheticAuthByProvider.has(candidate) ||
-          resolveUsableCustomProviderApiKey({ cfg, provider: candidate })
-        ) {
+        if (hasUsableDirectNonProfileAuth(candidate)) {
           return true;
         }
       }
       return false;
+    };
+    const hasUsableDirectProviderAuth = (provider: string): boolean => {
+      const normalized = normalizeProviderId(provider);
+      const orderedProfiles = resolveAuthProfileOrder({
+        cfg,
+        store,
+        provider: normalized,
+      });
+      return orderedProfiles.length > 0 || hasUsableDirectNonProfileAuth(normalized);
     };
     const hasUsableProviderAuth = (
       provider: string,
       options?: { includeLegacyOpenAICodex?: boolean },
     ): boolean => {
       for (const candidate of listRuntimeAuthProviderCandidates(provider, options)) {
-        const orderedProfiles = resolveAuthProfileOrder({
-          cfg,
-          store,
-          provider: candidate,
-        });
-        if (orderedProfiles.length > 0 || hasUsableNonProfileAuth(candidate)) {
+        if (hasUsableDirectProviderAuth(candidate)) {
           return true;
         }
       }
       return false;
     };
+    const resolveCliRuntimeAuthProvider = (usage: (typeof providerUses)[number]) =>
+      cliRuntimeAuthUsages.find(
+        (candidate) =>
+          candidate.provider === usage.provider &&
+          candidate.model === usage.model &&
+          candidate.allowCodexRuntimeFallback === usage.allowCodexRuntimeFallback,
+      )?.runtime;
     const hasUsableAuthForProviderInUse = (
-      provider: string,
+      usage: (typeof providerUses)[number],
       options: { allowCodexRuntimeFallback: boolean },
     ): boolean => {
+      const cliRuntimeAuthProvider = resolveCliRuntimeAuthProvider(usage);
+      if (cliRuntimeAuthProvider) {
+        return hasUsableDirectProviderAuth(cliRuntimeAuthProvider);
+      }
+      const { provider } = usage;
       if (hasUsableProviderAuth(provider)) {
         return true;
       }
@@ -613,8 +706,8 @@ export async function modelsStatusCommand(
       );
     };
     const runtimeAuthRoutes = Array.from(
-      new Map(
-        codexRuntimeAuthUsages.map((usage) => {
+      new Map([
+        ...codexRuntimeAuthUsages.map((usage) => {
           const effective = resolveRuntimeAuthRouteEffective(codexProvider);
           return [
             `${usage.provider}:codex:${codexProvider}`,
@@ -631,21 +724,38 @@ export async function modelsStatusCommand(
             },
           ] as const;
         }),
-      ).values(),
+        ...cliRuntimeAuthUsages.map((usage) => {
+          const effective = resolveDirectRuntimeAuthRouteEffective(usage.runtime);
+          return [
+            `${usage.provider}:${usage.runtime}:${usage.runtime}`,
+            {
+              provider: usage.provider,
+              runtime: usage.runtime,
+              authProvider: usage.runtime,
+              status: hasUsableDirectProviderAuth(usage.runtime) ? "usable" : "missing",
+              effective,
+            },
+          ] as const;
+        }),
+      ]).values(),
     ).toSorted((a, b) => a.provider.localeCompare(b.provider));
     const missingProvidersInUse = Array.from(
       new Set(
         providerUses
           .filter(
             (usage) =>
-              !hasUsableAuthForProviderInUse(usage.provider, {
+              !hasUsableAuthForProviderInUse(usage, {
                 allowCodexRuntimeFallback: usage.allowCodexRuntimeFallback,
               }),
           )
-          .map((usage) => usage.provider),
+          .map((usage) => resolveCliRuntimeAuthProvider(usage) ?? usage.provider),
       ),
     )
-      .filter((provider) => !isCliProvider(provider, cfg))
+      .filter(
+        (provider) =>
+          !isCliProvider(provider, cfg) ||
+          cliRuntimeAuthUsages.some((usage) => usage.runtime === provider),
+      )
       .toSorted((a, b) => a.localeCompare(b));
 
     const probeProfileIds = (() => {
@@ -783,6 +893,11 @@ export async function modelsStatusCommand(
     const checkStatus = (() => {
       const providersInUse = new Set<string>();
       for (const usage of providerUses) {
+        const cliRuntimeAuthProvider = resolveCliRuntimeAuthProvider(usage);
+        if (cliRuntimeAuthProvider) {
+          providersInUse.add(cliRuntimeAuthProvider);
+          continue;
+        }
         providersInUse.add(usage.provider);
         providersInUse.add(resolveProviderAuthHealthId(usage.provider));
         if (
