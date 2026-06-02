@@ -19,7 +19,7 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../api.js";
 import { assessClaimFreshness, isClaimContestedStatus } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiSearchBackend, WikiSearchCorpus, WikiPageGroup } from "./config.js";
 import {
   parseWikiMarkdown,
   toWikiPageSummary,
