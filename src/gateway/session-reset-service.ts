@@ -59,6 +59,7 @@ import {
   noteActiveSessionForShutdown,
 } from "./active-sessions-shutdown-tracker.js";
 import { findDirectChildSessionsForParent } from "./session-child-sessions.js";
+import { resolveSessionStoreAgentId } from "./session-store-key.js";
 import {
   archiveSessionTranscriptsDetailed,
   resolveStableSessionEndTranscript,
@@ -68,7 +69,6 @@ import {
   loadSessionEntry,
   migrateAndPruneGatewaySessionStoreKey,
   readSessionMessagesAsync,
-  resolveSessionStoreAgentId,
   resolveSessionStoreKey,
   resolveGatewaySessionStoreTarget,
   resolveSessionModelRef,
