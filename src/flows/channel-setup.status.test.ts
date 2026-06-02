@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   makeCatalogEntry,
   makeChannelSetupEntries,
@@ -87,6 +87,7 @@ let noteChannelStatus: ChannelSetupStatusModule["noteChannelStatus"];
 let noteChannelPrimer: ChannelSetupStatusModule["noteChannelPrimer"];
 let resolveChannelSelectionNoteLines: ChannelSetupStatusModule["resolveChannelSelectionNoteLines"];
 let resolveChannelSetupSelectionContributions: ChannelSetupStatusModule["resolveChannelSetupSelectionContributions"];
+let previousOpenClawLocale: string | undefined;
 
 function requireFirstMockCall<const Calls extends readonly unknown[][]>(
   calls: Calls,
@@ -102,6 +103,7 @@ function requireFirstMockCall<const Calls extends readonly unknown[][]>(
 describe("resolveChannelSetupSelectionContributions", () => {
   beforeEach(async () => {
     vi.resetModules();
+    previousOpenClawLocale = process.env.OPENCLAW_LOCALE;
     process.env.OPENCLAW_LOCALE = "en";
     vi.clearAllMocks();
     listChatChannels.mockReturnValue([
@@ -123,6 +125,14 @@ describe("resolveChannelSetupSelectionContributions", () => {
       resolveChannelSelectionNoteLines,
       resolveChannelSetupSelectionContributions,
     } = await import("./channel-setup.status.js"));
+  });
+
+  afterEach(() => {
+    if (previousOpenClawLocale === undefined) {
+      delete process.env.OPENCLAW_LOCALE;
+    } else {
+      process.env.OPENCLAW_LOCALE = previousOpenClawLocale;
+    }
   });
 
   it("sorts channels alphabetically by picker label", () => {
