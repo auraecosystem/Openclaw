@@ -1,9 +1,6 @@
 import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
 import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
-import {
-  getReplyPayloadMetadata as getInternalReplyPayloadMetadata,
-  type ReplyPayload as InternalReplyPayload,
-} from "../auto-reply/reply-payload.js";
+import type { ReplyPayload as InternalReplyPayload } from "../auto-reply/reply-payload.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/outbound.types.js";
 import { normalizeOutboundReplyPayload as normalizeCoreOutboundReplyPayload } from "../infra/outbound/reply-payload-normalize.js";
 import { createReplyToFanout } from "../infra/outbound/reply-policy.js";
@@ -20,10 +17,6 @@ export {
   isReplyPayloadTtsSupplement,
   markReplyPayloadAsTtsSupplement,
 } from "../auto-reply/reply-payload.js";
-
-export function getReplyPayloadAssistantMessageIndex(payload: object): number | undefined {
-  return getInternalReplyPayloadMetadata(payload)?.assistantMessageIndex;
-}
 
 export type OutboundReplyPayload = {
   text?: string;

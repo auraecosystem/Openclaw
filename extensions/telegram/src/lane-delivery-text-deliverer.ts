@@ -76,6 +76,8 @@ type DeliverLaneTextParams = {
   payload: ReplyPayload;
   infoKind: string;
   buttons?: TelegramInlineButtons;
+  finalizePreview?: boolean;
+  durable?: boolean;
 };
 
 function result(
@@ -284,7 +286,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     lane: DraftLaneState,
     text: string,
     payload: ReplyPayload,
-    isFinal: boolean,
+    useFinalTextRecovery: boolean,
     finalizePreview: boolean,
     buttons?: TelegramInlineButtons,
   ): Promise<LaneDeliveryResult | undefined> => {
@@ -305,7 +307,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     const finalText = text.trimEnd();
     const deliveredStreamTextBeforeUpdate = stream.lastDeliveredText?.();
     const deliveredPrefixBeforeUpdate =
-      isFinal &&
+      useFinalTextRecovery &&
       deliveredStreamTextBeforeUpdate !== undefined &&
       isDeliveredPrefix({
         deliveredText: deliveredStreamTextBeforeUpdate,
@@ -351,7 +353,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     };
 
     const retainedPreview =
-      isFinal && remainingChunks.length === 0 && isPotentialTruncatedFinal(text)
+      useFinalTextRecovery && remainingChunks.length === 0 && isPotentialTruncatedFinal(text)
         ? selectLongerFinalText({
             finalText: text,
             candidateTexts: [
@@ -434,6 +436,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
       deliveredStreamTextAfterStop !== firstChunk.trimEnd()
     ) {
       if (
+        useFinalTextRecovery &&
         isDeliveredPrefix({ deliveredText: deliveredStreamTextAfterStop, finalText }) &&
         deliveredStreamTextAfterStop.length > firstChunk.trimEnd().length
       ) {
@@ -482,20 +485,23 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     payload,
     infoKind,
     buttons,
+    finalizePreview: requestedFinalizePreview,
+    durable: requestedDurable,
   }: DeliverLaneTextParams): Promise<LaneDeliveryResult> => {
     const lane = params.lanes[laneName];
     const reply = resolveSendableOutboundReplyParts(payload, { text });
-    const isFinal = infoKind === "final";
-    const finalizePreview = isFinal;
+    const isDurableFinal = infoKind === "final";
+    const finalizePreview = requestedFinalizePreview ?? isDurableFinal;
+    const durable = requestedDurable ?? isDurableFinal;
     const streamed = !reply.hasMedia
-      ? await streamText(laneName, lane, text, payload, isFinal, finalizePreview, buttons)
+      ? await streamText(laneName, lane, text, payload, isDurableFinal, finalizePreview, buttons)
       : undefined;
     if (streamed) {
       return streamed;
     }
 
     if (
-      isFinal &&
+      finalizePreview &&
       reply.hasMedia &&
       lane.stream &&
       lane.hasStreamedMessage &&
@@ -507,7 +513,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
         lane,
         text,
         textOnlyPayload(payload),
-        true,
+        isDurableFinal,
         true,
         buttons,
       );
@@ -523,7 +529,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
             fallbackButtons: stripButtons ? undefined : buttons,
           }),
           {
-            durable: true,
+            durable,
           },
         );
         return finalizedPreview;
@@ -535,7 +541,7 @@ export function createLaneTextDeliverer(params: CreateLaneTextDelivererParams) {
     }
 
     const delivered = await params.sendPayload(params.applyTextToPayload(payload, text), {
-      durable: isFinal,
+      durable,
     });
     if (delivered && finalizePreview) {
       lane.finalized = true;
