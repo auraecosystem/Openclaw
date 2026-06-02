@@ -1550,6 +1550,7 @@ export async function spawnAcpDirect(
   const parentEventRouting = parentSessionKey
     ? resolveEventSessionRoutingPolicy({ cfg, sessionKey: parentSessionKey })
     : undefined;
+  const assistantCommentary = cfg.acp?.stream?.assistantCommentary === true;
   if (effectiveStreamToParent && parentSessionKey) {
     // Register relay before dispatch so fast lifecycle failures are not missed.
     parentRelay = startAcpSpawnParentStreamRelay({
@@ -1563,6 +1564,7 @@ export async function spawnAcpDirect(
       logPath: streamLogPath,
       deliveryContext: parentDeliveryCtx,
       emitStartNotice: false,
+      assistantCommentary,
     });
   }
   const gatewayAttachments = toGatewayImageAttachments(params.attachments);
@@ -1622,6 +1624,7 @@ export async function spawnAcpDirect(
         logPath: streamLogPath,
         deliveryContext: parentDeliveryCtx,
         emitStartNotice: false,
+        assistantCommentary,
       });
     }
     parentRelay?.notifyStarted();
