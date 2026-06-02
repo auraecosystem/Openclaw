@@ -123,6 +123,23 @@ function resolveDirectFromActiveRegistry(channel: string): ChannelPlugin | undef
   return undefined;
 }
 
+function channelPluginCanSend(plugin: ChannelPlugin | undefined): boolean {
+  const outbound = plugin?.outbound;
+  const messageSend = plugin?.message?.send;
+  return Boolean(
+    outbound?.sendText ??
+    outbound?.sendMedia ??
+    outbound?.sendPayload ??
+    outbound?.sendPoll ??
+    outbound?.sendFormattedText ??
+    outbound?.sendFormattedMedia ??
+    messageSend?.text ??
+    messageSend?.media ??
+    messageSend?.payload ??
+    messageSend?.poll,
+  );
+}
+
 function toOutboundChannelRuntime(plugin: ChannelPlugin): OutboundChannelRuntime {
   return {
     id: plugin.id,
@@ -210,13 +227,60 @@ export function resolveOutboundChannelPlugin(params: {
   return resolveLoaded() ?? resolveDirectFromActiveRegistry(normalized) ?? resolve();
 }
 
+/** Resolves a deliverable outbound channel plugin that has send capability. */
+export function resolveOutboundChannelPluginForDelivery(params: {
+  channel: string;
+  cfg?: OpenClawConfig;
+  allowBootstrap?: boolean;
+}): ChannelPlugin | undefined {
+  const normalized = normalizeDeliverableOutboundChannel(params.channel);
+  if (!normalized) {
+    return undefined;
+  }
+
+  const resolveLoaded = () => getLoadedChannelPlugin(normalized);
+  const resolve = () => getChannelPlugin(normalized);
+  const current = resolveLoaded();
+  if (channelPluginCanSend(current)) {
+    return current;
+  }
+  const directCurrent = resolveDirectFromActiveRegistry(normalized);
+  if (channelPluginCanSend(directCurrent)) {
+    return directCurrent;
+  }
+
+  const bundledCurrent = resolve();
+  if (channelPluginCanSend(bundledCurrent)) {
+    return bundledCurrent;
+  }
+
+  if (params.allowBootstrap !== true) {
+    return undefined;
+  }
+
+  maybeBootstrapChannelPlugin({ channel: normalized, cfg: params.cfg });
+  const bootstrappedLoaded = resolveLoaded();
+  if (channelPluginCanSend(bootstrappedLoaded)) {
+    return bootstrappedLoaded;
+  }
+  const bootstrappedDirect = resolveDirectFromActiveRegistry(normalized);
+  if (channelPluginCanSend(bootstrappedDirect)) {
+    return bootstrappedDirect;
+  }
+  const bootstrappedBundled = resolve();
+  if (channelPluginCanSend(bootstrappedBundled)) {
+    return bootstrappedBundled;
+  }
+  return undefined;
+}
+
 /** Resolves the message adapter for a deliverable outbound channel. */
 export function resolveOutboundChannelMessageAdapter(params: {
   channel: string;
   cfg?: OpenClawConfig;
   allowBootstrap?: boolean;
 }): ChannelMessageAdapterShape | undefined {
-  return resolveOutboundChannelPlugin(params)?.message;
+  return resolveOutboundChannelPluginForDelivery(params)?.message;
 }
 
 /** Resolves a channel plugin for read-only metadata paths. */
