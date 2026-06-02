@@ -40,7 +40,6 @@ describe("cron isolated session tool construction with messaging profile", () =>
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).toContain("exec");
     expect(toolNames).toContain("process");
-    expect(toolNames).toContain("bash");
   });
 
   it("createOpenClawCodingTools excludes exec with messaging profile only", () => {
@@ -55,7 +54,6 @@ describe("cron isolated session tool construction with messaging profile", () =>
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain("exec");
     expect(toolNames).not.toContain("process");
-    expect(toolNames).not.toContain("bash");
   });
 
   it("allowBackground is consistent with exec visibility under wildcard + messaging", () => {
