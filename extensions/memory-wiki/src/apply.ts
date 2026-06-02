@@ -221,7 +221,7 @@ async function applyCreateSynthesisMutation(params: {
     `synthesis.${slug}`;
   const changed = await writeWikiPage({
     rootDir: params.config.vault.path,
-    relativePath: relativePath,
+    relativePath,
     frontmatter: {
       ...parsed.frontmatter,
       pageType: "synthesis",
