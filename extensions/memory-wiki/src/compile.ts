@@ -1350,7 +1350,7 @@ export async function compileMemoryWikiVault(
     updatedFiles.push(rootIndexPath);
   }
 
-  for (const group of deriveAllPageGroups(params.config)) {
+  for (const group of deriveAllPageGroups(config)) {
     const relativePath = path.join(group.dir, "index.md").replace(/\\/g, "/");
     const filePath = path.join(rootDir, relativePath);
     if (
