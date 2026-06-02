@@ -208,7 +208,7 @@ export function buildRuntimeCompatibleToolInventory(params: {
 } {
   const rawToolsByName = buildReadableRawToolsByName(params.tools);
   const preNormalizationProjection = filterProviderNormalizableTools(params.tools);
-  const preNormalizationDiagnostics: RuntimeToolSchemaDiagnostic[] = [
+  const toolSchemaDiagnostics: RuntimeToolSchemaDiagnostic[] = [
     ...preNormalizationProjection.diagnostics,
   ];
   const normalizedTools = normalizeAgentRuntimeTools({
@@ -221,11 +221,10 @@ export function buildRuntimeCompatibleToolInventory(params: {
     modelId: params.modelId,
     modelApi: params.modelApi ?? undefined,
     model: params.runtimeModel,
-    onPreNormalizationSchemaDiagnostics: (diagnostics) =>
-      preNormalizationDiagnostics.push(...diagnostics),
+    onToolSchemaDiagnostics: (diagnostics) => toolSchemaDiagnostics.push(...diagnostics),
   });
   const projection = filterRuntimeCompatibleTools(normalizedTools);
-  const diagnostics = [...preNormalizationDiagnostics, ...projection.diagnostics];
+  const diagnostics = [...toolSchemaDiagnostics, ...projection.diagnostics];
   return {
     entries: buildEffectiveToolInventoryEntries(projection.tools, rawToolsByName),
     notices: buildUnsupportedToolSchemaNotices({

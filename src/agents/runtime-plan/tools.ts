@@ -11,6 +11,7 @@ import {
 import type { AgentTool } from "../runtime/index.js";
 import {
   filterProviderNormalizableTools,
+  filterRuntimeCompatibleTools,
   type RuntimeToolSchemaDiagnostic,
 } from "../tool-schema-projection.js";
 import type { AgentRuntimePlan } from "./types.js";
@@ -27,7 +28,7 @@ type AgentRuntimeToolPolicyParams<TSchemaType extends TSchema = TSchema, TResult
   model?: ProviderRuntimeModel;
   runtimeHandle?: ProviderRuntimePluginHandle;
   allowProviderRuntimePluginLoad?: boolean;
-  onPreNormalizationSchemaDiagnostics?: (
+  onToolSchemaDiagnostics?: (
     diagnostics: readonly RuntimeToolSchemaDiagnostic[],
     tools: readonly AgentTool<TSchemaType, TResult>[],
   ) => void;
@@ -53,14 +54,49 @@ function copyRuntimeToolMetadata(source: AgentTool, target: AgentTool): void {
   copyChannelAgentToolMeta(source as never, target as never);
 }
 
+function readRuntimeToolName(tool: AgentTool): string | undefined {
+  try {
+    return typeof tool.name === "string" && tool.name ? tool.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function readRuntimeToolArrayLength(tools: readonly AgentTool[]): number {
+  try {
+    return tools.length;
+  } catch {
+    return 0;
+  }
+}
+
+function readRuntimeToolAt<TSchemaType extends TSchema = TSchema, TResult = unknown>(
+  tools: readonly AgentTool<TSchemaType, TResult>[],
+  index: number,
+): AgentTool<TSchemaType, TResult> | undefined {
+  try {
+    return tools[index];
+  } catch {
+    return undefined;
+  }
+}
+
 function preserveRuntimeToolMetadata<TSchemaType extends TSchema = TSchema, TResult = unknown>(
   sourceTools: AgentTool<TSchemaType, TResult>[],
   normalizedTools: AgentTool<TSchemaType, TResult>[],
 ): AgentTool<TSchemaType, TResult>[] {
   const sourcesByUniqueName = new Map<string, AgentTool<TSchemaType, TResult>>();
   const duplicateNames = new Set<string>();
-  for (const source of sourceTools) {
-    const name = source.name;
+  const sourceLength = readRuntimeToolArrayLength(sourceTools);
+  for (let index = 0; index < sourceLength; index += 1) {
+    const source = readRuntimeToolAt(sourceTools, index);
+    if (!source) {
+      continue;
+    }
+    const name = readRuntimeToolName(source);
+    if (!name) {
+      continue;
+    }
     if (sourcesByUniqueName.has(name)) {
       duplicateNames.add(name);
       sourcesByUniqueName.delete(name);
@@ -70,10 +106,20 @@ function preserveRuntimeToolMetadata<TSchemaType extends TSchema = TSchema, TRes
       sourcesByUniqueName.set(name, source);
     }
   }
-  for (const [index, target] of normalizedTools.entries()) {
+  const targetLength = readRuntimeToolArrayLength(normalizedTools);
+  for (let index = 0; index < targetLength; index += 1) {
+    const target = readRuntimeToolAt(normalizedTools, index);
+    if (!target) {
+      continue;
+    }
+    const targetName = readRuntimeToolName(target);
+    if (!targetName) {
+      continue;
+    }
     const indexedSource = sourceTools[index];
+    const indexedSourceName = indexedSource ? readRuntimeToolName(indexedSource) : undefined;
     const source =
-      indexedSource?.name === target.name ? indexedSource : sourcesByUniqueName.get(target.name);
+      indexedSourceName === targetName ? indexedSource : sourcesByUniqueName.get(targetName);
     if (source) {
       copyRuntimeToolMetadata(source, target);
     }
@@ -88,10 +134,7 @@ export function normalizeAgentRuntimeTools<
   const planContext = runtimePlanToolContext(params);
   const normalizableToolProjection = filterProviderNormalizableTools(params.tools);
   if (normalizableToolProjection.diagnostics.length > 0) {
-    params.onPreNormalizationSchemaDiagnostics?.(
-      normalizableToolProjection.diagnostics,
-      params.tools,
-    );
+    params.onToolSchemaDiagnostics?.(normalizableToolProjection.diagnostics, params.tools);
   }
   const normalizableTools = [...normalizableToolProjection.tools] as AgentTool<
     TSchemaType,
@@ -112,7 +155,16 @@ export function normalizeAgentRuntimeTools<
       allowRuntimePluginLoad: params.allowProviderRuntimePluginLoad,
     });
   const normalizedTools = Array.isArray(normalized) ? normalized : normalizableTools;
-  return preserveRuntimeToolMetadata(normalizableTools, normalizedTools);
+  const metadataPreservedTools = preserveRuntimeToolMetadata(normalizableTools, normalizedTools);
+  const runtimeToolProjection = filterRuntimeCompatibleTools(metadataPreservedTools);
+  if (runtimeToolProjection.diagnostics.length > 0) {
+    params.onToolSchemaDiagnostics?.(runtimeToolProjection.diagnostics, metadataPreservedTools);
+  }
+  const runtimeCompatibleTools =
+    runtimeToolProjection.diagnostics.length > 0
+      ? [...runtimeToolProjection.tools]
+      : metadataPreservedTools;
+  return runtimeCompatibleTools;
 }
 
 export function logAgentRuntimeToolDiagnostics(params: AgentRuntimeToolPolicyParams): void {

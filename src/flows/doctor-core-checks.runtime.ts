@@ -607,7 +607,7 @@ function collectBundleMcpRuntimeToolSchemaFindings(params: {
     warn: () => {},
     toolPolicyAuditLogLevel: "debug",
   });
-  const preNormalizationFindings: HealthFinding[] = [];
+  const toolSchemaFindings: HealthFinding[] = [];
 
   let normalizedTools: AnyAgentTool[];
   try {
@@ -620,8 +620,8 @@ function collectBundleMcpRuntimeToolSchemaFindings(params: {
       modelId: params.modelRef.model,
       modelApi: params.model.api,
       model: params.model,
-      onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) => {
-        preNormalizationFindings.push(
+      onToolSchemaDiagnostics: (diagnostics, sourceTools) => {
+        toolSchemaFindings.push(
           ...diagnostics.map((diagnostic) =>
             toolSchemaDiagnosticToFinding({
               agentId: params.agentId,
@@ -633,11 +633,11 @@ function collectBundleMcpRuntimeToolSchemaFindings(params: {
       },
     });
   } catch (error) {
-    return [...preNormalizationFindings, bundleMcpRuntimeNormalizationFailureFinding(error)];
+    return [...toolSchemaFindings, bundleMcpRuntimeNormalizationFailureFinding(error)];
   }
 
   return [
-    ...preNormalizationFindings,
+    ...toolSchemaFindings,
     ...collectToolSchemaFindings({
       agentId: params.agentId,
       tools: normalizedTools,
@@ -701,7 +701,7 @@ function collectAgentRuntimeToolSchemaFindings(params: {
     return [agentRuntimeToolLoadFailureFinding({ agentId: params.agentId, error })];
   }
 
-  const preNormalizationFindings: HealthFinding[] = [];
+  const toolSchemaFindings: HealthFinding[] = [];
 
   let normalizedTools: AnyAgentTool[];
   try {
@@ -714,8 +714,8 @@ function collectAgentRuntimeToolSchemaFindings(params: {
       modelId: params.modelRef.model,
       modelApi: params.model.api,
       model: params.model,
-      onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) => {
-        preNormalizationFindings.push(
+      onToolSchemaDiagnostics: (diagnostics, sourceTools) => {
+        toolSchemaFindings.push(
           ...diagnostics.map((diagnostic) =>
             toolSchemaDiagnosticToFinding({
               agentId: params.agentId,
@@ -728,13 +728,13 @@ function collectAgentRuntimeToolSchemaFindings(params: {
     });
   } catch (error) {
     return [
-      ...preNormalizationFindings,
+      ...toolSchemaFindings,
       agentRuntimeToolNormalizationFailureFinding({ agentId: params.agentId, error }),
     ];
   }
 
   return [
-    ...preNormalizationFindings,
+    ...toolSchemaFindings,
     ...collectToolSchemaFindings({
       agentId: params.agentId,
       tools: normalizedTools,

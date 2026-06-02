@@ -98,7 +98,7 @@ export function buildRuntimeCompatibleMcpToolInventory(params: {
   notices: EffectiveToolInventoryNotice[];
 } {
   const preNormalizationProjection = filterProviderNormalizableTools(params.tools);
-  const preNormalizationDiagnostics: RuntimeToolSchemaDiagnostic[] = [
+  const toolSchemaDiagnostics: RuntimeToolSchemaDiagnostic[] = [
     ...preNormalizationProjection.diagnostics,
   ];
   const normalizedTools = normalizeAgentRuntimeTools({
@@ -110,11 +110,10 @@ export function buildRuntimeCompatibleMcpToolInventory(params: {
     modelApi: params.modelApi ?? undefined,
     model: params.runtimeModel,
     allowProviderRuntimePluginLoad: false,
-    onPreNormalizationSchemaDiagnostics: (diagnostics) =>
-      preNormalizationDiagnostics.push(...diagnostics),
+    onToolSchemaDiagnostics: (diagnostics) => toolSchemaDiagnostics.push(...diagnostics),
   });
   const projection = filterRuntimeCompatibleTools(normalizedTools);
-  const diagnostics = [...preNormalizationDiagnostics, ...projection.diagnostics];
+  const diagnostics = [...toolSchemaDiagnostics, ...projection.diagnostics];
   return {
     entries: buildMcpToolInventoryEntries(projection.tools),
     notices: diagnostics.map(buildMcpUnsupportedToolSchemaNotice),

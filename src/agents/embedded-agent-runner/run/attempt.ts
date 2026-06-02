@@ -1421,7 +1421,7 @@ export async function runEmbeddedAttempt(
       modelApi: params.model.api,
       model: params.model,
       runtimeHandle: getProviderRuntimeHandle(),
-      onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) =>
+      onToolSchemaDiagnostics: (diagnostics, sourceTools) =>
         logRuntimeToolSchemaQuarantine({
           diagnostics,
           tools: sourceTools,
@@ -1517,7 +1517,7 @@ export async function runEmbeddedAttempt(
             modelApi: params.model.api,
             model: params.model,
             runtimeHandle: getProviderRuntimeHandle(),
-            onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) =>
+            onToolSchemaDiagnostics: (diagnostics, sourceTools) =>
               logRuntimeToolSchemaQuarantine({
                 diagnostics,
                 tools: sourceTools,

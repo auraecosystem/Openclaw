@@ -170,7 +170,7 @@ export function collectActiveToolSchemaProjectionWarnings(params: {
     }
 
     const rawToolsByName = buildReadableToolsByName(tools);
-    const preNormalizationDiagnostics: RuntimeToolSchemaDiagnostic[] = [];
+    const toolSchemaDiagnostics: RuntimeToolSchemaDiagnostic[] = [];
     let normalizedTools: typeof tools;
     try {
       normalizedTools = normalizeAgentRuntimeTools({
@@ -182,8 +182,7 @@ export function collectActiveToolSchemaProjectionWarnings(params: {
         modelId: modelRef.model,
         modelApi: runtimeModelContext.modelApi,
         model: runtimeModelContext.model,
-        onPreNormalizationSchemaDiagnostics: (diagnostics) =>
-          preNormalizationDiagnostics.push(...diagnostics),
+        onToolSchemaDiagnostics: (diagnostics) => toolSchemaDiagnostics.push(...diagnostics),
       });
     } catch (error) {
       warnings.push(
@@ -193,7 +192,7 @@ export function collectActiveToolSchemaProjectionWarnings(params: {
       );
       continue;
     }
-    for (const diagnostic of preNormalizationDiagnostics) {
+    for (const diagnostic of toolSchemaDiagnostics) {
       const rawTool = rawToolsByName.get(diagnostic.toolName);
       const pluginId = readPluginId(rawTool);
       warnings.push(

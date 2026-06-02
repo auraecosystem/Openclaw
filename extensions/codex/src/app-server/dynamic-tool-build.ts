@@ -267,9 +267,9 @@ export async function buildDynamicTools(input: DynamicToolBuildParams) {
     },
   });
   toolBuildStages.mark("create-openclaw-coding-tools");
-  const preNormalizationDiagnostics: RuntimeToolSchemaDiagnostic[] = [];
+  const toolSchemaDiagnostics: RuntimeToolSchemaDiagnostic[] = [];
   const readableAllToolProjection = filterProviderNormalizableTools(allTools);
-  preNormalizationDiagnostics.push(...readableAllToolProjection.diagnostics);
+  toolSchemaDiagnostics.push(...readableAllToolProjection.diagnostics);
   const readableAllTools = [...readableAllToolProjection.tools];
   const codexFilteredTools = addNodeShellDynamicToolsIfNeeded(
     addSandboxShellDynamicToolsIfAvailable(
@@ -301,17 +301,16 @@ export async function buildDynamicTools(input: DynamicToolBuildParams) {
     modelId: params.modelId,
     modelApi: params.model.api,
     model: params.model,
-    onPreNormalizationSchemaDiagnostics: (diagnostics) =>
-      preNormalizationDiagnostics.push(...diagnostics),
+    onToolSchemaDiagnostics: (diagnostics) => toolSchemaDiagnostics.push(...diagnostics),
   });
   toolBuildStages.mark("runtime-normalization");
-  if (preNormalizationDiagnostics.length > 0) {
+  if (toolSchemaDiagnostics.length > 0) {
     embeddedAgentLog.warn(
-      `codex app-server quarantined ${preNormalizationDiagnostics.length} unsupported runtime tool schema${preNormalizationDiagnostics.length === 1 ? "" : "s"} before dynamic tool registration`,
+      `codex app-server quarantined ${toolSchemaDiagnostics.length} unsupported runtime tool schema${toolSchemaDiagnostics.length === 1 ? "" : "s"} before dynamic tool registration`,
       {
         runId: params.runId,
         sessionId: params.sessionId,
-        diagnostics: preNormalizationDiagnostics.map((diagnostic) => ({
+        diagnostics: toolSchemaDiagnostics.map((diagnostic) => ({
           index: diagnostic.toolIndex,
           tool: diagnostic.toolName,
           violations: diagnostic.violations.slice(0, 12),
