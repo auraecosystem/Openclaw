@@ -973,7 +973,13 @@ describe("gateway server chat", () => {
       },
     ]);
 
-    expect(collectHistoryTextValues(historyMessages)).toEqual(["spawn a child", yieldMessage]);
+    const defaultVisibleMessages = historyMessages.filter(
+      (message) => (message as { role?: unknown } | undefined)?.role !== "toolResult",
+    );
+    expect(collectHistoryTextValues(defaultVisibleMessages)).toEqual([
+      "spawn a child",
+      yieldMessage,
+    ]);
     expect(
       historyMessages.some(
         (message) =>
@@ -981,7 +987,7 @@ describe("gateway server chat", () => {
           typeof message === "object" &&
           (message as { role?: unknown }).role === "toolResult",
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       historyMessages.some(
         (message) =>
