@@ -133,6 +133,7 @@ export async function finalizeHarnessContextEngineTurn(params: {
   promptError: boolean;
   aborted: boolean;
   yieldAborted: boolean;
+  isHeartbeat?: boolean;
   sessionIdUsed: string;
   sessionKey?: string;
   sessionFile: string;
@@ -165,6 +166,7 @@ export async function finalizeHarnessContextEngineTurn(params: {
         prePromptMessageCount: conversationSnapshot.prePromptMessageCount,
         tokenBudget: params.tokenBudget,
         runtimeContext: params.runtimeContext,
+        isHeartbeat: params.isHeartbeat,
       });
     } catch (afterTurnErr) {
       postTurnFinalizationSucceeded = false;
