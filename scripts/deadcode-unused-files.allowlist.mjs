@@ -2,10 +2,29 @@
 // generated/build inputs, manifest-discovered plugin surfaces, live-test
 // helpers, or package bridge files that static production scanning cannot see.
 export const KNIP_UNUSED_FILE_ALLOWLIST = [
+  // HEAD-only continuation-rail OTel optimization adapter; service.ts taken
+  // wholesale from upstream during Strategy-B merge (HEAD's
+  // scheduleTrackedRunSpanFinalize vs upstream's completeTrackedLifecycleSpan +
+  // retainedSpanContext were too entangled for clean port). TODO: fresh-window
+  // cohort-cosign re-port HEAD-only OTel optimizations into upstream service.ts
+  // shape; reinstate setContinuationTracer(createContinuationOtelTracerAdapter())
+  // install-call after sdk.start().
+  "extensions/diagnostics-otel/src/continuation-tracer-adapter.ts",
   // Per-agent SQLite scaffold is intentionally landed before runtime migration
   // callers so the schema and scoped cache API can be reviewed together.
   "src/agents/cache/agent-cache-store.sqlite.ts",
   "src/agents/cache/agent-cache-store.ts",
+  // Continuation-rail post-compaction release helper, extracted for testability
+  // in isolation; agent-runner-execution.ts:154-238 still has inline
+  // releaseQueuedCompactionCompletion implementation. TODO: refactor call-site
+  // to use this helper (bigger refactor, not block-CI).
+  "src/auto-reply/continuation/post-compaction-release.ts",
+  // Continuation-rail back-pressure cap-on-enqueue (producer-side); declarative
+  // state landed before producer wire. Matches agent-cache-store family.
+  "src/infra/chain-budget.ts",
+  // Substrate-capability registry query-API; scaffold landed before consumers
+  // wired to the routing system.
+  "src/infra/substrate-capability-registry.ts",
   "src/state/openclaw-agent-db.paths.ts",
   "src/state/openclaw-agent-db.ts",
   "src/state/openclaw-agent-schema.generated.ts",
@@ -28,7 +47,13 @@ export const KNIP_OPTIONAL_UNUSED_FILE_ALLOWLIST = [
   "extensions/diffs/src/viewer-payload.ts",
   "extensions/matrix/src/plugin-entry.runtime.js",
   "extensions/memory-core/src/memory-tool-manager-mock.ts",
-  "ui/src/ui/browser-redact.ts",
+  "extensions/qa-lab/src/auth-profile.fixture.ts",
+  "extensions/qa-lab/src/codex-plugin.fixture.ts",
+  // Continuation-rail subagent-announce runtime entry; bundled separately via
+  // tsdown.config.ts:277-278 and loaded by subagent-announce.ts:326 via
+  // importRuntimeModule(import.meta.url, ["./subagent-announce.continuation.runtime"]).
+  // Knip can't see dynamic-import; mirrors subagent-registry.runtime.ts sibling.
+  "src/agents/subagent-announce.continuation.runtime.ts",
   "src/agents/subagent-registry.runtime.ts",
   "src/auto-reply/inbound.group-require-mention-test-plugins.ts",
   "src/auto-reply/reply/get-reply.test-loader.ts",
@@ -50,6 +75,4 @@ export const KNIP_OPTIONAL_UNUSED_FILE_ALLOWLIST = [
   "src/plugins/runtime-sidecar-paths-baseline.ts",
   "src/tasks/task-registry-control.runtime.ts",
   "ui/src/ui/browser-redact.ts",
-  "extensions/qa-lab/src/auth-profile.fixture.ts",
-  "extensions/qa-lab/src/codex-plugin.fixture.ts",
 ];

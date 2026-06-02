@@ -579,7 +579,6 @@ function buildCompactionContextEngineRuntimeContext(params: {
       config: params.params.config,
       sessionKey: params.params.sessionKey,
       agentId: sessionAgentId,
-      authProfileId: params.params.authProfileId,
       contextEnginePluginId: params.contextEnginePluginId,
       purpose: "context-engine.compaction",
     }),

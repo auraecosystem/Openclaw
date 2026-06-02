@@ -1624,6 +1624,7 @@ export const registerTelegramHandlers = ({
         telegramDeps.enqueueSystemEvent(text, {
           sessionKey,
           contextKey: `telegram:reaction:add:${chatId}:${messageId}:${user?.id ?? "anon"}:${emoji}`,
+          forceSenderIsOwnerFalse: true,
         });
         logVerbose(`telegram: reaction event enqueued: ${text}`);
       }

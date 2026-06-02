@@ -3454,6 +3454,11 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
             case "diagnostic.async_queue.dropped":
               recordAsyncQueueDropped(evt);
               return;
+            case "diagnostic.continuation_queue.sample":
+              // Continuation-queue diagnostic events are emitted by the continuation feature
+              // (PR #85651). No OTel-side handler is needed; swallow silently to satisfy
+              // exhaustiveness-check after upstream's service.ts was taken wholesale at merge.
+              return;
             case "telemetry.exporter":
               recordTelemetryExporter(evt, metadata);
               return;

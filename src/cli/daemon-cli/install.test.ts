@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useHermeticOpenclawEnv } from "../../../test/vitest/hermetic-openclaw-env.js";
 import type { ResolvedGatewayAuth } from "../../gateway/auth.js";
 import { captureFullEnv } from "../../test-utils/env.js";
 import { createCliRuntimeCapture } from "../test-runtime-capture.js";
@@ -236,6 +237,7 @@ const { runDaemonInstall } = await import("./install.js");
 const envSnapshot = captureFullEnv();
 
 describe("runDaemonInstall", () => {
+  useHermeticOpenclawEnv();
   beforeEach(() => {
     loadConfigMock.mockReset();
     resolveNodeStartupTlsEnvironmentMock.mockReset();

@@ -1,18 +1,31 @@
 export {
   ackSessionDelivery,
+  buildPostCompactionDelegateDeliveryPayload,
+  DEFAULT_FAILED_MAX_AGE_MS,
+  enqueuePostCompactionDelegateDelivery,
   enqueueSessionDelivery,
   failSessionDelivery,
   loadPendingSessionDelivery,
   loadPendingSessionDeliveries,
+  moveSessionDeliveryToFailed,
+  pruneFailedOlderThan,
 } from "./session-delivery-queue-storage.js";
 export type {
   QueuedSessionDelivery,
   QueuedSessionDeliveryPayload,
+  SessionDeliveryContext,
   SessionDeliveryRoute,
 } from "./session-delivery-queue-storage.js";
 export {
+  computeSessionDeliveryBackoffMs,
   drainPendingSessionDeliveries,
   isSessionDeliveryEligibleForRetry,
+  MAX_SESSION_DELIVERY_RETRIES,
   recoverPendingSessionDeliveries,
 } from "./session-delivery-queue-recovery.js";
-export type { SessionDeliveryRecoveryLogger } from "./session-delivery-queue-recovery.js";
+export type {
+  DeliverSessionDeliveryFn,
+  PendingSessionDeliveryDrainDecision,
+  SessionDeliveryRecoveryLogger,
+  SessionDeliveryRecoverySummary,
+} from "./session-delivery-queue-recovery.js";

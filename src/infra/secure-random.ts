@@ -4,6 +4,19 @@ export function generateSecureUuid(): string {
   return randomUUID();
 }
 
+/**
+ * Returns a UUIDv4 identifier minted on chain-id transitions. Used for
+ * `SessionEntry.continuationChainId`: chain.id is minted on the 0->1
+ * transition of `continuationChainCount` and stays stable for the lifetime
+ * of the chain. Uses node:crypto.randomUUID() to match the upstream
+ * openclaw parent-trace UUID-format convention (parent traces use v4 from
+ * crypto stdlib; this keeps span attribute chain.id format-consistent with
+ * trace-tooling expectations).
+ */
+export function generateChainId(): string {
+  return randomUUID();
+}
+
 export function generateSecureToken(bytes = 16): string {
   return randomBytes(bytes).toString("base64url");
 }

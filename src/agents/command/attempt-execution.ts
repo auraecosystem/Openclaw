@@ -11,6 +11,7 @@ import {
 import type { SessionEntry } from "../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { emitAgentEvent } from "../../infra/agent-events.js";
+import { runWithDiagnosticTraceparent } from "../../infra/diagnostic-trace-context.js";
 import { readErrorName } from "../../infra/errors.js";
 import { redactSensitiveText } from "../../logging/redact.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -137,7 +138,6 @@ function resolveProfileAuthFromStore(params: { agentDir: string; profileId: stri
   }
   const credential = ensureAuthProfileStore(params.agentDir, {
     allowKeychainPrompt: false,
-    externalCliProfileIds: [profileId],
   }).profiles[profileId];
   return { provider: credential?.provider, mode: credential?.type };
 }
@@ -188,7 +188,6 @@ function resolveHarnessAuthProfileSelection(params: {
 
   const store = ensureAuthProfileStore(params.agentDir, {
     allowKeychainPrompt: false,
-    externalCliProviderIds: [harnessAuthProvider],
   });
   const authProfileId = resolveAuthProfileOrder({
     cfg: params.config,
@@ -558,67 +557,69 @@ export function runAgentAttempt(params: {
       nextCliSessionId: string | undefined,
       activeCliSessionBinding = cliSessionBinding,
     ) =>
-      runCliAgent({
-        sessionId: params.sessionId,
-        sessionKey: params.sessionKey,
-        sessionEntry: params.sessionEntry,
-        agentId: params.sessionAgentId,
-        trigger: "user",
-        sessionFile: params.sessionFile,
-        workspaceDir: params.workspaceDir,
-        cwd: params.cwd,
-        config: params.cfg,
-        prompt: effectivePrompt,
-        provider: cliExecutionProvider,
-        model: params.modelOverride,
-        thinkLevel: params.resolvedThinkLevel,
-        timeoutMs: params.timeoutMs,
-        runId: params.runId,
-        extraSystemPrompt: params.opts.extraSystemPrompt,
-        inputProvenance: params.opts.inputProvenance,
-        cliSessionId: nextCliSessionId,
-        cliSessionBinding:
-          nextCliSessionId === activeCliSessionBinding?.sessionId
-            ? activeCliSessionBinding
-            : undefined,
-        authProfileId,
-        bootstrapPromptWarningSignaturesSeen,
-        bootstrapPromptWarningSignature,
-        images: params.isFallbackRetry ? undefined : params.opts.images,
-        imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
-        skillsSnapshot: params.skillsSnapshot,
-        messageChannel: params.messageChannel,
-        streamParams: params.opts.streamParams,
-        messageProvider: params.opts.messageProvider ?? params.messageChannel,
-        currentChannelId: params.runContext.currentChannelId,
-        currentThreadTs: params.runContext.currentThreadTs,
-        currentInboundAudio: params.runContext.currentInboundAudio,
-        agentAccountId: params.runContext.accountId,
-        senderIsOwner: params.opts.senderIsOwner,
-        toolsAllow: params.opts.toolsAllow,
-        cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
-        cleanupCliLiveSessionOnRunEnd: params.opts.cleanupCliLiveSessionOnRunEnd,
-        ...(mutableCliSessionStore
-          ? {
-              onBeforeFreshCliSessionRetry: async (retry) => {
-                if (retry.sessionId !== activeCliSessionBinding?.sessionId) {
-                  return false;
-                }
+      runWithDiagnosticTraceparent(params.opts.traceparent, () =>
+        runCliAgent({
+          sessionId: params.sessionId,
+          sessionKey: params.sessionKey,
+          sessionEntry: params.sessionEntry,
+          agentId: params.sessionAgentId,
+          trigger: "user",
+          sessionFile: params.sessionFile,
+          workspaceDir: params.workspaceDir,
+          cwd: params.cwd,
+          config: params.cfg,
+          prompt: effectivePrompt,
+          provider: cliExecutionProvider,
+          model: params.modelOverride,
+          thinkLevel: params.resolvedThinkLevel,
+          timeoutMs: params.timeoutMs,
+          runId: params.runId,
+          extraSystemPrompt: params.opts.extraSystemPrompt,
+          inputProvenance: params.opts.inputProvenance,
+          cliSessionId: nextCliSessionId,
+          cliSessionBinding:
+            nextCliSessionId === activeCliSessionBinding?.sessionId
+              ? activeCliSessionBinding
+              : undefined,
+          authProfileId,
+          bootstrapPromptWarningSignaturesSeen,
+          bootstrapPromptWarningSignature,
+          images: params.isFallbackRetry ? undefined : params.opts.images,
+          imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
+          skillsSnapshot: params.skillsSnapshot,
+          messageChannel: params.messageChannel,
+          streamParams: params.opts.streamParams,
+          messageProvider: params.opts.messageProvider ?? params.messageChannel,
+          currentChannelId: params.runContext.currentChannelId,
+          currentThreadTs: params.runContext.currentThreadTs,
+          currentInboundAudio: params.runContext.currentInboundAudio,
+          agentAccountId: params.runContext.accountId,
+          senderIsOwner: params.opts.senderIsOwner,
+          toolsAllow: params.opts.toolsAllow,
+          cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
+          cleanupCliLiveSessionOnRunEnd: params.opts.cleanupCliLiveSessionOnRunEnd,
+          ...(mutableCliSessionStore
+            ? {
+                onBeforeFreshCliSessionRetry: async (retry) => {
+                  if (retry.sessionId !== activeCliSessionBinding?.sessionId) {
+                    return false;
+                  }
 
-                log.warn(
-                  `CLI session failed, clearing before fresh retry: provider=${sanitizeForLog(cliExecutionProvider)} sessionKey=${mutableCliSessionStore.sessionKey} reason=${sanitizeForLog(retry.reason)}`,
-                );
+                  log.warn(
+                    `CLI session failed, clearing before fresh retry: provider=${sanitizeForLog(cliExecutionProvider)} sessionKey=${mutableCliSessionStore.sessionKey} reason=${sanitizeForLog(retry.reason)}`,
+                  );
 
-                params.sessionEntry =
-                  (await clearCliSessionInStore({
-                    provider: cliExecutionProvider,
-                    ...mutableCliSessionStore,
-                  })) ?? params.sessionEntry;
-                return true;
-              },
-            }
-          : {}),
-      });
+                  params.sessionEntry =
+                    (await clearCliSessionInStore({
+                      provider: cliExecutionProvider,
+                      ...mutableCliSessionStore,
+                    })) ?? params.sessionEntry;
+                  return true;
+                },
+              }
+            : {}),
+        }),
+      );
     return resolveReusableCliSessionBinding().then(async (activeCliSessionBinding) => {
       try {
         return await runCliWithSession(activeCliSessionBinding?.sessionId, activeCliSessionBinding);
@@ -644,72 +645,75 @@ export function runAgentAttempt(params: {
     });
   }
 
-  return runEmbeddedAgent({
-    sessionId: params.sessionId,
-    sessionKey: params.sessionKey,
-    agentId: params.sessionAgentId,
-    trigger: "user",
-    messageChannel: params.messageChannel,
-    messageProvider: params.opts.messageProvider ?? params.messageChannel,
-    agentAccountId: params.runContext.accountId,
-    messageTo: params.opts.replyTo ?? params.opts.to,
-    messageThreadId: params.opts.threadId,
-    groupId: params.runContext.groupId,
-    groupChannel: params.runContext.groupChannel,
-    groupSpace: params.runContext.groupSpace,
-    spawnedBy: params.spawnedBy,
-    currentChannelId: params.runContext.currentChannelId,
-    currentThreadTs: params.runContext.currentThreadTs,
-    currentInboundAudio: params.runContext.currentInboundAudio,
-    replyToMode: params.runContext.replyToMode,
-    hasRepliedRef: params.runContext.hasRepliedRef,
-    senderIsOwner: params.opts.senderIsOwner,
-    sessionFile: params.sessionFile,
-    workspaceDir: params.workspaceDir,
-    cwd: params.cwd,
-    config: params.cfg,
-    agentHarnessId: embeddedAgentHarnessOverride,
-    agentHarnessRuntimeOverride: embeddedAgentHarnessOverride,
-    skillsSnapshot: params.skillsSnapshot,
-    prompt: effectivePrompt,
-    images: params.isFallbackRetry ? undefined : params.opts.images,
-    imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
-    clientTools: params.opts.clientTools,
-    provider: embeddedAgentProvider,
-    model: params.modelOverride,
-    modelFallbacksOverride: params.modelFallbacksOverride,
-    authProfileId,
-    authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
-    thinkLevel: params.resolvedThinkLevel,
-    fastMode: params.fastMode,
-    verboseLevel: params.resolvedVerboseLevel,
-    bashElevated: params.opts.bashElevated,
-    timeoutMs: params.timeoutMs,
-    runId: params.runId,
-    lane: params.opts.lane,
-    abortSignal: params.opts.abortSignal,
-    extraSystemPrompt: params.opts.extraSystemPrompt,
-    bootstrapContextMode: params.opts.bootstrapContextMode,
-    bootstrapContextRunKind: params.opts.bootstrapContextRunKind,
-    toolsAllow: params.opts.toolsAllow,
-    internalEvents: params.opts.internalEvents,
-    inputProvenance: params.opts.inputProvenance,
-    sourceReplyDeliveryMode: params.opts.sourceReplyDeliveryMode,
-    disableMessageTool: params.opts.disableMessageTool,
-    streamParams: params.opts.streamParams,
-    agentDir: params.agentDir,
-    allowTransientCooldownProbe: params.allowTransientCooldownProbe,
-    cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
-    modelRun: params.opts.modelRun,
-    promptMode: params.opts.promptMode,
-    disableTools: params.opts.modelRun === true,
-    onAgentEvent: params.onAgentEvent,
-    deferTerminalLifecycleEnd: params.deferTerminalLifecycleEnd,
-    suppressNextUserMessagePersistence: params.suppressPromptPersistenceOnRetry === true,
-    onUserMessagePersisted: params.onUserMessagePersisted,
-    bootstrapPromptWarningSignaturesSeen,
-    bootstrapPromptWarningSignature,
-  });
+  return runWithDiagnosticTraceparent(params.opts.traceparent, () =>
+    runEmbeddedAgent({
+      sessionId: params.sessionId,
+      sessionKey: params.sessionKey,
+      agentId: params.sessionAgentId,
+      trigger: "user",
+      messageChannel: params.messageChannel,
+      messageProvider: params.opts.messageProvider ?? params.messageChannel,
+      agentAccountId: params.runContext.accountId,
+      messageTo: params.opts.replyTo ?? params.opts.to,
+      messageThreadId: params.opts.threadId,
+      groupId: params.runContext.groupId,
+      groupChannel: params.runContext.groupChannel,
+      groupSpace: params.runContext.groupSpace,
+      spawnedBy: params.spawnedBy,
+      currentChannelId: params.runContext.currentChannelId,
+      currentThreadTs: params.runContext.currentThreadTs,
+      currentInboundAudio: params.runContext.currentInboundAudio,
+      replyToMode: params.runContext.replyToMode,
+      hasRepliedRef: params.runContext.hasRepliedRef,
+      senderIsOwner: params.opts.senderIsOwner,
+      sessionFile: params.sessionFile,
+      workspaceDir: params.workspaceDir,
+      cwd: params.cwd,
+      config: params.cfg,
+      agentHarnessId: embeddedAgentHarnessOverride,
+      agentHarnessRuntimeOverride: embeddedAgentHarnessOverride,
+      skillsSnapshot: params.skillsSnapshot,
+      prompt: effectivePrompt,
+      images: params.isFallbackRetry ? undefined : params.opts.images,
+      imageOrder: params.isFallbackRetry ? undefined : params.opts.imageOrder,
+      clientTools: params.opts.clientTools,
+      provider: embeddedAgentProvider,
+      model: params.modelOverride,
+      modelFallbacksOverride: params.modelFallbacksOverride,
+      authProfileId,
+      authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
+      thinkLevel: params.resolvedThinkLevel,
+      fastMode: params.fastMode,
+      verboseLevel: params.resolvedVerboseLevel,
+      bashElevated: params.opts.bashElevated,
+      timeoutMs: params.timeoutMs,
+      runId: params.runId,
+      lane: params.opts.lane,
+      abortSignal: params.opts.abortSignal,
+      extraSystemPrompt: params.opts.extraSystemPrompt,
+      bootstrapContextMode: params.opts.bootstrapContextMode,
+      bootstrapContextRunKind: params.opts.bootstrapContextRunKind,
+      toolsAllow: params.opts.toolsAllow,
+      drainsContinuationDelegateQueue: params.opts.drainsContinuationDelegateQueue,
+      internalEvents: params.opts.internalEvents,
+      inputProvenance: params.opts.inputProvenance,
+      sourceReplyDeliveryMode: params.opts.sourceReplyDeliveryMode,
+      disableMessageTool: params.opts.disableMessageTool,
+      streamParams: params.opts.streamParams,
+      agentDir: params.agentDir,
+      allowTransientCooldownProbe: params.allowTransientCooldownProbe,
+      cleanupBundleMcpOnRunEnd: params.opts.cleanupBundleMcpOnRunEnd,
+      modelRun: params.opts.modelRun,
+      promptMode: params.opts.promptMode,
+      disableTools: params.opts.modelRun === true,
+      onAgentEvent: params.onAgentEvent,
+      deferTerminalLifecycleEnd: params.deferTerminalLifecycleEnd,
+      suppressNextUserMessagePersistence: params.suppressPromptPersistenceOnRetry === true,
+      onUserMessagePersisted: params.onUserMessagePersisted,
+      bootstrapPromptWarningSignaturesSeen,
+      bootstrapPromptWarningSignature,
+    }),
+  );
 }
 
 export function buildAcpResult(params: {

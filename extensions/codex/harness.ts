@@ -45,6 +45,15 @@ export function createCodexAppServerAgentHarness(options?: {
       if (providerIds.has(provider)) {
         return { supported: true, priority: 100 };
       }
+      // Normalize multi-token provider ids (e.g. "OpenAI-Codex", "openai_codex",
+      // "openai:codex") by splitting on common separators and matching any
+      // recognized token to the providerIds allowlist.
+      const tokens = provider.split(/[-_:\s/]+/).filter(Boolean);
+      for (const token of tokens) {
+        if (providerIds.has(token)) {
+          return { supported: true, priority: 100 };
+        }
+      }
       return {
         supported: false,
         reason: `provider is not one of: ${[...providerIds].toSorted().join(", ")}`,

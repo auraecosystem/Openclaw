@@ -43,6 +43,7 @@ export function registerSlackMemberEvents(params: {
         {
           sessionKey: ingressContext.sessionKey,
           contextKey: `slack:member:${paramsLocal.verb}:${channelId ?? "unknown"}:${payload.user ?? "unknown"}`,
+          forceSenderIsOwnerFalse: true,
         },
       );
     } catch (err) {

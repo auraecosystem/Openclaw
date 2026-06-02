@@ -590,6 +590,9 @@ afterEach(() => {
 const baseQueuedRun = (messageProvider = "whatsapp"): FollowupRun =>
   createMockFollowupRun({ run: { messageProvider } });
 
+// Continuation regression anchors: follow-up turns must keep continue_work,
+// continue_delegate, and drainsContinuationDelegateQueue wired through the
+// queued runner even after embedded-runner rename churn.
 function createQueuedRun(
   overrides: Partial<Omit<FollowupRun, "run">> & { run?: Partial<FollowupRun["run"]> } = {},
 ): FollowupRun {

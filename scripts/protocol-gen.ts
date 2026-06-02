@@ -1,7 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProtocolSchemas } from "../packages/gateway-protocol/src/schema.js";
+import {
+  ProtocolSchemas,
+  stripInternalProtocolFields,
+} from "../packages/gateway-protocol/src/schema.js";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "..");
@@ -9,7 +12,10 @@ const repoRoot = path.resolve(scriptDir, "..");
 async function writeJsonSchema() {
   const definitions: Record<string, unknown> = {};
   for (const [name, schema] of Object.entries(ProtocolSchemas)) {
-    definitions[name] = schema;
+    const publicSchema = stripInternalProtocolFields(schema);
+    if (publicSchema !== undefined) {
+      definitions[name] = publicSchema;
+    }
   }
 
   const rootSchema = {

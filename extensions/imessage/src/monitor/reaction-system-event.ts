@@ -23,6 +23,7 @@ export function enqueueIMessageReactionSystemEvent(params: {
   const queued = enqueueSystemEvent(decision.text, {
     sessionKey: decision.route.sessionKey,
     contextKey: decision.contextKey,
+    forceSenderIsOwnerFalse: true,
   });
   runtime.log?.(
     `imessage: reaction system event ${queued ? "queued" : "deduped"} session=${

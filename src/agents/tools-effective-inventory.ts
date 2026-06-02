@@ -311,6 +311,7 @@ export function resolveEffectiveToolInventory(
     modelId: params.modelId,
   });
 
+  const continuationEnabled = params.cfg?.agents?.defaults?.continuation?.enabled === true;
   const effectiveTools = createOpenClawCodingTools({
     agentId,
     sessionKey: params.sessionKey,
@@ -338,6 +339,25 @@ export function resolveEffectiveToolInventory(
     modelHasVision: params.modelHasVision,
     requireExplicitMessageTarget: params.requireExplicitMessageTarget,
     disableMessageTool: params.disableMessageTool,
+    // Inventory-only path: register callback-backed continuation tools when
+    // enabled so /status and tools-effective reflect the full RFC §2.1 surface.
+    // Runtime side effects still only run on live runner paths.
+    continueWorkOpts: continuationEnabled
+      ? {
+          requestContinuation: () => undefined,
+        }
+      : undefined,
+    requestCompactionOpts: continuationEnabled
+      ? {
+          sessionId: "<inventory-only>",
+          getContextUsage: () => null,
+          triggerCompaction: async () => ({
+            ok: false,
+            compacted: false,
+            reason: "inventory-only path",
+          }),
+        }
+      : undefined,
   });
   const projectedInventory = buildRuntimeCompatibleToolInventory({
     tools: effectiveTools,
