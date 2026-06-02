@@ -139,6 +139,11 @@ export type CronServiceDeps = {
     timeoutMs: number;
     execution?: CronAgentExecutionStarted;
   }) => Promise<void>;
+  onIsolatedAgentSetupTimeout?: (params: {
+    job: CronJob;
+    error: string;
+    timeoutMs: number;
+  }) => void | Promise<void>;
   sendCronFailureAlert?: (params: {
     job: CronJob;
     text: string;

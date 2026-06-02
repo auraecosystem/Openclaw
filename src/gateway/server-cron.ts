@@ -1,5 +1,5 @@
-import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { retireSessionMcpRuntime } from "../agents/agent-bundle-mcp-tools.js";
+import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { abortAndDrainEmbeddedAgentRun } from "../agents/embedded-agent.js";
 import { cleanupBrowserSessionsForLifecycleEnd } from "../browser-lifecycle-cleanup.js";
 import type { CliDeps } from "../cli/deps.types.js";
@@ -23,6 +23,7 @@ import { formatErrorMessage } from "../infra/errors.js";
 import { resolveMainScopedEventSessionKey } from "../infra/event-session-routing.js";
 import { runHeartbeatOnce } from "../infra/heartbeat-runner.js";
 import { requestHeartbeat } from "../infra/heartbeat-wake.js";
+import { requestSafeGatewayRestart } from "../infra/restart-coordinator.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { getChildLogger } from "../logging.js";
 import { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
@@ -411,6 +412,25 @@ export function buildGatewayCronService(params: {
           );
         },
       }).catch(() => {});
+    },
+    onIsolatedAgentSetupTimeout: ({ job, error, timeoutMs }) => {
+      const restart = requestSafeGatewayRestart({
+        reason: "cron.isolated_agent_setup_timeout",
+        delayMs: 0,
+      });
+      cronLogger.warn(
+        {
+          jobId: job.id,
+          jobName: job.name,
+          timeoutMs,
+          error,
+          restartStatus: restart.status,
+          restartCoalesced: restart.restart.coalesced,
+          restartSummary: restart.preflight.summary,
+          restartDelayMs: restart.restart.delayMs,
+        },
+        "cron: isolated agent setup timed out before runner start; requested safe gateway restart",
+      );
     },
     sendCronFailureAlert: async ({ job, text, channel, to, mode, accountId }) =>
       await sendGatewayCronFailureAlert({

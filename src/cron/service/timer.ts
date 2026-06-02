@@ -38,6 +38,7 @@ import type {
 import { cleanupTimedOutCronAgentRun, createCronAgentWatchdog } from "./agent-watchdog.js";
 import {
   abortErrorMessage,
+  isSetupTimeoutErrorText,
   normalizeCronRunErrorText,
   timeoutErrorMessage,
 } from "./execution-errors.js";
@@ -172,6 +173,9 @@ export async function executeJobCoreWithTimeout(
     const activeExecution = watchdog.activeExecution();
     await cleanupTimedOutCronAgentRun(state, job, jobTimeoutMs, activeExecution);
     const error = timeoutReason ?? timeoutErrorMessage(activeExecution);
+    if (isSetupTimeoutErrorText(error)) {
+      notifyIsolatedAgentSetupTimeout(state, job, error, jobTimeoutMs);
+    }
     return {
       status: "error",
       error,
@@ -181,6 +185,31 @@ export async function executeJobCoreWithTimeout(
     };
   } finally {
     watchdog.dispose();
+  }
+}
+
+function notifyIsolatedAgentSetupTimeout(
+  state: CronServiceState,
+  job: CronJob,
+  error: string,
+  timeoutMs: number,
+): void {
+  const notify = state.deps.onIsolatedAgentSetupTimeout;
+  if (!notify) {
+    return;
+  }
+  try {
+    void Promise.resolve(notify({ job, error, timeoutMs })).catch((err: unknown) => {
+      state.deps.log.warn(
+        { jobId: job.id, err: String(err) },
+        "cron: isolated setup timeout handler failed",
+      );
+    });
+  } catch (err) {
+    state.deps.log.warn(
+      { jobId: job.id, err: String(err) },
+      "cron: isolated setup timeout handler failed",
+    );
   }
 }
 

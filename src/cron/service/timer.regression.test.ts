@@ -1546,6 +1546,7 @@ describe("cron service timer regressions", () => {
       const started = createDeferred<void>();
       let abortObserved = false;
       const cleanupTimedOutAgentRun = vi.fn(async () => {});
+      const onIsolatedAgentSetupTimeout = vi.fn();
       const state = createCronServiceState({
         cronEnabled: true,
         storePath: store.storePath,
@@ -1554,6 +1555,7 @@ describe("cron service timer regressions", () => {
         enqueueSystemEvent: vi.fn(),
         requestHeartbeat: vi.fn(),
         cleanupTimedOutAgentRun,
+        onIsolatedAgentSetupTimeout,
         runIsolatedAgentJob: vi.fn(async ({ abortSignal }: { abortSignal?: AbortSignal }) => {
           started.resolve();
           abortSignal?.addEventListener(
@@ -1582,6 +1584,12 @@ describe("cron service timer regressions", () => {
       expect(requireRecord(cleanupArgs.job).id).toBe("isolated-setup-timeout-74803");
       expect(cleanupArgs.timeoutMs).toBe(120_000);
       expect(cleanupArgs.execution).toBeUndefined();
+      expect(onIsolatedAgentSetupTimeout).toHaveBeenCalledTimes(1);
+      expect(onIsolatedAgentSetupTimeout).toHaveBeenCalledWith({
+        job: expect.objectContaining({ id: "isolated-setup-timeout-74803" }),
+        error: expect.stringContaining("setup timed out before runner start"),
+        timeoutMs: 120_000,
+      });
     } finally {
       vi.useRealTimers();
     }
@@ -1607,6 +1615,7 @@ describe("cron service timer regressions", () => {
       const started = createDeferred<void>();
       let abortObserved = false;
       const cleanupTimedOutAgentRun = vi.fn(async () => {});
+      const onIsolatedAgentSetupTimeout = vi.fn();
       const state = createCronServiceState({
         cronEnabled: true,
         storePath: store.storePath,
@@ -1615,6 +1624,7 @@ describe("cron service timer regressions", () => {
         enqueueSystemEvent: vi.fn(),
         requestHeartbeat: vi.fn(),
         cleanupTimedOutAgentRun,
+        onIsolatedAgentSetupTimeout,
         runIsolatedAgentJob: vi.fn(
           async ({
             abortSignal,
@@ -1670,6 +1680,7 @@ describe("cron service timer regressions", () => {
       const execution = requireRecord(cleanupArgs.execution);
       expect(execution.jobId).toBe("isolated-pre-model-timeout-74803");
       expect(execution.phase).toBe("context_engine");
+      expect(onIsolatedAgentSetupTimeout).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
