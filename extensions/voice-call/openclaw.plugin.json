@@ -259,7 +259,7 @@
       },
       "provider": {
         "type": "string",
-        "enum": ["telnyx", "twilio", "plivo", "mock"]
+        "enum": ["telnyx", "twilio", "plivo", "mock", "msteams"]
       },
       "telnyx": {
         "type": "object",
@@ -296,6 +296,23 @@
             "type": "string"
           },
           "authToken": {
+            "type": "string"
+          }
+        }
+      },
+      "msteams": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "port": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 65535
+          },
+          "path": {
+            "type": "string"
+          },
+          "sharedSecret": {
             "type": "string"
           }
         }

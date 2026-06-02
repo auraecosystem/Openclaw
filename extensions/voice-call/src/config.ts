@@ -62,6 +62,18 @@ const TwilioConfigSchema = z
   })
   .strict();
 
+const MsteamsConfigSchema = z
+  .object({
+    /** TCP port for the MaryamBot WebSocket server. */
+    port: z.number().int().min(1).max(65535).optional(),
+    /** URL path prefix for the WebSocket upgrade (per-call path = {path}/{callId}). */
+    path: z.string().min(1).optional(),
+    /** Shared secret used to verify HMAC-SHA256 on the WS handshake. */
+    sharedSecret: z.string().min(1).optional(),
+  })
+  .strict();
+export type MsteamsConfig = z.infer<typeof MsteamsConfigSchema>;
+
 const PlivoConfigSchema = z
   .object({
     /** Plivo Auth ID (starts with MA/SA) */
@@ -400,8 +412,8 @@ export const VoiceCallConfigSchema = z
     /** Enable voice call functionality */
     enabled: z.boolean().default(false),
 
-    /** Active provider (telnyx, twilio, plivo, or mock) */
-    provider: z.enum(["telnyx", "twilio", "plivo", "mock"]).optional(),
+    /** Active provider (telnyx, twilio, plivo, mock, or msteams) */
+    provider: z.enum(["telnyx", "twilio", "plivo", "mock", "msteams"]).optional(),
 
     /** Telnyx-specific configuration */
     telnyx: TelnyxConfigSchema.optional(),
@@ -411,6 +423,9 @@ export const VoiceCallConfigSchema = z
 
     /** Plivo-specific configuration */
     plivo: PlivoConfigSchema.optional(),
+
+    /** Microsoft Teams provider — bridges Skype.Bots.Media via the MaryamBot worker */
+    msteams: MsteamsConfigSchema.optional(),
 
     /** Phone number to call from (E.164) */
     fromNumber: E164Schema.optional(),

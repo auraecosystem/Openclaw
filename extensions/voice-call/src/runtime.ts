@@ -59,6 +59,7 @@ type TelnyxProviderModule = typeof import("./providers/telnyx.js");
 type TwilioProviderModule = typeof import("./providers/twilio.js");
 type PlivoProviderModule = typeof import("./providers/plivo.js");
 type MockProviderModule = typeof import("./providers/mock.js");
+type MsteamsProviderModule = typeof import("./providers/msteams.js");
 type RealtimeVoiceRuntimeModule = typeof import("./realtime-voice.runtime.js");
 type RealtimeHandlerModule = typeof import("./webhook/realtime-handler.js");
 
@@ -75,6 +76,7 @@ let telnyxProviderPromise: Promise<TelnyxProviderModule> | undefined;
 let twilioProviderPromise: Promise<TwilioProviderModule> | undefined;
 let plivoProviderPromise: Promise<PlivoProviderModule> | undefined;
 let mockProviderPromise: Promise<MockProviderModule> | undefined;
+let msteamsProviderPromise: Promise<MsteamsProviderModule> | undefined;
 let realtimeVoiceRuntimePromise: Promise<RealtimeVoiceRuntimeModule> | undefined;
 let realtimeHandlerPromise: Promise<RealtimeHandlerModule> | undefined;
 
@@ -96,6 +98,11 @@ function loadPlivoProvider(): Promise<PlivoProviderModule> {
 function loadMockProvider(): Promise<MockProviderModule> {
   mockProviderPromise ??= import("./providers/mock.js");
   return mockProviderPromise;
+}
+
+function loadMsteamsProvider(): Promise<MsteamsProviderModule> {
+  msteamsProviderPromise ??= import("./providers/msteams.js");
+  return msteamsProviderPromise;
 }
 
 function loadRealtimeVoiceRuntime(): Promise<RealtimeVoiceRuntimeModule> {
@@ -189,7 +196,7 @@ function createRuntimeResourceLifecycle(params: {
   };
 }
 
-async function resolveProvider(config: VoiceCallConfig): Promise<VoiceCallProvider> {
+async function resolveProvider(config: VoiceCallConfig, log: Logger): Promise<VoiceCallProvider> {
   const allowNgrokFreeTierLoopbackBypass =
     config.tunnel?.provider === "ngrok" &&
     isLoopbackHost(config.serve?.bind ?? "") &&
@@ -243,6 +250,15 @@ async function resolveProvider(config: VoiceCallConfig): Promise<VoiceCallProvid
     case "mock": {
       const { MockProvider } = await loadMockProvider();
       return new MockProvider();
+    }
+    case "msteams": {
+      const { MsteamsProvider } = await loadMsteamsProvider();
+      return new MsteamsProvider({
+        port: config.msteams?.port,
+        path: config.msteams?.path,
+        sharedSecret: config.msteams?.sharedSecret,
+        logger: log,
+      });
     }
     default:
       throw new Error(`Unsupported voice-call provider: ${String(config.provider)}`);
@@ -304,7 +320,7 @@ export async function createVoiceCallRuntime(params: {
     throw new Error(`Invalid voice-call config: ${validation.errors.join("; ")}`);
   }
 
-  const provider = await resolveProvider(config);
+  const provider = await resolveProvider(config, log);
   if (stateRuntime) {
     setVoiceCallStateRuntime({ state: stateRuntime });
   }
