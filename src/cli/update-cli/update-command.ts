@@ -1132,9 +1132,6 @@ async function hasCustomNpmRegistryOverride(params: {
     timeoutMs: params.timeoutMs,
     manager: params.manager,
   });
-  if (params.manager === "bun" && !registry) {
-    return true;
-  }
   return registry ? !isPublicNpmRegistry(registry) : false;
 }
 
