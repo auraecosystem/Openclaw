@@ -477,6 +477,7 @@ export const coreGatewayHandlers: GatewayRequestHandlers = {
       "sessions.steer",
       "sessions.abort",
       "sessions.patch",
+      "sessions.echo",
       "sessions.pluginPatch",
       "sessions.reset",
       "sessions.delete",
