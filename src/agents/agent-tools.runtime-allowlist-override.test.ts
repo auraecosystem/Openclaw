@@ -22,4 +22,27 @@ describe("createOpenClawCodingTools runtimeToolAllowlist override", () => {
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain("exec");
   });
+
+  it("allows exec background when runtimeToolAllowlist contains wildcard with messaging profile", () => {
+    const tools = createOpenClawCodingTools({
+      config: {
+        tools: { profile: "messaging" },
+      } as unknown as NonNullable<Parameters<typeof createOpenClawCodingTools>[0]>["config"],
+      runtimeToolAllowlist: ["*"],
+    });
+    const execTool = tools.find((t) => t.name === "exec");
+    expect(execTool).toBeDefined();
+    const allowBackground = (execTool as unknown as { allowBackground?: boolean }).allowBackground;
+    expect(allowBackground).not.toBe(false);
+  });
+
+  it("does not allow exec background with messaging profile and no runtime wildcard", () => {
+    const tools = createOpenClawCodingTools({
+      config: {
+        tools: { profile: "messaging" },
+      } as unknown as NonNullable<Parameters<typeof createOpenClawCodingTools>[0]>["config"],
+    });
+    const execTool = tools.find((t) => t.name === "exec");
+    expect(execTool).toBeUndefined();
+  });
 });

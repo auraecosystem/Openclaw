@@ -622,6 +622,18 @@ export function createOpenClawCodingTools(options?: {
     ...(providerProfileAlsoAllow ?? []),
     ...runtimeProfileAlsoAllow,
   ]);
+  // When the runtime explicitly requests all tools via wildcard allowlist,
+  // override the static profile so that tools like exec remain available in
+  // cron isolated sessions that set toolsAllow: ["*"] (#89228).
+  const runtimeHasWildcardAllowlist = options?.runtimeToolAllowlist?.some(
+    (entry) => normalizeToolName(entry) === "*",
+  );
+  const effectiveProfilePolicy = runtimeHasWildcardAllowlist
+    ? undefined
+    : profilePolicyWithAlsoAllow;
+  const effectiveProviderProfilePolicy = runtimeHasWildcardAllowlist
+    ? undefined
+    : providerProfilePolicyWithAlsoAllow;
   // Prefer sessionKey for process isolation scope to prevent cross-session process visibility/killing.
   // Fallback to agentId if no sessionKey is available (e.g. legacy or global contexts).
   const scopeKey = resolveProcessToolScopeKey({
@@ -662,8 +674,8 @@ export function createOpenClawCodingTools(options?: {
     mergeToolSearchControlAllowlist(sandboxToolPolicy);
   const subagentPolicyWithToolSearchControls = mergeToolSearchControlAllowlist(subagentPolicy);
   const allowBackground = isToolAllowedByPolicies("process", [
-    profilePolicyWithAlsoAllow,
-    providerProfilePolicyWithAlsoAllow,
+    effectiveProfilePolicy,
+    effectiveProviderProfilePolicy,
     globalPolicyWithToolSearchControls,
     globalProviderPolicyWithToolSearchControls,
     agentPolicyWithToolSearchControls,
@@ -1083,18 +1095,6 @@ export function createOpenClawCodingTools(options?: {
   options?.recordToolPrepStage?.("model-provider-policy");
   // Sender identity is carried for command/channel-action auth; tool visibility
   // comes from configured tool policies, not per-turn sender ownership.
-  // When the runtime explicitly requests all tools via wildcard allowlist,
-  // override the static profile so that tools like exec remain available in
-  // cron isolated sessions that set toolsAllow: ["*"] (#89228).
-  const runtimeHasWildcardAllowlist = options?.runtimeToolAllowlist?.some(
-    (entry) => normalizeToolName(entry) === "*",
-  );
-  const effectiveProfilePolicy = runtimeHasWildcardAllowlist
-    ? undefined
-    : profilePolicyWithAlsoAllow;
-  const effectiveProviderProfilePolicy = runtimeHasWildcardAllowlist
-    ? undefined
-    : providerProfilePolicyWithAlsoAllow;
   const subagentFiltered = applyToolPolicyPipeline({
     tools: toolsForModelProvider,
     toolMeta: (tool) => getPluginToolMeta(tool),
