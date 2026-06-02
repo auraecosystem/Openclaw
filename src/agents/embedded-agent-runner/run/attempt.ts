@@ -375,6 +375,7 @@ import {
   EmbeddedAttemptSessionTakeoverError,
   type EmbeddedAttemptSessionFileOwner,
   createEmbeddedAttemptSessionLockController,
+  installEmbeddedPromptRetryDefault,
   installPromptSubmissionLockRelease,
 } from "./attempt.session-lock.js";
 import {
@@ -3963,11 +3964,9 @@ export async function runEmbeddedAttempt(
             if (googlePromptCacheStreamFn) {
               activeSession.agent.streamFn = googlePromptCacheStreamFn;
             }
-            // Disable SDK-level retries inside the embedded prompt lock window.
-            // Model-fallback handles retries; SDK retries here race with session takeover.
-            const embeddedInnerStreamFn = activeSession.agent.streamFn;
-            activeSession.agent.streamFn = (model, context, options) =>
-              embeddedInnerStreamFn(model, context, { ...options, maxRetries: 0 });
+            // Default to disabling SDK-level retries inside the embedded prompt lock window;
+            // an explicit settings.retry.provider.maxRetries still wins (see helper comment).
+            installEmbeddedPromptRetryDefault(activeSession);
             installPromptSubmissionLockRelease({
               session: activeSession,
               waitForSessionEvents: (sessionToDrain) =>
