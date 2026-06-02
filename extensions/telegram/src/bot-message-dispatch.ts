@@ -21,6 +21,7 @@ import {
   createOutboundPayloadPlan,
   deriveDurableFinalDeliveryRequirements,
   projectOutboundPayloadPlanForDelivery,
+  resolveChannelMessageSourceReplyDeliveryMode,
 } from "openclaw/plugin-sdk/channel-outbound";
 import {
   buildChannelProgressDraftLineForEntry,
@@ -67,6 +68,8 @@ import {
   loadModelCatalog,
   modelSupportsVision,
   resolveAgentDir,
+  resolveHarnessSourceVisibleRepliesDefault,
+  resolveSourceReplyMessageToolAvailable,
   resolveDefaultModelForAgent,
 } from "./bot-message-dispatch.agent.runtime.js";
 import { deduplicateBlockSentMedia } from "./bot-message-dispatch.media-dedup.js";
@@ -280,6 +283,10 @@ function createFreshTelegramSessionStoreLoader(params: {
   load.clear = () => storesByPath.clear();
   return load;
 }
+
+type HarnessSourceVisibleRepliesDefaultParams = Parameters<
+  typeof resolveHarnessSourceVisibleRepliesDefault
+>[0];
 
 function resolveTelegramReasoningLevel(params: {
   cfg: OpenClawConfig;
@@ -684,6 +691,62 @@ function resolveDispatchTelegramContext(params: {
   };
 }
 
+function telegramVisibleRepliesPreferMessageTool(params: {
+  cfg: OpenClawConfig;
+  context: TelegramMessageContext;
+  ctxPayload: TelegramMessageContext["ctxPayload"];
+  route: TelegramMessageContext["route"];
+  telegramDeps: TelegramBotDeps;
+}): boolean {
+  let sessionStore: HarnessSourceVisibleRepliesDefaultParams["sessionStore"];
+  let sessionEntry: HarnessSourceVisibleRepliesDefaultParams["entry"];
+  const sessionKey =
+    typeof params.ctxPayload.SessionKey === "string" ? params.ctxPayload.SessionKey : undefined;
+  if (sessionKey) {
+    try {
+      const store = (params.telegramDeps.loadSessionStore ?? loadSessionStore)(
+        params.context.turn.storePath,
+        { skipCache: true },
+      );
+      sessionStore = store as HarnessSourceVisibleRepliesDefaultParams["sessionStore"];
+      sessionEntry = resolveSessionStoreEntry({
+        store,
+        sessionKey,
+      }).existing;
+    } catch {
+      // Keep dispatch resilient; core dispatch will re-resolve with its own store snapshot.
+    }
+  }
+  const defaultVisibleReplies = resolveHarnessSourceVisibleRepliesDefault({
+    cfg: params.cfg,
+    ctx: params.ctxPayload,
+    entry: sessionEntry,
+    sessionAgentId: params.route.agentId,
+    sessionKey,
+    sessionStore,
+  });
+  const preliminaryMode = resolveChannelMessageSourceReplyDeliveryMode({
+    cfg: params.cfg,
+    ctx: params.ctxPayload,
+    defaultVisibleReplies,
+  });
+  const messageToolAvailable = resolveSourceReplyMessageToolAvailable({
+    cfg: params.cfg,
+    ctx: params.ctxPayload,
+    sessionAgentId: params.route.agentId,
+    sessionKey,
+    prefersMessageToolDelivery: preliminaryMode === "message_tool_only",
+  });
+  return (
+    resolveChannelMessageSourceReplyDeliveryMode({
+      cfg: params.cfg,
+      ctx: params.ctxPayload,
+      defaultVisibleReplies,
+      messageToolAvailable,
+    }) === "message_tool_only"
+  );
+}
+
 export const dispatchTelegramMessage = async ({
   context,
   bot,
@@ -722,6 +785,13 @@ export const dispatchTelegramMessage = async ({
     statusReactionController: rawStatusReactionController,
   } = dispatchContext;
   const isRoomEvent = ctxPayload.InboundEventKind === "room_event";
+  const configuredMessageToolOnlySourceReplies = telegramVisibleRepliesPreferMessageTool({
+    cfg,
+    context,
+    ctxPayload,
+    route,
+    telegramDeps,
+  });
   const statusReactionController = isRoomEvent ? null : rawStatusReactionController;
   const statusReactionTiming = {
     ...DEFAULT_TIMING,
@@ -820,7 +890,8 @@ export const dispatchTelegramMessage = async ({
   });
   const forceBlockStreamingForReasoning = resolvedReasoningLevel === "on";
   const streamReasoningDraft = resolvedReasoningLevel === "stream";
-  const streamDeliveryEnabled = !isRoomEvent && streamMode !== "off";
+  const streamDeliveryEnabled =
+    !isRoomEvent && !configuredMessageToolOnlySourceReplies && streamMode !== "off";
   const rawReplyQuoteText =
     ctxPayload.ReplyToIsQuote && typeof ctxPayload.ReplyToQuoteText === "string"
       ? ctxPayload.ReplyToQuoteText
@@ -873,7 +944,8 @@ export const dispatchTelegramMessage = async ({
     !hasTelegramQuoteReply &&
     !accountBlockStreamingEnabled &&
     !forceBlockStreamingForReasoning;
-  const canStreamReasoningDraft = !isRoomEvent && streamReasoningDraft;
+  const canStreamReasoningDraft =
+    !isRoomEvent && !configuredMessageToolOnlySourceReplies && streamReasoningDraft;
   const draftReplyToMessageId =
     replyToMode !== "off" && typeof msg.message_id === "number"
       ? (replyQuoteMessageId ?? msg.message_id)
@@ -1921,7 +1993,10 @@ export const dispatchTelegramMessage = async ({
                   skillFilter,
                   disableBlockStreaming,
                   abortSignal: replyAbortController.signal,
-                  sourceReplyDeliveryMode: isRoomEvent ? "message_tool_only" : undefined,
+                  sourceReplyDeliveryMode:
+                    isRoomEvent || configuredMessageToolOnlySourceReplies
+                      ? "message_tool_only"
+                      : undefined,
                   queuedDeliveryCorrelations: isRoomEvent
                     ? [{ begin: beginDeliveryCorrelation }]
                     : undefined,
