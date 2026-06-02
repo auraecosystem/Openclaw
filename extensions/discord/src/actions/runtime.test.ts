@@ -1026,6 +1026,27 @@ describe("handleDiscordMessagingAction", () => {
     );
   });
 
+  it("normalizes channel: prefixed channelId before resolving guildId in searchMessages", async () => {
+    fetchChannelInfoDiscord.mockResolvedValueOnce({
+      id: "C1",
+      type: 0,
+      guild_id: "resolved-guild",
+    });
+    searchMessagesDiscord.mockResolvedValueOnce({ total_results: 0, messages: [] });
+
+    await handleMessagingAction(
+      "searchMessages",
+      { channelId: "channel:C1", content: "hello" },
+      enableAllActions,
+    );
+
+    expect(fetchChannelInfoDiscord).toHaveBeenCalledWith("C1", expect.anything());
+    expect(searchMessagesDiscord).toHaveBeenCalledWith(
+      expect.objectContaining({ guildId: "resolved-guild", content: "hello" }),
+      expect.anything(),
+    );
+  });
+
   it("accepts query as alias for content in searchMessages", async () => {
     searchMessagesDiscord.mockResolvedValueOnce({ total_results: 0, messages: [] });
 
