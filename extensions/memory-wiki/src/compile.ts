@@ -36,7 +36,6 @@ import {
   toWikiPageSummary,
   type WikiClaim,
   type WikiClaimEvidence,
-  type WikiPageKind,
   type WikiPageSummary,
   type WikiRelationship,
   WIKI_RELATED_END_MARKER,
@@ -48,7 +47,7 @@ function deriveAllPageGroups(
   config: ResolvedMemoryWikiConfig,
 ): Array<{ kind: WikiPageKind; dir: string; heading: string }> {
   return config.pageGroups.map((g) => ({
-    kind: g.kind as WikiPageKind,
+    kind: g.kind,
     dir: g.dir,
     heading: g.heading ?? g.dir.charAt(0).toUpperCase() + g.dir.slice(1),
   }));

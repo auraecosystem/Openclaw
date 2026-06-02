@@ -422,7 +422,7 @@ export function inferWikiPageKind(
 
   // Use pageGroups for dynamic directory resolution
   if (pageGroups && pageGroups.length > 0) {
-    const sorted = [...pageGroups].sort((a, b) => b.dir.length - a.dir.length);
+    const sorted = pageGroups.toSorted((a, b) => b.dir.length - a.dir.length);
     for (const group of sorted) {
       if (group.dir === "." && !normalized.includes("/")) {
         return group.kind;
