@@ -27,13 +27,11 @@ describe("npm registry spec validation", () => {
     "@openclaw/voice-call@latest",
     "@openclaw/voice-call@beta",
     "@openclaw/voice-call@2026q2",
-    "@openclaw/voice-call@01",
-    "@openclaw/voice-call@2026.05",
-    "@openclaw/voice-call@1.02.x",
     "@openclaw/voice-call@1.x-beta",
     "@openclaw/voice-call@x-beta",
     "@openclaw/voice-call@V1",
     "@openclaw/voice-call@V1.x",
+    "@openclaw/voice-call@Vx",
   ])("accepts %s", (spec) => {
     expect(validateRegistryNpmSpec(spec)).toBeNull();
   });
@@ -52,11 +50,39 @@ describe("npm registry spec validation", () => {
       expected: "exact version or dist-tag",
     },
     {
+      spec: "@openclaw/voice-call@01",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@2026.05",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@1.02.x",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@vv1",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@vv1.2.3",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@1.02.3",
+      expected: "exact version or dist-tag",
+    },
+    {
       spec: "@openclaw/voice-call@1.2.x-beta",
       expected: "exact version or dist-tag",
     },
     {
       spec: "@openclaw/voice-call@v1.x.x-beta",
+      expected: "exact version or dist-tag",
+    },
+    {
+      spec: "@openclaw/voice-call@x.x.x-beta",
       expected: "exact version or dist-tag",
     },
     {
