@@ -572,13 +572,20 @@ function updateUsageStatsEntry(
 function clearProviderCooldownEntries(
   store: AuthProfileStore,
   provider: string,
-  additionalProfileIds: string[] = [],
+  profileIds?: string[],
 ): boolean {
-  const profileIds = [
-    ...new Set([...additionalProfileIds, ...listProfilesForProvider(store, provider)]),
-  ];
+  const idsToClear =
+    profileIds === undefined
+      ? listProfilesForProvider(store, provider)
+      : profileIds.filter((profileId) => {
+          const profileProvider = store.profiles[profileId]?.provider;
+          return (
+            profileProvider === undefined ||
+            normalizeProviderId(profileProvider) === normalizeProviderId(provider)
+          );
+        });
   let changed = false;
-  for (const profileId of profileIds) {
+  for (const profileId of new Set(idsToClear)) {
     if (!store.usageStats?.[profileId]) {
       continue;
     }
@@ -1007,9 +1014,9 @@ export async function clearAuthProfileCooldown(params: {
 }
 
 /**
- * Clear cooldown/disabled state for every profile owned by a provider.
- * Re-auth flows use this after fresh credentials are saved so stale persisted
- * lockouts do not keep a healthy profile unavailable.
+ * Clear cooldown/disabled state for provider profiles. Omitting profileIds
+ * clears every profile owned by the provider; passing profileIds limits cleanup
+ * to those refreshed profiles.
  */
 export async function clearProviderAuthProfileCooldowns(params: {
   store: AuthProfileStore;
@@ -1017,20 +1024,28 @@ export async function clearProviderAuthProfileCooldowns(params: {
   profileIds?: string[];
   agentDir?: string;
 }): Promise<void> {
-  const { store, provider, profileIds = [], agentDir } = params;
-  const providerProfileIds = [
-    ...new Set([...profileIds, ...listProfilesForProvider(store, provider)]),
-  ];
+  const { store, provider, profileIds, agentDir } = params;
+  const providerWideProfileIds =
+    profileIds === undefined ? listProfilesForProvider(store, provider) : undefined;
   const updated = await authProfileUsageDeps.updateAuthProfileStoreWithLock({
     agentDir,
-    updater: (freshStore) => clearProviderCooldownEntries(freshStore, provider, providerProfileIds),
+    updater: (freshStore) => {
+      const lockedProfileIds =
+        profileIds === undefined
+          ? [
+              ...(providerWideProfileIds ?? []),
+              ...listProfilesForProvider(freshStore, provider),
+            ]
+          : profileIds;
+      return clearProviderCooldownEntries(freshStore, provider, lockedProfileIds);
+    },
   });
   if (updated) {
     store.usageStats = updated.usageStats;
     return;
   }
 
-  if (!clearProviderCooldownEntries(store, provider, providerProfileIds)) {
+  if (!clearProviderCooldownEntries(store, provider, profileIds)) {
     return;
   }
   authProfileUsageDeps.saveAuthProfileStore(store, agentDir);

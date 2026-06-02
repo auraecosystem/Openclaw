@@ -796,6 +796,37 @@ describe("clearProviderAuthProfileCooldowns", () => {
     expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:plugin-refresh"]);
   });
 
+  it("does not clear unrelated provider profiles when explicit profile ids are supplied", async () => {
+    const localStore = makeStore({});
+    const freshStore = makeStore({
+      "anthropic:default": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 3,
+        failureCounts: { billing: 3 },
+      },
+      "anthropic:plugin-refresh": {
+        cooldownUntil: Date.now() + 60_000,
+        cooldownReason: "rate_limit",
+        errorCount: 1,
+        failureCounts: { rate_limit: 1 },
+      },
+    });
+    storeMocks.updateAuthProfileStoreWithLock.mockImplementation(async ({ updater }) => {
+      expect(updater(freshStore)).toBe(true);
+      return freshStore;
+    });
+
+    await clearProviderAuthProfileCooldowns({
+      store: localStore,
+      provider: "anthropic",
+      profileIds: ["anthropic:plugin-refresh"],
+    });
+
+    expect(freshStore.usageStats?.["anthropic:default"]?.disabledReason).toBe("billing");
+    expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:plugin-refresh"]);
+  });
+
   it("falls back to the provided store when the lock update is unavailable", async () => {
     const store = makeStore({
       "anthropic:default": {
