@@ -23,10 +23,10 @@ export function collectAllowedToolNames(params: {
 }): Set<string> {
   const names = new Set<string>();
   for (const tool of params.tools) {
-    addName(names, tool.name);
+    addName(names, readToolName(tool));
   }
   for (const tool of params.clientTools ?? []) {
-    addName(names, tool.function?.name);
+    addName(names, readClientToolName(tool));
   }
   return names;
 }
@@ -37,7 +37,7 @@ export function collectAllowedToolNames(params: {
 export function collectRegisteredToolNames(tools: Array<{ name?: string }>): Set<string> {
   const names = new Set<string>();
   for (const tool of tools) {
-    addName(names, tool.name);
+    addName(names, readToolName(tool));
   }
   return names;
 }
@@ -48,14 +48,44 @@ export function collectCoreBuiltinToolNames(
 ): Set<string> {
   const names = new Set<string>();
   for (const tool of tools) {
-    if (options?.isPluginTool?.(tool)) {
+    if (isPluginToolForAllowlist(tool, options?.isPluginTool)) {
       continue;
     }
-    addName(names, tool.name);
+    addName(names, readToolName(tool));
   }
   return names;
 }
 
 export function toSessionToolAllowlist(allowedToolNames: Iterable<string>): string[] {
   return [...new Set(allowedToolNames)].toSorted((a, b) => a.localeCompare(b));
+}
+
+function readToolName(tool: { name?: string }): string | undefined {
+  try {
+    return tool.name;
+  } catch {
+    return undefined;
+  }
+}
+
+function readClientToolName(tool: ClientToolDefinition): string | undefined {
+  try {
+    return tool.function?.name;
+  } catch {
+    return undefined;
+  }
+}
+
+function isPluginToolForAllowlist(
+  tool: { name?: string },
+  isPluginTool: ((tool: { name?: string }) => boolean) | undefined,
+): boolean {
+  if (!isPluginTool) {
+    return false;
+  }
+  try {
+    return isPluginTool(tool);
+  } catch {
+    return true;
+  }
 }
