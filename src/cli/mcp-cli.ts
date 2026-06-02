@@ -6,7 +6,7 @@ import {
   normalizeStringifiedOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { Command } from "commander";
-import { buildBundleMcpToolsFromCatalog } from "../agents/agent-bundle-mcp-materialize.js";
+import { projectBundleMcpToolsFromCatalog } from "../agents/agent-bundle-mcp-materialize.js";
 import { createSessionMcpRuntime } from "../agents/agent-bundle-mcp-runtime.js";
 import {
   buildMcpHttpFetch,
@@ -469,7 +469,7 @@ async function buildMcpStatusEntries(
 function formatMcpProbeResult(
   catalog: Awaited<ReturnType<ReturnType<typeof createSessionMcpRuntime>["getCatalog"]>>,
 ) {
-  const projectedTools = buildBundleMcpToolsFromCatalog({
+  const projection = projectBundleMcpToolsFromCatalog({
     catalog,
     createResourceListExecute: () => async () => {
       throw new Error("probe projection cannot execute MCP resources_list");
@@ -515,8 +515,8 @@ function formatMcpProbeResult(
           },
         ]),
     ),
-    tools: projectedTools.map((tool) => tool.name).toSorted(),
-    diagnostics: catalog.diagnostics ?? [],
+    tools: projection.tools.map((tool) => tool.name).toSorted(),
+    diagnostics: [...(catalog.diagnostics ?? []), ...projection.diagnostics],
   };
 }
 
