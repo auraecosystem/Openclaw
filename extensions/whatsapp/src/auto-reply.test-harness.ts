@@ -28,6 +28,7 @@ type MockWebListener = {
   onClose: Promise<WebListenerCloseReason>;
   signalClose: () => void;
   sendMessage: () => Promise<WhatsAppSendResult>;
+  sendListReply: () => Promise<WhatsAppSendResult>;
   sendPoll: () => Promise<WhatsAppSendResult>;
   sendReaction: () => Promise<WhatsAppSendResult>;
   sendComposingTo: () => Promise<void>;
@@ -262,6 +263,7 @@ export function createMockWebListener(): MockWebListener {
     onClose: new Promise<WebListenerCloseReason>(() => {}),
     signalClose: vi.fn(),
     sendMessage: vi.fn(async () => createAcceptedWhatsAppSendResult("text", "msg-1")),
+    sendListReply: vi.fn(async () => createAcceptedWhatsAppSendResult("text", "list-1")),
     sendPoll: vi.fn(async () => createAcceptedWhatsAppSendResult("poll", "poll-1")),
     sendReaction: vi.fn(async () => createAcceptedWhatsAppSendResult("reaction", "reaction-1")),
     sendComposingTo: vi.fn(async () => undefined),
