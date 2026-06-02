@@ -451,6 +451,15 @@ export const uk: TranslationMap = {
     logs: "Журнали шлюзу в реальному часі.",
     dreams: "Консолідація пам’яті під час сну.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Активність",
     subtitle: "Тимчасова активність інструментів, отримана з подій поточного сеансу.",

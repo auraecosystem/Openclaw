@@ -453,6 +453,15 @@ export const de: TranslationMap = {
     logs: "Live-Verfolgung der Gateway-Protokolldateien.",
     dreams: "Speicherkonsolidierung im Schlaf.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Aktivität",
     subtitle: "Flüchtige Tool-Aktivität, abgeleitet aus Live-Sitzungsereignissen.",

@@ -452,6 +452,15 @@ export const fr: TranslationMap = {
     logs: "Journaux Gateway en direct.",
     dreams: "Consolidation de la mémoire pendant le sommeil.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Activité",
     subtitle: "Activité éphémère des outils dérivée des événements de session en direct.",

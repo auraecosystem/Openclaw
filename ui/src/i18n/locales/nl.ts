@@ -451,6 +451,15 @@ export const nl: TranslationMap = {
     logs: "Live Gateway-logs.",
     dreams: "Geheugendromen, consolidatie en reflectie.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Activiteit",
     subtitle: "Tijdelijke toolactiviteit afgeleid van live sessiegebeurtenissen.",

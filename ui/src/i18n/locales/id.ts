@@ -449,6 +449,15 @@ export const id: TranslationMap = {
     logs: "Log Gateway langsung.",
     dreams: "Konsolidasi memori saat tidur.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Aktivitas",
     subtitle: "Aktivitas alat sementara yang berasal dari peristiwa sesi langsung.",

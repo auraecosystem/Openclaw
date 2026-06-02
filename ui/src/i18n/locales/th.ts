@@ -447,6 +447,15 @@ export const th: TranslationMap = {
     logs: "บันทึกเกตเวย์แบบสด",
     dreams: "การฝันของหน่วยความจำ การรวมข้อมูล และการสะท้อนคิด",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "กิจกรรม",
     subtitle: "กิจกรรมของเครื่องมือแบบชั่วคราวที่ได้จากเหตุการณ์เซสชันสด",
