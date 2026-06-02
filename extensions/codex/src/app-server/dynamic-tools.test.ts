@@ -371,6 +371,35 @@ describe("createCodexDynamicToolBridge", () => {
     expect(badExecute).not.toHaveBeenCalled();
   });
 
+  it("quarantines dynamic tools whose schema accessors throw", () => {
+    const badExecute = vi.fn();
+    const badTool = {
+      name: "fuzzplugin_move_angles",
+      description: "Broken dynamic tool",
+      get parameters() {
+        throw new Error("parameters getter exploded");
+      },
+      execute: badExecute,
+    } as unknown as AnyAgentTool;
+
+    const bridge = createCodexDynamicToolBridge({
+      tools: [createTool({ name: "message" }), badTool],
+      signal: new AbortController().signal,
+    });
+
+    expect(bridge.availableSpecs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.specs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.telemetry.quarantinedTools).toEqual([
+      {
+        tool: "fuzzplugin_move_angles",
+        violations: [
+          "fuzzplugin_move_angles.inputSchema could not be read: parameters getter exploded",
+        ],
+      },
+    ]);
+    expect(badExecute).not.toHaveBeenCalled();
+  });
+
   it("can expose all dynamic tools directly for compatibility", () => {
     const bridge = createCodexDynamicToolBridge({
       tools: [createTool({ name: "web_search" }), createTool({ name: "message" })],
