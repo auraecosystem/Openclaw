@@ -492,7 +492,9 @@ describe("followup queue drain restart after idle window", () => {
       // Yield a few microtasks; nothing should have drained because the
       // idle-aware kick was never invoked.
       for (let i = 0; i < 5; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
       }
       expect(drainCalls).toHaveLength(0);
 
@@ -500,7 +502,9 @@ describe("followup queue drain restart after idle window", () => {
       kickFollowupDrainIfIdle(key);
       // Spin a few microtasks to let the scheduled drain complete.
       for (let i = 0; i < 10 && drainCalls.length === 0; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
       }
       expect(drainCalls).toHaveLength(1);
       expect(drainCalls[0]?.prompt).toBe("survived restart");
@@ -569,7 +573,9 @@ describe("followup queue drain restart after idle window", () => {
       // Only route A goes idle and kicks. Per-key isolation: B must not drain.
       kickFollowupDrainIfIdle(keyA);
       for (let i = 0; i < 10 && drainsA.length === 0; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
       }
       expect(drainsA).toHaveLength(1);
       expect(drainsA[0]?.prompt).toBe("restored A");
@@ -578,7 +584,9 @@ describe("followup queue drain restart after idle window", () => {
       // Now B's own idle-kick fires; B drains.
       kickFollowupDrainIfIdle(keyB);
       for (let i = 0; i < 10 && drainsB.length === 0; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
       }
       expect(drainsB).toHaveLength(1);
       expect(drainsB[0]?.prompt).toBe("restored B");
@@ -639,7 +647,9 @@ describe("followup queue drain restart after idle window", () => {
       await drained.promise;
       // Spin a few microtasks so the drain loop's finally + cleanup run.
       for (let i = 0; i < 10; i++) {
-        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => {
+          setImmediate(resolve);
+        });
       }
 
       // After the drain, the queue is empty and the state file should not
