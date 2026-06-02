@@ -502,6 +502,15 @@ async function deliverMediaReply(params: {
               replyMarkup: params.replyMarkup,
               replyQuoteText: params.replyQuoteText,
             });
+            // The voice-text fallback funnels through sendTelegramText and can
+            // resolve `undefined` (skipped send) when the resolved fallback
+            // text strips to empty post-HTML normalization. Gate
+            // markReplyApplied + markDelivered on a real message id so an
+            // all-skipped fallback does not falsely register the outer reply
+            // as delivered (ClawSweeper P2 finding on #88810).
+            if (fallbackMessageId == null) {
+              continue;
+            }
             if (firstDeliveredMessageId == null) {
               firstDeliveredMessageId = fallbackMessageId;
             }

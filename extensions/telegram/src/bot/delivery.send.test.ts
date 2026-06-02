@@ -40,30 +40,30 @@ function createBot(sendMessage: ReturnType<typeof vi.fn>): Bot {
   return { api: { sendMessage } } as unknown as Bot;
 }
 
-// The "interrupted mid-reply turn" delivery shape: the model emits an HTML chunk that
-// looks non-empty locally (bare <br>, &nbsp;, etc.) but Telegram's supported-tag filter
-// strips it to nothing and returns a 400. The delivery contract passes plainText=""
-// for these chunks because the model produced no human-visible source text either.
-// Before this fix, the post-call 400 surfaced as a delivery failure; after the fix,
-// the send is skipped silently. Empty/whitespace-only chunks are caught pre-flight
-// (no API call). Tags that survive trim locally but Telegram strips server-side
-// (bare <br>, &nbsp;) trigger one API attempt then the catch-side silent skip.
+// The "interrupted mid-reply turn" delivery shape: the model emits an HTML chunk
+// that trims locally to empty (whitespace-only, empty inline tags such as <i></i>)
+// and the delivery contract passes plainText="" because no human-visible source
+// text was produced. Before this fix, the resulting Telegram 400 surfaced as a
+// delivery failure; after the fix, the send is silently skipped.
+//
+// Note on cases that are NOT empty-text skips and are intentionally absent here:
+// - Bare <br>, <br/>, <br /> reach Telegram as a parse error ("can't parse
+//   entities: unsupported start tag"), not the empty-text 400, so they take a
+//   different recovery path and are not part of the silent-skip contract.
+// - &nbsp; payloads round-trip to Telegram as the Unicode NBSP character (U+00A0),
+//   which is a successful delivery, not a skip.
+// Restricting the fixture to truly empty-after-trim payloads keeps future
+// maintenance pointed at the correct Telegram contract (ClawSweeper P3 finding
+// on #88810).
 const EMPTY_HTML_PAYLOADS = [
   { label: "empty string after trim", htmlText: "   ", expectedApiCalls: 0 },
-  { label: "bare <br> chunk", htmlText: "<br>", expectedApiCalls: 1 },
-  { label: "self-closing <br/> chunk", htmlText: "<br/>", expectedApiCalls: 1 },
-  { label: "spaced <br /> chunk", htmlText: "<br />", expectedApiCalls: 1 },
-  { label: "nbsp-only payload", htmlText: "&nbsp;", expectedApiCalls: 1 },
-  { label: "multiple nbsp payload", htmlText: "&nbsp;&nbsp;&nbsp;", expectedApiCalls: 1 },
 ];
 
 describe("sendTelegramText empty-text silent skip", () => {
   for (const { label, htmlText, expectedApiCalls } of EMPTY_HTML_PAYLOADS) {
     it(`silently skips html ${label} when Telegram rejects as empty and no plain fallback`, async () => {
-      // Telegram's supported-tag filter strips bare <br>/&nbsp; chunks to empty and
-      // returns one of the documented "empty text" 400 descriptions. With no plain
-      // fallback to retry against, the send must become a no-op rather than bubble
-      // a 400 up to the delivery caller.
+      // Locally-empty payloads must short-circuit pre-flight (no API call) so
+      // they cannot bubble a 400 up to the delivery caller.
       const runtime = createRuntime();
       const sendMessage = vi.fn(async () => {
         throw new Error("400: Bad Request: message text is empty");
