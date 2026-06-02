@@ -1,17 +1,22 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 
-function readSlice(filePath, start, length) {
+function readBufferSlice(filePath, start, length) {
   if (length <= 0) {
-    return "";
+    return Buffer.alloc(0);
   }
   const fd = fs.openSync(filePath, "r");
   try {
     const buffer = Buffer.alloc(length);
     const bytesRead = fs.readSync(fd, buffer, 0, length, start);
-    return buffer.subarray(0, bytesRead).toString("utf8");
+    return buffer.subarray(0, bytesRead);
   } finally {
     fs.closeSync(fd);
   }
+}
+
+function readSlice(filePath, start, length) {
+  return readBufferSlice(filePath, start, length).toString("utf8");
 }
 
 function resolveFileIdentity(stats) {
@@ -21,6 +26,19 @@ function resolveFileIdentity(stats) {
   return Number.isFinite(stats.birthtimeMs) ? `birth:${stats.birthtimeMs}` : undefined;
 }
 
+function resolveContentFingerprint(filePath, stats, maxReadBytes) {
+  if (stats.size === 0) {
+    return "empty";
+  }
+  const sampleBytes = Math.min(stats.size, maxReadBytes);
+  const hash = createHash("sha256");
+  hash.update(readBufferSlice(filePath, 0, sampleBytes));
+  if (sampleBytes < stats.size) {
+    hash.update(readBufferSlice(filePath, stats.size - sampleBytes, sampleBytes));
+  }
+  return hash.digest("hex");
+}
+
 export function resolvePositiveInteger(value, fallback) {
   return Number.isSafeInteger(value) && value > 0 ? value : fallback;
 }
@@ -28,6 +46,7 @@ export function resolvePositiveInteger(value, fallback) {
 export function createIncrementalLineReader(filePath, options = {}) {
   const maxReadBytes = resolvePositiveInteger(options.maxReadBytes, 256 * 1024);
   let fileIdentity;
+  let contentFingerprint;
   let offset = 0;
   let pending = "";
 
@@ -61,7 +80,15 @@ export function createIncrementalLineReader(filePath, options = {}) {
         reset = true;
       }
       if (stats.size === offset) {
-        return { lines: [], reset };
+        const nextContentFingerprint = resolveContentFingerprint(filePath, stats, maxReadBytes);
+        if (contentFingerprint === undefined || contentFingerprint === nextContentFingerprint) {
+          contentFingerprint = nextContentFingerprint;
+          return { lines: [], reset };
+        }
+        contentFingerprint = nextContentFingerprint;
+        offset = 0;
+        pending = "";
+        reset = true;
       }
 
       let start = offset;
@@ -82,6 +109,7 @@ export function createIncrementalLineReader(filePath, options = {}) {
 
       const text = readSlice(filePath, start, stats.size - start);
       offset = stats.size;
+      contentFingerprint = resolveContentFingerprint(filePath, stats, maxReadBytes);
       if (!text) {
         return { lines: [], reset };
       }
