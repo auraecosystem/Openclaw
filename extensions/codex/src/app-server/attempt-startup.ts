@@ -179,6 +179,7 @@ export async function startCodexAttemptThread(params: {
               params.startupAuthProfileId,
               params.agentDir,
               params.config,
+              { timeoutMs: params.startupTimeoutMs },
             );
             startupClientLease = () => {
               releaseLeasedSharedCodexAppServerClient(startupClient);
