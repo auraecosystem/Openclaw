@@ -427,12 +427,28 @@ if (!command) {
   process.exit(1);
 }
 
+console.error("[openclaw] starting ${params.displayName} ACP wrapper", JSON.stringify({
+  command,
+  argsCount: args.length,
+  cwd: process.cwd(),
+  node: process.version,
+  pid: process.pid,
+  leaseId: process.env[${JSON.stringify(OPENCLAW_ACPX_LEASE_ID_ENV)}] || readOpenClawWrapperArg(rawConfiguredArgs, ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)}) || null,
+  gatewayInstanceId: readOpenClawWrapperArg(rawConfiguredArgs, ${quoteCommandPart(OPENCLAW_GATEWAY_INSTANCE_ID_ARG)}) || null,
+  stderrLogPath
+}));
+
 const child = spawn(command, args, {
   detached: process.platform !== "win32",
   env,
   stdio: ["inherit", "inherit", "pipe"],
   windowsHide: true,
 });
+console.error("[openclaw] spawned ${params.displayName} ACP child", JSON.stringify({
+  childPid: child.pid ?? null,
+  wrapperPid: process.pid,
+  leaseId: process.env[${JSON.stringify(OPENCLAW_ACPX_LEASE_ID_ENV)}] || readOpenClawWrapperArg(rawConfiguredArgs, ${quoteCommandPart(OPENCLAW_ACPX_LEASE_ID_ARG)}) || null
+}));
 
 child.stderr?.on("data", (chunk) => {
   appendStderrLog(chunk);
@@ -497,6 +513,14 @@ child.on("error", (error) => {
 });
 
 child.on("exit", (code, signal) => {
+  console.error("[openclaw] ${params.displayName} ACP child exited", JSON.stringify({
+    childPid: child.pid ?? null,
+    code,
+    signal,
+    wrapperPid: process.pid,
+    orphanCleanupStarted,
+    stderrLogPath
+  }));
   if (parentWatcher) {
     clearInterval(parentWatcher);
   }
@@ -515,6 +539,12 @@ child.on("exit", (code, signal) => {
 
 child.on("close", () => {
   finishStderrLog();
+  console.error("[openclaw] ${params.displayName} ACP wrapper closing", JSON.stringify({
+    childPid: child.pid ?? null,
+    exitCode: childExitCode,
+    wrapperPid: process.pid,
+    stderrLogPath
+  }));
   process.exit(childExitCode);
 });
 `;
