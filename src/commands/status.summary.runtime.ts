@@ -35,6 +35,7 @@ function resolveStatusModelRefFromRaw(params: {
         continue;
       }
       const parsed = parseModelRef(modelKey, params.defaultProvider, {
+        allowManifestNormalization: false,
         allowPluginNormalization: false,
       });
       if (parsed) {
@@ -44,6 +45,7 @@ function resolveStatusModelRefFromRaw(params: {
     return { provider: params.defaultProvider, model: trimmed };
   }
   return parseModelRef(trimmed, params.defaultProvider, {
+    allowManifestNormalization: false,
     allowPluginNormalization: false,
   });
 }
@@ -147,6 +149,7 @@ function resolveSessionModelRef(
       runtimeModel: entry?.model,
       overrideProvider: entry?.providerOverride,
       overrideModel: entry?.modelOverride,
+      allowManifestNormalization: false,
       allowPluginNormalization: false,
     }) ?? resolved
   );
