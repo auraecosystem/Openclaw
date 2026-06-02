@@ -2141,7 +2141,7 @@ describe("update-cli", () => {
     expect(jsonOutput?.targetVersion).toBe("2026.5.26");
   });
 
-  it("honors pnpm npm_config_registry env before public npm availability preflight", async () => {
+  it("honors PNPM_CONFIG_REGISTRY before public npm availability preflight", async () => {
     const root = createCaseDir("openclaw-update-pnpm-env-registry");
     const pnpmGlobalProject = path.join(root, "pnpm-global", "5");
     const pnpmGlobalRoot = path.join(pnpmGlobalProject, "node_modules");
@@ -2190,7 +2190,7 @@ describe("update-cli", () => {
       };
     });
 
-    await withEnvAsync({ npm_config_registry: "https://pnpm.internal.example/" }, async () => {
+    await withEnvAsync({ PNPM_CONFIG_REGISTRY: "https://pnpm.internal.example/" }, async () => {
       await updateCommand({ dryRun: true, tag: "2026.5.26", json: true });
     });
 
@@ -2204,7 +2204,7 @@ describe("update-cli", () => {
     expect(jsonOutput?.targetVersion).toBe("2026.5.26");
   });
 
-  it("honors pnpm lowercase registry env when it wins casing conflict", async () => {
+  it("honors pnpm_config_registry before public npm availability preflight", async () => {
     const root = createCaseDir("openclaw-update-pnpm-env-registry-precedence");
     const pnpmGlobalRoot = path.join(root, "pnpm-global", "5", "node_modules");
     vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(root);
@@ -2252,15 +2252,9 @@ describe("update-cli", () => {
       };
     });
 
-    await withEnvAsync(
-      {
-        NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
-        npm_config_registry: "https://pnpm.internal.example/",
-      },
-      async () => {
-        await updateCommand({ dryRun: true, tag: "2026.5.26", json: true });
-      },
-    );
+    await withEnvAsync({ pnpm_config_registry: "https://pnpm.internal.example/" }, async () => {
+      await updateCommand({ dryRun: true, tag: "2026.5.26", json: true });
+    });
 
     expect(fetchNpmPackageTargetStatus).not.toHaveBeenCalled();
     expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);
@@ -2272,9 +2266,10 @@ describe("update-cli", () => {
     expect(jsonOutput?.targetVersion).toBe("2026.5.26");
   });
 
-  it("skips pnpm public availability when registry env casing conflicts", async () => {
+  it("ignores npm registry env for pnpm-managed package updates", async () => {
     const root = createCaseDir("openclaw-update-pnpm-env-registry-precedence-uppercase");
-    const pnpmGlobalRoot = path.join(root, "pnpm-global", "5", "node_modules");
+    const pnpmGlobalProject = path.join(root, "pnpm-global", "5");
+    const pnpmGlobalRoot = path.join(pnpmGlobalProject, "node_modules");
     vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(root);
     resolveGlobalManager.mockResolvedValue("pnpm");
     vi.mocked(checkUpdateStatus).mockResolvedValue({
@@ -2296,7 +2291,7 @@ describe("update-cli", () => {
       error: "HTTP 404",
     });
     vi.mocked(defaultRuntime.writeJson).mockClear();
-    vi.mocked(runCommandWithTimeout).mockImplementation(async (argv) => {
+    vi.mocked(runCommandWithTimeout).mockImplementation(async (argv, options) => {
       if (argv[0] === "pnpm" && argv[1] === "root" && argv[2] === "-g") {
         return {
           stdout: `${pnpmGlobalRoot}\n`,
@@ -2308,7 +2303,9 @@ describe("update-cli", () => {
         };
       }
       if (argv[0] === "pnpm" && argv[1] === "config" && argv[2] === "get") {
-        throw new Error("pnpm registry env should bypass config probing");
+        expect(argv).toEqual(["pnpm", "config", "get", "registry"]);
+        expect(expectRunCommandOptions(options).cwd).toBe(pnpmGlobalProject);
+        return commandOk("https://registry.npmjs.org/\n");
       }
       return {
         stdout: "",
@@ -2322,22 +2319,81 @@ describe("update-cli", () => {
 
     await withEnvAsync(
       {
-        npm_config_registry: "https://pnpm.internal.example/",
-        NPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+        NPM_CONFIG_REGISTRY: "https://pnpm.internal.example/",
+        npm_config_registry: "https://npm.internal.example/",
       },
       async () => {
         await updateCommand({ dryRun: true, tag: "2026.5.26", json: true });
       },
     );
 
-    expect(fetchNpmPackageTargetStatus).not.toHaveBeenCalled();
-    expect(defaultRuntime.exit).not.toHaveBeenCalledWith(1);
+    expect(fetchNpmPackageTargetStatus).toHaveBeenCalledWith({
+      target: "2026.5.26",
+      timeoutMs: undefined,
+    });
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
+    expect(defaultRuntime.writeJson).not.toHaveBeenCalled();
     const commands = vi.mocked(runCommandWithTimeout).mock.calls.map(([argv]) => argv.join(" "));
     expect(commands).toContain("pnpm root -g");
-    expect(commands).not.toContain("pnpm config get registry");
-    const jsonOutput = lastWriteJsonCall() as { tag?: string; targetVersion?: string } | undefined;
-    expect(jsonOutput?.tag).toBe("openclaw@2026.5.26");
-    expect(jsonOutput?.targetVersion).toBe("2026.5.26");
+    expect(commands).toContain("pnpm config get registry");
+  });
+
+  it("uses pnpm registry config when PNPM registry env casing conflicts", async () => {
+    const root = createCaseDir("openclaw-update-pnpm-env-registry-conflict");
+    const pnpmGlobalProject = path.join(root, "pnpm-global", "5");
+    const pnpmGlobalRoot = path.join(pnpmGlobalProject, "node_modules");
+    vi.mocked(resolveOpenClawPackageRoot).mockResolvedValue(root);
+    resolveGlobalManager.mockResolvedValue("pnpm");
+    vi.mocked(checkUpdateStatus).mockResolvedValue({
+      root,
+      installKind: "package",
+      packageManager: "pnpm",
+      deps: {
+        manager: "pnpm",
+        status: "ok",
+        lockfilePath: null,
+        markerPath: null,
+      },
+    });
+    readPackageVersion.mockResolvedValue("2026.5.24-beta.2");
+    vi.mocked(fetchNpmPackageTargetStatus).mockResolvedValue({
+      target: "2026.5.26",
+      version: null,
+      nodeEngine: null,
+      error: "HTTP 404",
+    });
+    vi.mocked(defaultRuntime.writeJson).mockClear();
+    vi.mocked(runCommandWithTimeout).mockImplementation(async (argv, options) => {
+      if (argv[0] === "pnpm" && argv[1] === "root" && argv[2] === "-g") {
+        return commandOk(`${pnpmGlobalRoot}\n`);
+      }
+      if (argv[0] === "pnpm" && argv[1] === "config" && argv[2] === "get") {
+        expect(argv).toEqual(["pnpm", "config", "get", "registry"]);
+        expect(expectRunCommandOptions(options).cwd).toBe(pnpmGlobalProject);
+        return commandOk("https://registry.npmjs.org/\n");
+      }
+      return commandOk();
+    });
+
+    await withEnvAsync(
+      {
+        PNPM_CONFIG_REGISTRY: "https://registry.npmjs.org/",
+        pnpm_config_registry: "https://pnpm.internal.example/",
+      },
+      async () => {
+        await updateCommand({ dryRun: true, tag: "2026.5.26", json: true });
+      },
+    );
+
+    expect(fetchNpmPackageTargetStatus).toHaveBeenCalledWith({
+      target: "2026.5.26",
+      timeoutMs: undefined,
+    });
+    expect(defaultRuntime.exit).toHaveBeenCalledWith(1);
+    expect(defaultRuntime.writeJson).not.toHaveBeenCalled();
+    const commands = vi.mocked(runCommandWithTimeout).mock.calls.map(([argv]) => argv.join(" "));
+    expect(commands).toContain("pnpm root -g");
+    expect(commands).toContain("pnpm config get registry");
   });
 
   it("ignores caller-local pnpm registry config before public npm availability preflight", async () => {

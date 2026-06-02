@@ -1052,6 +1052,15 @@ function readNpmRegistryEnv(env: NodeJS.ProcessEnv): string | null {
   return readRegistryEnv(env, ["NPM_CONFIG_REGISTRY", "npm_config_registry"]);
 }
 
+function readPnpmRegistryEnv(env: NodeJS.ProcessEnv): string | null {
+  const upper = normalizeOptionalString(env.PNPM_CONFIG_REGISTRY);
+  const lower = normalizeOptionalString(env.pnpm_config_registry);
+  if (upper && lower && normalizeNpmRegistryUrl(upper) !== normalizeNpmRegistryUrl(lower)) {
+    return null;
+  }
+  return readRegistryEnv(env, ["PNPM_CONFIG_REGISTRY", "pnpm_config_registry"]);
+}
+
 function readBunRegistryEnv(env: NodeJS.ProcessEnv): string | null {
   return (
     readRegistryEnv(env, ["BUN_CONFIG_REGISTRY", "bun_config_registry"]) ??
@@ -1086,7 +1095,7 @@ async function resolveEffectiveNpmRegistry(params: {
     return readBunRegistryEnv(params.env);
   }
   if (params.manager === "pnpm") {
-    const registryEnv = readNpmRegistryEnv(params.env);
+    const registryEnv = readPnpmRegistryEnv(params.env);
     if (registryEnv) {
       return registryEnv;
     }
@@ -1110,7 +1119,9 @@ async function resolveEffectiveNpmRegistry(params: {
     },
   ).catch(() => null);
   if (!result || result.code !== 0) {
-    return readNpmRegistryEnv(params.env);
+    return params.manager === "pnpm"
+      ? readPnpmRegistryEnv(params.env)
+      : readNpmRegistryEnv(params.env);
   }
   return normalizeOptionalString(result.stdout) ?? null;
 }
