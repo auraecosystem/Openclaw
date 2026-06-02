@@ -5,6 +5,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { createConfigRuntimeEnv } from "../config/env-vars.js";
 import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
+import { clearRuntimeAuthProfileStoreSnapshots } from "./auth-profiles/store.js";
 import { unsetEnv, withTempEnv } from "./models-config.e2e-harness.js";
 import {
   planOpenClawModelsJsonWithDeps,
@@ -364,6 +365,78 @@ describe("models-config", () => {
       providers?: Record<string, { apiKey?: string }>;
     };
     expect(parsed.providers?.openai?.apiKey).toBe("OPENAI_API_KEY");
+  });
+
+  it("writes auth-profile env apiKey refs as non-plaintext markers", async () => {
+    const agentDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-models-auth-ref-"));
+    try {
+      await fs.writeFile(
+        path.join(agentDir, "auth-profiles.json"),
+        `${JSON.stringify(
+          {
+            version: 1,
+            profiles: {
+              "tensorix:default": {
+                type: "api_key",
+                provider: "tensorix",
+                keyRef: {
+                  source: "env",
+                  provider: "default",
+                  id: "TENSORIX_API_KEY",
+                },
+              },
+            },
+          },
+          null,
+          2,
+        )}\n`,
+        "utf8",
+      );
+      clearRuntimeAuthProfileStoreSnapshots();
+
+      const plan = await planOpenClawModelsJsonWithDeps(
+        {
+          cfg: {
+            models: {
+              providers: {
+                tensorix: {
+                  baseUrl: "https://api.tensorix.ai/v1",
+                  api: "openai-completions",
+                  models: [
+                    {
+                      id: "tensorix/deepseek/deepseek-v4-pro",
+                      name: "DeepSeek V4 Pro",
+                      reasoning: false,
+                      input: ["text"],
+                      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                      contextWindow: 64_000,
+                      maxTokens: 8_192,
+                    },
+                  ],
+                },
+              },
+            },
+          },
+          agentDir,
+          env: {},
+          existingRaw: "",
+          existingParsed: null,
+        },
+        {
+          resolveImplicitProviders: async () => ({}),
+        },
+      );
+
+      expect(plan.action).toBe("write");
+      const parsed = JSON.parse(plan.action === "write" ? plan.contents : "{}") as {
+        providers?: Record<string, { apiKey?: string }>;
+      };
+      expect(parsed.providers?.tensorix?.apiKey).toBe("secretref-env:TENSORIX_API_KEY"); // pragma: allowlist secret
+      expect(parsed.providers?.tensorix?.apiKey).not.toBe("TENSORIX_API_KEY"); // pragma: allowlist secret
+    } finally {
+      clearRuntimeAuthProfileStoreSnapshots();
+      await fs.rm(agentDir, { recursive: true, force: true });
+    }
   });
 
   it("normalizes retired Gemini ids preserved from existing models.json rows", async () => {

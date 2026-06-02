@@ -6,6 +6,7 @@ import type { AuthProfileStore } from "./auth-profiles/types.js";
 import { resolveEnvApiKey, type EnvApiKeyLookupOptions } from "./model-auth-env.js";
 import {
   isNonSecretApiKeyMarker,
+  resolveEnvSecretRefApiKeyMarker,
   resolveEnvSecretRefHeaderValueMarker,
   resolveNonEnvSecretRefApiKeyMarker,
   resolveNonEnvSecretRefHeaderValueMarker,
@@ -123,7 +124,7 @@ export function resolveApiKeyFromCredential(
       if (keyRef.source === "env") {
         const envVar = keyRef.id.trim();
         return {
-          apiKey: envVar,
+          apiKey: resolveEnvSecretRefApiKeyMarker(envVar),
           source: "env-ref",
           discoveryApiKey: toDiscoveryApiKey(env[envVar]),
         };
@@ -148,7 +149,7 @@ export function resolveApiKeyFromCredential(
       if (tokenRef.source === "env") {
         const envVar = tokenRef.id.trim();
         return {
-          apiKey: envVar,
+          apiKey: resolveEnvSecretRefApiKeyMarker(envVar),
           source: "env-ref",
           discoveryApiKey: toDiscoveryApiKey(env[envVar]),
         };
@@ -207,7 +208,7 @@ export function normalizeConfiguredProviderApiKey(params: {
   if (configuredApiKeyRef && configuredApiKeyRef.id.trim()) {
     const marker =
       configuredApiKeyRef.source === "env"
-        ? configuredApiKeyRef.id.trim()
+        ? resolveEnvSecretRefApiKeyMarker(configuredApiKeyRef.id)
         : resolveNonEnvSecretRefApiKeyMarker(configuredApiKeyRef.source);
     params.secretRefManagedProviders?.add(params.providerKey);
     if (params.provider.apiKey === marker) {
