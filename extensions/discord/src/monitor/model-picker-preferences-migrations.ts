@@ -196,7 +196,7 @@ export const detectDiscordLegacyStateMigrations: BundledChannelLegacyStateMigrat
           if (normalized) {
             out.push({
               key: toBindingRecordKey(normalized),
-              value: JSON.parse(JSON.stringify(normalized)) as unknown,
+              value: normalized,
             });
           }
         }
