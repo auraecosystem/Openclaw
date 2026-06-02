@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearOpenAIToolSchemaCacheForTest,
   isStrictOpenAIJsonSchemaCompatible,
+  normalizeOpenAIStrictToolParameters,
   normalizeStrictOpenAIJsonSchema,
   resolveOpenAIStrictToolFlagForInventory,
 } from "./openai-tool-schema.js";
@@ -90,5 +91,44 @@ describe("OpenAI strict tool schema normalization", () => {
         unsupportedToolSchemaKeywords: ["minimum"],
       }),
     ).toBe(third);
+  });
+
+  it("shapes OpenAI tool schemas from their JSON view before raw object traversal", () => {
+    const schema = new Proxy(
+      {
+        toJSON() {
+          return {
+            type: "object",
+            properties: {
+              query: { type: "string" },
+            },
+            required: ["query"],
+          };
+        },
+      },
+      {
+        ownKeys() {
+          throw new Error("raw schema traversal");
+        },
+      },
+    );
+
+    expect(normalizeStrictOpenAIJsonSchema(schema)).toEqual({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+      required: ["query"],
+      additionalProperties: false,
+    });
+    expect(normalizeOpenAIStrictToolParameters(schema, false)).toMatchObject({
+      type: "object",
+      properties: {
+        query: { type: "string" },
+      },
+    });
+    expect(
+      resolveOpenAIStrictToolFlagForInventory([{ name: "lookup", parameters: schema }], true),
+    ).toBe(true);
   });
 });

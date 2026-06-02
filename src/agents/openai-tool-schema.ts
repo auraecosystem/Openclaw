@@ -14,6 +14,7 @@ type ToolWithParameters = {
 
 const MAX_STRICT_SCHEMA_CACHE_ENTRIES_PER_SCHEMA = 8;
 let strictOpenAISchemaCache = new WeakMap<object, Array<{ key: string; value: unknown }>>();
+let openAISchemaInputCache = new WeakMap<object, unknown>();
 
 function resolveToolSchemaModelCompat(
   compat: ToolSchemaCompatInput | null | undefined,
@@ -63,13 +64,33 @@ function rememberStrictOpenAISchema(schema: object, key: string, value: unknown)
 
 export function clearOpenAIToolSchemaCacheForTest(): void {
   strictOpenAISchemaCache = new WeakMap();
+  openAISchemaInputCache = new WeakMap();
+}
+
+function materializeOpenAIToolSchemaInput(schema: unknown): unknown {
+  const schemaInput = schema ?? {};
+  if (!schemaInput || typeof schemaInput !== "object") {
+    return schemaInput;
+  }
+  if (openAISchemaInputCache.has(schemaInput)) {
+    return openAISchemaInputCache.get(schemaInput);
+  }
+  let materialized: unknown;
+  try {
+    const text = JSON.stringify(schemaInput);
+    materialized = text ? JSON.parse(text) : {};
+  } catch {
+    materialized = {};
+  }
+  openAISchemaInputCache.set(schemaInput, materialized);
+  return materialized;
 }
 
 export function normalizeStrictOpenAIJsonSchema(
   schema: unknown,
   modelCompat?: ToolSchemaCompatInput | null,
 ): unknown {
-  const schemaInput = schema ?? {};
+  const schemaInput = materializeOpenAIToolSchemaInput(schema);
   if (!schemaInput || typeof schemaInput !== "object") {
     return normalizeStrictOpenAIJsonSchemaRecursive(
       normalizeToolParameterSchema(schemaInput, {
@@ -147,10 +168,11 @@ export function normalizeOpenAIStrictToolParameters<T>(
   modelCompat?: ToolSchemaCompatInput | null,
 ): T {
   const toolSchemaCompat = resolveToolSchemaModelCompat(modelCompat);
+  const schemaInput = materializeOpenAIToolSchemaInput(schema);
   if (!strict) {
-    return normalizeToolParameterSchema(schema ?? {}, { modelCompat: toolSchemaCompat }) as T;
+    return normalizeToolParameterSchema(schemaInput ?? {}, { modelCompat: toolSchemaCompat }) as T;
   }
-  return normalizeStrictOpenAIJsonSchema(schema, toolSchemaCompat) as T;
+  return normalizeStrictOpenAIJsonSchema(schemaInput, toolSchemaCompat) as T;
 }
 
 export function isStrictOpenAIJsonSchemaCompatible(schema: unknown): boolean {
