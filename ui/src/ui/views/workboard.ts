@@ -1410,6 +1410,9 @@ export function renderWorkboard(props: WorkboardProps) {
   for (const card of filtered) {
     byStatus.get(card.status)?.push(card);
   }
+  const visibleStatuses = state.hideEmptyColumns
+    ? state.statuses.filter((status) => (byStatus.get(status)?.length ?? 0) > 0)
+    : state.statuses;
 
   return html`
     <section class="workboard">
@@ -1439,6 +1442,18 @@ export function renderWorkboard(props: WorkboardProps) {
               (priority) => html`<option value=${priority}>${priority}</option>`,
             )}
           </select>
+          <label class="workboard-toggle">
+            <input
+              type="checkbox"
+              name="workboard-hide-empty-columns"
+              .checked=${state.hideEmptyColumns}
+              @change=${(event: Event) => {
+                state.hideEmptyColumns = (event.currentTarget as HTMLInputElement).checked;
+                props.onRequestUpdate?.();
+              }}
+            />
+            <span>${t("workboard.hideEmptyColumns")}</span>
+          </label>
         </div>
         <div class="workboard-toolbar__actions">
           <button
@@ -1488,7 +1503,7 @@ export function renderWorkboard(props: WorkboardProps) {
       ${state.error ? html`<div class="callout danger">${state.error}</div>` : nothing}
       ${renderDispatchSummary(state)} ${renderCardModal(props)} ${renderCardDetailsPanel(props)}
       <div class="workboard-board">
-        ${state.statuses.map((status) => renderColumn(props, status, byStatus.get(status) ?? []))}
+        ${visibleStatuses.map((status) => renderColumn(props, status, byStatus.get(status) ?? []))}
       </div>
     </section>
   `;

@@ -336,6 +336,7 @@ export type WorkboardUiState = {
   lastDispatchSummary: WorkboardDispatchSummary | null;
   query: string;
   priorityFilter: "all" | WorkboardPriority;
+  hideEmptyColumns: boolean;
   draftOpen: boolean;
   editingCardId: string | null;
   draftTitle: string;
@@ -380,6 +381,7 @@ function createDefaultState(): WorkboardUiState {
     lastDispatchSummary: null,
     query: "",
     priorityFilter: "all",
+    hideEmptyColumns: false,
     draftOpen: false,
     editingCardId: null,
     draftTitle: "",
