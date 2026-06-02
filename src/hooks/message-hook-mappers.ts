@@ -78,6 +78,7 @@ export type CanonicalSentMessageHookContext = {
   sessionKey?: string;
   runId?: string;
   messageId?: string;
+  senderId?: string;
   trace?: DiagnosticTraceContext;
   callDepth?: number;
   isGroup?: boolean;
@@ -180,6 +181,7 @@ export function buildCanonicalSentMessageHookContext(params: {
   sessionKey?: string;
   runId?: string;
   messageId?: string;
+  senderId?: string;
   trace?: DiagnosticTraceContext;
   callDepth?: number;
   isGroup?: boolean;
@@ -196,6 +198,7 @@ export function buildCanonicalSentMessageHookContext(params: {
     sessionKey: params.sessionKey,
     runId: params.runId,
     messageId: params.messageId,
+    senderId: params.senderId,
     trace: params.trace,
     callDepth: params.callDepth,
     isGroup: params.isGroup,
@@ -445,6 +448,7 @@ export function toPluginMessageSentEvent(
     ...(canonical.messageId ? { messageId: canonical.messageId } : {}),
     ...(canonical.sessionKey ? { sessionKey: canonical.sessionKey } : {}),
     ...(canonical.runId ? { runId: canonical.runId } : {}),
+    ...(canonical.senderId ? { senderId: canonical.senderId } : {}),
     ...(canonical.error ? { error: canonical.error } : {}),
   };
   assignTraceFields(event, canonical.trace);
