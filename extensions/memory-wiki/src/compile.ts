@@ -27,7 +27,6 @@ import {
   type WikiPageContradictionCluster,
 } from "./claim-health.js";
 import type { ResolvedMemoryWikiConfig, WikiPageKind } from "./config.js";
-import { findDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   formatWikiLink,
