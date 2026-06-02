@@ -402,7 +402,13 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
     }
   });
 
-  it("allows skill_workshop lifecycle actions when no approval route is available", async () => {
+  it("blocks skill_workshop lifecycle actions when no approval route is available", async () => {
+    // ClawSweeper P1 pushback on #89590: apply/reject/quarantine all mutate
+    // the live skill set, so falling back to ALLOW_ONCE on no-route would
+    // bypass the operator-intended pending-approval default. The default
+    // (block with "Plugin approval unavailable" reason) is the safer
+    // contract; the model sees the block immediately rather than a
+    // synthesized success.
     mockCallGatewayTool.mockResolvedValueOnce({
       id: "skill-workshop-approval",
       decision: null,
@@ -423,11 +429,13 @@ describe("runBeforeToolCallHook — embedded mode approvals", () => {
       },
     });
 
-    expect(result).toEqual({
-      blocked: false,
-      params: { action: "apply", proposal_id: "weather-20260530-a1b2c3d4e5" },
-      approvalResolution: PluginApprovalResolutions.ALLOW_ONCE,
-    });
+    if (!result.blocked) {
+      throw new Error(
+        "expected skill_workshop no-route approval to fall through to the default fail-closed contract",
+      );
+    }
+    expect(result.kind).toBe("failure");
+    expect(result.deniedReason).toBe("plugin-approval");
     const approvalCall = requireApprovalRequestCall("skill_workshop no-route approval request");
     expect(approvalCall.request.toolName).toBe("skill_workshop");
   });
