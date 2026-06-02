@@ -156,7 +156,7 @@ describe("startCodexAttemptThread", () => {
   });
 
   it("clears the shared app-server when initialize stalls before thread startup", async () => {
-    const { harness, run } = startThreadWithHarness(200);
+    const { harness, run } = startThreadWithHarness(1_000);
     const runError = run.then(
       () => undefined,
       (error: unknown) => error,
@@ -176,7 +176,7 @@ describe("startCodexAttemptThread", () => {
     vi.spyOn(Date, "now").mockImplementation(() => now);
     const initializeTimeouts: number[] = [];
     const attemptClientFactory: CodexAppServerClientFactory = async (...args) => {
-      initializeTimeouts.push(args[4]?.timeoutMs ?? 0);
+      initializeTimeouts.push((args[4]?.initializeTimeoutDeadlineMs ?? 0) - Date.now());
       throw new Error("captured initialize budget");
     };
     const { run } = startThreadWithHarness(500, new AbortController().signal, {
