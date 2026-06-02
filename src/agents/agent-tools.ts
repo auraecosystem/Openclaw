@@ -1083,17 +1083,29 @@ export function createOpenClawCodingTools(options?: {
   options?.recordToolPrepStage?.("model-provider-policy");
   // Sender identity is carried for command/channel-action auth; tool visibility
   // comes from configured tool policies, not per-turn sender ownership.
+  // When the runtime explicitly requests all tools via wildcard allowlist,
+  // override the static profile so that tools like exec remain available in
+  // cron isolated sessions that set toolsAllow: ["*"] (#89228).
+  const runtimeHasWildcardAllowlist = options?.runtimeToolAllowlist?.some(
+    (entry) => normalizeToolName(entry) === "*",
+  );
+  const effectiveProfilePolicy = runtimeHasWildcardAllowlist
+    ? undefined
+    : profilePolicyWithAlsoAllow;
+  const effectiveProviderProfilePolicy = runtimeHasWildcardAllowlist
+    ? undefined
+    : providerProfilePolicyWithAlsoAllow;
   const subagentFiltered = applyToolPolicyPipeline({
     tools: toolsForModelProvider,
     toolMeta: (tool) => getPluginToolMeta(tool),
     warn: logWarn,
     steps: [
       ...buildDefaultToolPolicyPipelineSteps({
-        profilePolicy: profilePolicyWithAlsoAllow,
-        profile,
+        profilePolicy: effectiveProfilePolicy,
+        profile: runtimeHasWildcardAllowlist ? undefined : profile,
         profileUnavailableCoreWarningAllowlist: profilePolicy?.allow,
-        providerProfilePolicy: providerProfilePolicyWithAlsoAllow,
-        providerProfile,
+        providerProfilePolicy: effectiveProviderProfilePolicy,
+        providerProfile: runtimeHasWildcardAllowlist ? undefined : providerProfile,
         providerProfileUnavailableCoreWarningAllowlist: providerProfilePolicy?.allow,
         globalPolicy: globalPolicyWithToolSearchControls,
         globalProviderPolicy: globalProviderPolicyWithToolSearchControls,
