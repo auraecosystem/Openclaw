@@ -140,6 +140,7 @@ export async function finalizeHarnessContextEngineTurn(params: {
   prePromptMessageCount: number;
   tokenBudget?: number;
   runtimeContext?: ContextEngineRuntimeContext;
+  isHeartbeat?: boolean;
   runMaintenance?: typeof runHarnessContextEngineMaintenance;
   sessionManager?: unknown;
   config?: SessionWriteLockAcquireTimeoutConfig;
@@ -165,6 +166,7 @@ export async function finalizeHarnessContextEngineTurn(params: {
         prePromptMessageCount: conversationSnapshot.prePromptMessageCount,
         tokenBudget: params.tokenBudget,
         runtimeContext: params.runtimeContext,
+        ...(params.isHeartbeat !== undefined ? { isHeartbeat: params.isHeartbeat } : {}),
       });
     } catch (afterTurnErr) {
       postTurnFinalizationSucceeded = false;
