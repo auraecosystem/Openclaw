@@ -702,13 +702,18 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
               }
             }
 
-            const hasTarget =
-              (typeof delivery?.channel === "string" && delivery.channel.trim()) ||
-              (typeof delivery?.to === "string" && delivery.to.trim());
+            // Inference gates on whether `to` was explicitly set. Treating
+            // `channel` alone as "has target" skips inference for calls like
+            // `{ mode: "announce", channel: "wea" }` and the downstream
+            // delivery resolver then falls back to the session store's stale
+            // `lastTo`, mis-routing the message to whichever peer the host
+            // last spoke with. See the inferDeliveryFrom* helpers below for
+            // how the correct `to` is derived.
+            const hasExplicitTo = typeof delivery?.to === "string" && delivery.to.trim().length > 0;
             const shouldInfer =
               (deliveryValue == null || delivery) &&
               (mode === "" || mode === "announce") &&
-              !hasTarget;
+              !hasExplicitTo;
             if (shouldInfer) {
               const inferred = resolveCronCreationDelivery({
                 cfg,
@@ -716,9 +721,14 @@ Use jobId canonical; id accepted compat. contextMessages (0-10) adds previous me
                 agentSessionKey: opts.agentSessionKey,
               });
               if (inferred) {
+                // Start from the inferred delivery so the caller's partial
+                // object (mode/channel/etc.) is preserved on top of it, then
+                // re-assert `to` from the inferred result since the caller
+                // did not provide one.
                 (job as { delivery?: unknown }).delivery = {
                   ...inferred,
                   ...delivery,
+                  to: inferred.to,
                 } satisfies CronDelivery;
               }
             }
