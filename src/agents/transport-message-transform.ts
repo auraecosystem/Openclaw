@@ -34,7 +34,22 @@ function isFailedAssistantTurn(message: Context["messages"][number]): boolean {
   if (message.role !== "assistant") {
     return false;
   }
-  return message.stopReason === "error" || message.stopReason === "aborted";
+  if (message.stopReason === "error" || message.stopReason === "aborted") {
+    return true;
+  }
+  if (message.stopReason !== "length") {
+    return false;
+  }
+  const content = Array.isArray(message.content) ? message.content : [];
+  return !content.some((block) => {
+    if (block.type === "toolCall") {
+      return true;
+    }
+    if (block.type === "text") {
+      return block.text.trim().length > 0;
+    }
+    return false;
+  });
 }
 
 export function transformTransportMessages(
