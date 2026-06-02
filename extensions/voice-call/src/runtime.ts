@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { isLoopbackHost } from "openclaw/plugin-sdk/gateway-runtime";
+import { resolveConfiguredCapabilityProvider } from "openclaw/plugin-sdk/provider-selection-runtime";
 import {
   consultRealtimeVoiceAgent,
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
@@ -20,6 +21,7 @@ import {
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { CallManager } from "./manager.js";
 import type { VoiceCallProvider } from "./providers/base.js";
+import type { MsteamsProvider } from "./providers/msteams.js";
 import type { TwilioProvider } from "./providers/twilio.js";
 import { buildRealtimeVoiceInstructions } from "./realtime-agent-context.js";
 import { resolveRealtimeFastContextConsult } from "./realtime-fast-context.js";
@@ -62,6 +64,7 @@ type MockProviderModule = typeof import("./providers/mock.js");
 type MsteamsProviderModule = typeof import("./providers/msteams.js");
 type RealtimeVoiceRuntimeModule = typeof import("./realtime-voice.runtime.js");
 type RealtimeHandlerModule = typeof import("./webhook/realtime-handler.js");
+type RealtimeTranscriptionRuntimeModule = typeof import("./realtime-transcription.runtime.js");
 
 const REALTIME_VOICE_CONSULT_SYSTEM_PROMPT = [
   "You are the configured OpenClaw agent receiving delegated requests from a live phone voice bridge.",
@@ -79,6 +82,7 @@ let mockProviderPromise: Promise<MockProviderModule> | undefined;
 let msteamsProviderPromise: Promise<MsteamsProviderModule> | undefined;
 let realtimeVoiceRuntimePromise: Promise<RealtimeVoiceRuntimeModule> | undefined;
 let realtimeHandlerPromise: Promise<RealtimeHandlerModule> | undefined;
+let realtimeTranscriptionRuntimePromise: Promise<RealtimeTranscriptionRuntimeModule> | undefined;
 
 function loadTelnyxProvider(): Promise<TelnyxProviderModule> {
   telnyxProviderPromise ??= import("./providers/telnyx.js");
@@ -113,6 +117,77 @@ function loadRealtimeVoiceRuntime(): Promise<RealtimeVoiceRuntimeModule> {
 function loadRealtimeHandler(): Promise<RealtimeHandlerModule> {
   realtimeHandlerPromise ??= import("./webhook/realtime-handler.js");
   return realtimeHandlerPromise;
+}
+
+function loadRealtimeTranscriptionRuntime(): Promise<RealtimeTranscriptionRuntimeModule> {
+  realtimeTranscriptionRuntimePromise ??= import("./realtime-transcription.runtime.js");
+  return realtimeTranscriptionRuntimePromise;
+}
+
+/**
+ * Wire the msteams provider's audio loop: resolve the realtime-transcription
+ * provider the same way the webhook streaming init does, build a telephony TTS
+ * provider, and inject the CallManager + response runtime. Mirrors the Twilio
+ * streaming wiring (setTTSProvider / setMediaStreamHandler) but for the
+ * WS-driven Teams bridge.
+ */
+async function configureMsteamsStreaming(params: {
+  provider: MsteamsProvider;
+  config: VoiceCallConfig;
+  cfg: OpenClawConfig;
+  coreConfig: CoreConfig;
+  agentRuntime: CoreAgentDeps;
+  manager: CallManager;
+  ttsRuntime?: TelephonyTtsRuntime;
+  log: Logger;
+}): Promise<void> {
+  const { provider, config, cfg, coreConfig, agentRuntime, manager, ttsRuntime, log } = params;
+  const streaming = config.streaming;
+
+  provider.setCallManager(manager);
+  provider.setResponseRuntime({ coreConfig, agentRuntime, voiceConfig: config });
+
+  const { getRealtimeTranscriptionProvider, listRealtimeTranscriptionProviders } =
+    await loadRealtimeTranscriptionRuntime();
+  const resolution = resolveConfiguredCapabilityProvider({
+    configuredProviderId: streaming.provider,
+    providerConfigs: streaming.providers,
+    cfg,
+    cfgForResolve: cfg,
+    getConfiguredProvider: (providerId) => getRealtimeTranscriptionProvider(providerId, cfg),
+    listProviders: () => listRealtimeTranscriptionProviders(cfg),
+    resolveProviderConfig: ({ provider: p, cfg: c, rawConfig }) =>
+      p.resolveConfig?.({ cfg: c, rawConfig }) ?? rawConfig,
+    isProviderConfigured: ({ provider: p, cfg: c, providerConfig }) =>
+      p.isConfigured({ cfg: c, providerConfig }),
+  });
+  if (resolution.ok) {
+    provider.setTranscriptionProvider(resolution.provider, resolution.providerConfig, cfg);
+    log.info(`[voice-call] msteams realtime transcription provider: ${resolution.provider.id}`);
+  } else {
+    log.warn(
+      `[voice-call] msteams streaming enabled but transcription provider unavailable (${resolution.code})`,
+    );
+  }
+
+  if (ttsRuntime?.textToSpeechTelephony) {
+    try {
+      const ttsProvider = createTelephonyTtsProvider({
+        coreConfig,
+        ttsOverride: config.tts,
+        runtime: ttsRuntime,
+        logger: log,
+      });
+      provider.setTtsProvider(ttsProvider);
+      log.info("[voice-call] msteams telephony TTS provider configured");
+    } catch (err) {
+      log.warn(
+        `[voice-call] Failed to initialize msteams telephony TTS: ${formatErrorMessage(err)}`,
+      );
+    }
+  } else {
+    log.warn("[voice-call] Telephony TTS unavailable; msteams streaming TTS disabled");
+  }
 }
 
 function resolveVoiceCallConsultSessionKey(call: {
@@ -522,6 +597,19 @@ export async function createVoiceCallRuntime(params: {
         twilioProvider.setMediaStreamHandler(mediaHandler);
         log.info("[voice-call] Media stream handler wired to provider");
       }
+    }
+
+    if (provider.name === "msteams" && config.streaming?.enabled) {
+      await configureMsteamsStreaming({
+        provider: provider as MsteamsProvider,
+        config,
+        cfg,
+        coreConfig,
+        agentRuntime,
+        manager,
+        ttsRuntime,
+        log,
+      });
     }
 
     if (realtimeProvider) {

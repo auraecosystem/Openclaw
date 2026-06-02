@@ -27,9 +27,21 @@ export type TelephonyTtsRuntime = {
   }>;
 };
 
+export type TelephonyPcmResult = {
+  audioBuffer: Buffer;
+  sampleRate: number;
+};
+
 export type TelephonyTtsProvider = {
   synthesisTimeoutMs: number;
+  /** Synthesize and convert to 8 kHz mu-law (Twilio Media Streams). */
   synthesizeForTelephony: (text: string) => Promise<Buffer>;
+  /**
+   * Synthesize raw PCM (no mu-law conversion) for providers that consume PCM
+   * directly (e.g. the Microsoft Teams bridge, which resamples to 16 kHz).
+   * Reuses the same directive parsing, config merge, and fallback handling.
+   */
+  synthesizePcmForTelephony: (text: string) => Promise<TelephonyPcmResult>;
 };
 
 export const TELEPHONY_DEFAULT_TTS_TIMEOUT_MS = 8000;
@@ -66,43 +78,49 @@ export function createTelephonyTtsProvider(params: {
     TELEPHONY_DEFAULT_TTS_TIMEOUT_MS,
   );
 
+  const synthesizePcm = async (text: string): Promise<TelephonyPcmResult> => {
+    const directives = parseTtsDirectives(text, modelOverrides, {
+      cfg: mergedConfig,
+      providerConfigs,
+      preferredProviderId: activeProvider,
+    });
+    if (directives.warnings.length > 0) {
+      logger?.warn?.(
+        `[voice-call] Ignored telephony TTS directive overrides (${directives.warnings.join("; ")})`,
+      );
+    }
+    const cleanText = directives.hasDirective
+      ? directives.ttsText?.trim() || directives.cleanedText.trim()
+      : text;
+    const result = await runtime.textToSpeechTelephony({
+      text: cleanText,
+      cfg: mergedConfig,
+      overrides: directives.overrides,
+    });
+
+    if (!result.success || !result.audioBuffer || !result.sampleRate) {
+      throw new Error(result.error ?? "TTS conversion failed");
+    }
+
+    if (result.fallbackFrom && result.provider && result.fallbackFrom !== result.provider) {
+      const attemptedChain =
+        result.attemptedProviders && result.attemptedProviders.length > 0
+          ? result.attemptedProviders.join(" -> ")
+          : `${result.fallbackFrom} -> ${result.provider}`;
+      logger?.warn?.(
+        `[voice-call] Telephony TTS fallback used from=${result.fallbackFrom} to=${result.provider} attempts=${attemptedChain}`,
+      );
+    }
+
+    return { audioBuffer: result.audioBuffer, sampleRate: result.sampleRate };
+  };
+
   return {
     synthesisTimeoutMs,
+    synthesizePcmForTelephony: synthesizePcm,
     synthesizeForTelephony: async (text: string) => {
-      const directives = parseTtsDirectives(text, modelOverrides, {
-        cfg: mergedConfig,
-        providerConfigs,
-        preferredProviderId: activeProvider,
-      });
-      if (directives.warnings.length > 0) {
-        logger?.warn?.(
-          `[voice-call] Ignored telephony TTS directive overrides (${directives.warnings.join("; ")})`,
-        );
-      }
-      const cleanText = directives.hasDirective
-        ? directives.ttsText?.trim() || directives.cleanedText.trim()
-        : text;
-      const result = await runtime.textToSpeechTelephony({
-        text: cleanText,
-        cfg: mergedConfig,
-        overrides: directives.overrides,
-      });
-
-      if (!result.success || !result.audioBuffer || !result.sampleRate) {
-        throw new Error(result.error ?? "TTS conversion failed");
-      }
-
-      if (result.fallbackFrom && result.provider && result.fallbackFrom !== result.provider) {
-        const attemptedChain =
-          result.attemptedProviders && result.attemptedProviders.length > 0
-            ? result.attemptedProviders.join(" -> ")
-            : `${result.fallbackFrom} -> ${result.provider}`;
-        logger?.warn?.(
-          `[voice-call] Telephony TTS fallback used from=${result.fallbackFrom} to=${result.provider} attempts=${attemptedChain}`,
-        );
-      }
-
-      return convertPcmToMulaw8k(result.audioBuffer, result.sampleRate);
+      const { audioBuffer, sampleRate } = await synthesizePcm(text);
+      return convertPcmToMulaw8k(audioBuffer, sampleRate);
     },
   };
 }
