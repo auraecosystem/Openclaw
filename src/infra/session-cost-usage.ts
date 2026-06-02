@@ -522,6 +522,8 @@ function buildCostUsageSummaryFromCache(params: {
     }
   }
 
+  fillMissingDays(dailyMap, params.startMs, params.endMs);
+
   const daily = Array.from(dailyMap.entries())
     .map(([date, bucket]) => Object.assign({ date }, bucket))
     .toSorted((a, b) => a.date.localeCompare(b.date));
@@ -931,6 +933,73 @@ const parseTranscriptEntry = (entry: Record<string, unknown>): ParsedTranscriptE
 const formatDayKey = (date: Date): string =>
   date.toLocaleDateString("en-CA", { timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 
+/**
+ * Ensure the daily map has an entry for every calendar day in [startMs, endMs].
+ * Days without activity are inserted with a zero-valued totals bucket so the
+ * resulting `daily` series matches the requested range length (one bar per
+ * calendar day) instead of only covering days with recorded usage.
+ *
+ * Iterates by adding 24h in milliseconds and formats each step via
+ * `formatDayKey`. Across local-clock DST transitions a 24h step is still
+ * within the same calendar day as long as the starting point is not within
+ * the first or last hour of the day; we additionally probe ±1h around each
+ * step to defensively cover that edge case so no calendar day is skipped.
+ */
+/**
+ * Maximum window (in days) for which we will zero-fill missing calendar
+ * days. Bounded ranges from the UI's range filter top out at 90 days for
+ * the explicit picker and "All" is the wildcard escape hatch — anything
+ * wider than this threshold is treated as an all-time / open-ended range
+ * and falls back to sparse behavior (only days with activity), since a
+ * dense series at that scale would produce tens of thousands of zero
+ * buckets (e.g. a 1970-based startMs → ~20k entries) without any user
+ * value. 366 days covers a full year + leap-day cushion.
+ */
+const MAX_ZERO_FILL_DAYS = 366;
+
+const fillMissingDays = (
+  dailyMap: Map<string, CostUsageTotals>,
+  startMs: number,
+  endMs: number,
+): void => {
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs < startMs) {
+    return;
+  }
+  const dayMs = 24 * 60 * 60 * 1000;
+  // Bound the fill so unbounded / all-time ranges don't generate tens of
+  // thousands of zero buckets. Wider ranges keep their existing sparse
+  // (activity-only) shape.
+  const spanDays = Math.floor((endMs - startMs) / dayMs) + 1;
+  if (spanDays > MAX_ZERO_FILL_DAYS) {
+    return;
+  }
+  const endKey = formatDayKey(new Date(endMs));
+  // Iterate a few hours past endMs to guarantee we cover the final calendar
+  // day even when DST shifts the local clock relative to the millisecond grid.
+  const cutoff = endMs + 12 * 60 * 60 * 1000;
+  let cursor = startMs;
+  let lastKey: string | undefined;
+  // Hard upper bound to avoid runaway loops on bogus inputs.
+  const maxIterations = Math.floor((endMs - startMs) / dayMs) + 5;
+  for (let i = 0; i <= maxIterations && cursor <= cutoff; i += 1) {
+    const key = formatDayKey(new Date(cursor));
+    if (!dailyMap.has(key)) {
+      dailyMap.set(key, emptyTotals());
+    }
+    if (key === endKey) {
+      lastKey = key;
+      break;
+    }
+    lastKey = key;
+    cursor += dayMs;
+  }
+  // Defensive: make sure the end-day key is present even if the loop
+  // terminated early (e.g. DST forward-shift swallowing an hour).
+  if (lastKey !== endKey && !dailyMap.has(endKey)) {
+    dailyMap.set(endKey, emptyTotals());
+  }
+};
+
 const formatUtcDayKey = (date: Date): string =>
   `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}-${String(date.getUTCDate()).padStart(2, "0")}`;
 
@@ -1333,6 +1402,8 @@ export async function loadCostUsageSummary(params?: {
       },
     });
   }
+
+  fillMissingDays(dailyMap, sinceTime, untilTime);
 
   const daily = Array.from(dailyMap.entries())
     .map(([date, bucket]) => Object.assign({ date }, bucket))
