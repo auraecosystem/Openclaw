@@ -98,6 +98,21 @@ export async function setupSkills(
       );
     }
   }
+  // #74382: env-only skills (no missing bins, just missing env) are still
+  // configurable in the multiselect — but the API-key prompt below must only
+  // fire for skills the user explicitly selected.
+  const envOnlyConfigurable = missing.filter(
+    (skill) =>
+      Boolean(skill.primaryEnv) && skill.missing.env.length > 0 && skill.missing.bins.length === 0,
+  );
+  const configurable = [...installable, ...envOnlyConfigurable];
+  // Track names of skills the user actually saw in the install multiselect so
+  // the API-key gate below only fires for skills that were genuinely offered.
+  // Skills with missing bins + primaryEnv but no install options
+  // (`install.length === 0` so they aren't in `installable`, and
+  // `missing.bins.length > 0` so they aren't in `envOnlyConfigurable`) never
+  // appear in the multiselect — those should still get API-key prompts.
+  const presentableNames = new Set(configurable.map((skill) => skill.name));
   let next: OpenClawConfig = cfg;
   if (installable.length === 0 && missing.length === 0) {
     await prompter.note(
@@ -110,7 +125,8 @@ export async function setupSkills(
     );
     return next;
   }
-  if (installable.length > 0) {
+  const installSelected = new Set<string>();
+  if (configurable.length > 0) {
     const toInstall = await prompter.multiselect({
       message: t("wizard.skills.installDeps"),
       options: [
@@ -119,15 +135,23 @@ export async function setupSkills(
           label: t("common.skipForNow"),
           hint: t("wizard.skills.skipDepsHint"),
         },
-        ...installable.map((skill) => ({
-          value: skill.name,
-          label: `${skill.emoji ?? "🧩"} ${skill.name}`,
-          hint: formatSkillHint(skill),
-        })),
+        ...configurable.map((skill) => {
+          const isEnvOnly = skill.missing.bins.length === 0;
+          return {
+            value: skill.name,
+            label: `${skill.emoji ?? "🧩"} ${skill.name}`,
+            hint: isEnvOnly
+              ? `Configure ${skill.primaryEnv ?? "credentials"}`
+              : formatSkillHint(skill),
+          };
+        }),
       ],
     });
 
     const selected = toInstall.filter((name) => name !== "__skip__");
+    for (const name of selected) {
+      installSelected.add(name);
+    }
 
     const selectedSkills = selected
       .map((name) => installable.find((s) => s.name === name))
@@ -231,6 +255,14 @@ export async function setupSkills(
 
   for (const skill of missing) {
     if (!skill.primaryEnv || skill.missing.env.length === 0) {
+      continue;
+    }
+    // Only skip the API-key prompt when the skill was actually presented in
+    // the install multiselect and the user did not pick it. Skills that were
+    // never presented (bins required + primaryEnv but no install options)
+    // still get prompted — otherwise we silently stop asking for required
+    // env keys for a documented pattern (see docs/tools/skills.md).
+    if (presentableNames.has(skill.name) && !installSelected.has(skill.name)) {
       continue;
     }
     const wantsKey = await prompter.confirm({
