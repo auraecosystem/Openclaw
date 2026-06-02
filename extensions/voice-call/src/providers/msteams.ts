@@ -5,7 +5,6 @@ import type {
   RealtimeTranscriptionProviderPlugin,
   RealtimeTranscriptionSession,
 } from "openclaw/plugin-sdk/realtime-transcription";
-import { resamplePcm } from "openclaw/plugin-sdk/realtime-voice";
 import { resolveVoiceCallEffectiveConfig, type VoiceCallConfig } from "../config.js";
 import type { CoreAgentDeps, CoreConfig } from "../core-bridge.js";
 import type { CallManager } from "../manager.js";
@@ -14,9 +13,9 @@ import {
   type MsteamsLogger,
   type MsteamsSession,
 } from "../msteams-media-stream.js";
+import type { MsteamsTtsProvider } from "../msteams-tts.js";
 import { generateVoiceResponse } from "../response-generator.js";
 import { chunkAudio } from "../telephony-audio.js";
-import type { TelephonyTtsProvider } from "../telephony-tts.js";
 import type {
   EndReason,
   GetCallStatusInput,
@@ -103,7 +102,7 @@ export class MsteamsProvider implements VoiceCallProvider {
 
   private manager: CallManager | null = null;
   private transcription: MsteamsTranscriptionDeps | null = null;
-  private ttsProvider: TelephonyTtsProvider | null = null;
+  private ttsProvider: MsteamsTtsProvider | null = null;
   private responseRuntime: MsteamsResponseRuntime | null = null;
 
   private readonly calls = new Map<string, MsteamsCallState>();
@@ -149,7 +148,7 @@ export class MsteamsProvider implements VoiceCallProvider {
     this.transcription = { provider, providerConfig, cfg };
   }
 
-  setTtsProvider(provider: TelephonyTtsProvider): void {
+  setTtsProvider(provider: MsteamsTtsProvider): void {
     this.ttsProvider = provider;
   }
 
@@ -162,7 +161,7 @@ export class MsteamsProvider implements VoiceCallProvider {
    * teardown path. No-op if the provider was constructed without a full config.
    */
   async stop(): Promise<void> {
-    for (const providerCallId of [...this.calls.keys()]) {
+    for (const providerCallId of Array.from(this.calls.keys())) {
       this.teardownCall(providerCallId, { closeSession: true, reason: "shutdown" });
     }
     await this.mediaStream?.stop();
@@ -422,7 +421,7 @@ export class MsteamsProvider implements VoiceCallProvider {
       throw new Error(`MsteamsProvider.playTts: no active session for ${input.providerCallId}`);
     }
     if (!this.ttsProvider) {
-      throw new Error("MsteamsProvider.playTts: telephony TTS provider not configured");
+      throw new Error("MsteamsProvider.playTts: TTS provider not configured");
     }
 
     // Supersede any in-flight playback for this call (e.g. rapid responses).
@@ -431,20 +430,14 @@ export class MsteamsProvider implements VoiceCallProvider {
     state.ttsAbort = abort;
     state.turnId += 1;
 
-    const { audioBuffer, sampleRate } = await this.ttsProvider.synthesizePcmForTelephony(
-      input.text,
-    );
+    // msteams-tts.ts synthesizes and resamples to PCM 16 kHz mono.
+    const pcm16k = await this.ttsProvider.synthesizePcm16k(input.text);
     if (abort.signal.aborted) {
       return;
     }
-    if (audioBuffer.length === 0) {
-      throw new Error("MsteamsProvider.playTts: telephony TTS produced no audio");
+    if (pcm16k.length === 0) {
+      throw new Error("MsteamsProvider.playTts: TTS produced no audio");
     }
-
-    const pcm16k =
-      sampleRate === MSTEAMS_SAMPLE_RATE_HZ
-        ? audioBuffer
-        : resamplePcm(audioBuffer, sampleRate, MSTEAMS_SAMPLE_RATE_HZ);
 
     await this.streamPcmFrames(state, pcm16k, abort.signal);
 
