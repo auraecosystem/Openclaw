@@ -462,6 +462,8 @@ export function startAcpSpawnParentStreamRelay(params: {
             phase?: unknown;
             at?: unknown;
             eventType?: unknown;
+            tag?: unknown;
+            text?: unknown;
             proxyEnvKeys?: unknown;
           }
         | undefined;
