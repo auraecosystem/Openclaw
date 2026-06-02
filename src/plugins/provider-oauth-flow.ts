@@ -12,6 +12,7 @@ export function createVpsAwareOAuthHandlers(params: {
   spin: ReturnType<WizardPrompter["progress"]>;
   openUrl: (url: string) => Promise<unknown>;
   localBrowserMessage: string;
+  manualPromptMessage?: string;
 }): {
   onAuth: (event: { url: string }) => Promise<void>;
   onPrompt: (prompt: OAuthPrompt) => Promise<string>;
@@ -30,7 +31,7 @@ export function createVpsAwareOAuthHandlers(params: {
     },
     onPrompt: async (prompt) => {
       const code = await params.prompter.text({
-        message: prompt.message,
+        message: params.isRemote ? (params.manualPromptMessage ?? prompt.message) : prompt.message,
         placeholder: prompt.placeholder,
         signal: prompt.signal,
         validate: validateRequiredInput,

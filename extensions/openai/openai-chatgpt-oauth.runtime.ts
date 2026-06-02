@@ -332,6 +332,7 @@ export async function loginOpenAICodexOAuth(params: {
       spin,
       openUrl,
       localBrowserMessage: localBrowserMessage ?? "Complete sign-in in browser...",
+      manualPromptMessage: manualInputPromptMessage,
     });
     const onAuth = (event: Parameters<typeof baseOnAuth>[0]) => {
       browserAuthStarted = true;
