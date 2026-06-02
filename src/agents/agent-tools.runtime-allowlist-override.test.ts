@@ -6,7 +6,7 @@ describe("createOpenClawCodingTools runtimeToolAllowlist override", () => {
     const tools = createOpenClawCodingTools({
       config: {
         tools: { profile: "messaging" },
-      } as unknown as Parameters<typeof createOpenClawCodingTools>[0]["config"],
+      } as unknown as NonNullable<Parameters<typeof createOpenClawCodingTools>[0]>["config"],
       runtimeToolAllowlist: ["*"],
     });
     const toolNames = tools.map((t) => t.name);
@@ -17,7 +17,7 @@ describe("createOpenClawCodingTools runtimeToolAllowlist override", () => {
     const tools = createOpenClawCodingTools({
       config: {
         tools: { profile: "messaging" },
-      } as unknown as Parameters<typeof createOpenClawCodingTools>[0]["config"],
+      } as unknown as NonNullable<Parameters<typeof createOpenClawCodingTools>[0]>["config"],
     });
     const toolNames = tools.map((t) => t.name);
     expect(toolNames).not.toContain("exec");
