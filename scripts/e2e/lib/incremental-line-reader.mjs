@@ -1,6 +1,20 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 
+function readSlice(filePath, start, length) {
+  if (length <= 0) {
+    return "";
+  }
+  const fd = fs.openSync(filePath, "r");
+  try {
+    const buffer = Buffer.alloc(length);
+    const bytesRead = fs.readSync(fd, buffer, 0, length, start);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readBufferSlice(filePath, start, length) {
   if (length <= 0) {
     return Buffer.alloc(0);
@@ -15,10 +29,6 @@ function readBufferSlice(filePath, start, length) {
   }
 }
 
-function readSlice(filePath, start, length) {
-  return readBufferSlice(filePath, start, length).toString("utf8");
-}
-
 function resolveFileIdentity(stats) {
   if (Number.isSafeInteger(stats.dev) && Number.isSafeInteger(stats.ino) && stats.ino !== 0) {
     return `${stats.dev}:${stats.ino}`;
@@ -26,17 +36,12 @@ function resolveFileIdentity(stats) {
   return Number.isFinite(stats.birthtimeMs) ? `birth:${stats.birthtimeMs}` : undefined;
 }
 
-function resolveContentFingerprint(filePath, stats, maxReadBytes) {
-  if (stats.size === 0) {
-    return "empty";
-  }
-  const sampleBytes = Math.min(stats.size, maxReadBytes);
-  const hash = createHash("sha256");
-  hash.update(readBufferSlice(filePath, 0, sampleBytes));
-  if (sampleBytes < stats.size) {
-    hash.update(readBufferSlice(filePath, stats.size - sampleBytes, sampleBytes));
-  }
-  return hash.digest("hex");
+function readTailFingerprint(filePath, stats, maxReadBytes) {
+  const length = Math.min(stats.size, maxReadBytes);
+  const start = Math.max(0, stats.size - length);
+  const buffer = readBufferSlice(filePath, start, length);
+  const hash = createHash("sha256").update(buffer).digest("base64url");
+  return `${start}:${buffer.byteLength}:${hash}`;
 }
 
 export function resolvePositiveInteger(value, fallback) {
@@ -74,21 +79,25 @@ export function createIncrementalLineReader(filePath, options = {}) {
       }
       fileIdentity = nextFileIdentity;
 
+      if (!reset && stats.size === offset && contentFingerprint !== undefined) {
+        const nextContentFingerprint = readTailFingerprint(filePath, stats, maxReadBytes);
+        if (contentFingerprint !== nextContentFingerprint) {
+          offset = 0;
+          pending = "";
+          reset = true;
+        } else {
+          contentFingerprint = nextContentFingerprint;
+          return { lines: [], reset: false };
+        }
+      }
+
       if (stats.size < offset) {
         offset = 0;
         pending = "";
         reset = true;
       }
       if (stats.size === offset) {
-        const nextContentFingerprint = resolveContentFingerprint(filePath, stats, maxReadBytes);
-        if (contentFingerprint === undefined || contentFingerprint === nextContentFingerprint) {
-          contentFingerprint = nextContentFingerprint;
-          return { lines: [], reset };
-        }
-        contentFingerprint = nextContentFingerprint;
-        offset = 0;
-        pending = "";
-        reset = true;
+        return { lines: [], reset };
       }
 
       let start = offset;
@@ -109,7 +118,7 @@ export function createIncrementalLineReader(filePath, options = {}) {
 
       const text = readSlice(filePath, start, stats.size - start);
       offset = stats.size;
-      contentFingerprint = resolveContentFingerprint(filePath, stats, maxReadBytes);
+      contentFingerprint = readTailFingerprint(filePath, stats, maxReadBytes);
       if (!text) {
         return { lines: [], reset };
       }
