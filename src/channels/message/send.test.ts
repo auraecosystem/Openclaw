@@ -455,6 +455,7 @@ describe("withDurableMessageSendContext", () => {
         error,
         sentBeforeError: false,
         stage: "platform_send",
+        target: { channel: "telegram", to: "chat-1" },
       });
       return [];
     });
@@ -480,6 +481,7 @@ describe("withDurableMessageSendContext", () => {
       error,
       sentBeforeError: false,
       stage: "platform_send",
+      target: { channel: "telegram", to: "chat-1" },
     });
     expect(onCommitReceipt).not.toHaveBeenCalled();
     expect(onSendFailure).toHaveBeenCalledWith(error);
@@ -492,6 +494,7 @@ describe("withDurableMessageSendContext", () => {
         index: 0,
         status: "sent",
         results: [{ channel: "telegram", messageId: "msg-1" }],
+        target: { channel: "telegram", to: "chat-1", threadId: 42 },
       });
       params.onPayloadDeliveryOutcome?.({
         index: 1,
@@ -499,6 +502,7 @@ describe("withDurableMessageSendContext", () => {
         error,
         sentBeforeError: true,
         stage: "platform_send",
+        target: { channel: "telegram", to: "chat-1", threadId: 42 },
       });
       return [{ channel: "telegram", messageId: "msg-1" }];
     });
@@ -517,6 +521,22 @@ describe("withDurableMessageSendContext", () => {
     expect(result.receipt?.platformMessageIds).toEqual(["msg-1"]);
     expect(result.error).toBe(error);
     expect(result.sentBeforeError).toBe(true);
+    expect(result.payloadOutcomes).toEqual([
+      {
+        index: 0,
+        status: "sent",
+        results: [{ channel: "telegram", messageId: "msg-1" }],
+        target: { channel: "telegram", to: "chat-1", threadId: 42 },
+      },
+      {
+        index: 1,
+        status: "failed",
+        error,
+        sentBeforeError: true,
+        stage: "platform_send",
+        target: { channel: "telegram", to: "chat-1", threadId: 42 },
+      },
+    ]);
     expect(onSendFailure).toHaveBeenCalledWith(error);
   });
 
