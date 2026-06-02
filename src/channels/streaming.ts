@@ -492,7 +492,7 @@ export function buildChannelProgressDraftLine(
       return buildNamedProgressLine(
         input.event,
         input.name ?? "exec",
-        [status, input.title],
+        [status, options?.commandText === "status" ? undefined : input.title],
         options,
         { id: input.itemId ?? input.toolCallId, status },
       );
