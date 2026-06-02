@@ -26,7 +26,8 @@ import {
   type WikiFreshnessLevel,
   type WikiPageContradictionCluster,
 } from "./claim-health.js";
-import type { ResolvedMemoryWikiConfig } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiPageKind, WikiPageGroup } from "./config.js";
+import { findDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   formatWikiLink,
@@ -42,6 +43,20 @@ import {
   WIKI_RELATED_START_MARKER,
 } from "./markdown.js";
 import { initializeMemoryWikiVault } from "./vault.js";
+
+function deriveAllPageGroups(
+  config: ResolvedMemoryWikiConfig,
+): Array<{ kind: WikiPageKind; dir: string; heading: string }> {
+  return config.pageGroups.map((g) => ({
+    kind: g.kind as WikiPageKind,
+    dir: g.dir,
+    heading: g.heading ?? g.dir.charAt(0).toUpperCase() + g.dir.slice(1),
+  }));
+}
+
+function getReportDir(config: ResolvedMemoryWikiConfig): string {
+  return findDirForKind(config.pageGroups, "report") ?? "reports";
+}
 
 const COMPILE_PAGE_GROUPS: Array<{ kind: WikiPageKind; dir: string; heading: string }> = [
   { kind: "source", dir: "sources", heading: "Sources" },
@@ -353,9 +368,13 @@ async function collectMarkdownFiles(rootDir: string, relativeDir: string): Promi
     .toSorted((left, right) => left.localeCompare(right));
 }
 
-async function readPageSummaries(rootDir: string): Promise<WikiPageSummary[]> {
+async function readPageSummaries(
+  rootDir: string,
+  config?: ResolvedMemoryWikiConfig,
+): Promise<WikiPageSummary[]> {
+  const allGroups = config ? deriveAllPageGroups(config) : COMPILE_PAGE_GROUPS;
   const filePaths = (
-    await Promise.all(COMPILE_PAGE_GROUPS.map((group) => collectMarkdownFiles(rootDir, group.dir)))
+    await Promise.all(allGroups.map((group) => collectMarkdownFiles(rootDir, group.dir)))
   ).flat();
 
   const readResult = await runTasksWithConcurrency({
@@ -365,7 +384,7 @@ async function readPageSummaries(rootDir: string): Promise<WikiPageSummary[]> {
         () => fs.readFile(absolutePath, "utf8"),
         `read wiki page ${absolutePath}`,
       );
-      return toWikiPageSummary({ absolutePath, relativePath, raw });
+      return toWikiPageSummary({ absolutePath, relativePath, raw, pageGroups: config?.pageGroups });
     }),
     limit: READ_PAGE_SUMMARIES_CONCURRENCY,
     errorMode: "stop",
@@ -979,7 +998,7 @@ function buildRootIndexBody(params: {
     `- Reports: ${params.counts.report}`,
   ];
 
-  for (const group of COMPILE_PAGE_GROUPS) {
+  for (const group of deriveAllPageGroups(params.config)) {
     lines.push("", `### ${group.heading}`);
     lines.push(
       renderSectionList({
@@ -1305,15 +1324,15 @@ export async function compileMemoryWikiVault(
 ): Promise<CompileMemoryWikiResult> {
   await initializeMemoryWikiVault(config);
   const rootDir = config.vault.path;
-  let pages = await readPageSummaries(rootDir);
+  let pages = await readPageSummaries(rootDir, config);
   const updatedFiles = await refreshPageRelatedBlocks({ config, pages });
   if (updatedFiles.length > 0) {
-    pages = await readPageSummaries(rootDir);
+    pages = await readPageSummaries(rootDir, config);
   }
   const dashboardUpdatedFiles = await refreshDashboardPages({ config, rootDir, pages });
   updatedFiles.push(...dashboardUpdatedFiles);
   if (dashboardUpdatedFiles.length > 0) {
-    pages = await readPageSummaries(rootDir);
+    pages = await readPageSummaries(rootDir, config);
   }
   const counts = buildPageCounts(pages);
   const digestUpdatedFiles = await writeAgentDigestArtifacts({
@@ -1337,7 +1356,7 @@ export async function compileMemoryWikiVault(
     updatedFiles.push(rootIndexPath);
   }
 
-  for (const group of COMPILE_PAGE_GROUPS) {
+  for (const group of deriveAllPageGroups(params.config)) {
     const relativePath = path.join(group.dir, "index.md").replace(/\\/g, "/");
     const filePath = path.join(rootDir, relativePath);
     if (
@@ -1374,10 +1393,10 @@ export async function compileMemoryWikiVault(
   };
 }
 
-async function hasMissingWikiIndexes(rootDir: string): Promise<boolean> {
+async function hasMissingWikiIndexes(rootDir: string, config?: ResolvedMemoryWikiConfig): Promise<boolean> {
   const required = [
     path.join(rootDir, "index.md"),
-    ...COMPILE_PAGE_GROUPS.map((group) => path.join(rootDir, group.dir, "index.md")),
+    ...(config ? deriveAllPageGroups(config) : COMPILE_PAGE_GROUPS).map((group) => path.join(rootDir, group.dir, "index.md")),
   ];
   for (const filePath of required) {
     const exists = await fs
@@ -1406,7 +1425,7 @@ export async function refreshMemoryWikiIndexesAfterImport(params: {
     params.syncResult.importedCount > 0 ||
     params.syncResult.updatedCount > 0 ||
     params.syncResult.removedCount > 0;
-  const missingIndexes = await hasMissingWikiIndexes(params.config.vault.path);
+  const missingIndexes = await hasMissingWikiIndexes(params.config.vault.path, params.config);
   if (!importChanged && !missingIndexes) {
     return {
       refreshed: false,
