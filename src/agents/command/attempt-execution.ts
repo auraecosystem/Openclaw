@@ -235,7 +235,7 @@ async function persistTextTurnTranscript(
 ): Promise<PersistTextTurnTranscriptResult> {
   const promptText = params.transcriptBody ?? params.body;
   const replyText = params.finalText;
-  if (!promptText && !replyText) {
+  if (!params.userMessage && !promptText && !replyText) {
     return {
       sessionEntry: params.sessionEntry,
       appendedMessages: 0,
@@ -278,7 +278,7 @@ async function persistTextTurnTranscript(
             }),
         updateMode: "none",
       });
-      if (appendedUser) {
+      if (appendedUser?.appended) {
         appendedMessages += 1;
       }
     }
@@ -310,7 +310,7 @@ async function persistTextTurnTranscript(
             timestamp: Date.now(),
           },
         });
-        if (appendedAssistant) {
+        if (appendedAssistant.appended) {
           appendedMessages += 1;
         }
       }
@@ -351,6 +351,7 @@ function isClaudeCliProvider(provider: string): boolean {
 export async function persistAcpTurnTranscript(params: {
   body: string;
   transcriptBody?: string;
+  userMessage?: PersistedUserTurnMessage;
   finalText: string;
   sessionId: string;
   sessionKey: string;
