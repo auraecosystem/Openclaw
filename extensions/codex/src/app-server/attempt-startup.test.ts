@@ -4,7 +4,10 @@ import type {
 } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { startCodexAttemptThread } from "./attempt-startup.js";
-import { defaultLeasedCodexAppServerClientFactory } from "./client-factory.js";
+import {
+  defaultLeasedCodexAppServerClientFactory,
+  type CodexAppServerClientFactory,
+} from "./client-factory.js";
 import { CodexAppServerClient } from "./client.js";
 import { type CodexPluginConfig, resolveCodexAppServerRuntimeOptions } from "./config.js";
 import { clearSharedCodexAppServerClient } from "./shared-client.js";
@@ -51,14 +54,19 @@ function readHarnessMessages(writes: string[]): Array<{ id?: number; method?: st
 function startThreadWithHarness(
   startupTimeoutMs: number,
   signal = new AbortController().signal,
-  overrides?: { pluginConfig?: CodexPluginConfig },
+  overrides?: {
+    attemptClientFactory?: CodexAppServerClientFactory;
+    buildAttemptParams?: () => EmbeddedRunAttemptParams;
+    pluginConfig?: CodexPluginConfig;
+  },
 ) {
   const harness = createClientHarness();
   vi.spyOn(CodexAppServerClient, "start").mockReturnValue(harness.client);
   const effectivePluginConfig = overrides?.pluginConfig ?? pluginConfig;
 
   const run = startCodexAttemptThread({
-    attemptClientFactory: defaultLeasedCodexAppServerClientFactory,
+    attemptClientFactory:
+      overrides?.attemptClientFactory ?? defaultLeasedCodexAppServerClientFactory,
     appServer: resolveCodexAppServerRuntimeOptions({ pluginConfig: effectivePluginConfig }),
     pluginConfig: effectivePluginConfig,
     computerUseConfig: effectivePluginConfig.computerUse ?? { enabled: false },
@@ -67,7 +75,7 @@ function startThreadWithHarness(
     startupEnvApiKeyCacheKey: undefined,
     agentDir: "/tmp/agent",
     config: undefined,
-    buildAttemptParams: createAttemptParams,
+    buildAttemptParams: overrides?.buildAttemptParams ?? createAttemptParams,
     sessionAgentId: "agent-1",
     effectiveWorkspace: "/tmp",
     effectiveCwd: "/tmp",
@@ -160,11 +168,39 @@ describe("startCodexAttemptThread", () => {
       timeout: 2_000,
     });
     expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toMatch(/codex app-server (initialize|startup) timed out/u);
+    expect((error as Error).message).toBe("codex app-server initialize timed out");
+  });
+
+  it("uses a remaining startup budget when initialize starts after earlier setup work", async () => {
+    let now = 0;
+    vi.spyOn(Date, "now").mockImplementation(() => now);
+    const initializeTimeouts: number[] = [];
+    const attemptClientFactory: CodexAppServerClientFactory = async (...args) => {
+      initializeTimeouts.push(args[4]?.timeoutMs ?? 0);
+      throw new Error("captured initialize budget");
+    };
+    const { run } = startThreadWithHarness(500, new AbortController().signal, {
+      attemptClientFactory,
+      buildAttemptParams: () => {
+        now = 120;
+        return createAttemptParams();
+      },
+    });
+    const runError = run.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    const error = await runError;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("captured initialize budget");
+    expect(initializeTimeouts).toHaveLength(1);
+    expect(initializeTimeouts[0]).toBeGreaterThan(0);
+    expect(initializeTimeouts[0]).toBeLessThanOrEqual(330);
   });
 
   it("clears the shared app-server when startup abandons an in-flight thread request", async () => {
-    const { harness, run } = startThreadWithHarness(200);
+    const { harness, run } = startThreadWithHarness(1_000);
     const runError = run.then(
       () => undefined,
       (error: unknown) => error,

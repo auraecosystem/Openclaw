@@ -52,8 +52,10 @@ import {
   type CodexAppServerThreadLifecycleBinding,
   type CodexContextEngineThreadBootstrapProjection,
 } from "./thread-lifecycle.js";
+import { withTimeout } from "./timeout.js";
 
 const CODEX_APP_SERVER_STARTUP_CONNECTION_CLOSE_MAX_ATTEMPTS = 3;
+const CODEX_APP_SERVER_INITIALIZE_TIMEOUT_HEAD_START_MS = 50;
 
 type CodexSandboxContext = Awaited<ReturnType<typeof resolveSandboxContext>>;
 
@@ -102,11 +104,14 @@ export async function startCodexAttemptThread(params: {
   let releaseSharedClientLease: (() => void) | undefined;
   let startupClientForAbandonedRequestCleanup: CodexAppServerClient | undefined;
   let releaseStartupResourcesOnTimeout: (() => Promise<void>) | undefined;
+  let startupTimedOut = false;
+  const startupDeadlineMs = Date.now() + params.startupTimeoutMs;
   try {
     const startupResult = await withCodexStartupTimeout({
       timeoutMs: params.startupTimeoutMs,
       signal: params.signal,
       onTimeout: async () => {
+        startupTimedOut = true;
         await params.onStartupTimeout();
         await releaseStartupResourcesOnTimeout?.();
       },
@@ -174,13 +179,28 @@ export async function startCodexAttemptThread(params: {
           let startupClientLease: (() => void) | undefined;
           let startupAttemptSucceeded = false;
           try {
-            const startupClient = await params.attemptClientFactory(
+            const initializeTimeoutMs = Math.max(
+              1,
+              startupDeadlineMs - Date.now() - CODEX_APP_SERVER_INITIALIZE_TIMEOUT_HEAD_START_MS,
+            );
+            const startupClientPromise = params.attemptClientFactory(
               params.appServer.start,
               params.startupAuthProfileId,
               params.agentDir,
               params.config,
-              { timeoutMs: params.startupTimeoutMs },
+              { timeoutMs: initializeTimeoutMs },
             );
+            const startupClient = await withTimeout(
+              startupClientPromise,
+              initializeTimeoutMs,
+              "codex app-server initialize timed out",
+            ).catch((error: unknown) => {
+              void startupClientPromise.then(
+                (client) => client.close(),
+                () => undefined,
+              );
+              throw error;
+            });
             startupClientLease = () => {
               releaseLeasedSharedCodexAppServerClient(startupClient);
             };
@@ -331,7 +351,11 @@ export async function startCodexAttemptThread(params: {
           try {
             return await startupAttempt();
           } catch (error) {
-            if (params.signal.aborted || !isCodexAppServerConnectionClosedError(error)) {
+            if (
+              startupTimedOut ||
+              params.signal.aborted ||
+              !isCodexAppServerConnectionClosedError(error)
+            ) {
               throw error;
             }
             const failedClient = attemptedClient;
