@@ -1,9 +1,67 @@
 import { describe, expect, it } from "vitest";
-import { buildCodexPluginThreadConfigEligibilityLogData } from "./attempt-diagnostics.js";
+import {
+  buildCodexDiagnosticToolDefinitions,
+  buildCodexPluginThreadConfigEligibilityLogData,
+} from "./attempt-diagnostics.js";
 import { resolveCodexPluginsPolicy } from "./config.js";
 import { buildCodexPluginAppCacheKey } from "./plugin-app-cache-key.js";
 
 describe("Codex app-server attempt diagnostics", () => {
+  it("keeps tool definition capture from throwing on unreadable schemas", () => {
+    const hostileError = {
+      toString() {
+        throw new Error("toString exploded");
+      },
+    };
+    const definitions = buildCodexDiagnosticToolDefinitions([
+      {
+        name: "bad_diagnostic_probe",
+        description: "Broken diagnostic tool",
+        get inputSchema() {
+          throw new Error("input schema getter exploded");
+        },
+      },
+      {
+        name: "hostile_diagnostic_probe",
+        description: "Hostile diagnostic tool",
+        get inputSchema() {
+          throw hostileError;
+        },
+      },
+      {
+        name: "message",
+        description: "Send a message.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ]);
+
+    expect(definitions).toEqual([
+      {
+        name: "bad_diagnostic_probe",
+        description: "Broken diagnostic tool",
+        parameters: {
+          type: "object",
+          properties: {},
+          "x-openclaw-diagnostic-error": "input schema getter exploded",
+        },
+      },
+      {
+        name: "hostile_diagnostic_probe",
+        description: "Hostile diagnostic tool",
+        parameters: {
+          type: "object",
+          properties: {},
+          "x-openclaw-diagnostic-error": "unknown error",
+        },
+      },
+      {
+        name: "message",
+        description: "Send a message.",
+        parameters: { type: "object", properties: {} },
+      },
+    ]);
+  });
+
   it("redacts plugin thread config eligibility log data", () => {
     const appServer = {
       start: {

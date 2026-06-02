@@ -6,12 +6,23 @@ import {
 import type { CodexAppServerRuntimeOptions, resolveCodexPluginsPolicy } from "./config.js";
 
 type TrustedDiagnosticEventInput = Parameters<typeof emitTrustedDiagnosticEventWithPrivateData>[0];
+const UNREADABLE_DIAGNOSTIC_TOOL_NAME = "<unreadable diagnostic tool name>";
+const UNREADABLE_DIAGNOSTIC_TOOL_DESCRIPTION = "";
 
 export function readCodexDiagnosticToolParameters(tool: {
   inputSchema?: unknown;
   parameters?: unknown;
 }): unknown {
-  return tool.inputSchema ?? tool.parameters;
+  try {
+    const inputSchema = tool.inputSchema;
+    return inputSchema ?? tool.parameters;
+  } catch (error) {
+    return {
+      type: "object",
+      properties: {},
+      "x-openclaw-diagnostic-error": formatUnknownError(error),
+    };
+  }
 }
 
 export function buildCodexDiagnosticToolDefinitions(
@@ -23,10 +34,34 @@ export function buildCodexDiagnosticToolDefinitions(
   }[],
 ) {
   return tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description,
+    name: readCodexDiagnosticToolName(tool),
+    description: readCodexDiagnosticToolDescription(tool),
     parameters: readCodexDiagnosticToolParameters(tool),
   }));
+}
+
+function readCodexDiagnosticToolName(tool: { name: string }): string {
+  try {
+    return tool.name;
+  } catch {
+    return UNREADABLE_DIAGNOSTIC_TOOL_NAME;
+  }
+}
+
+function readCodexDiagnosticToolDescription(tool: { description: string }): string {
+  try {
+    return tool.description;
+  } catch {
+    return UNREADABLE_DIAGNOSTIC_TOOL_DESCRIPTION;
+  }
+}
+
+function formatUnknownError(error: unknown): string {
+  try {
+    return error instanceof Error ? error.message : String(error);
+  } catch {
+    return "unknown error";
+  }
 }
 
 export function utf8JsonByteLength(value: unknown): number | undefined {
