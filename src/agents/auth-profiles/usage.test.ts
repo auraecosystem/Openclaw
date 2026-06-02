@@ -750,6 +750,7 @@ describe("clearProviderAuthProfileCooldowns", () => {
       refresh: "claude-refresh-token",
       expires: 4_102_444_800_000,
     };
+    localStore.runtimeExternalProfileIds = ["anthropic:claude-cli"];
     const freshStore: AuthProfileStore = {
       version: 1,
       profiles: {},
@@ -770,6 +771,103 @@ describe("clearProviderAuthProfileCooldowns", () => {
     await clearProviderAuthProfileCooldowns({ store: localStore, provider: "anthropic" });
 
     expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:claude-cli"]);
+  });
+
+  it("falls back to runtime-overlay cooldowns when the locked store has no matching usage", async () => {
+    const localStore = makeStore({
+      "anthropic:claude-cli": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 2,
+        failureCounts: { billing: 2 },
+      },
+    });
+    localStore.profiles["anthropic:claude-cli"] = {
+      type: "oauth",
+      provider: "anthropic",
+      access: "claude-access-token",
+      refresh: "claude-refresh-token",
+      expires: 4_102_444_800_000,
+    };
+    localStore.runtimeExternalProfileIds = ["anthropic:claude-cli"];
+    const freshStore = makeStore({});
+    storeMocks.updateAuthProfileStoreWithLock.mockImplementation(async ({ updater }) => {
+      expect(updater(freshStore)).toBe(false);
+      return freshStore;
+    });
+
+    await clearProviderAuthProfileCooldowns({
+      store: localStore,
+      provider: "anthropic",
+      agentDir: "/tmp/openclaw-agent",
+    });
+
+    expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:claude-cli"]);
+    expect(storeMocks.saveAuthProfileStore).toHaveBeenCalledWith(
+      localStore,
+      "/tmp/openclaw-agent",
+    );
+  });
+
+  it("keeps runtime-overlay cleanup when the locked store also clears persisted profiles", async () => {
+    const localStore = makeStore({
+      "anthropic:default": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 3,
+        failureCounts: { billing: 3 },
+      },
+      "anthropic:claude-cli": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 2,
+        failureCounts: { billing: 2 },
+      },
+    });
+    localStore.profiles["anthropic:claude-cli"] = {
+      type: "oauth",
+      provider: "anthropic",
+      access: "claude-access-token",
+      refresh: "claude-refresh-token",
+      expires: 4_102_444_800_000,
+    };
+    localStore.runtimeExternalProfileIds = ["anthropic:claude-cli"];
+    const freshStore = makeStore({
+      "anthropic:default": {
+        disabledUntil: Date.now() + 3_600_000,
+        disabledReason: "billing",
+        errorCount: 3,
+        failureCounts: { billing: 3 },
+      },
+    });
+    freshStore.profiles["anthropic:fresh"] = {
+      type: "api_key",
+      provider: "anthropic",
+      key: "sk-fresh",
+    };
+    storeMocks.updateAuthProfileStoreWithLock.mockImplementation(async ({ updater }) => {
+      expect(updater(freshStore)).toBe(true);
+      return freshStore;
+    });
+
+    await clearProviderAuthProfileCooldowns({
+      store: localStore,
+      provider: "anthropic",
+      agentDir: "/tmp/openclaw-agent",
+    });
+
+    expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:default"]);
+    expectProfileErrorStateCleared(localStore.usageStats?.["anthropic:claude-cli"]);
+    const savedStore = storeMocks.saveAuthProfileStore.mock.calls[0]?.[0];
+    expect(savedStore?.profiles["anthropic:fresh"]).toEqual(freshStore.profiles["anthropic:fresh"]);
+    expect(savedStore?.profiles["anthropic:claude-cli"]).toEqual(
+      localStore.profiles["anthropic:claude-cli"],
+    );
+    expect(savedStore?.runtimeExternalProfileIds).toContain("anthropic:claude-cli");
+    expectProfileErrorStateCleared(savedStore?.usageStats?.["anthropic:default"]);
+    expectProfileErrorStateCleared(savedStore?.usageStats?.["anthropic:claude-cli"]);
+    expect(storeMocks.saveAuthProfileStore).toHaveBeenCalledTimes(1);
+    expect(storeMocks.saveAuthProfileStore.mock.calls[0]?.[1]).toBe("/tmp/openclaw-agent");
   });
 
   it("clears explicit refreshed profile ids even before they appear in the profile map", async () => {

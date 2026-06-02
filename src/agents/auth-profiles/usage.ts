@@ -570,21 +570,28 @@ function updateUsageStatsEntry(
   store.usageStats[profileId] = updater(store.usageStats[profileId]);
 }
 
+function resolveProviderCooldownEntryIds(
+  store: AuthProfileStore,
+  provider: string,
+  profileIds?: string[],
+): string[] {
+  return profileIds === undefined
+    ? listProfilesForProvider(store, provider)
+    : profileIds.filter((profileId) => {
+        const profileProvider = store.profiles[profileId]?.provider;
+        return (
+          profileProvider === undefined ||
+          resolveProviderIdForAuth(profileProvider) === resolveProviderIdForAuth(provider)
+        );
+      });
+}
+
 function clearProviderCooldownEntries(
   store: AuthProfileStore,
   provider: string,
   profileIds?: string[],
 ): boolean {
-  const idsToClear =
-    profileIds === undefined
-      ? listProfilesForProvider(store, provider)
-      : profileIds.filter((profileId) => {
-          const profileProvider = store.profiles[profileId]?.provider;
-          return (
-            profileProvider === undefined ||
-            resolveProviderIdForAuth(profileProvider) === resolveProviderIdForAuth(provider)
-          );
-        });
+  const idsToClear = resolveProviderCooldownEntryIds(store, provider, profileIds);
   let changed = false;
   for (const profileId of new Set(idsToClear)) {
     if (!store.usageStats?.[profileId]) {
@@ -594,6 +601,91 @@ function clearProviderCooldownEntries(
     changed = true;
   }
   return changed;
+}
+
+function mergeLockedProviderCooldownStoreForSave(params: {
+  lockedStore: AuthProfileStore;
+  callerStore: AuthProfileStore;
+  callerProfileIds: string[];
+}): AuthProfileStore {
+  const callerRuntimeExternalProfileIds = new Set(params.callerStore.runtimeExternalProfileIds ?? []);
+  const callerProfileIdSet = new Set(
+    params.callerProfileIds.filter((profileId) => callerRuntimeExternalProfileIds.has(profileId)),
+  );
+  const mergedUsageStats: NonNullable<AuthProfileStore["usageStats"]> = {
+    ...(params.lockedStore.usageStats ?? {}),
+  };
+  for (const profileId of callerProfileIdSet) {
+    if (params.callerStore.usageStats?.[profileId]) {
+      mergedUsageStats[profileId] = params.callerStore.usageStats[profileId];
+    }
+  }
+  const merged: AuthProfileStore = {
+    ...params.lockedStore,
+    profiles: { ...params.lockedStore.profiles },
+    usageStats: mergedUsageStats,
+    order: params.lockedStore.order
+      ? Object.fromEntries(
+          Object.entries(params.lockedStore.order).map(([provider, profileIds]) => [
+            provider,
+            [...profileIds],
+          ]),
+        )
+      : undefined,
+    lastGood: params.lockedStore.lastGood ? { ...params.lockedStore.lastGood } : undefined,
+    runtimeExternalProfileIds: params.lockedStore.runtimeExternalProfileIds
+      ? [...params.lockedStore.runtimeExternalProfileIds]
+      : undefined,
+    runtimeExternalProfileIdsAuthoritative:
+      params.lockedStore.runtimeExternalProfileIdsAuthoritative,
+  };
+  const runtimeExternalProfileIds = new Set(merged.runtimeExternalProfileIds ?? []);
+
+  for (const profileId of callerProfileIdSet) {
+    if (merged.profiles[profileId]) {
+      continue;
+    }
+    const credential = params.callerStore.profiles[profileId];
+    if (!credential) {
+      continue;
+    }
+    merged.profiles[profileId] = credential;
+    if (callerRuntimeExternalProfileIds.has(profileId)) {
+      runtimeExternalProfileIds.add(profileId);
+    }
+  }
+
+  for (const [provider, profileIds] of Object.entries(params.callerStore.order ?? {})) {
+    const callerIds = profileIds.filter((profileId) => callerProfileIdSet.has(profileId));
+    if (callerIds.length === 0) {
+      continue;
+    }
+    const existingIds = merged.order?.[provider] ?? [];
+    merged.order = {
+      ...merged.order,
+      [provider]: [
+        ...callerIds,
+        ...existingIds.filter((profileId) => !callerIds.includes(profileId)),
+      ],
+    };
+  }
+
+  for (const [provider, profileId] of Object.entries(params.callerStore.lastGood ?? {})) {
+    if (!callerProfileIdSet.has(profileId) || merged.lastGood?.[provider]) {
+      continue;
+    }
+    merged.lastGood = {
+      ...merged.lastGood,
+      [provider]: profileId,
+    };
+  }
+
+  if (runtimeExternalProfileIds.size > 0) {
+    merged.runtimeExternalProfileIds = [...runtimeExternalProfileIds];
+  } else if (merged.runtimeExternalProfileIdsAuthoritative === true) {
+    merged.runtimeExternalProfileIds = [];
+  }
+  return merged;
 }
 
 function keepActiveWindowOrRecompute(params: {
@@ -1028,6 +1120,7 @@ export async function clearProviderAuthProfileCooldowns(params: {
   const { store, provider, profileIds, agentDir } = params;
   const providerWideProfileIds =
     profileIds === undefined ? listProfilesForProvider(store, provider) : undefined;
+  let lockedStoreChanged = false;
   const updated = await authProfileUsageDeps.updateAuthProfileStoreWithLock({
     agentDir,
     updater: (freshStore) => {
@@ -1038,11 +1131,22 @@ export async function clearProviderAuthProfileCooldowns(params: {
               ...listProfilesForProvider(freshStore, provider),
             ]
           : profileIds;
-      return clearProviderCooldownEntries(freshStore, provider, lockedProfileIds);
+      lockedStoreChanged = clearProviderCooldownEntries(freshStore, provider, lockedProfileIds);
+      return lockedStoreChanged;
     },
   });
-  if (updated) {
-    store.usageStats = updated.usageStats;
+  if (updated && lockedStoreChanged) {
+    const callerProfileIds = resolveProviderCooldownEntryIds(store, provider, profileIds);
+    const callerStoreChanged = clearProviderCooldownEntries(store, provider, profileIds);
+    const mergedStore = mergeLockedProviderCooldownStoreForSave({
+      lockedStore: updated,
+      callerStore: store,
+      callerProfileIds,
+    });
+    store.usageStats = mergedStore.usageStats;
+    if (callerStoreChanged) {
+      authProfileUsageDeps.saveAuthProfileStore(mergedStore, agentDir);
+    }
     return;
   }
 
