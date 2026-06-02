@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { splitMediaFromOutput, type SplitMediaFromOutputOptions } from "./parse.js";
+import * as logger from "../logger.js";
 
 describe("splitMediaFromOutput", () => {
   function expectParsedMediaOutputCase(
@@ -136,6 +137,42 @@ describe("splitMediaFromOutput", () => {
       { type: "media", url: "https://example.com/a.png" },
       { type: "text", text: "```text\nMEDIA:https://example.com/ignored.png\n```\nAfter" },
     ]);
+  });
+
+  describe("MEDIA token inside fenced code block emits a warning (#41966)", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(logger, "logWarn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("warns when a MEDIA: token appears inside a triple-backtick fence", () => {
+      splitMediaFromOutput(
+        "Here's how to send media:\n```\nMEDIA:/home/user/screenshot.png\n```\nEnd of example.",
+      );
+      expect(warnSpy).toHaveBeenCalledOnce();
+      expect(warnSpy.mock.calls[0][0]).toMatch(/MEDIA:.*fenced code block/);
+    });
+
+    it("does not warn when a MEDIA: token appears outside a fence", () => {
+      splitMediaFromOutput("MEDIA:https://example.com/image.png");
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("warns once per fenced MEDIA line and still keeps the line as visible text", () => {
+      const result = splitMediaFromOutput(
+        "Caption\n```\nMEDIA:https://example.com/a.png\nMEDIA:https://example.com/b.png\n```\nEnd",
+      );
+      // Both fenced MEDIA lines warn
+      expect(warnSpy).toHaveBeenCalledTimes(2);
+      // Neither is extracted as media — kept as visible text (contract unchanged)
+      expect(result.mediaUrls).toBeUndefined();
+      expect(result.text).toContain("MEDIA:https://example.com/a.png");
+    });
   });
 
   const extractMarkdownImages = { extractMarkdownImages: true } as const;
