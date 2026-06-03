@@ -18,7 +18,6 @@ import {
   formatSessionGoalStatus,
   getSessionGoal,
   updateSessionGoalStatus,
-  updateSessionStore,
 } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isChatStopCommandText } from "../gateway/chat-abort.js";
@@ -54,12 +53,11 @@ import {
   listSessionsFromStoreAsync,
   loadCombinedSessionStoreForGateway,
   loadSessionEntry,
-  migrateAndPruneGatewaySessionStoreKey,
   resolveGatewaySessionStoreTarget,
   resolveSessionModelRef,
   readSessionMessagesAsync,
 } from "../gateway/session-utils.js";
-import { applySessionsPatchToStore } from "../gateway/sessions-patch.js";
+import { patchGatewaySessionEntry } from "../gateway/sessions-patch.js";
 import { type AgentEventPayload, onAgentEvent } from "../infra/agent-events.js";
 import { setEmbeddedMode } from "../infra/embedded-mode.js";
 import { normalizeAgentId } from "../routing/session-key.js";
@@ -510,21 +508,13 @@ export class EmbeddedTuiBackend implements TuiBackend {
       key: opts.key,
       agentId: opts.agentId,
     });
-    const applied = await updateSessionStore(target.storePath, async (store) => {
-      const { primaryKey } = migrateAndPruneGatewaySessionStoreKey({
-        cfg,
-        key: opts.key,
-        store,
-        agentId: opts.agentId,
-      });
-      return await applySessionsPatchToStore({
-        cfg,
-        store,
-        storeKey: primaryKey,
-        agentId: opts.agentId,
-        patch: opts,
-        loadGatewayModelCatalog: () => loadEmbeddedTuiModelCatalog(cfg),
-      });
+    const applied = await patchGatewaySessionEntry({
+      cfg,
+      storePath: target.storePath,
+      key: opts.key,
+      agentId: opts.agentId,
+      patch: opts,
+      loadGatewayModelCatalog: () => loadEmbeddedTuiModelCatalog(cfg),
     });
     if (!applied.ok) {
       throw new Error(applied.error.message);

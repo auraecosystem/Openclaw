@@ -1,5 +1,5 @@
 import type { SessionEntry } from "../../config/sessions.js";
-import { updateSessionStore } from "../../config/sessions.js";
+import { patchSessionLifecycleEntry } from "../../config/sessions/session-entry-lifecycle.js";
 import { applyAbortCutoffToSessionEntry, type AbortCutoff } from "./abort-cutoff.js";
 import type { CommandHandler } from "./commands-types.js";
 
@@ -9,21 +9,19 @@ export async function persistSessionEntry(params: CommandParams): Promise<boolea
   if (!params.sessionEntry || !params.sessionStore || !params.sessionKey) {
     return false;
   }
-  params.sessionEntry.updatedAt = Date.now();
-  params.sessionStore[params.sessionKey] = params.sessionEntry;
+  const sessionEntry = params.sessionEntry;
+  sessionEntry.updatedAt = Date.now();
+  params.sessionStore[params.sessionKey] = sessionEntry;
   if (params.storePath) {
     // Slash commands mutate one known session entry; skipping global session
     // maintenance avoids scanning the whole sessions directory for simple
     // command-only writes.
-    await updateSessionStore(
-      params.storePath,
-      (store) => {
-        store[params.sessionKey] = params.sessionEntry as SessionEntry;
-        return params.sessionEntry as SessionEntry;
-      },
+    await patchSessionLifecycleEntry(
+      { sessionKey: params.sessionKey, storePath: params.storePath },
+      () => sessionEntry,
       {
-        resolveSingleEntryPersistence: (entry) =>
-          entry ? { sessionKey: params.sessionKey, entry } : null,
+        fallbackEntry: sessionEntry,
+        replaceEntry: true,
         skipMaintenance: true,
       },
     );
@@ -49,23 +47,15 @@ export async function persistAbortTargetEntry(params: {
   sessionStore[key] = entry;
 
   if (storePath) {
-    await updateSessionStore(
-      storePath,
-      (store) => {
-        const nextEntry = store[key] ?? entry;
-        if (!nextEntry) {
-          return undefined;
-        }
+    await patchSessionLifecycleEntry(
+      { sessionKey: key, storePath },
+      (nextEntry) => {
         nextEntry.abortedLastRun = true;
         applyAbortCutoffToSessionEntry(nextEntry, abortCutoff);
         nextEntry.updatedAt = Date.now();
-        store[key] = nextEntry;
         return nextEntry;
       },
-      {
-        resolveSingleEntryPersistence: (updated) =>
-          updated ? { sessionKey: key, entry: updated } : null,
-      },
+      { fallbackEntry: entry, replaceEntry: true },
     );
   }
 

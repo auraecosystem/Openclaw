@@ -4,7 +4,7 @@ import { defaultRuntime } from "../runtime.js";
 
 const agentCommandFromIngressMock = vi.fn();
 const updateSessionStoreMock = vi.fn();
-const applySessionsPatchToStoreMock = vi.fn();
+const patchGatewaySessionEntryMock = vi.fn();
 const createSessionGoalMock = vi.fn();
 const clearSessionGoalMock = vi.fn();
 const getSessionGoalMock = vi.fn();
@@ -170,7 +170,7 @@ vi.mock("../gateway/session-utils.fs.js", () => ({
 }));
 
 vi.mock("../gateway/sessions-patch.js", () => ({
-  applySessionsPatchToStore: (...args: unknown[]) => applySessionsPatchToStoreMock(...args),
+  patchGatewaySessionEntry: (...args: unknown[]) => patchGatewaySessionEntryMock(...args),
 }));
 
 vi.mock("../gateway/server-methods/agent-timestamp.js", () => ({
@@ -235,8 +235,8 @@ describe("EmbeddedTuiBackend", () => {
       storePath: "/tmp/openclaw-sessions.json",
       store: {},
     });
-    applySessionsPatchToStoreMock.mockReset();
-    applySessionsPatchToStoreMock.mockResolvedValue({ ok: true, entry: {} });
+    patchGatewaySessionEntryMock.mockReset();
+    patchGatewaySessionEntryMock.mockResolvedValue({ ok: true, entry: {} });
     getRuntimeConfigMock.mockReset();
     getRuntimeConfigMock.mockReturnValue({});
     loadGatewayModelCatalogMock.mockReset();
@@ -460,7 +460,7 @@ describe("EmbeddedTuiBackend", () => {
         provider: "tui-pty-mock",
       },
     ]);
-    applySessionsPatchToStoreMock.mockImplementation(
+    patchGatewaySessionEntryMock.mockImplementation(
       async ({
         loadGatewayModelCatalog,
       }: {
@@ -1256,9 +1256,9 @@ describe("EmbeddedTuiBackend", () => {
       fastMode: true,
     });
 
-    expect(applySessionsPatchToStoreMock).toHaveBeenCalledWith(
+    expect(patchGatewaySessionEntryMock).toHaveBeenCalledWith(
       expect.objectContaining({
-        storeKey: "global",
+        key: "global",
         agentId: "work",
         patch: expect.objectContaining({
           key: "global",
