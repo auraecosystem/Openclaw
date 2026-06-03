@@ -502,7 +502,7 @@ describe("hasCompletedBootstrapTurn", () => {
     expect(await hasCompletedBootstrapTurn(sessionFile)).toBe(false);
   });
 
-  it("returns false for assistant turns without a recorded full bootstrap marker", async () => {
+  it("returns true for assistant turns without a recorded full bootstrap marker", async () => {
     const sessionFile = path.join(tmpDir, "assistant-no-marker.jsonl");
     await fs.writeFile(
       sessionFile,
@@ -513,7 +513,7 @@ describe("hasCompletedBootstrapTurn", () => {
       ].join("\n") + "\n",
       "utf8",
     );
-    expect(await hasCompletedBootstrapTurn(sessionFile)).toBe(false);
+    expect(await hasCompletedBootstrapTurn(sessionFile)).toBe(true);
   });
 
   it("returns true when a full bootstrap completion marker exists", async () => {
@@ -538,6 +538,7 @@ describe("hasCompletedBootstrapTurn", () => {
     await fs.writeFile(
       sessionFile,
       [
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "hi" } }),
         JSON.stringify({
           type: "custom",
           customType: FULL_BOOTSTRAP_COMPLETED_CUSTOM_TYPE,
@@ -548,6 +549,21 @@ describe("hasCompletedBootstrapTurn", () => {
       "utf8",
     );
     expect(await hasCompletedBootstrapTurn(sessionFile)).toBe(false);
+  });
+
+  it("returns true when an assistant turn happens after compaction without a marker", async () => {
+    const sessionFile = path.join(tmpDir, "assistant-after-compaction-no-marker.jsonl");
+    await fs.writeFile(
+      sessionFile,
+      [
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "old reply" } }),
+        JSON.stringify({ type: "compaction", summary: "trimmed" }),
+        JSON.stringify({ type: "message", message: { role: "user", content: "new ask" } }),
+        JSON.stringify({ type: "message", message: { role: "assistant", content: "new reply" } }),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    expect(await hasCompletedBootstrapTurn(sessionFile)).toBe(true);
   });
 
   it("returns true when a later full bootstrap marker happens after compaction", async () => {
