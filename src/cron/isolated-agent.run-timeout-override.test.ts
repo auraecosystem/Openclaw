@@ -1,3 +1,4 @@
+import "./isolated-agent.mocks.js";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { describe, expect, it } from "vitest";
 import { resolveCronRunTimeoutOverrideMs } from "./isolated-agent/run-timeout.js";
