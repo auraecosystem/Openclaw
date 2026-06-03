@@ -34,6 +34,7 @@ import {
 } from "./client.js";
 import {
   buildGatewayConnectionDetailsWithResolvers,
+  normalizeGatewayWebSocketUrl,
   type GatewayConnectionDetails,
 } from "./connection-details.js";
 import { resolveGatewayCredentialsWithSecretInputs } from "./credentials-secret-inputs.js";
@@ -600,7 +601,7 @@ async function resolveGatewayCallContext(
   const envUrlOverride = cliUrlOverride
     ? undefined
     : trimToUndefined(process.env.OPENCLAW_GATEWAY_URL);
-  const urlOverride = cliUrlOverride ?? envUrlOverride;
+  const urlOverride = normalizeGatewayWebSocketUrl(cliUrlOverride ?? envUrlOverride);
   const urlOverrideSource = cliUrlOverride ? "cli" : envUrlOverride ? "env" : undefined;
   const canSkipConfigLoad = canSkipGatewayConfigLoad({
     config: opts.config,
