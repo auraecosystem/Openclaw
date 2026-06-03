@@ -12,6 +12,7 @@ import { PROTOCOL_VERSION } from "../../dist/gateway/protocol/index.js";
 import { formatErrorMessage } from "../../dist/infra/errors.js";
 import { rawDataToString } from "../../dist/infra/ws.js";
 import { readStringValue } from "../../dist/normalization-core/string-coerce.js";
+import { resolveGatewaySuccessPayload } from "./lib/gateway-frame-payload.mjs";
 import { readMcpChannelLimits } from "./mcp-channel-limits.ts";
 import { createMcpClientTempState, type McpClientTempState } from "./mcp-client-temp-state.ts";
 import { connectMcpWithTimeout } from "./mcp-connect-timeout.ts";
@@ -190,7 +191,7 @@ async function connectGatewayOnce(params: {
     }
     pending.delete(typed.id);
     if (typed.ok === true) {
-      match.resolve(typed.payload ?? typed.result);
+      match.resolve(resolveGatewaySuccessPayload(typed));
       return;
     }
     match.reject(

@@ -2,7 +2,7 @@
 
 Docs: https://docs.openclaw.ai
 
-## 2026.6.1
+## 2026.6.2
 
 ### Highlights
 
@@ -45,6 +45,60 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Canvas: restore A2UI Google, X, and legacy Granola compatibility image assets in the bundled host payload.
+- Agents/providers: avoid loading owner plugin runtimes for explicitly configured custom provider models during OpenAI-compatible transport setup.
+- Tooling: fail Codex app-server protocol generation before invoking Cargo when local disk headroom is too low.
+- Release/CI/E2E: fail early when Crabbox sparse-sync full checkouts do not have enough local disk, with guidance for moving the sync root.
+- Release/CI/E2E: reset shared Crabbox pnpm hydrate state before installs so stale `/var/tmp` stores cannot leave `pnpm install` spinning after completion.
+- Release/CI/E2E: print heartbeat progress during centralized Docker builds while keeping successful build logs quiet.
+- Release/CI/E2E: avoid heartbeat-tail delays in Docker E2E log wrappers while reporting captured log bytes during long runs.
+- Release/CI/E2E: keep release user-journey logs and temporary plugin fixtures under per-run scratch roots so parallel runs cannot collide or leak artifacts.
+- Release/CI/E2E: bound release candidate GitHub API calls so stalled network requests cannot wedge workflow and artifact polling.
+- Release/CI/E2E: bound Discord smoke API calls in cross-OS release checks so host-side round trips cannot hang on stalled fetches.
+- Release/CI/E2E: bound RPC RTT gateway readiness probes so a half-open local HTTP response cannot stall cleanup past the readiness deadline.
+- Release/CI/E2E: stop RPC RTT gateway process groups so pnpm wrapper children cannot survive measurement cleanup.
+- Release/CI/E2E: fail the kitchen-sink RPC walk when command RSS sampling captures no process samples.
+- Release/CI/E2E: fail kitchen-sink RPC commands that exit cleanly only after their timeout expires.
+- Release/CI/E2E: force-stop memory/fd repro gateway children that survive listener cleanup.
+- Release/CI/E2E: remove fallback ClawHub skill-install home directories when proof runs fail.
+- Release/CI/E2E: let plugin lifecycle measurement wrappers exit promptly after external shutdown while preserving descendant cleanup.
+- Gateway: cancel client stop fallback termination when the socket closes normally during shutdown.
+- Installers: fail the PowerShell installer when interactive onboarding exits non-zero.
+- Scripts/UI: stop descendant processes from wrapped non-interactive commands when `run-with-env` receives shutdown signals.
+- Release/CI/E2E: write multi-node update Docker artifacts to unique per-run directories by default so parallel runs cannot overwrite evidence.
+- Release/CI/E2E: write package Telegram Docker artifacts to unique per-run directories by default so parallel live/RTT runs cannot overwrite evidence.
+- Release/CI/E2E: keep plugin lifecycle matrix resource artifacts under a unique per-run scratch root so parallel runs cannot overwrite tarballs or inspect output.
+- Release/CI/E2E: bound mock OpenAI readiness probes in web-search and Telegram RTT Docker smokes so stalled HTTP accepts cannot hang cleanup or fall through.
+- Tooling: cancel oversized pnpm audit advisory responses before failing so registry error paths do not leave response bodies open.
+- Release/CI/E2E: stop tracked gateway and mock service process groups so descendant helpers do not survive E2E cleanup.
+- Release/CI/E2E: exit Telegram credential proof wrappers promptly after forwarded shutdown signals while keeping the descendant force-kill guard armed.
+- Release/CI/E2E: reject oversized ClickClack fixture request bodies before release journey smokes can accumulate unbounded payloads.
+- Release/CI/E2E: reject oversized OpenAI image-auth mock request bodies before Docker proof runs can accumulate unbounded payloads.
+- Release/CI/E2E: require the Kitchen Sink RPC walk to prove every expected plugin tool is cataloged and effective before invoking tool fixtures.
+- Release/CI/E2E: stop tracked Docker build commands when centralized build wrappers receive shutdown signals.
+- Release/CI/E2E: cover MCP channel pairing reconnects by asserting the same temporary client state is reused across reconnects.
+- Release/CI/E2E: require QA channel baseline and reconnect scenarios to assert their scenario markers instead of accepting any outbound reply.
+- Release/CI/E2E: fail secret-provider proof runs when temporary state cleanup still fails after retries instead of hiding the cleanup error.
+- Release/CI/E2E: fail package-candidate ref proofs when temporary source worktree cleanup fails instead of leaving stale worktrees behind.
+- Release/CI/E2E: remove package tarball extract directories when tar extraction fails before validation can continue.
+- Release/CI/E2E: retry generated temp-state cleanup after removal failures and route plugin lifecycle measurement edits to their owner tests.
+- Release/CI/E2E: close parent gateway log handles after spawning RPC RTT probes so repeated measurements do not leak file descriptors.
+- Release/CI/E2E: fail RPC RTT probes when temporary state cleanup fails instead of hiding leftover scratch directories.
+- Release/CI/E2E: fail Kitchen Sink RPC walks when temporary state cleanup still fails after retries instead of silently preserving scratch roots.
+- Control UI: lazy-load the usage view so the initial app bundle stays below the chunk warning threshold.
+- Build: keep Baileys optional image backends external so source builds do not warn about missing `jimp` or `sharp`.
+- Build: render independent CLI startup metadata help snapshots concurrently to cut cold build-all metadata time.
+- Plugins: stop timed-out package-boundary prep steps by process group so descendant TypeScript/helper processes do not survive local check cleanup.
+- Control UI: serve static assets asynchronously after safe-open checks so large UI files do not block Gateway request handling.
+- Scripts/UI: forward direct wrapper SIGHUP shutdown to child processes so terminal hangups do not leave wrapped dev commands running.
+- Gateway: return the post-expiration pending-work revision from node drains so reconnecting nodes do not observe stale queue revisions after expired items are pruned.
+- Release/CI/E2E: keep temporary full-sync checkouts alive while slow Crabbox leases boot, so sparse worktree runs do not lose their sync source before file-list generation.
+- Release/CI/E2E: normalize inherited Linux `C.UTF-8` locale settings before raw AWS macOS Crabbox bootstrap commands, avoiding macOS locale warnings during package-manager hydration.
+- Release/CI/E2E: keep gateway watch regression checks from copying large static plugin assets inside the measured idle window.
+- Update: keep core updates nonblocking when a missing external plugin repair download stalls, while still blocking installed active plugin payload smoke failures.
+- Agents/providers: keep streaming tool-call argument parsing record-shaped when providers emit valid non-object JSON such as `null` or arrays.
+- Release/CI/E2E: reset incremental log readers when watched log files rotate without shrinking, so same-size replacements do not hide new readiness or RPC lines.
+- Talk: preserve explicit `null` payloads on controller-created turn and output-audio lifecycle events.
 - Agents/TUI: keep local custom provider runs from loading plugin runtime and auth alias metadata when plugins are disabled.
 - Agents/TUI: restore in-flight TUI run switch-back behavior, keep no-policy native hook fallback available, guard vanished workspaces, and keep lightweight isolated subagents lightweight.
 - Agents/media: keep async image, music, and video generation starts from ending the Codex turn, so mixed requests can continue with summaries or other work while media renders in the background.
@@ -54,6 +108,7 @@ Docs: https://docs.openclaw.ai
 - Agents/Codex: surface Skill Workshop guidance in Codex app-server prompts when `skill_workshop` is available. Thanks @shakkernerd.
 - Agents/auth: write auth profiles atomically, add force re-login recovery, preserve workspaces during state-only uninstall, and compact before oversized turns so recovery paths avoid partial state.
 - Skills: skip disabled skill env overrides from stale persisted snapshots so disabled skill `apiKey` SecretRefs cannot abort embedded or channel turns. (#79072, #79173) Thanks @zeus1959.
+- Skill Workshop: render the Control UI tab from filtered navigation state and keep filtered fallback routing stable.
 - CLI: avoid live catalog validation during `openclaw agents add`, so adding a secondary agent no longer depends on provider catalog availability. (#76284, #88314) Thanks @zhangguiping-xydt.
 - CLI: keep `plugins list --json` on the snapshot-only path so plugin sweeps avoid loading the full runtime status graph.
 - CLI/desktop: bridge WSL clipboard operations through the shell and recognize manual-update launchd jobs. (#88764)
@@ -63,6 +118,7 @@ Docs: https://docs.openclaw.ai
 - Cron: keep SQLite cron migrations compatible with legacy run-log tables, archived job stores, diagnostic cron names, and legacy one-shot delete-after-run behavior. (#88285)
 - Cron: keep update delivery validation scoped, harden restart state, and retire MCP runtimes on isolated cron cleanup.
 - Memory: serialize QMD update/embed writes per store, preserve phase signals on read errors, harden envelope metadata sanitization, and rewrite generated transcript paths on rollover so memory/search state survives concurrent gateway and CLI activity. (#66339, #85931) Thanks @openperf and @amittell.
+- Memory: keep vector-disabled FTS indexes from resolving embedding providers during sync and search.
 - Providers: bound generated media downloads from OpenAI, Runway, xAI, MiniMax, BytePlus, DashScope-compatible, FAL, OpenRouter, Google, Vydra, and Comfy providers.
 - Providers: resolve Google defaults to `google-generative-ai`, register Vertex static catalog rows, align Foundry reasoning metadata, skip DeepSeek V4 thinking params on Foundry fallback, use MiniMax account OAuth endpoints, preserve Copilot Claude 1M capabilities, suppress disabled Ollama reasoning output, keep OpenAI stop-finished tool calls, and avoid replay ids when the Responses store is disabled. (#88480, #88512)
 - Providers: cap GitHub Copilot OAuth request timeouts before creating abort signals.
@@ -83,6 +139,7 @@ Docs: https://docs.openclaw.ai
 - Channels: preserve long Feishu streaming replies, send visible fallbacks when accepted Feishu turns produce no final reply, tolerate iMessage self-chat timestamp skew, preserve colon-prefixed slash commands in mention parsing, decode Nostr `npub` allowlists correctly, and suppress raw provider errors during channel delivery. (#87896)
 - Config/status/doctor: skip unresolved shell references in state-dir dotenv files, resolve gateway auth secrets during deep status audits, respect explicit PI runtime policy, report runtime tool-schema errors, and keep post-upgrade JSON stable. (#88288)
 - Gateway/session state: list commands from the Gateway plugin registry, harden MCP loopback tool schemas, hide phantom agent-store rows from `sessions.list`, make task persistence failures explicit, and carry session UUIDs on interactive dispatch events.
+- Gateway/plugins: narrow plugin lookup memoization to the stable plugin/runtime inputs, avoiding repeated lookup work without mixing disabled or filtered plugin state.
 - OpenAI/TTS: handle speed directives for OpenAI TTS voices. (#74089)
 - CI/Crabbox: keep default runner capacity on the Azure credit-backed on-demand D4 lane with the Azure SSH port and a Git-independent full check job, so broad validation avoids low-priority spot quota stalls, hydrate port mismatches, non-Git hydrated workspaces, and stale AWS region hints.
 - CI/Crabbox: route Crabbox wrapper and Testbox workflow edits to their regression tests so changed-test gates do not silently run zero specs.
@@ -657,6 +714,7 @@ Docs: https://docs.openclaw.ai
 - Gateway/sessions: allow shared-secret bearer callers to read and stream session history without an explicit scope header. (#81815) Thanks @medns.
 - Agents/embedded runner: classify HTML auth provider responses as `auth_html` and return a re-authentication hint instead of the CDN-blocked copy that `upstream_html` returns. Cloudflare Access login pages, nginx basic-auth challenges, and gateway login walls all produce HTML auth bodies that were previously misdiagnosed as transient CDN blocks. (#79900) Thanks @martingarramon.
 - TUI/streaming watchdog: dismiss the `This response is taking longer than expected` notice as soon as a chat event for the same run arrives, so the message no longer sits next to the recovered response when the run was only briefly silent. Refs #67052, #69081 (closed), prior attempt #69026. Thanks @jpruit20 and @romneyda.
+- Agents/auth profiles: replace the bare `No available auth profile for <provider> (all in cooldown or unavailable)` TUI error with plain-language copy that explains what happened in user terms (sign-in expired, provider asking us to slow down, billing issue on the account, etc.) and suggests the matching `openclaw models auth login --provider <provider>` recovery command for sign-in and billing causes, while falling back to the underlying provider error for cases without a clear recovery path. Thanks @romneyda.
 - Agents/Pi: tolerate OpenClaw-owned transcript writes while embedded prompts are released for model I/O, keeping long-running Feishu, Slack, Telegram, and cron turns from failing with false session-takeover errors. Fixes #84059. (#84250) Thanks @tianxiaochannel-oss88.
 
 ## 2026.5.20

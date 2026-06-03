@@ -46,6 +46,7 @@ export async function connectGatewayClient(params: {
   deviceIdentity?: DeviceIdentity;
   onEvent?: (evt: { event?: string; payload?: unknown }) => void;
   connectChallengeTimeoutMs?: number;
+  requestTimeoutMs?: number;
   timeoutMs?: number;
   timeoutMessage?: string;
 }) {
@@ -89,6 +90,9 @@ export async function connectGatewayClient(params: {
       deviceToken: params.deviceToken,
       ...(params.connectChallengeTimeoutMs !== undefined
         ? { connectChallengeTimeoutMs: params.connectChallengeTimeoutMs }
+        : {}),
+      ...(params.requestTimeoutMs !== undefined
+        ? { requestTimeoutMs: params.requestTimeoutMs }
         : {}),
       clientName: params.clientName ?? GATEWAY_CLIENT_NAMES.TEST,
       clientDisplayName: params.clientDisplayName ?? "vitest",
