@@ -57,8 +57,12 @@ export function isModelTransportDebugEnabled(env: ModelTransportDebugEnv = proce
   );
 }
 
+function isModelFetchMetadataMessage(message: string): boolean {
+  return message.startsWith("[model-fetch]");
+}
+
 export function emitModelTransportDebug(log: SubsystemLogger, message: string): void {
-  if (isModelTransportDebugEnabled()) {
+  if (isModelFetchMetadataMessage(message) || isModelTransportDebugEnabled()) {
     log.info(message);
     return;
   }
