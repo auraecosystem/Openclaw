@@ -120,7 +120,7 @@ describe("gateway pre-auth hardening", () => {
       handleHooksRequest: async () => false,
       resolvedAuth,
     });
-    const wss = new WebSocketServer({ noServer: true });
+    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PREAUTH_PAYLOAD_BYTES });
     attachGatewayUpgradeHandler({
       httpServer,
       wss,
