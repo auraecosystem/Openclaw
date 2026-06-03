@@ -11,6 +11,7 @@ type DirectSendOptions = {
   cfg: OpenClawConfig;
   accountId?: string | null;
   replyToId?: string | null;
+  quoteAuthor?: string | null;
   mediaUrl?: string;
   mediaAccess?: OutboundMediaAccess;
   mediaLocalRoots?: readonly string[];
@@ -93,6 +94,7 @@ export function createDirectTextMediaOutbound<
     accountId?: string | null;
     deps?: OutboundSendDeps;
     replyToId?: string | null;
+    quoteAuthor?: string | null;
     mediaUrl?: string;
     mediaAccess?: OutboundMediaAccess;
     buildOptions: (params: DirectSendOptions) => TOpts;
@@ -113,6 +115,7 @@ export function createDirectTextMediaOutbound<
         mediaReadFile: sendParams.mediaAccess?.readFile,
         accountId: sendParams.accountId,
         replyToId: sendParams.replyToId,
+        quoteAuthor: sendParams.quoteAuthor,
         maxBytes,
       }),
     );
@@ -127,7 +130,7 @@ export function createDirectTextMediaOutbound<
     sanitizeText: ({ text }) => sanitizeForPlainText(text),
     sendPayload: async (ctx) =>
       await sendTextMediaPayload({ channel: params.channel, ctx, adapter: outbound }),
-    sendText: async ({ cfg, to, text, accountId, deps, replyToId }) => {
+    sendText: async ({ cfg, to, text, accountId, deps, replyToId, quoteAuthor }) => {
       return await sendDirect({
         cfg,
         to,
@@ -135,6 +138,7 @@ export function createDirectTextMediaOutbound<
         accountId,
         deps,
         replyToId,
+        quoteAuthor,
         buildOptions: params.buildTextOptions,
       });
     },
@@ -149,6 +153,7 @@ export function createDirectTextMediaOutbound<
       accountId,
       deps,
       replyToId,
+      quoteAuthor,
     }) => {
       return await sendDirect({
         cfg,
@@ -166,6 +171,7 @@ export function createDirectTextMediaOutbound<
         accountId,
         deps,
         replyToId,
+        quoteAuthor,
         buildOptions: params.buildMediaOptions,
       });
     },

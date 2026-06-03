@@ -46,6 +46,9 @@ describe("delivery-queue storage", () => {
           },
           bestEffort: true,
           gifPlayback: true,
+          replyToId: "1700000000000",
+          replyToMode: "first",
+          quoteAuthor: "uuid:sender-1",
           silent: true,
           gatewayClientScopes: ["operator.write"],
           mirror: {
@@ -78,6 +81,9 @@ describe("delivery-queue storage", () => {
       });
       expect(entry.bestEffort).toBe(true);
       expect(entry.gifPlayback).toBe(true);
+      expect(entry.replyToId).toBe("1700000000000");
+      expect(entry.replyToMode).toBe("first");
+      expect(entry.quoteAuthor).toBe("uuid:sender-1");
       expect(entry.silent).toBe(true);
       expect(entry.gatewayClientScopes).toEqual(["operator.write"]);
       expect(entry.mirror).toEqual({

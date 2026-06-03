@@ -197,6 +197,7 @@ type ChannelHandlerParams = {
   accountId?: string;
   replyToId?: string | null;
   replyToMode?: ReplyToMode;
+  quoteAuthor?: string | null;
   formatting?: OutboundDeliveryFormattingOptions;
   threadId?: string | number | null;
   identity?: OutboundIdentity;
@@ -352,6 +353,7 @@ function createPluginHandler(
   const resolveCtx = (overrides?: {
     replyToId?: string | null;
     replyToIdSource?: "explicit" | "implicit";
+    quoteAuthor?: string | null;
     threadId?: string | number | null;
     audioAsVoice?: boolean;
     formatting?: OutboundDeliveryFormattingOptions;
@@ -362,6 +364,8 @@ function createPluginHandler(
       overrides && "replyToIdSource" in overrides
         ? overrides.replyToIdSource
         : baseCtx.replyToIdSource,
+    quoteAuthor:
+      overrides && "quoteAuthor" in overrides ? overrides.quoteAuthor : baseCtx.quoteAuthor,
     threadId: overrides && "threadId" in overrides ? overrides.threadId : baseCtx.threadId,
     audioAsVoice: overrides?.audioAsVoice,
     formatting:
@@ -448,12 +452,22 @@ function createPluginHandler(
     sendPayload:
       messagePayload || outbound?.sendPayload
         ? async (payload, overrides) => {
+            const payloadForSend =
+              overrides && "replyToId" in overrides
+                ? overrides.replyToId === undefined
+                  ? payload.replyToId === undefined
+                    ? payload
+                    : { ...payload, replyToId: undefined }
+                  : payload.replyToId === overrides.replyToId
+                    ? payload
+                    : { ...payload, replyToId: overrides.replyToId }
+                : payload;
             const payloadCtx = {
               ...resolveCtx(overrides),
               kind: "payload" as const satisfies ChannelMessageSendAttemptKind,
-              text: payload.text ?? "",
-              mediaUrl: payload.mediaUrl,
-              payload,
+              text: payloadForSend.text ?? "",
+              mediaUrl: payloadForSend.mediaUrl,
+              payload: payloadForSend,
             };
             if (messagePayload) {
               const sent = await runChannelMessageSendWithLifecycle({
@@ -574,6 +588,7 @@ function createChannelOutboundContextBase(
     replyToId: params.replyToId,
     replyToMode: params.replyToMode,
     formatting: params.formatting,
+    quoteAuthor: params.quoteAuthor,
     threadId: params.threadId,
     identity: params.identity,
     gifPlayback: params.gifPlayback,
@@ -637,6 +652,7 @@ type DeliverOutboundPayloadsCoreParams = {
   replyToId?: string | null;
   replyToMode?: ReplyToMode;
   formatting?: OutboundDeliveryFormattingOptions;
+  quoteAuthor?: string | null;
   threadId?: string | number | null;
   identity?: OutboundIdentity;
   deps?: OutboundSendDeps;
@@ -1262,6 +1278,7 @@ export async function deliverOutboundPayloadsInternal(
         threadId: params.threadId,
         replyToId: params.replyToId,
         replyToMode: params.replyToMode,
+        quoteAuthor: params.quoteAuthor,
         formatting: params.formatting,
         identity: params.identity,
         bestEffort: params.bestEffort,
@@ -1478,9 +1495,21 @@ async function deliverOutboundPayloadsCore(
   const chunkMode = handler.chunker
     ? (params.formatting?.chunkMode ?? resolveChunkMode(cfg, channel, accountId))
     : "length";
+  // Signal treats replyToId as a one-shot quote bubble (duplicate quote bubbles
+  // would render across chunks). However, signal-cli silently drops the quote
+  // for group targets when quote-author is unavailable; in that case the reply
+  // never actually renders, so we must keep delivering replyToId on subsequent
+  // payloads instead of marking it consumed.
+  const signalGroupTargetWithoutAuthor =
+    channel === "signal" &&
+    typeof to === "string" &&
+    /^(?:signal:)?group:/i.test(to.trim()) &&
+    !params.quoteAuthor;
+  const treatAsSingleUseChannel = channel === "signal" && !signalGroupTargetWithoutAuthor;
   const { resolveCurrentReplyTo, applyReplyToConsumption } = createReplyToDeliveryPolicy({
     replyToId: params.replyToId,
     replyToMode: params.replyToMode,
+    treatAsSingleUse: treatAsSingleUseChannel,
   });
 
   const sendTextChunks = async (
@@ -1497,10 +1526,15 @@ async function deliverOutboundPayloadsCore(
       textLimit,
       chunkMode,
       formatting: params.formatting,
-      consumeReplyTo: (value) =>
-        applyReplyToConsumption(value, {
+      consumeReplyTo: (value) => {
+        const resolved = applyReplyToConsumption(value, {
           consumeImplicitReply: value.replyToIdSource === "implicit",
-        }),
+        });
+        if (resolved.replyToId || resolved.quoteAuthor === undefined) {
+          return resolved;
+        }
+        return { ...resolved, quoteAuthor: undefined };
+      },
     });
     for (const unit of units) {
       if (unit.kind !== "text") {
@@ -1521,6 +1555,25 @@ async function deliverOutboundPayloadsCore(
       recordPayloadOutcome(suppressedPayloadOutcome({ index, reason: "no_visible_payload" }));
     });
   }
+  // Tracks whether an inherited reply has been delivered so subsequent payloads
+  // do not re-attach a duplicate quote indicator. This applies to channels that
+  // treat replyToId as a one-shot quote bubble. Channels that use replyToId as
+  // persistent thread context (slack thread_ts, mattermost rootId, googlechat
+  // threadName, tlon urbit thread reply id) must keep the id on every payload
+  // to avoid orphaning chunks from the thread.
+  let inheritedReplyDelivered = false;
+  const isThreadBasedChannel =
+    channel === "slack" ||
+    channel === "mattermost" ||
+    channel === "googlechat" ||
+    channel === "tlon";
+  // Suppress inherited reply on subsequent payloads only when the channel
+  // treats replyToId as one-shot quote metadata. Skip suppression when the
+  // channel falls back to a pass-through (signal group without author) — the
+  // first delivery did not consume a quote, so subsequent payloads should
+  // continue to receive the inherited reply id.
+  const isSingleUseInheritedReply =
+    !isThreadBasedChannel && !signalGroupTargetWithoutAuthor && params.replyToMode !== "all";
   const deliveredMirrorPayloads: NormalizedOutboundPayload[] = [];
   const recordDeliveredMirrorPayload = (
     payloadSummary: NormalizedOutboundPayload,
@@ -1694,19 +1747,44 @@ async function deliverOutboundPayloadsCore(
 
       params.onPayload?.(payloadSummary);
       const replyToResolution = resolveCurrentReplyTo(effectivePayload);
+      // After an inherited reply has been delivered on a prior payload, suppress
+      // the inherited reply on subsequent payloads by passing `null` so plugin
+      // adapters do not reattach a duplicate quote bubble. Only applies for
+      // single-use reply modes: channels that use replyToId for thread routing
+      // (e.g. googlechat) need the id on every payload.
+      const suppressInheritedReply =
+        isSingleUseInheritedReply &&
+        inheritedReplyDelivered &&
+        replyToResolution.source === "implicit" &&
+        effectivePayload.replyToId !== null &&
+        typeof effectivePayload.replyToId !== "string";
+      const resolvedReplyToId = suppressInheritedReply ? null : replyToResolution.replyToId;
+      const resolvedReplyToIdSource = suppressInheritedReply ? undefined : replyToResolution.source;
+      const effectiveQuoteAuthor =
+        resolvedReplyToId && typeof resolvedReplyToId === "string"
+          ? (params.quoteAuthor ?? undefined)
+          : undefined;
       const sendOverrides: OutboundMessageSendOverrides = {
-        replyToId: replyToResolution.replyToId,
-        replyToIdSource: replyToResolution.source,
+        replyToId: resolvedReplyToId,
+        replyToIdSource: resolvedReplyToIdSource,
+        quoteAuthor: effectiveQuoteAuthor,
         ...(params.threadId !== undefined ? { threadId: params.threadId } : {}),
         ...(effectivePayload.audioAsVoice === true ? { audioAsVoice: true } : {}),
         ...(params.forceDocument !== undefined ? { forceDocument: params.forceDocument } : {}),
       };
       const applySendReplyToConsumption = <T extends OutboundMessageSendOverrides>(
         overrides: T,
-      ): T =>
-        applyReplyToConsumption(overrides, {
-          consumeImplicitReply: replyToResolution.source === "implicit",
+      ): T => {
+        const resolved = applyReplyToConsumption(overrides, {
+          consumeImplicitReply: resolvedReplyToIdSource === "implicit",
         });
+        // Clear stale quoteAuthor when the single-use replyToId is consumed so
+        // later chunks of the same turn are not misattributed to a prior quote.
+        if (resolved.replyToId || resolved.quoteAuthor === undefined) {
+          return resolved;
+        }
+        return { ...resolved, quoteAuthor: undefined };
+      };
       const deliveryTarget = deliveryHandler.buildTargetRef({ threadId: sendOverrides.threadId });
       if (
         deliveryHandler.sendPayload &&
@@ -1732,6 +1810,9 @@ async function deliverOutboundPayloadsCore(
             }),
           );
           continue;
+        }
+        if (resolvedReplyToIdSource === "implicit" && resolvedReplyToId) {
+          inheritedReplyDelivered = true;
         }
         results.push(delivery);
         recordPayloadOutcome({ index: payloadIndex, status: "sent", results: [delivery] });
@@ -1768,6 +1849,13 @@ async function deliverOutboundPayloadsCore(
           );
         } else {
           await sendTextChunks(deliveryHandler, payloadSummary.text, sendOverrides);
+        }
+        if (
+          resolvedReplyToIdSource === "implicit" &&
+          resolvedReplyToId &&
+          results.length > beforeCount
+        ) {
+          inheritedReplyDelivered = true;
         }
         const deliveredResults = results.slice(beforeCount);
         if (deliveredResults.length > 0) {
@@ -1826,6 +1914,13 @@ async function deliverOutboundPayloadsCore(
         }
         const beforeCount = results.length;
         await sendTextChunks(deliveryHandler, fallbackText, sendOverrides);
+        if (
+          resolvedReplyToIdSource === "implicit" &&
+          resolvedReplyToId &&
+          results.length > beforeCount
+        ) {
+          inheritedReplyDelivered = true;
+        }
         const deliveredResults = results.slice(beforeCount);
         if (deliveredResults.length > 0) {
           recordPayloadOutcome({
@@ -1890,6 +1985,13 @@ async function deliverOutboundPayloadsCore(
         results.push(delivery);
         firstMessageId ??= delivery.messageId;
         lastMessageId = delivery.messageId;
+      }
+      if (
+        resolvedReplyToIdSource === "implicit" &&
+        resolvedReplyToId &&
+        results.length > beforeCount
+      ) {
+        inheritedReplyDelivered = true;
       }
       await maybePinDeliveredMessage({
         handler: deliveryHandler,

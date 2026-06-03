@@ -29,7 +29,8 @@ export type OutboundReplyPayload = {
   interactive?: InternalReplyPayload["interactive"];
   channelData?: InternalReplyPayload["channelData"];
   sensitiveMedia?: boolean;
-  replyToId?: string;
+  // null explicitly suppresses inherited reply metadata (distinct from undefined = "not set")
+  replyToId?: string | null;
 };
 
 export type ReasoningReplyPayload = {
@@ -84,7 +85,17 @@ export function isReasoningReplyPayload(payload: ReasoningReplyPayload): boolean
 export function normalizeOutboundReplyPayload(
   payload: Record<string, unknown>,
 ): OutboundReplyPayload {
-  return normalizeCoreOutboundReplyPayload(payload);
+  const normalized = normalizeCoreOutboundReplyPayload(payload);
+  // Core normalization coerces replyToId to string|undefined; preserve the SDK's
+  // explicit null suppression signal (null = "do not reply", distinct from
+  // undefined = "not set") that the core helper would otherwise drop.
+  const replyToId =
+    typeof payload.replyToId === "string"
+      ? payload.replyToId
+      : payload.replyToId === null
+        ? null
+        : undefined;
+  return { ...normalized, replyToId };
 }
 
 /** Wrap a deliverer so callers can hand it arbitrary payloads while channels receive normalized data. */
@@ -452,7 +463,7 @@ export async function deliverFormattedTextWithAttachments(params: {
   }
   await params.send({
     text,
-    replyToId: params.payload.replyToId,
+    replyToId: params.payload.replyToId ?? undefined,
   });
   return true;
 }
