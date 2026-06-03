@@ -80,9 +80,6 @@ export type GuardedFetchOptions = {
   policy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
-  resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
-  /** Preserve ambient Undici env-proxy routing for each eligible URL while keeping strict checks otherwise. */
-  useEnvProxyForEligibleUrls?: boolean;
   retainAuthorizationRedirectHostnameAllowlist?: string[];
   mode?: GuardedFetchMode;
   pinDns?: boolean;
@@ -104,6 +101,9 @@ export type GuardedFetchResult = {
 
 type GuardedFetchInternalOptions = GuardedFetchOptions & {
   managedProxyBypass?: ConfiguredLocalOriginManagedProxyBypass;
+  resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
+  /** Preserve ambient Undici env-proxy routing for each eligible URL while keeping strict checks otherwise. */
+  useEnvProxyForEligibleUrls?: boolean;
 };
 
 export type GuardedFetchConfiguredLocalOriginOptions = GuardedFetchOptions & {
