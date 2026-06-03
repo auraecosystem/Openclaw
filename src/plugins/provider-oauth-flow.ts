@@ -1,7 +1,7 @@
 import type { RuntimeEnv } from "../runtime.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 
-export type OAuthPrompt = { message: string; placeholder?: string };
+export type OAuthPrompt = { message: string; placeholder?: string; signal?: AbortSignal };
 
 const validateRequiredInput = (value: string) => (value.trim().length > 0 ? undefined : "Required");
 
@@ -17,18 +17,11 @@ export function createVpsAwareOAuthHandlers(params: {
   onAuth: (event: { url: string }) => Promise<void>;
   onPrompt: (prompt: OAuthPrompt) => Promise<string>;
 } {
-  const manualPromptMessage = params.manualPromptMessage ?? "Paste the redirect URL";
-  let manualCodePromise: Promise<string> | undefined;
-
   return {
     onAuth: async ({ url }) => {
       if (params.isRemote) {
         params.spin.stop("OAuth URL ready");
         params.runtime.log(`\nOpen this URL in your LOCAL browser:\n\n${url}\n`);
-        manualCodePromise = params.prompter.text({
-          message: manualPromptMessage,
-          validate: validateRequiredInput,
-        });
         return;
       }
 
@@ -37,12 +30,10 @@ export function createVpsAwareOAuthHandlers(params: {
       params.runtime.log(`Open: ${url}`);
     },
     onPrompt: async (prompt) => {
-      if (manualCodePromise) {
-        return manualCodePromise;
-      }
       const code = await params.prompter.text({
-        message: prompt.message,
+        message: params.isRemote ? (params.manualPromptMessage ?? prompt.message) : prompt.message,
         placeholder: prompt.placeholder,
+        signal: prompt.signal,
         validate: validateRequiredInput,
       });
       return code;
