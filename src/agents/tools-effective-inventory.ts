@@ -17,6 +17,7 @@ import { resolveModel } from "./embedded-agent-runner/model.js";
 import { resolveBundledStaticCatalogModel } from "./embedded-agent-runner/model.static-catalog.js";
 import { normalizeStaticProviderModelId } from "./model-ref-shared.js";
 import { normalizeToolName } from "./tool-policy.js";
+import type { RuntimeToolSchemaDiagnostic } from "./tool-schema-projection.js";
 import {
   buildEffectiveToolInventoryGroups,
   buildRuntimeCompatibleToolInventory,
@@ -27,6 +28,7 @@ import type {
   EffectiveToolInventoryResult,
   ResolveEffectiveToolInventoryParams,
 } from "./tools-effective-inventory.types.js";
+import type { AnyAgentTool } from "./tools/common.js";
 
 export {
   buildEffectiveToolInventoryEntries,
@@ -310,6 +312,8 @@ export function resolveEffectiveToolInventory(
     modelProvider: params.modelProvider,
     modelId: params.modelId,
   });
+  const preNormalizationDiagnostics: RuntimeToolSchemaDiagnostic[] = [];
+  let preNormalizationTools: readonly AnyAgentTool[] | undefined;
 
   const effectiveTools = createOpenClawCodingTools({
     agentId,
@@ -338,9 +342,15 @@ export function resolveEffectiveToolInventory(
     modelHasVision: params.modelHasVision,
     requireExplicitMessageTarget: params.requireExplicitMessageTarget,
     disableMessageTool: params.disableMessageTool,
+    onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) => {
+      preNormalizationDiagnostics.push(...diagnostics);
+      preNormalizationTools = sourceTools;
+    },
   });
   const projectedInventory = buildRuntimeCompatibleToolInventory({
     tools: effectiveTools,
+    preNormalizationDiagnostics,
+    preNormalizationTools,
     cfg: params.cfg,
     workspaceDir,
     modelProvider: params.modelProvider,

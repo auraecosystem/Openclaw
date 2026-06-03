@@ -682,6 +682,7 @@ function collectAgentRuntimeToolSchemaFindings(params: {
   modelRef: { provider: string; model: string };
   model: ProviderRuntimeModel;
 }): readonly HealthFinding[] {
+  const preNormalizationFindings: HealthFinding[] = [];
   let tools: AnyAgentTool[];
   try {
     tools = createOpenClawCodingTools({
@@ -696,12 +697,24 @@ function collectAgentRuntimeToolSchemaFindings(params: {
       allowGatewaySubagentBinding: true,
       emitBeforeToolCallDiagnostics: false,
       toolPolicyAuditLogLevel: "debug",
+      onPreNormalizationSchemaDiagnostics: (diagnostics, sourceTools) => {
+        preNormalizationFindings.push(
+          ...diagnostics.map((diagnostic) =>
+            toolSchemaDiagnosticToFinding({
+              agentId: params.agentId,
+              tools: sourceTools,
+              diagnostic,
+            }),
+          ),
+        );
+      },
     });
   } catch (error) {
-    return [agentRuntimeToolLoadFailureFinding({ agentId: params.agentId, error })];
+    return [
+      ...preNormalizationFindings,
+      agentRuntimeToolLoadFailureFinding({ agentId: params.agentId, error }),
+    ];
   }
-
-  const preNormalizationFindings: HealthFinding[] = [];
 
   let normalizedTools: AnyAgentTool[];
   try {
