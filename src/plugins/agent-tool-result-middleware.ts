@@ -3,6 +3,10 @@ import type {
   AgentToolResultMiddlewareOptions,
   AgentToolResultMiddlewareRuntime,
 } from "./agent-tool-result-middleware-types.js";
+import type {
+  PluginAgentToolResultMiddlewareRegistration,
+  PluginRegistry,
+} from "./registry-types.js";
 import { getActivePluginRegistry } from "./runtime.js";
 
 export const AGENT_TOOL_RESULT_MIDDLEWARE_RUNTIMES = [
@@ -71,12 +75,53 @@ export function normalizeAgentToolResultMiddlewareRuntimeIds(
   return normalized;
 }
 
+type MiddlewareSnapshot =
+  | {
+      ok: true;
+      handler: AgentToolResultMiddleware;
+      runtimes: readonly AgentToolResultMiddlewareRuntime[];
+    }
+  | {
+      ok: false;
+    };
+
+function listActiveMiddlewareRegistrations(): readonly PluginAgentToolResultMiddlewareRegistration[] {
+  const registry = getActivePluginRegistry() as PluginRegistry | null | undefined;
+  if (!registry) {
+    return [];
+  }
+  try {
+    return Array.isArray(registry.agentToolResultMiddlewares)
+      ? registry.agentToolResultMiddlewares
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function snapshotMiddlewareRegistration(
+  entry: PluginAgentToolResultMiddlewareRegistration,
+): MiddlewareSnapshot {
+  try {
+    const { runtimes, handler } = entry;
+    if (!Array.isArray(runtimes) || typeof handler !== "function") {
+      return { ok: false };
+    }
+    return { ok: true, runtimes, handler };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export function listAgentToolResultMiddlewares(
   runtime: AgentToolResultMiddlewareRuntime,
 ): AgentToolResultMiddleware[] {
-  return (
-    getActivePluginRegistry()
-      ?.agentToolResultMiddlewares?.filter((entry) => entry.runtimes.includes(runtime))
-      .map((entry) => entry.handler) ?? []
-  );
+  const handlers: AgentToolResultMiddleware[] = [];
+  for (const entry of listActiveMiddlewareRegistrations()) {
+    const registration = snapshotMiddlewareRegistration(entry);
+    if (registration.ok && registration.runtimes.includes(runtime)) {
+      handlers.push(registration.handler);
+    }
+  }
+  return handlers;
 }
