@@ -118,6 +118,7 @@ import type { ReplyMediaContext } from "./reply-media-paths.js";
 import { createReplyMediaContext } from "./reply-media-paths.runtime.js";
 import type { ReplyOperation } from "./reply-run-registry.js";
 import { isReplyProfilerEnabled } from "./reply-timing-tracker.js";
+import { isRoutableChannel, routeReply } from "./route-reply.js";
 import type { TypingSignaler } from "./typing-mode.js";
 
 // Maximum number of LiveSessionModelSwitchError retries before surfacing a
@@ -1599,10 +1600,56 @@ export async function runAgentTurnWithFallback(params: {
   const currentMessageId = params.sessionCtx.MessageSidFull ?? params.sessionCtx.MessageSid;
   const shouldNotifyUserAboutCompaction =
     runtimeConfig?.agents?.defaults?.compaction?.notifyUser === true;
-  const sendCompactionNotice = async (phase: "start" | "end" | "incomplete") => {
-    if (!params.opts?.onBlockReply) {
+  const routeCompactionNotice = async (
+    noticePayload: ReplyPayload,
+    phase: "start" | "end" | "incomplete",
+  ) => {
+    const originatingChannel =
+      params.followupRun.originatingChannel ??
+      resolveOriginMessageProvider({
+        provider:
+          params.followupRun.run.messageProvider ??
+          params.sessionCtx.Surface ??
+          params.sessionCtx.Provider,
+      });
+    const originatingTo =
+      params.followupRun.originatingTo ??
+      normalizeOptionalString(params.sessionCtx.OriginatingTo) ??
+      normalizeOptionalString(params.sessionCtx.To);
+    if (!isRoutableChannel(originatingChannel) || !originatingTo) {
+      logVerbose(
+        `compaction ${phase} notice has no block reply callback or routable origin (non-fatal)`,
+      );
       return;
     }
+    const result = await routeReply({
+      payload: noticePayload,
+      channel: originatingChannel,
+      to: originatingTo,
+      sessionKey: params.followupRun.run.sessionKey ?? params.sessionKey,
+      policySessionKey: params.runtimePolicySessionKey,
+      accountId: params.followupRun.originatingAccountId ?? params.followupRun.run.agentAccountId,
+      requesterSenderId: params.followupRun.run.senderId,
+      requesterSenderName: params.followupRun.run.senderName,
+      requesterSenderUsername: params.followupRun.run.senderUsername,
+      requesterSenderE164: params.followupRun.run.senderE164,
+      threadId: params.followupRun.originatingThreadId,
+      cfg: runtimeConfig,
+      mirror: false,
+      isGroup: Boolean(params.followupRun.run.groupId),
+      groupId: params.followupRun.run.groupId,
+      replyKind: "block",
+      runId,
+    });
+    if (!result.ok) {
+      logVerbose(
+        `compaction ${phase} notice route delivery failed (non-fatal): ${
+          result.error ?? "unknown error"
+        }`,
+      );
+    }
+  };
+  const sendCompactionNotice = async (phase: "start" | "end" | "incomplete") => {
     const text =
       phase === "start"
         ? "🧹 Compacting context..."
@@ -1616,7 +1663,11 @@ export async function runAgentTurnWithFallback(params: {
       isCompactionNotice: true,
     });
     try {
-      await params.opts.onBlockReply(noticePayload);
+      if (params.opts?.onBlockReply) {
+        await params.opts.onBlockReply(noticePayload);
+      } else {
+        await routeCompactionNotice(noticePayload, phase);
+      }
     } catch (err) {
       // Non-critical notice delivery failure should not bubble out of the
       // fire-and-forget event handler.
@@ -1632,8 +1683,11 @@ export async function runAgentTurnWithFallback(params: {
       .map((entry) => entry.trim())
       .filter((entry) => entry.length > 0);
   };
-  const sendCompactionHookMessages = async (messages: string[]) => {
-    if (!params.opts?.onBlockReply || messages.length === 0) {
+  const sendCompactionHookMessages = async (
+    messages: string[],
+    phase: "start" | "end" | "incomplete",
+  ) => {
+    if (messages.length === 0) {
       return;
     }
     const noticePayload = params.applyReplyToMode({
@@ -1643,7 +1697,11 @@ export async function runAgentTurnWithFallback(params: {
       isCompactionNotice: true,
     });
     try {
-      await params.opts.onBlockReply(noticePayload);
+      if (params.opts?.onBlockReply) {
+        await params.opts.onBlockReply(noticePayload);
+      } else {
+        await routeCompactionNotice(noticePayload, phase);
+      }
     } catch (err) {
       logVerbose(`compaction hook notice delivery failed (non-fatal): ${String(err)}`);
     }
@@ -2550,7 +2608,7 @@ export async function runAgentTurnWithFallback(params: {
                             await params.opts.onCompactionStart();
                           }
                           if (hookMessages.length > 0) {
-                            await sendCompactionHookMessages(hookMessages);
+                            await sendCompactionHookMessages(hookMessages, "start");
                           } else if (shouldNotifyUserAboutCompaction) {
                             // Send directly via opts.onBlockReply (bypassing the
                             // pipeline) so the notice does not cause final payloads
@@ -2566,12 +2624,12 @@ export async function runAgentTurnWithFallback(params: {
                               await params.opts.onCompactionEnd();
                             }
                             if (hookMessages.length > 0) {
-                              await sendCompactionHookMessages(hookMessages);
+                              await sendCompactionHookMessages(hookMessages, "end");
                             } else if (shouldNotifyUserAboutCompaction) {
                               await sendCompactionNotice("end");
                             }
                           } else if (hookMessages.length > 0) {
-                            await sendCompactionHookMessages(hookMessages);
+                            await sendCompactionHookMessages(hookMessages, "incomplete");
                           } else if (shouldNotifyUserAboutCompaction) {
                             await sendCompactionNotice("incomplete");
                           }
