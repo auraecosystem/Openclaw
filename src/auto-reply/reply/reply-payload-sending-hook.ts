@@ -1,5 +1,8 @@
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
-import type { PluginHookReplyPayloadSendingContext } from "../../plugins/hook-types.js";
+import type {
+  PluginHookReplyPayloadSendingContext,
+  PluginHookReplyUsageState,
+} from "../../plugins/hook-types.js";
 import type { ReplyPayload } from "../reply-payload.js";
 import type { ReplyDispatchKind } from "./reply-dispatcher.types.js";
 
@@ -13,6 +16,7 @@ export async function runReplyPayloadSendingHook(params: {
   channel?: string;
   sessionKey?: string;
   runId?: string;
+  usageState?: PluginHookReplyUsageState;
   context: PluginHookReplyPayloadSendingContext;
 }): Promise<ReplyPayload | null> {
   const hookRunner = getGlobalHookRunner();
@@ -27,6 +31,7 @@ export async function runReplyPayloadSendingHook(params: {
       channel: params.channel,
       sessionKey: params.sessionKey,
       runId: params.runId,
+      usageState: params.usageState,
     },
     params.context,
   );
