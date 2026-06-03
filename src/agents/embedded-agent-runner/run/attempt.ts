@@ -607,13 +607,29 @@ function shouldPreservePromptErrorAfterCleanupError(params: {
   );
 }
 
-function shouldSuppressTakeoverErrorOnUserAbort(params: {
+export function isNonUserAbortReason(reason: unknown): boolean {
+  if (!reason || typeof reason !== "object") {
+    return false;
+  }
+  const err = reason as Error;
+  if (err.name === "TimeoutError") {
+    return true;
+  }
+  if (
+    err.name === "AbortError" &&
+    (err.message?.includes("gateway restart") || err.message?.includes("provider auth revocation"))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function shouldSuppressTakeoverErrorOnUserAbort(params: {
   cleanupError: unknown;
   userInitiatedAbort: boolean;
 }): boolean {
   return (
-    params.userInitiatedAbort &&
-    params.cleanupError instanceof EmbeddedAttemptSessionTakeoverError
+    params.userInitiatedAbort && params.cleanupError instanceof EmbeddedAttemptSessionTakeoverError
   );
 }
 
@@ -5101,7 +5117,8 @@ export async function runEmbeddedAttempt(
         Boolean(params.abortSignal?.aborted) &&
         !timedOut &&
         !idleTimedOut &&
-        !timedOutDuringCompaction;
+        !timedOutDuringCompaction &&
+        !isNonUserAbortReason(getAbortReason(params.abortSignal!));
       const shouldSuppressTakeover = shouldSuppressTakeoverErrorOnUserAbort({
         cleanupError: cleanupFailure,
         userInitiatedAbort,
