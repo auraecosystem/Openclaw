@@ -10,6 +10,7 @@ import {
 } from "../../embedded-agent-helpers.js";
 import { FailoverError, resolveFailoverStatus } from "../../failover-error.js";
 import {
+  isSameProfileRetryFailoverReason,
   mergeRetryFailoverReason,
   resolveRunFailoverDecision,
   type AssistantFailoverDecision,
@@ -24,7 +25,8 @@ type AssistantFailoverOutcome =
       action: "retry";
       overloadProfileRotations: number;
       lastRetryFailoverReason: FailoverReason | null;
-      retryKind?: "same_model_idle_timeout";
+      retryKind?: "same_model_idle_timeout" | "same_profile_transient";
+      sameProfileOverloadRetries?: number;
     }
   | {
       action: "throw";
@@ -59,6 +61,8 @@ export async function handleAssistantFailover(params: {
   isProbeSession: boolean;
   overloadProfileRotations: number;
   overloadProfileRotationLimit: number;
+  sameProfileOverloadRetries: number;
+  sameProfileOverloadRetryLimit: number;
   previousRetryFailoverReason: FailoverReason | null;
   logAssistantFailoverDecision: (
     decision: "rotate_profile" | "fallback_model" | "surface_error",
@@ -76,6 +80,7 @@ export async function handleAssistantFailover(params: {
     logFallbackDecision: (decision: "fallback_model", extra?: { status?: number }) => void;
   }) => void;
   maybeBackoffBeforeOverloadFailover: (reason: FailoverReason | null) => Promise<void>;
+  backoffBeforeSameProfileOverloadRetry: () => Promise<void>;
   advanceAuthProfile: () => Promise<boolean>;
 }): Promise<AssistantFailoverOutcome> {
   let overloadProfileRotations = params.overloadProfileRotations;
@@ -181,6 +186,29 @@ export async function handleAssistantFailover(params: {
     await markFailedProfilePromise;
     if (params.idleTimedOut && params.allowSameModelIdleTimeoutRetry) {
       return sameModelIdleTimeoutRetry();
+    }
+
+    if (
+      !params.fallbackConfigured &&
+      isSameProfileRetryFailoverReason(params.failoverReason) &&
+      params.sameProfileOverloadRetries < params.sameProfileOverloadRetryLimit
+    ) {
+      const sameProfileOverloadRetries = params.sameProfileOverloadRetries + 1;
+      params.warn(
+        `assistant-side transient ${params.failoverReason} with no fallback; retrying same profile (${sameProfileOverloadRetries}/${params.sameProfileOverloadRetryLimit}) for ${sanitizeForLog(params.provider)}/${sanitizeForLog(params.modelId)}`,
+      );
+      await params.backoffBeforeSameProfileOverloadRetry();
+      return {
+        action: "retry",
+        overloadProfileRotations,
+        retryKind: "same_profile_transient",
+        sameProfileOverloadRetries,
+        lastRetryFailoverReason: mergeRetryFailoverReason({
+          previous: params.previousRetryFailoverReason,
+          failoverReason: params.failoverReason,
+          timedOut: params.timedOut || params.idleTimedOut,
+        }),
+      };
     }
 
     decision = resolveRunFailoverDecision({
