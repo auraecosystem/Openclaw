@@ -426,17 +426,26 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
   }
 
   if (action === "search") {
-    const guildId = readStringParam(actionParams, "guildId", {
-      required: true,
-    });
-    const query = readStringParam(actionParams, "query", { required: true });
+    const guildId = readStringParam(actionParams, "guildId");
+    const query =
+      readStringParam(actionParams, "query") ?? readStringParam(actionParams, "content");
+    if (!query) {
+      throw new Error("Discord search requires query text. Provide query or content.");
+    }
+    // Fall back to the current session channel when no explicit channelId is
+    // provided. This lets the runtime resolve guildId from the channel.
+    const channelId =
+      readStringParam(actionParams, "channelId") ??
+      (ctx.toolContext?.currentChannelProvider?.trim().toLowerCase() === "discord"
+        ? ctx.toolContext?.currentChannelId?.trim() || undefined
+        : undefined);
     return await handleDiscordAction(
       {
         action: "searchMessages",
         accountId: accountId ?? undefined,
-        guildId,
+        ...(guildId ? { guildId } : {}),
         content: query,
-        channelId: readStringParam(actionParams, "channelId"),
+        channelId,
         channelIds: readStringArrayParam(actionParams, "channelIds"),
         authorId: readStringParam(actionParams, "authorId"),
         authorIds: readStringArrayParam(actionParams, "authorIds"),
