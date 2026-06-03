@@ -649,6 +649,16 @@ describe("anthropic transport stream", () => {
         },
       },
     });
+    const unreadableNameTool = {
+      description: "Broken name",
+      parameters: { type: "object", properties: {} },
+    };
+    Object.defineProperty(unreadableNameTool, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("anthropic tool name exploded");
+      },
+    });
     const streamFn = createAnthropicMessagesTransportStreamFn();
     const stream = await Promise.resolve(
       streamFn(
@@ -657,6 +667,7 @@ describe("anthropic transport stream", () => {
           systemPrompt: "Follow policy.",
           messages: [{ role: "user", content: "Read the file" }],
           tools: [
+            unreadableNameTool,
             {
               name: "read",
               description: "Read a file",
@@ -1221,6 +1232,25 @@ describe("anthropic transport stream", () => {
   });
 
   it("skips malformed tools when building Anthropic payloads", async () => {
+    const unreadableParametersTool = {
+      name: "bad_parameters_tool",
+      description: "unreadable schema",
+      execute: async () => ({ content: [{ type: "text", text: "bad" }] }),
+    };
+    Object.defineProperty(unreadableParametersTool, "parameters", {
+      enumerable: true,
+      get() {
+        throw new Error("anthropic tool parameters exploded");
+      },
+    });
+    const unreadablePropertiesSchema: Record<string, unknown> = { type: "object" };
+    Object.defineProperty(unreadablePropertiesSchema, "properties", {
+      enumerable: true,
+      get() {
+        throw new Error("anthropic tool properties exploded");
+      },
+    });
+
     await runTransportStream(
       makeAnthropicTransportModel(),
       {
@@ -1230,6 +1260,21 @@ describe("anthropic transport stream", () => {
             name: "bad_plugin_tool",
             description: "missing schema",
             execute: async () => ({ content: [{ type: "text", text: "bad" }] }),
+          },
+          unreadableParametersTool,
+          {
+            name: "bad_properties_tool",
+            description: "unreadable properties",
+            parameters: unreadablePropertiesSchema,
+          },
+          {
+            name: "null_schema_fields_tool",
+            description: "null schema fields",
+            parameters: {
+              type: "object",
+              properties: null,
+              required: null,
+            },
           },
           {
             name: "good_plugin_tool",
@@ -1250,8 +1295,13 @@ describe("anthropic transport stream", () => {
     );
 
     const tools = requireArray(latestAnthropicRequest().payload.tools, "tools");
-    expect(tools).toHaveLength(1);
-    const tool = requireRecord(tools[0], "tool");
+    expect(tools).toHaveLength(2);
+    const nullFieldTool = findRecord(tools, (record) => record.name === "null_schema_fields_tool");
+    expect(requireRecord(nullFieldTool.input_schema, "input schema")).toMatchObject({
+      properties: {},
+      required: [],
+    });
+    const tool = findRecord(tools, (record) => record.name === "good_plugin_tool");
     expect(tool.name).toBe("good_plugin_tool");
     expect(requireRecord(tool.input_schema, "input schema").properties).toEqual({
       query: { type: "string" },

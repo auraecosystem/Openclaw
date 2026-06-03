@@ -243,11 +243,16 @@ function toClaudeCodeName(name: string): string {
 function fromClaudeCodeName(name: string, tools: Context["tools"] | undefined): string {
   if (tools && tools.length > 0) {
     const lowerName = normalizeLowercaseStringOrEmpty(name);
-    const matchedTool = tools.find(
-      (tool) => normalizeLowercaseStringOrEmpty(tool.name) === lowerName,
-    );
-    if (matchedTool) {
-      return matchedTool.name;
+    for (const tool of tools) {
+      let toolName: unknown;
+      try {
+        toolName = tool.name;
+      } catch {
+        continue;
+      }
+      if (typeof toolName === "string" && normalizeLowercaseStringOrEmpty(toolName) === lowerName) {
+        return toolName;
+      }
     }
   }
   return name;
@@ -474,6 +479,31 @@ function ensureNonEmptyAnthropicMessages(messages: Array<Record<string, unknown>
     : [{ role: "user", content: EMPTY_ANTHROPIC_MESSAGES_FALLBACK_TEXT }];
 }
 
+type AnthropicToolCandidate = NonNullable<Context["tools"]>[number];
+type AnthropicToolFieldRead = { readable: true; value: unknown } | { readable: false };
+
+function readAnthropicToolField(
+  tool: AnthropicToolCandidate,
+  field: "name" | "description" | "parameters",
+): AnthropicToolFieldRead {
+  try {
+    return { readable: true, value: (tool as unknown as Record<string, unknown>)[field] };
+  } catch {
+    return { readable: false };
+  }
+}
+
+function readAnthropicSchemaField(
+  schema: Record<string, unknown>,
+  field: "properties" | "required",
+): AnthropicToolFieldRead {
+  try {
+    return { readable: true, value: schema[field] };
+  } catch {
+    return { readable: false };
+  }
+}
+
 function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
   if (!tools) {
     return [];
@@ -490,20 +520,43 @@ function convertAnthropicTools(tools: Context["tools"], isOAuthToken: boolean) {
   for (const tool of tools) {
     // Main quarantine happens when plugin tools materialize; this keeps Anthropic
     // safe for direct/custom tool arrays that bypass the plugin registry.
+    const nameRead = readAnthropicToolField(tool, "name");
+    const parametersRead = readAnthropicToolField(tool, "parameters");
+    if (!nameRead.readable || !parametersRead.readable) {
+      continue;
+    }
+    const rawParameters = parametersRead.value;
     const parameters =
-      tool.parameters && typeof tool.parameters === "object" && !Array.isArray(tool.parameters)
-        ? (tool.parameters as Record<string, unknown>)
+      rawParameters && typeof rawParameters === "object" && !Array.isArray(rawParameters)
+        ? (rawParameters as Record<string, unknown>)
         : undefined;
-    if (!parameters) {
+    if (typeof nameRead.value !== "string" || !parameters) {
+      continue;
+    }
+    const propertiesRead = readAnthropicSchemaField(parameters, "properties");
+    const requiredRead = readAnthropicSchemaField(parameters, "required");
+    const descriptionRead = readAnthropicToolField(tool, "description");
+    if (!propertiesRead.readable || !requiredRead.readable) {
+      continue;
+    }
+    const properties = propertiesRead.value;
+    const required = requiredRead.value;
+    if (
+      (properties !== undefined && properties !== null && typeof properties !== "object") ||
+      (required !== undefined && required !== null && !Array.isArray(required))
+    ) {
       continue;
     }
     converted.push({
-      name: isOAuthToken ? toClaudeCodeName(tool.name) : tool.name,
-      description: tool.description,
+      name: isOAuthToken ? toClaudeCodeName(nameRead.value) : nameRead.value,
+      description:
+        descriptionRead.readable && typeof descriptionRead.value === "string"
+          ? descriptionRead.value
+          : undefined,
       input_schema: {
         type: "object",
-        properties: parameters.properties || {},
-        required: parameters.required || [],
+        properties: properties ?? {},
+        required: required ?? [],
       },
     });
   }
