@@ -354,6 +354,9 @@ export class OpenClaw {
 
   async close(): Promise<void> {
     await this.transport.close?.();
+    // Await the pump first so a pump failure lands in normalizedEvents via
+    // close(pumpError) before this consumer-driven close() runs. EventHub
+    // still records a late failure cause if the ordering ever changes.
     await this.eventPumpPromise?.catch(() => {});
     this.normalizedEvents.close();
     this.eventPumpPromise = null;
@@ -489,8 +492,10 @@ export class OpenClaw {
       };
     });
     this.eventPumpPromise = (async () => {
-      const iterator = this.transport.events()[Symbol.asyncIterator]();
+      let iterator: AsyncIterator<GatewayEvent> | undefined;
+      let pumpError: unknown;
       try {
+        iterator = this.transport.events()[Symbol.asyncIterator]();
         while (true) {
           const next = iterator.next();
           await Promise.resolve();
@@ -503,15 +508,14 @@ export class OpenClaw {
           this.recordReplayEvent(normalized);
           this.normalizedEvents.publish(normalized);
         }
+      } catch (error) {
+        pumpError = error ?? new Error("OpenClaw SDK event stream failed");
       } finally {
         markReady();
-        await iterator.return?.();
-        this.normalizedEvents.close();
+        await iterator?.return?.().catch(() => {});
+        this.normalizedEvents.close(pumpError);
       }
-    })().catch(() => {
-      markReady();
-      this.normalizedEvents.close();
-    });
+    })();
     return this.eventPumpReady;
   }
 

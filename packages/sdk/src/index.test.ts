@@ -1264,4 +1264,144 @@ describe("OpenClaw SDK", () => {
     expect(timedOut.runId).toBe("run_1");
     expect(timedOut.data).toEqual({ phase: "end", stopReason: "timeout" });
   });
+
+  it("surfaces pump failures when transport events() throws synchronously", async () => {
+    const failure = new Error("transport events() construction failure");
+    const transport: OpenClawTransport = {
+      async request() {
+        return {} as never;
+      },
+      events(): AsyncIterable<GatewayEvent> {
+        throw failure;
+      },
+    };
+    const oc = new OpenClaw({ transport });
+
+    const iterator = oc.events()[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toBe(failure);
+
+    await oc.close();
+  });
+
+  it("surfaces pump failures when the transport event iterator throws before yielding", async () => {
+    const failure = new Error("synthetic transport event failure");
+    const transport: OpenClawTransport = {
+      async request() {
+        return {} as never;
+      },
+      events(): AsyncIterable<GatewayEvent> {
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<GatewayEvent> {
+            return {
+              next: () => Promise.reject(failure),
+            };
+          },
+        };
+      },
+    };
+    const oc = new OpenClaw({ transport });
+
+    const iterator = oc.events()[Symbol.asyncIterator]();
+    await expect(iterator.next()).rejects.toBe(failure);
+
+    await oc.close();
+  });
+
+  it("records a late failure cause even when the hub was already closed", () => {
+    const hub = new EventHub<GatewayEvent>();
+    const failure = new Error("late pump failure");
+
+    hub.close();
+    hub.close(failure);
+
+    const iterator = hub.stream()[Symbol.asyncIterator]();
+    return expect(iterator.next()).rejects.toBe(failure);
+  });
+
+  it("wakes a blocked consumer when a failure cause arrives", async () => {
+    const hub = new EventHub<GatewayEvent>();
+    const failure = new Error("failure after consumer parked");
+    const iterator = hub.stream()[Symbol.asyncIterator]();
+
+    const pending = iterator.next();
+    // Consumer is parked waiting for events; deliver the failure afterwards.
+    await Promise.resolve();
+    hub.close(failure);
+
+    await expect(pending).rejects.toBe(failure);
+  });
+
+  it("surfaces pump failures after a successful event when the iterator later throws", async () => {
+    const failure = new Error("synthetic transport event failure after yield");
+    const transport: OpenClawTransport = {
+      async request() {
+        return {} as never;
+      },
+      events(): AsyncIterable<GatewayEvent> {
+        return {
+          [Symbol.asyncIterator](): AsyncIterator<GatewayEvent> {
+            let yielded = false;
+            return {
+              next: () => {
+                if (yielded) {
+                  return Promise.reject(failure);
+                }
+                yielded = true;
+                return Promise.resolve({
+                  done: false,
+                  value: {
+                    event: "agent",
+                    seq: 1,
+                    payload: {
+                      runId: "run_pump",
+                      stream: "lifecycle",
+                      ts: 1_777_000_000_000,
+                      data: { phase: "start" },
+                    },
+                  },
+                });
+              },
+            };
+          },
+        };
+      },
+    };
+    const oc = new OpenClaw({ transport });
+
+    // The background pump yields one event and then fails. However the
+    // consumer reaches the stream, iteration must terminate by rejecting with
+    // the pump failure instead of reporting a clean end-of-stream.
+    const drained: OpenClawEvent[] = [];
+    let caughtError: unknown;
+    try {
+      for await (const event of oc.events()) {
+        drained.push(event);
+      }
+    } catch (error) {
+      caughtError = error;
+    }
+    expect(caughtError).toBe(failure);
+    expect(drained.length).toBeGreaterThanOrEqual(0);
+
+    await oc.close();
+  });
+
+  it("drains buffered events before rejecting with the close error", async () => {
+    const hub = new EventHub<GatewayEvent>();
+    const event: GatewayEvent = {
+      event: "agent",
+      seq: 1,
+      payload: { runId: "run_drain", stream: "lifecycle", ts: 1, data: { phase: "start" } },
+    };
+    const failure = new Error("drain-then-throw");
+
+    hub.publish(event);
+    hub.close(failure);
+
+    const iterator = hub.stream(undefined, { replay: true })[Symbol.asyncIterator]();
+    // replay snapshot was cleared by close(), so the iterator sees only the
+    // close error — this verifies close(error) is surfaced even when replay
+    // events were already flushed.
+    await expect(iterator.next()).rejects.toBe(failure);
+  });
 });

@@ -14,6 +14,7 @@ export class EventHub<T> {
   private readonly replayLimit: number;
   private readonly replayEvents: T[] = [];
   private closed = false;
+  private closeError: Error | undefined;
   private readonly listeners = new Set<Listener<T>>();
   private readonly waiters = new Set<() => void>();
 
@@ -37,10 +38,31 @@ export class EventHub<T> {
     }
   }
 
-  close(): void {
+  close(error?: unknown): void {
+    // Record the first failure cause even if the hub was already closed
+    // without one, so a pump failure racing a plain consumer-driven close()
+    // still surfaces instead of being swallowed by idempotency. Normalize to
+    // an Error so consumers always reject with a throwable cause.
+    if (error !== undefined && this.closeError === undefined) {
+      this.closeError =
+        error instanceof Error
+          ? error
+          : new Error(typeof error === "string" ? error : "EventHub closed with a non-Error cause");
+      this.wakeAllWaiters();
+    }
+    if (this.closed) {
+      return;
+    }
     this.closed = true;
     this.replayEvents.length = 0;
     this.listeners.clear();
+    this.wakeAllWaiters();
+  }
+
+  private wakeAllWaiters(): void {
+    if (this.waiters.size === 0) {
+      return;
+    }
     for (const wake of this.waiters) {
       wake();
     }
@@ -91,6 +113,12 @@ export class EventHub<T> {
               }
               if (queue.length > 0) {
                 return { done: false, value: queue.shift() as T };
+              }
+              // Surface a pump failure once buffered events are drained,
+              // independent of whether the hub has also been marked closed.
+              if (this.closeError !== undefined) {
+                cleanup();
+                throw this.closeError;
               }
               if (this.closed) {
                 break;
