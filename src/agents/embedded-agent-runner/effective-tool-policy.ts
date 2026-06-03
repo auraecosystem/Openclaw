@@ -20,6 +20,16 @@ import {
 import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../tool-policy.js";
 import type { AnyAgentTool } from "../tools/common.js";
 
+function collectEnabledPluginIds(config: OpenClawConfig | undefined): string[] {
+  const entries = config?.plugins?.entries;
+  if (!entries) {
+    return [];
+  }
+  return Object.entries(entries)
+    .filter(([, entry]) => entry?.enabled === true)
+    .map(([pluginId]) => pluginId);
+}
+
 /**
  * Identity inputs used by `resolveGroupToolPolicy` to look up channel/group
  * tool policy. These fields are an authorization signal (they can widen
@@ -174,6 +184,7 @@ export function applyFinalEffectiveToolPolicy(
     toolMeta: (tool) => getPluginToolMeta(tool),
     warn: params.warn,
     steps: pipelineSteps,
+    knownPluginIds: collectEnabledPluginIds(params.config),
     auditLogLevel: params.toolPolicyAuditLogLevel,
   });
 }

@@ -120,6 +120,7 @@ export function applyToolPolicyPipeline(params: {
   toolMeta: (tool: AnyAgentTool) => { pluginId: string } | undefined;
   warn: (message: string) => void;
   steps: ToolPolicyPipelineStep[];
+  knownPluginIds?: string[];
   auditLogLevel?: ToolPolicyAuditLogLevel;
 }): AnyAgentTool[] {
   const coreToolNames = new Set(
@@ -133,6 +134,9 @@ export function applyToolPolicyPipeline(params: {
     tools: params.tools,
     toolMeta: params.toolMeta,
   });
+  const knownPluginIds = new Set(
+    (params.knownPluginIds ?? []).map((entry) => normalizeToolName(entry)),
+  );
 
   let filtered = params.tools;
   for (const step of params.steps) {
@@ -142,7 +146,12 @@ export function applyToolPolicyPipeline(params: {
 
     let policy: ToolPolicyLike | undefined = step.policy;
     if (step.stripPluginOnlyAllowlist) {
-      const resolved = analyzeAllowlistByToolType(policy, pluginGroups, coreToolNames);
+      const resolved = analyzeAllowlistByToolType(
+        policy,
+        pluginGroups,
+        coreToolNames,
+        knownPluginIds,
+      );
       if (resolved.unknownAllowlist.length > 0) {
         const unavailableCoreWarningAllowlist = new Set(
           (step.suppressUnavailableCoreToolWarningAllowlist ?? []).map((entry) =>
