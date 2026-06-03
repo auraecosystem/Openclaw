@@ -140,7 +140,13 @@ function createBrowserToolOptions(ctx: OpenClawPluginToolContext): {
   };
 }
 
-export const browserPluginReload = { restartPrefixes: ["browser"] };
+// browser.profiles flows through resolved-config-refresh.ts and does not require a gateway
+// restart. Other browser.* paths (including browser.defaultProfile, which forProfile() resolves
+// before the request-time refresh) still fall through to the planner's default-restart branch
+// via the no-rule path.
+export const browserPluginReload = {
+  hotPrefixes: ["browser.profiles"],
+};
 
 export const browserPluginNodeHostCommands: OpenClawPluginNodeHostCommand[] = [
   {
