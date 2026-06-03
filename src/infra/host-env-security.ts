@@ -204,12 +204,29 @@ export function sanitizeHostExecEnvWithDiagnostics(params?: {
   baseEnv?: Record<string, string | undefined>;
   overrides?: Record<string, string> | null;
   blockPathOverrides?: boolean;
+  // Operator-curated allowlist for trusted exec posture. Keys listed here
+  // bypass the inherited-block list (so override-only-blocked keys like
+  // `GH_TOKEN` or `AWS_ACCESS_KEY_ID` survive in `baseEnv`). Keys that are
+  // dangerous everywhere (`LD_PRELOAD`, `NODE_OPTIONS`, etc.) are still
+  // stripped — the allowlist cannot bypass them.
+  allowInheritedKeys?: Iterable<string>;
 }): HostExecEnvSanitizationResult {
   const baseEnv = params?.baseEnv ?? process.env;
 
+  const allowInherited = new Set<string>();
+  for (const rawKey of params?.allowInheritedKeys ?? []) {
+    const normalized = normalizeEnvVarKey(rawKey, { portable: true });
+    if (normalized) {
+      allowInherited.add(normalized.toUpperCase());
+    }
+  }
+
   const merged: Record<string, string> = {};
   for (const [key, value] of listNormalizedEnvEntries(baseEnv)) {
-    if (isDangerousHostInheritedEnvVarName(key)) {
+    if (isDangerousHostEnvVarName(key)) {
+      continue;
+    }
+    if (isDangerousHostInheritedEnvVarName(key) && !allowInherited.has(key.toUpperCase())) {
       continue;
     }
     merged[key] = value;
@@ -247,6 +264,7 @@ export function sanitizeHostExecEnv(params?: {
   baseEnv?: Record<string, string | undefined>;
   overrides?: Record<string, string> | null;
   blockPathOverrides?: boolean;
+  allowInheritedKeys?: Iterable<string>;
 }): Record<string, string> {
   return sanitizeHostExecEnvWithDiagnostics(params).env;
 }
