@@ -439,9 +439,9 @@ function isCliAgentRuntime(runtime: string | undefined, cfg: OpenClawConfig | un
   return isCliRuntimeAlias(normalized) || isCliProvider(normalized, cfg);
 }
 
-async function resolveModelFallbackCandidateHarnessAuthPrecheck(
+function resolveModelFallbackCandidateHarnessAuthCooldownPolicy(
   params: ModelFallbackRuntimeContext & ModelCandidate,
-): Promise<{ skipsProviderAuthCooldown: boolean }> {
+): { skipsProviderAuthCooldown: boolean; agentRuntime?: string } {
   if (!params.cfg) {
     return { skipsProviderAuthCooldown: false };
   }
@@ -477,6 +477,35 @@ async function resolveModelFallbackCandidateHarnessAuthPrecheck(
   if (agentRuntime === "auto" || (agentRuntime === "codex" && agentRuntimeSource === "implicit")) {
     return { skipsProviderAuthCooldown: false };
   }
+  return {
+    skipsProviderAuthCooldown: agentRuntime !== "codex",
+    agentRuntime,
+  };
+}
+
+async function resolveModelFallbackCandidateHarnessAuthPrecheck(
+  params: ModelFallbackRuntimeContext & ModelCandidate,
+): Promise<{ skipsProviderAuthCooldown: boolean }> {
+  const policy = resolveModelFallbackCandidateHarnessAuthCooldownPolicy(params);
+  if (!policy.skipsProviderAuthCooldown) {
+    // Even when auth cooldown is not being skipped, validate that the
+    // resolved agent harness is registered before proceeding to cooldown
+    // handling. A missing harness should fail-closed ahead of any cooldown
+    // logic so that downstream callers never bypass the harness gate.
+    const agentRuntime = policy.agentRuntime;
+    if (agentRuntime && !getRegisteredAgentHarness(agentRuntime)) {
+      throw new MissingAgentHarnessError(agentRuntime);
+    }
+    return { skipsProviderAuthCooldown: false };
+  }
+  const agentRuntime = policy.agentRuntime;
+  if (!agentRuntime) {
+    return { skipsProviderAuthCooldown: false };
+  }
+  const agentHarnessRuntimeOverride = params.resolveAgentHarnessRuntimeOverride?.(
+    params.provider,
+    params.model,
+  );
   await params.prepareAgentHarnessRuntime?.({
     provider: params.provider,
     model: params.model,
@@ -1091,6 +1120,51 @@ function shouldProbePrimaryDuringCooldown(params: {
   return params.now >= soonest - PROBE_MARGIN_MS;
 }
 
+function hasLaterAvailableAuthFallbackCandidate(params: {
+  candidates: ModelCandidate[];
+  currentIndex: number;
+  cfg: OpenClawConfig | undefined;
+  authRuntime: ModelFallbackAuthRuntime;
+  authStore: AuthProfileStore;
+  agentId?: string;
+  sessionKey?: string;
+  resolveAgentHarnessRuntimeOverride?: (provider: string, model: string) => string | undefined;
+}): boolean {
+  for (let i = params.currentIndex + 1; i < params.candidates.length; i += 1) {
+    const candidate = params.candidates[i];
+    if (!candidate) {
+      continue;
+    }
+    const harnessAuth = resolveModelFallbackCandidateHarnessAuthCooldownPolicy({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      sessionKey: params.sessionKey,
+      resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
+      ...candidate,
+    });
+    if (harnessAuth.skipsProviderAuthCooldown) {
+      return true;
+    }
+    const profileIds = params.authRuntime.resolveAuthProfileOrder({
+      cfg: params.cfg,
+      store: params.authStore,
+      provider: candidate.provider,
+    });
+    if (profileIds.length === 0) {
+      return true;
+    }
+    if (
+      profileIds.some(
+        (id) =>
+          !params.authRuntime.isProfileInCooldown(params.authStore, id, undefined, candidate.model),
+      )
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** @internal – exposed for unit tests only */
 export const probeThrottleInternals = {
   lastProbeAttempt,
@@ -1126,6 +1200,7 @@ function resolveCooldownDecision(params: {
   isPrimary: boolean;
   requestedModel: boolean;
   hasFallbackCandidates: boolean;
+  hasAvailableAuthFallbackCandidate: boolean;
   now: number;
   probeThrottleKey: string;
   authRuntime: ModelFallbackAuthRuntime;
@@ -1166,7 +1241,7 @@ function resolveCooldownDecision(params: {
   if (inferredReason === "billing") {
     const shouldProbeSingleProviderBilling =
       params.isPrimary &&
-      !params.hasFallbackCandidates &&
+      !params.hasAvailableAuthFallbackCandidate &&
       isProbeThrottleOpen(params.now, params.probeThrottleKey);
     if (params.isPrimary && (shouldProbe || shouldProbeSingleProviderBilling)) {
       return { type: "attempt", reason: inferredReason, markProbe: true };
@@ -1358,6 +1433,16 @@ export async function runWithModelFallback<T>(
           isPrimary,
           requestedModel,
           hasFallbackCandidates,
+          hasAvailableAuthFallbackCandidate: hasLaterAvailableAuthFallbackCandidate({
+            candidates,
+            currentIndex: i,
+            cfg: params.cfg,
+            authRuntime,
+            authStore,
+            agentId: params.agentId,
+            sessionKey: params.sessionKey,
+            resolveAgentHarnessRuntimeOverride: params.resolveAgentHarnessRuntimeOverride,
+          }),
           now,
           probeThrottleKey,
           authRuntime,
@@ -1546,6 +1631,12 @@ export async function runWithModelFallback<T>(
     }
     const err = attemptRun.error;
     {
+      // Command-lane watchdog timeouts are not provider/model failures. Do
+      // not burn further fallback candidates on a timeout that already
+      // surfaced the watchdog; abort the chain immediately (see #70903).
+      if (isCommandLaneTaskTimeoutError(err)) {
+        throw err;
+      }
       // Local runtime coordination errors (session write-lock timeout, embedded
       // attempt session takeover) are not provider/model failures. Aborting
       // here prevents the fallback chain from consuming candidates retrying
