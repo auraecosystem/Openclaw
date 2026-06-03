@@ -34,6 +34,7 @@ import {
   extractThinkingFromTaggedStream,
   extractThinkingFromTaggedText,
   promoteThinkingTagsToBlocks,
+  sanitizeAssistantVisibleStreamText,
 } from "./embedded-agent-utils.js";
 import type { AgentEvent, AgentMessage } from "./runtime/index.js";
 
@@ -212,6 +213,22 @@ function resolveStreamVisibleText(params: {
   }
   const rawText = `${params.previousRawText}${params.visibleDelta}`;
   return { rawText, visibleText: rawText.trim() };
+}
+
+function resolveTextAppendDelta(previousText: string, nextText: string): string {
+  if (!nextText) {
+    return "";
+  }
+  if (!previousText) {
+    return nextText;
+  }
+  if (nextText.startsWith(previousText)) {
+    return nextText.slice(previousText.length);
+  }
+  if (previousText.startsWith(nextText)) {
+    return "";
+  }
+  return nextText;
 }
 
 function copyPartialBlockState(
@@ -633,9 +650,11 @@ export function handleMessageUpdate(
     !deliveryPhase &&
     Boolean(streamItemId) &&
     isOpenAiResponsesAssistantMessage(partialAssistant);
+  let streamItemChanged = false;
   if ((deliveryPhase || isPhasePendingOpenAiResponsesTextItem) && streamItemId) {
     const previousStreamItemId = ctx.state.lastAssistantStreamItemId;
     if (previousStreamItemId && previousStreamItemId !== streamItemId) {
+      streamItemChanged = true;
       void ctx.flushBlockReplyBuffer({ assistantMessageIndex: ctx.state.assistantMessageIndex });
       ctx.resetAssistantMessageState(ctx.state.assistantTexts.length);
       void ctx.params.onAssistantMessageStart?.();
@@ -663,11 +682,29 @@ export function handleMessageUpdate(
   }
   const wasThinking = ctx.state.partialBlockState.thinking;
   let visibleDelta = "";
-  let next = shouldUsePhaseAwareBlockReply
+  const shouldReadPhaseAwarePartialText =
+    shouldUsePhaseAwareBlockReply && (streamItemChanged || evtType === "text_end" || !chunk);
+  let next = shouldReadPhaseAwarePartialText
     ? coerceChatContentText(extractAssistantVisibleText(partialAssistant)).trim()
     : "";
   let nextRawStreamText = next;
-  if (!next && deliveryPhase !== "final_answer") {
+  let shouldPersistRawStreamText = false;
+  if (shouldUsePhaseAwareBlockReply && !next && deliveryPhase === "final_answer" && chunk) {
+    visibleDelta = ctx.stripBlockTags(chunk, ctx.state.partialBlockState, {
+      final: evtType === "text_end",
+    });
+    const streamVisibleText = resolveStreamVisibleText({
+      previousRawText: ctx.state.lastStreamedAssistant ?? "",
+      visibleDelta,
+    });
+    const previousVisibleText = sanitizeAssistantVisibleStreamText(
+      ctx.state.lastStreamedAssistant ?? "",
+    ).trim();
+    next = sanitizeAssistantVisibleStreamText(streamVisibleText.rawText).trim();
+    visibleDelta = resolveTextAppendDelta(previousVisibleText, next);
+    nextRawStreamText = streamVisibleText.rawText;
+    shouldPersistRawStreamText = true;
+  } else if (!next && deliveryPhase !== "final_answer") {
     const pendingTagFragment = ctx.state.partialBlockState.pendingTagFragment;
     const shouldRecomputeFullStream = Boolean(pendingTagFragment) || REASONING_TAG_RE.test(chunk);
     if (shouldRecomputeFullStream) {
@@ -786,6 +823,8 @@ export function handleMessageUpdate(
       ctx.emitAssistantStreamData(data, { emitPartialReply: true });
       ctx.state.emittedAssistantUpdate = true;
     }
+  } else if (shouldPersistRawStreamText) {
+    ctx.state.lastStreamedAssistant = nextRawStreamText;
   }
 
   if (
