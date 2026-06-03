@@ -153,6 +153,12 @@ async function resumeOrphanedSession(params: {
       nextRunId: result.runId,
       fallback: params.originalRun,
       transcriptFile: resolveInternalSessionEffectsTranscriptPath(result.runId),
+      // Persist the stable original task (not the synthetic resume wrapper) so
+      // that any further post-restart redispatch reconstructs the same
+      // canonical task. Persisting `resumeMessage` instead would accumulate a
+      // wrapped-resume-of-resume cascade across repeated restarts; ClawSweeper
+      // P1 finding on #77539 (subagent-orphan-recovery.ts:158).
+      task: params.task,
     });
     if (!remapped) {
       log.warn(
