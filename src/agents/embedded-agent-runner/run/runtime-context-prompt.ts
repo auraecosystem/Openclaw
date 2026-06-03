@@ -74,6 +74,7 @@ export function resolveRuntimeContextPromptParts(params: {
   effectivePrompt: string;
   transcriptPrompt?: string;
   modelPrompt?: string;
+  currentInboundContext?: CurrentInboundPromptContext;
   emptyTranscriptMode?: EmptyTranscriptMode;
 }): RuntimeContextPromptParts {
   const transcriptPrompt = params.transcriptPrompt;
@@ -89,13 +90,20 @@ export function resolveRuntimeContextPromptParts(params: {
         : { text: params.modelPrompt };
   const modelPromptText = modelPrompt?.text ?? transcriptPrompt ?? extracted.text;
   const prompt = transcriptPrompt ?? extracted.text;
+  const currentInboundContextText = buildCurrentInboundPromptContextPrefix(
+    params.currentInboundContext,
+  );
   if (!prompt.trim() && params.emptyTranscriptMode === "model-prompt") {
+    const runtimeContext =
+      [currentInboundContextText, extracted.runtimeContext]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .join("\n\n") || undefined;
     return {
       prompt: extracted.text,
       ...(modelPromptText.trim() && modelPromptText !== extracted.text
         ? { modelPrompt: modelPromptText }
         : {}),
-      ...(extracted.runtimeContext ? { runtimeContext: extracted.runtimeContext } : {}),
+      ...(runtimeContext ? { runtimeContext } : {}),
     };
   }
   const hiddenRuntimeContext = modelPrompt
@@ -106,10 +114,17 @@ export function resolveRuntimeContextPromptParts(params: {
     : transcriptPrompt
       ? removeLastPromptOccurrence(extracted.text, transcriptPrompt)?.trim()
       : undefined;
+  const runtimeContextParts = [
+    currentInboundContextText,
+    hiddenRuntimeContext,
+    extracted.runtimeContext,
+  ];
+  if (!prompt.trim()) {
+    runtimeContextParts.push(extracted.text);
+  }
   const runtimeContext =
-    [hiddenRuntimeContext, extracted.runtimeContext]
-      .filter((value): value is string => Boolean(value?.trim()))
-      .join("\n\n") || (!prompt.trim() ? extracted.text.trim() : undefined);
+    runtimeContextParts.filter((value): value is string => Boolean(value?.trim())).join("\n\n") ||
+    undefined;
   if (!prompt.trim()) {
     return runtimeContext
       ? {
