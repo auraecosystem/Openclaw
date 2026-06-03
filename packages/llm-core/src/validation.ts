@@ -63,6 +63,71 @@ function isValidatorSchema(value: unknown): value is Tool["parameters"] {
   return isRecord(value);
 }
 
+function formatSchemaPath(parent: string, key: string): string {
+  return parent ? `${parent}.${key}` : key;
+}
+
+function readSchemaKeys(value: object): string[] | undefined {
+  try {
+    return Object.keys(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function readSchemaValue(
+  value: Record<string, unknown>,
+  key: string,
+): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: value[key] };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function findUnreadableSchemaPath(
+  value: unknown,
+  path: string,
+  seen = new WeakSet<object>(),
+): string | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  if (seen.has(value)) {
+    return undefined;
+  }
+  seen.add(value);
+
+  const keys = readSchemaKeys(value);
+  if (!keys) {
+    return path;
+  }
+
+  for (const key of keys) {
+    const childPath = formatSchemaPath(path, key);
+    const childValue = readSchemaValue(value, key);
+    if (!childValue.ok) {
+      return childPath;
+    }
+    const unreadablePath = findUnreadableSchemaPath(childValue.value, childPath, seen);
+    if (unreadablePath) {
+      return unreadablePath;
+    }
+  }
+
+  return undefined;
+}
+
+function assertToolSchemaReadable(tool: Tool): void {
+  const unreadablePath = findUnreadableSchemaPath(tool.parameters, "parameters");
+  if (unreadablePath) {
+    throw new Error(
+      `Unsupported tool schema for "${tool.name}": unreadable schema at ${unreadablePath}`,
+    );
+  }
+}
+
 const JSON_NUMBER_TOKEN_RE = /^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:e[+-]?\d+)?$/iu;
 
 function parseJsonNumberString(value: string): number | undefined {
@@ -292,6 +357,7 @@ export function validateToolCall(tools: Tool[], toolCall: ToolCall): unknown {
 
 /** Validates tool arguments against TypeBox or plain JSON-schema parameters. */
 export function validateToolArguments(tool: Tool, toolCall: ToolCall): unknown {
+  assertToolSchemaReadable(tool);
   const args = structuredClone(toolCall.arguments);
   Value.Convert(tool.parameters, args);
 
