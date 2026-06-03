@@ -1,12 +1,19 @@
 import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { IMPLICIT_ALLOW_ALL_FROM_ALSO_ALLOW } from "./sandbox-tool-policy.js";
-import { expandToolGroups, normalizeToolList, normalizeToolName } from "./tool-policy-shared.js";
+import {
+  expandToolGroups,
+  normalizeReadableToolName,
+  normalizeToolList,
+  normalizeToolName,
+} from "./tool-policy-shared.js";
 export {
   couldNormalizeToolNamePrefixToAllowedTool,
   expandToolGroups,
+  normalizeReadableToolName,
   normalizeToolList,
   normalizeToolName,
+  readToolPolicyName,
   resolveToolProfilePolicy,
   TOOL_GROUPS,
 } from "./tool-policy-shared.js";
@@ -52,7 +59,7 @@ export function replaceWithEffectiveToolAllowlist(
   target.length = 0;
   const seen = new Set<string>();
   for (const tool of tools) {
-    const normalized = normalizeToolName(tool.name);
+    const normalized = normalizeReadableToolName(tool);
     if (!normalized || seen.has(normalized)) {
       continue;
     }
@@ -116,7 +123,10 @@ export function buildPluginToolGroups<T extends { name: string }>(params: {
     if (!meta) {
       continue;
     }
-    const name = normalizeToolName(tool.name);
+    const name = normalizeReadableToolName(tool);
+    if (!name) {
+      continue;
+    }
     all.push(name);
     const pluginId = normalizeOptionalLowercaseString(meta.pluginId);
     if (!pluginId) {

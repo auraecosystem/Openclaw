@@ -274,6 +274,40 @@ describe("tool-policy-pipeline", () => {
     expect(filtered.map((t) => (t as unknown as DummyTool).name)).toEqual(["exec"]);
   });
 
+  test("quarantines tools with unreadable names during policy filtering", () => {
+    const hostileTool = {
+      get name(): string {
+        throw new Error("tool policy name getter exploded");
+      },
+    };
+    const tools = [{ name: "exec" }, hostileTool] as unknown as DummyTool[];
+
+    const filtered = applyToolPolicyPipeline({
+      tools: tools as any,
+      toolMeta: () => undefined,
+      warn: () => {},
+      steps: [
+        {
+          policy: { allow: ["exec"] },
+          label: "tools.allow",
+          stripPluginOnlyAllowlist: true,
+        },
+      ],
+    });
+
+    expect(filtered.map((t) => (t as unknown as DummyTool).name)).toEqual(["exec"]);
+    expect(toolPolicyAuditInfo).toHaveBeenCalledWith(
+      "tool policy removed 1 tool(s) via tools.allow: tool[1]",
+      {
+        rule: "tools.allow",
+        ruleKind: "allow",
+        removedToolCount: 1,
+        removedTools: ["tool[1]"],
+        removedToolsTruncated: false,
+      },
+    );
+  });
+
   test("applies deny filtering after allow filtering", () => {
     const tools = [{ name: "exec" }, { name: "process" }] as unknown as DummyTool[];
     const filtered = applyToolPolicyPipeline({

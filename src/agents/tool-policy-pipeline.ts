@@ -6,6 +6,7 @@ import {
   analyzeAllowlistByToolType,
   buildPluginToolGroups,
   expandPolicyWithPluginGroups,
+  normalizeReadableToolName,
   normalizeToolName,
   type ToolPolicyLike,
 } from "./tool-policy.js";
@@ -125,7 +126,7 @@ export function applyToolPolicyPipeline(params: {
   const coreToolNames = new Set(
     params.tools
       .filter((tool) => !params.toolMeta(tool))
-      .map((tool) => normalizeToolName(tool.name))
+      .map((tool) => normalizeReadableToolName(tool))
       .filter(Boolean),
   );
 

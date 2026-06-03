@@ -23,6 +23,19 @@ export function normalizeToolName(name: string) {
   return TOOL_NAME_ALIASES[normalized] ?? normalized;
 }
 
+export function readToolPolicyName(tool: { name: string }): string | undefined {
+  try {
+    return typeof tool.name === "string" ? tool.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function normalizeReadableToolName(tool: { name: string }): string {
+  const name = readToolPolicyName(tool);
+  return name ? normalizeToolName(name) : "";
+}
+
 export function couldNormalizeToolNamePrefixToAllowedTool(
   prefix: string,
   allowedToolNames: Set<string>,
