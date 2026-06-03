@@ -32,6 +32,7 @@ function containerJoin(root: string, ...parts: string[]): string {
 export function isExistingWorkspaceSkillMountSource(params: {
   agentWorkspaceDir: string;
   hostPath: string;
+  hostPathCache?: Map<string, string>;
 }): boolean {
   try {
     if (!fs.lstatSync(params.hostPath).isDirectory()) {
@@ -43,8 +44,12 @@ export function isExistingWorkspaceSkillMountSource(params: {
 
   const agentRoot = resolveSandboxHostPathViaExistingAncestor(
     path.resolve(params.agentWorkspaceDir),
+    params.hostPathCache,
   );
-  const canonicalSource = resolveSandboxHostPathViaExistingAncestor(path.resolve(params.hostPath));
+  const canonicalSource = resolveSandboxHostPathViaExistingAncestor(
+    path.resolve(params.hostPath),
+    params.hostPathCache,
+  );
   return isPathInside(agentRoot, canonicalSource);
 }
 
@@ -69,10 +74,12 @@ export function resolveReadOnlyWorkspaceSkillMounts(params: {
     },
   ];
 
+  const hostPathCache = new Map<string, string>();
   return mounts.filter((mount) =>
     isExistingWorkspaceSkillMountSource({
       agentWorkspaceDir: params.agentWorkspaceDir,
       hostPath: mount.hostPath,
+      hostPathCache,
     }),
   );
 }
