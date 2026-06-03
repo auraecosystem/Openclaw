@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import os from "node:os";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -37,6 +38,7 @@ type SystemPresenceUpdate = {
 const entries = new Map<string, SystemPresence>();
 const TTL_MS = 5 * 60 * 1000; // 5 minutes
 const MAX_ENTRIES = 200;
+const SELF_INSTANCE_ID = randomUUID();
 
 function normalizePresenceKey(key: string | undefined): string | undefined {
   return normalizeOptionalLowercaseString(key);
@@ -102,6 +104,7 @@ function initSelfPresence() {
     modelIdentifier,
     mode: "gateway",
     reason: "self",
+    instanceId: SELF_INSTANCE_ID,
     text,
     ts: Date.now(),
   };
