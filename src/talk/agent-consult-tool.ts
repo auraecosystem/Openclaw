@@ -66,6 +66,8 @@ const SAFE_READ_ONLY_TOOLS = [
   "memory_get",
 ] as const;
 
+const REALTIME_VOICE_TOOL_NAME_WHITESPACE_RE = /\s/u;
+
 export function isRealtimeVoiceAgentConsultToolPolicy(
   value: unknown,
 ): value is RealtimeVoiceAgentConsultToolPolicy {
@@ -85,6 +87,20 @@ export function resolveRealtimeVoiceAgentConsultToolPolicy(
   return isRealtimeVoiceAgentConsultToolPolicy(normalized) ? normalized : fallback;
 }
 
+function readCustomRealtimeVoiceToolName(tool: RealtimeVoiceTool): string | undefined {
+  let name: unknown;
+  try {
+    name = (tool as { name?: unknown }).name;
+  } catch {
+    return undefined;
+  }
+  return typeof name === "string" &&
+    name.length > 0 &&
+    !REALTIME_VOICE_TOOL_NAME_WHITESPACE_RE.test(name)
+    ? name
+    : undefined;
+}
+
 export function resolveRealtimeVoiceAgentConsultTools(
   policy: RealtimeVoiceAgentConsultToolPolicy,
   customTools: RealtimeVoiceTool[] = [],
@@ -94,8 +110,9 @@ export function resolveRealtimeVoiceAgentConsultTools(
     tools.set(REALTIME_VOICE_AGENT_CONSULT_TOOL.name, REALTIME_VOICE_AGENT_CONSULT_TOOL);
   }
   for (const tool of customTools) {
-    if (!tools.has(tool.name)) {
-      tools.set(tool.name, tool);
+    const name = readCustomRealtimeVoiceToolName(tool);
+    if (name && !tools.has(name)) {
+      tools.set(name, tool);
     }
   }
   return [...tools.values()];
