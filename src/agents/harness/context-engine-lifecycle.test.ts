@@ -211,4 +211,58 @@ describe("harness context engine lifecycle", () => {
     const ingestBatchParams = ingestBatchCalls[0]?.[0] as { messages?: AgentMessage[] } | undefined;
     expect(ingestBatchParams?.messages).toEqual([turnUser, turnAssistant]);
   });
+
+  it("forwards isHeartbeat to contextEngine.afterTurn (regression for #89302)", async () => {
+    const afterTurn = vi.fn();
+    const contextEngine = createContextEngine({ afterTurn });
+
+    await finalizeHarnessContextEngineTurn({
+      contextEngine,
+      promptError: false,
+      aborted: false,
+      yieldAborted: false,
+      sessionIdUsed: "session-1",
+      sessionKey: "agent:main:main",
+      sessionFile: "/tmp/session.jsonl",
+      messagesSnapshot: [
+        textMessage("user", "hello", 1000),
+        textMessage("assistant", "hi there", 2000),
+      ],
+      prePromptMessageCount: 0,
+      isHeartbeat: true,
+      warn: () => {},
+    });
+
+    expect(afterTurn).toHaveBeenCalledTimes(1);
+    const afterTurnParams = (afterTurn as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]?.[0] as { isHeartbeat?: boolean } | undefined;
+    expect(afterTurnParams?.isHeartbeat).toBe(true);
+  });
+
+  it("omits isHeartbeat from afterTurn when not supplied (backward compat)", async () => {
+    const afterTurn = vi.fn();
+    const contextEngine = createContextEngine({ afterTurn });
+
+    await finalizeHarnessContextEngineTurn({
+      contextEngine,
+      promptError: false,
+      aborted: false,
+      yieldAborted: false,
+      sessionIdUsed: "session-1",
+      sessionKey: "agent:main:main",
+      sessionFile: "/tmp/session.jsonl",
+      messagesSnapshot: [
+        textMessage("user", "hello", 1000),
+        textMessage("assistant", "hi there", 2000),
+      ],
+      prePromptMessageCount: 0,
+      // isHeartbeat NOT set — should not appear in afterTurn params
+      warn: () => {},
+    });
+
+    expect(afterTurn).toHaveBeenCalledTimes(1);
+    const afterTurnParams = (afterTurn as unknown as { mock: { calls: unknown[][] } }).mock
+      .calls[0]?.[0] as { isHeartbeat?: boolean } | undefined;
+    expect(afterTurnParams).not.toHaveProperty("isHeartbeat");
+  });
 });
