@@ -859,4 +859,126 @@ describe("createAcpDispatchDeliveryCoordinator", () => {
     expect(coordinator.hasFailedVisibleTextDelivery()).toBe(false);
     expect(coordinator.getRoutedCounts().block).toBe(0);
   });
+
+  it("delivers media blocks with text stripped when suppressBlockUserDelivery is set", async () => {
+    deliveryMocks.routeReply.mockResolvedValueOnce({ ok: true });
+    const coordinator = createAcpDispatchDeliveryCoordinator({
+      cfg: createAcpTestConfig(),
+      ctx: buildTestCtx({
+        Provider: "telegram",
+        Surface: "telegram",
+        SessionKey: "agent:codex-acp:session-1",
+      }),
+      dispatcher: createDispatcher(),
+      inboundAudio: false,
+      suppressBlockUserDelivery: true,
+      shouldRouteToOriginating: true,
+      originatingChannel: "telegram",
+      originatingTo: "telegram:chat-1",
+    });
+
+    const delivered = await coordinator.deliver("block", {
+      text: "caption text",
+      mediaUrls: ["https://example.com/image.png"],
+    }, { skipTts: true });
+
+    expect(delivered).toBe(true);
+    expect(deliveryMocks.routeReply).toHaveBeenCalledTimes(1);
+    const [[routeParams]] = deliveryMocks.routeReply.mock.calls as unknown as Array<
+      [{ payload: { mediaUrls?: string[]; text?: string } }]
+    >;
+    const routedPayload = routeParams.payload;
+    expect(routedPayload.mediaUrls).toEqual(["https://example.com/image.png"]);
+    expect(routedPayload.text).toBeUndefined();
+  });
+
+  it("strips text from tool-result media when suppressBlockUserDelivery is set", async () => {
+    deliveryMocks.routeReply.mockResolvedValueOnce({ ok: true });
+    const coordinator = createAcpDispatchDeliveryCoordinator({
+      cfg: createAcpTestConfig(),
+      ctx: buildTestCtx({
+        Provider: "telegram",
+        Surface: "telegram",
+        SessionKey: "agent:codex-acp:session-1",
+      }),
+      dispatcher: createDispatcher(),
+      inboundAudio: false,
+      suppressBlockUserDelivery: true,
+      shouldRouteToOriginating: true,
+      originatingChannel: "telegram",
+      originatingTo: "telegram:chat-1",
+    });
+
+    const delivered = await coordinator.deliver(
+      "tool",
+      {
+        text: "tool caption",
+        mediaUrls: ["https://example.com/tool-image.png"],
+      },
+      { skipTts: true },
+    );
+
+    expect(delivered).toBe(true);
+    expect(deliveryMocks.routeReply).toHaveBeenCalledTimes(1);
+    const [[routeParams]] = deliveryMocks.routeReply.mock.calls as unknown as Array<
+      [{ payload: { mediaUrls?: string[]; text?: string } }]
+    >;
+    const routedPayload = routeParams.payload;
+    expect(routedPayload.mediaUrls).toEqual(["https://example.com/tool-image.png"]);
+    expect(routedPayload.text).toBeUndefined();
+  });
+
+  it("preserves text-only tool results when suppressBlockUserDelivery is set", async () => {
+    deliveryMocks.routeReply.mockResolvedValueOnce({ ok: true });
+    const coordinator = createAcpDispatchDeliveryCoordinator({
+      cfg: createAcpTestConfig(),
+      ctx: buildTestCtx({
+        Provider: "telegram",
+        Surface: "telegram",
+        SessionKey: "agent:codex-acp:session-1",
+      }),
+      dispatcher: createDispatcher(),
+      inboundAudio: false,
+      suppressBlockUserDelivery: true,
+      shouldRouteToOriginating: true,
+      originatingChannel: "telegram",
+      originatingTo: "telegram:chat-1",
+    });
+
+    const delivered = await coordinator.deliver(
+      "tool",
+      { text: "Searching..." },
+      { skipTts: true },
+    );
+
+    expect(delivered).toBe(true);
+    expect(deliveryMocks.routeReply).toHaveBeenCalledTimes(1);
+    const [[routeParams]] = deliveryMocks.routeReply.mock.calls as unknown as Array<
+      [{ payload: { text?: string } }]
+    >;
+    const routedPayload = routeParams.payload;
+    expect(routedPayload.text).toBe("Searching...");
+  });
+
+  it("suppresses text-only blocks when suppressBlockUserDelivery is set", async () => {
+    const coordinator = createAcpDispatchDeliveryCoordinator({
+      cfg: createAcpTestConfig(),
+      ctx: buildTestCtx({
+        Provider: "telegram",
+        Surface: "telegram",
+        SessionKey: "agent:codex-acp:session-1",
+      }),
+      dispatcher: createDispatcher(),
+      inboundAudio: false,
+      suppressBlockUserDelivery: true,
+      shouldRouteToOriginating: true,
+      originatingChannel: "telegram",
+      originatingTo: "telegram:chat-1",
+    });
+
+    const delivered = await coordinator.deliver("block", { text: "text only" }, { skipTts: true });
+
+    expect(delivered).toBe(false);
+    expect(deliveryMocks.routeReply).not.toHaveBeenCalled();
+  });
 });
