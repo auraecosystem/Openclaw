@@ -4,6 +4,7 @@ import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
+import { resolveGatewayLaunchAgentLabel } from "../daemon/constants.js";
 import { isValueToken } from "../infra/cli-root-options.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { resolveCliArgvInvocation } from "./argv-invocation.js";
@@ -96,7 +97,18 @@ export function applyCliProfileEnv(params: {
   }
 
   // Convenience only: fill defaults, never override explicit env values.
+  const previousProfileLabel = resolveGatewayLaunchAgentLabel(env.OPENCLAW_PROFILE);
   env.OPENCLAW_PROFILE = profile;
+
+  const inheritedLabel = env.OPENCLAW_LAUNCHD_LABEL?.trim();
+  const profileLabel = resolveGatewayLaunchAgentLabel(profile);
+  if (
+    inheritedLabel &&
+    inheritedLabel !== profileLabel &&
+    inheritedLabel === previousProfileLabel
+  ) {
+    delete env.OPENCLAW_LAUNCHD_LABEL;
+  }
 
   const existingStateDir = normalizeOptionalString(env.OPENCLAW_STATE_DIR);
   const stateDir = existingStateDir || resolveProfileStateDir(profile, env, homedir);
