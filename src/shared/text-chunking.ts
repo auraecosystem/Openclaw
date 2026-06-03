@@ -31,7 +31,7 @@ export function chunkTextByBreakResolver(
     remaining = remaining.slice(nextStart).trimStart();
   }
   if (remaining.length) {
-    chunks.push(remaining);
+    chunks.push(remaining.trimEnd());
   }
   return chunks;
 }
