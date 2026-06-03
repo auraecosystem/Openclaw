@@ -231,6 +231,35 @@ describe("buildGatewayInstallPlan", () => {
     ).toStrictEqual(["/opt/homebrew/opt/node/bin", path.dirname(openclawBinPath)]);
   });
 
+  it("passes configured gateway TLS extra CA bundle to the managed service env", async () => {
+    mockNodeGatewayPlanFixture();
+    const callerEnv = { HOME: isolatedHome };
+
+    await buildGatewayInstallPlan({
+      env: callerEnv,
+      port: 3000,
+      runtime: "node",
+      nodePath: "/opt/homebrew/opt/node/bin/node",
+      platform: "darwin",
+      config: {
+        gateway: {
+          tls: {
+            extraCaCerts: " /Users/me/.openclaw/gateway/tls/combined-ca.pem ",
+          },
+        },
+      },
+    });
+
+    expect(mocks.buildServiceEnvironment).toHaveBeenCalledOnce();
+    expect(
+      firstMockArg(mocks.buildServiceEnvironment, "buildServiceEnvironment").env,
+    ).toMatchObject({
+      HOME: isolatedHome,
+      NODE_EXTRA_CA_CERTS: "/Users/me/.openclaw/gateway/tls/combined-ca.pem",
+    });
+    expect(callerEnv).toStrictEqual({ HOME: isolatedHome });
+  });
+
   it("does not prepend '.' when nodePath is a bare executable name", async () => {
     mockNodeGatewayPlanFixture();
 

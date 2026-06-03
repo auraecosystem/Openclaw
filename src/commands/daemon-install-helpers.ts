@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { collectDurableServiceEnvVarSources } from "../config/state-dir-dotenv.js";
@@ -478,6 +479,10 @@ export function collectPreservedExistingServiceEnvVars(
   return preserved;
 }
 
+function resolveConfiguredNodeExtraCaCerts(config: OpenClawConfig | undefined): string | undefined {
+  return normalizeOptionalString(config?.gateway?.tls?.extraCaCerts);
+}
+
 function readExistingEnvironmentValueSource(params: {
   existingEnvironmentValueSources?: Record<
     string,
@@ -638,7 +643,11 @@ export async function buildGatewayInstallPlan(params: {
     ? { ...params.env, [OPENCLAW_WRAPPER_ENV_KEY]: wrapperPath }
     : wrapperPointsAtWindowsTaskScript
       ? omitEnvKey(params.env, OPENCLAW_WRAPPER_ENV_KEY)
-      : params.env;
+      : { ...params.env };
+  const configuredNodeExtraCaCerts = resolveConfiguredNodeExtraCaCerts(params.config);
+  if (configuredNodeExtraCaCerts) {
+    serviceInputEnv.NODE_EXTRA_CA_CERTS = configuredNodeExtraCaCerts;
+  }
   const { programArguments, workingDirectory } = await resolveGatewayProgramArguments({
     port: params.port,
     dev: devMode,
