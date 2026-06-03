@@ -371,6 +371,90 @@ describe("createCodexDynamicToolBridge", () => {
     expect(badExecute).not.toHaveBeenCalled();
   });
 
+  it("quarantines unreadable dynamic tool descriptors before bridge registration", async () => {
+    const warn = vi.spyOn(embeddedAgentLog, "warn").mockImplementation(() => undefined);
+    const unreadableName = createTool({ name: "fuzzplugin_unreadable_name" });
+    Object.defineProperty(unreadableName, "name", {
+      get() {
+        throw new Error("fuzzplugin dynamic tool name is unreadable");
+      },
+    });
+    const unreadableParameters = createTool({ name: "fuzzplugin_unreadable_parameters" });
+    Object.defineProperty(unreadableParameters, "parameters", {
+      get() {
+        throw new Error("fuzzplugin dynamic tool schema is unreadable");
+      },
+    });
+    const unreadableDescription = createTool({ name: "fuzzplugin_unreadable_description" });
+    Object.defineProperty(unreadableDescription, "description", {
+      get() {
+        throw new Error("fuzzplugin dynamic tool description is unreadable");
+      },
+    });
+    let flakyNameReads = 0;
+    const flakyName = createTool({ name: "fuzzplugin_flaky_name" });
+    Object.defineProperty(flakyName, "name", {
+      get() {
+        flakyNameReads += 1;
+        if (flakyNameReads > 1) {
+          throw new Error("fuzzplugin dynamic tool name was reread");
+        }
+        return "fuzzplugin_flaky_name";
+      },
+    });
+
+    const bridge = createCodexDynamicToolBridge({
+      tools: [unreadableName, createTool({ name: "message" }), unreadableParameters],
+      registeredTools: [
+        unreadableName,
+        createTool({ name: "message" }),
+        unreadableParameters,
+        unreadableDescription,
+        flakyName,
+      ],
+      signal: new AbortController().signal,
+    });
+
+    expect(bridge.availableSpecs.map((tool) => tool.name)).toEqual(["message"]);
+    expect(bridge.specs.map((tool) => tool.name)).toEqual(["message", "fuzzplugin_flaky_name"]);
+    expect(bridge.telemetry.quarantinedTools).toEqual([
+      {
+        tool: "tool[0]",
+        violations: ["tool[0].name is unreadable"],
+      },
+      {
+        tool: "fuzzplugin_unreadable_parameters",
+        violations: ["fuzzplugin_unreadable_parameters.inputSchema is unreadable"],
+      },
+      {
+        tool: "fuzzplugin_unreadable_description",
+        violations: ["fuzzplugin_unreadable_description.description is unreadable"],
+      },
+    ]);
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "tool[0], fuzzplugin_unreadable_parameters, fuzzplugin_unreadable_description",
+      ),
+      expect.objectContaining({
+        tools: [
+          {
+            tool: "tool[0]",
+            violations: ["tool[0].name is unreadable"],
+          },
+          {
+            tool: "fuzzplugin_unreadable_parameters",
+            violations: ["fuzzplugin_unreadable_parameters.inputSchema is unreadable"],
+          },
+          {
+            tool: "fuzzplugin_unreadable_description",
+            violations: ["fuzzplugin_unreadable_description.description is unreadable"],
+          },
+        ],
+      }),
+    );
+    expect(flakyNameReads).toBe(1);
+  });
+
   it("can expose all dynamic tools directly for compatibility", () => {
     const bridge = createCodexDynamicToolBridge({
       tools: [createTool({ name: "web_search" }), createTool({ name: "message" })],
