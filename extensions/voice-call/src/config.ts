@@ -910,6 +910,14 @@ export function validateProviderConfig(config: VoiceCallConfig): {
     if (!hasConfiguredSecretInput(config.msteams?.sharedSecret)) {
       errors.push("plugins.entries.voice-call.config.msteams.sharedSecret is required");
     }
+    // msteams is driven entirely by a realtime path: either streaming
+    // transcription or realtime voice-to-voice. Refuse to bind a listener that
+    // would accept calls it can neither transcribe nor answer.
+    if (!config.streaming?.enabled && !config.realtime?.enabled) {
+      errors.push(
+        'plugins.entries.voice-call.config.streaming.enabled (or realtime.enabled) must be true for provider "msteams"',
+      );
+    }
   }
 
   if (config.realtime.enabled && config.inboundPolicy === "disabled") {
@@ -928,10 +936,11 @@ export function validateProviderConfig(config: VoiceCallConfig): {
     config.realtime.enabled &&
     config.provider &&
     config.provider !== "twilio" &&
-    config.provider !== "telnyx"
+    config.provider !== "telnyx" &&
+    config.provider !== "msteams"
   ) {
     errors.push(
-      'plugins.entries.voice-call.config.provider must be "twilio" or "telnyx" when realtime.enabled is true',
+      'plugins.entries.voice-call.config.provider must be "twilio", "telnyx", or "msteams" when realtime.enabled is true',
     );
   }
 

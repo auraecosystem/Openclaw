@@ -542,7 +542,29 @@ export async function createVoiceCallRuntime(params: {
 
     if (provider.name === "msteams") {
       const msteamsProvider = provider as MsteamsProvider;
-      if (config.streaming?.enabled) {
+      let handlerWired = false;
+      if (config.realtime.enabled && realtimeProvider) {
+        // Low-latency speech-to-speech: bridge the Teams call straight to the
+        // realtime model (no STT/agent/TTS pipeline).
+        const realtimeInstructions = await buildRealtimeVoiceInstructions({
+          baseInstructions: config.realtime.instructions,
+          config,
+          coreConfig,
+          agentRuntime,
+        });
+        msteamsProvider.setRealtimeRuntime({
+          provider: realtimeProvider.provider,
+          providerConfig: realtimeProvider.providerConfig,
+          cfg,
+          instructions: realtimeInstructions,
+          greetingInstructions: config.inboundGreeting,
+          inboundPolicy: config.inboundPolicy,
+          allowFrom: config.allowFrom,
+          logger: log,
+        });
+        log.info("[voice-call] msteams realtime voice mode enabled");
+        handlerWired = true;
+      } else if (config.streaming?.enabled) {
         await wireMsteamsRuntime({
           config,
           coreConfig,
@@ -553,9 +575,16 @@ export async function createVoiceCallRuntime(params: {
           provider,
           logger: log,
         });
-      } else {
-        log.warn(
-          "[voice-call] msteams: streaming.enabled is false — caller speech cannot be transcribed",
+        handlerWired = true;
+      }
+      // Fail fast instead of binding a listener that would accept Teams calls it
+      // cannot handle (e.g. realtime requested but no realtime provider resolved,
+      // and streaming disabled).
+      if (!handlerWired) {
+        throw new Error(
+          config.realtime.enabled
+            ? "[voice-call] msteams: realtime.enabled is set but no realtime voice provider resolved, and streaming is disabled"
+            : "[voice-call] msteams: neither realtime nor streaming is enabled",
         );
       }
       // Bind the Teams bridge WebSocket server as part of runtime startup so a

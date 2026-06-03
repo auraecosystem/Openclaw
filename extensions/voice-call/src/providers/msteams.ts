@@ -5,6 +5,7 @@ import type {
   RealtimeTranscriptionProviderPlugin,
   RealtimeTranscriptionSession,
 } from "openclaw/plugin-sdk/realtime-transcription";
+import { isInboundCallAllowed } from "../allowlist.js";
 import { resolveVoiceCallEffectiveConfig, type VoiceCallConfig } from "../config.js";
 import type { CoreAgentDeps, CoreConfig } from "../core-bridge.js";
 import type { CallManager } from "../manager.js";
@@ -13,6 +14,11 @@ import {
   type MsteamsLogger,
   type MsteamsSession,
 } from "../msteams-media-stream.js";
+import {
+  createMsteamsRealtimeCall,
+  type MsteamsRealtimeCall,
+  type MsteamsRealtimeDeps,
+} from "../msteams-realtime.js";
 import type { MsteamsTtsProvider } from "../msteams-tts.js";
 import { generateVoiceResponse } from "../response-generator.js";
 import { chunkAudio } from "../telephony-audio.js";
@@ -106,7 +112,12 @@ export class MsteamsProvider implements VoiceCallProvider {
   private ttsProvider: MsteamsTtsProvider | null = null;
   private responseRuntime: MsteamsResponseRuntime | null = null;
 
+  // When set, calls are bridged to a realtime speech-to-speech model instead of
+  // the STT -> agent -> TTS pipeline (the low-latency path).
+  private realtimeDeps: MsteamsRealtimeDeps | null = null;
+
   private readonly calls = new Map<string, MsteamsCallState>();
+  private readonly realtimeCalls = new Map<string, MsteamsRealtimeCall>();
 
   constructor(options: MsteamsProviderOptions) {
     const { port, bindAddress, path, sharedSecret, logger } = options;
@@ -170,12 +181,24 @@ export class MsteamsProvider implements VoiceCallProvider {
   }
 
   /**
+   * Enable realtime (speech-to-speech) mode. When set, each Teams call is bridged
+   * directly to the realtime model rather than the STT -> agent -> TTS pipeline.
+   */
+  setRealtimeRuntime(deps: MsteamsRealtimeDeps): void {
+    this.realtimeDeps = deps;
+  }
+
+  /**
    * Stop the underlying WebSocket server. Called from the voice-call runtime's
    * teardown path. No-op if the provider was constructed without a full config.
    */
   async stop(): Promise<void> {
     for (const providerCallId of Array.from(this.calls.keys())) {
       this.teardownCall(providerCallId, { closeSession: true, reason: "shutdown" });
+    }
+    for (const [providerCallId, realtimeCall] of Array.from(this.realtimeCalls.entries())) {
+      this.realtimeCalls.delete(providerCallId);
+      realtimeCall.close();
     }
     await this.mediaStream?.stop();
   }
@@ -186,6 +209,35 @@ export class MsteamsProvider implements VoiceCallProvider {
 
   private handleSessionStart(session: MsteamsSession): void {
     const providerCallId = session.callId;
+
+    // Realtime mode: bridge the call straight to the speech-to-speech model.
+    // It does not route through CallManager, so the inbound-call policy is
+    // enforced here (mirroring the manager check the streaming path relies on).
+    if (this.realtimeDeps) {
+      if (this.realtimeCalls.has(providerCallId)) {
+        this.logger?.warn(
+          `MsteamsProvider: duplicate realtime session.start for ${providerCallId}`,
+        );
+        return;
+      }
+      const from = session.caller.aadId ?? "teams";
+      if (
+        !isInboundCallAllowed(this.realtimeDeps.inboundPolicy, this.realtimeDeps.allowFrom, from)
+      ) {
+        this.logger?.warn(
+          `MsteamsProvider: realtime call ${providerCallId} rejected by inbound policy (from=${from})`,
+        );
+        session.close("rejected");
+        return;
+      }
+      const realtimeCall = createMsteamsRealtimeCall({ session, deps: this.realtimeDeps });
+      this.realtimeCalls.set(providerCallId, realtimeCall);
+      this.logger?.info(
+        `MsteamsProvider: realtime session.start callId=${providerCallId} threadId=${session.threadId} caller.aadId=${session.caller.aadId ?? "teams"}`,
+      );
+      return;
+    }
+
     if (!this.manager || !this.transcription) {
       this.logger?.error(
         `MsteamsProvider: session.start for ${providerCallId} before dependencies were wired; closing`,
@@ -255,6 +307,11 @@ export class MsteamsProvider implements VoiceCallProvider {
   }
 
   private handleAudioFrame(frame: { callId: string; payload: Buffer }): void {
+    const realtimeCall = this.realtimeCalls.get(frame.callId);
+    if (realtimeCall) {
+      realtimeCall.pushAudio(frame.payload);
+      return;
+    }
     const state = this.calls.get(frame.callId);
     if (!state) {
       return;
@@ -342,6 +399,12 @@ export class MsteamsProvider implements VoiceCallProvider {
   }
 
   private handleSessionEnd(info: { callId: string; reason: string }): void {
+    const realtimeCall = this.realtimeCalls.get(info.callId);
+    if (realtimeCall) {
+      this.realtimeCalls.delete(info.callId);
+      realtimeCall.close();
+      return;
+    }
     const state = this.teardownCall(info.callId, { closeSession: false });
     if (!state || !this.manager) {
       return;
