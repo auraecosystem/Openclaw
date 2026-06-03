@@ -5,7 +5,7 @@ import {
 } from "../logging/diagnostic-runtime.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import type { CommandQueueEnqueueOptions } from "./command-queue.types.js";
-import { CommandLane } from "./lanes.js";
+import { CommandLane, STARVATION_PROMOTION_MS } from "./lanes.js";
 /**
  * Dedicated error type thrown when a queued command is rejected because
  * its lane was cleared.  Callers that fire-and-forget enqueued tasks can
@@ -269,6 +269,53 @@ function enqueueLaneEntry(state: LaneState, entry: QueueEntry): void {
   state.queue.splice(insertAt, 0, entry);
 }
 
+/**
+ * Compute an effective priority that promotes entries that have waited longer
+ * than STARVATION_PROMOTION_MS above all standard priorities, preventing
+ * indefinite starvation of low-priority work.
+ */
+// Promoted entries all share a single tier above any static priority so
+// original priority differences no longer influence ordering once an entry
+// has been starved. Within the promoted tier, FIFO by enqueue time applies.
+const STARVATION_PROMOTED_PRIORITY = Number.MAX_SAFE_INTEGER;
+
+function effectivePriority(entry: QueueEntry): number {
+  if (Date.now() - entry.enqueuedAt >= STARVATION_PROMOTION_MS) {
+    return STARVATION_PROMOTED_PRIORITY;
+  }
+  return entry.priority;
+}
+
+/**
+ * Find the queue index of the entry with the highest effective priority,
+ * accounting for starvation promotion. Breaks ties by enqueue time (oldest
+ * first), then by sequence number for entries enqueued in the same
+ * millisecond, so starved entries drain in strict FIFO order regardless of
+ * their original static priority.
+ */
+function pickNextIndex(queue: QueueEntry[]): number {
+  let bestIdx = 0;
+  let bestPri = effectivePriority(queue[0]);
+  let bestEnqueuedAt = queue[0].enqueuedAt;
+  let bestSeq = queue[0].sequence;
+  for (let i = 1; i < queue.length; i++) {
+    const pri = effectivePriority(queue[i]);
+    const enqueuedAt = queue[i].enqueuedAt;
+    if (
+      pri > bestPri ||
+      (pri === bestPri &&
+        (enqueuedAt < bestEnqueuedAt ||
+          (enqueuedAt === bestEnqueuedAt && queue[i].sequence < bestSeq)))
+    ) {
+      bestIdx = i;
+      bestPri = pri;
+      bestEnqueuedAt = enqueuedAt;
+      bestSeq = queue[i].sequence;
+    }
+  }
+  return bestIdx;
+}
+
 async function runQueueEntryTask(lane: string, entry: QueueEntry): Promise<unknown> {
   const taskPromise = Promise.resolve().then(entry.task);
   const taskTimeoutMs = normalizeTaskTimeoutMs(entry.taskTimeoutMs);
@@ -338,7 +385,8 @@ function drainLane(lane: string) {
   const pump = () => {
     try {
       while (state.activeTaskIds.size < state.maxConcurrent && state.queue.length > 0) {
-        const entry = state.queue.shift() as QueueEntry;
+        const nextIdx = pickNextIndex(state.queue);
+        const entry = state.queue.splice(nextIdx, 1)[0];
         const waitedMs = Date.now() - entry.enqueuedAt;
         if (waitedMs >= entry.warnAfterMs) {
           try {
