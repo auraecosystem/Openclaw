@@ -657,7 +657,7 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
           finalTextWouldUseStreamingCard;
         const shouldDeliverText =
           hasText &&
-          !hasVoiceMedia &&
+          (!hasVoiceMedia || account.config?.tts?.preserveText === true) &&
           !skipTextForDuplicateFinal &&
           !skipTextForClosedStreamingFinal;
         const shouldDiscardStreamingPreview =
@@ -754,10 +754,15 @@ export function createFeishuReplyDispatcher(params: CreateFeishuReplyDispatcherP
           }
         }
 
+        // Disable fallback when preserveText is already sending text separately,
+        // to avoid duplicate text delivery when voice degrades or media fails.
+        const shouldPassFallbackText =
+          hasVoiceMedia && hasText && account.config?.tts?.preserveText !== true;
+
         if (hasMedia) {
           await sendMediaReplies(
             payload,
-            hasVoiceMedia && hasText ? { fallbackText: text } : undefined,
+            shouldPassFallbackText ? { fallbackText: text } : undefined,
           );
         }
       },
