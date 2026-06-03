@@ -1,3 +1,5 @@
+import type { AnnotationItem } from "./screenshot-annotate.js";
+
 export type BrowserActionOk = { ok: true };
 
 export type BrowserActionTabResult = {
@@ -14,4 +16,10 @@ export type BrowserActionPathResult = {
   labels?: boolean;
   labelsCount?: number;
   labelsSkipped?: number;
+  /**
+   * Per-ref bounding boxes when labels=true. Coordinates are in the
+   * captured image's space (viewport / fullpage / element-relative).
+   * Omitted when empty.
+   */
+  annotations?: AnnotationItem[];
 };
