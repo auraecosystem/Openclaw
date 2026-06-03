@@ -113,6 +113,10 @@ const SKIP_AGENT_DISCOVERY_PROVIDER_RUNTIME_HOOKS: ProviderRuntimeHooks = {
   ...TARGET_PROVIDER_RUNTIME_HOOKS,
 };
 
+const OPENAI_PROVIDER_ID = "openai";
+const OPENAI_CHATGPT_RESPONSES_API = "openai-chatgpt-responses";
+const OPENAI_CODEX_SPARK_MODEL_ID = "gpt-5.3-codex-spark";
+
 function createEmptyAgentDiscoveryStores(): {
   authStorage: AuthStorage;
   modelRegistry: ModelRegistry;
@@ -843,6 +847,18 @@ function resolveExplicitModelWithRegistry(params: {
   const model = modelRegistry.find(provider, modelId) as Model | null;
 
   if (model) {
+    const suppressionBaseUrl = providerConfig?.baseUrl ?? model.baseUrl;
+    if (
+      shouldSuppressBuiltInModel({
+        provider,
+        id: modelId,
+        ...(cfg ? { config: cfg } : {}),
+        ...(suppressionBaseUrl ? { baseUrl: suppressionBaseUrl } : {}),
+        ...(workspaceDir ? { workspaceDir } : {}),
+      })
+    ) {
+      return { kind: "suppressed" };
+    }
     return {
       kind: "resolved",
       model: normalizeResolvedModel({
@@ -1021,6 +1037,100 @@ function resolvePluginDynamicModelWithRegistry(params: {
     model: overriddenDynamicModel,
     runtimeHooks,
   });
+}
+
+function isOpenAICodexSparkRef(params: { provider: string; modelId: string }): boolean {
+  return (
+    normalizeProviderId(params.provider) === OPENAI_PROVIDER_ID &&
+    normalizeStaticProviderModelId(OPENAI_PROVIDER_ID, params.modelId) ===
+      OPENAI_CODEX_SPARK_MODEL_ID
+  );
+}
+
+function shouldAttemptSuppressedCodexHarnessModel(params: {
+  provider: string;
+  modelId: string;
+}): boolean {
+  return isOpenAICodexSparkRef(params);
+}
+
+function providerConfigSelectsCodexHarness(providerConfig: InlineProviderConfig | undefined) {
+  const authMode = (providerConfig as { auth?: unknown } | undefined)?.auth;
+  return (
+    providerConfig?.api === OPENAI_CHATGPT_RESPONSES_API ||
+    authMode === "oauth" ||
+    authMode === "token"
+  );
+}
+
+function isNativeOpenAIBaseUrl(baseUrl: unknown): boolean {
+  if (typeof baseUrl !== "string") {
+    return false;
+  }
+  const trimmed = baseUrl.trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    return new URL(trimmed).hostname.toLowerCase().replace(/\.+$/, "") === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
+function providerConfigSelectsDirectOpenAI(providerConfig: InlineProviderConfig | undefined) {
+  const authMode = (providerConfig as { auth?: unknown } | undefined)?.auth;
+  return (
+    providerConfig?.api === "openai-responses" ||
+    providerConfig?.api === "openai-completions" ||
+    authMode === "api-key" ||
+    isNativeOpenAIBaseUrl(providerConfig?.baseUrl)
+  );
+}
+
+function isCodexHarnessAuthProfile(
+  authProfile: ReturnType<typeof resolveDynamicModelAuthProfile>,
+): boolean {
+  return authProfile.authProfileMode === "oauth" || authProfile.authProfileMode === "token";
+}
+
+function isCodexHarnessModel(model: Model | undefined): boolean {
+  return (model as ProviderRuntimeModel | undefined)?.api === OPENAI_CHATGPT_RESPONSES_API;
+}
+
+function resolveSuppressedCodexHarnessModel(params: {
+  provider: string;
+  modelId: string;
+  modelRegistry: CoreModelRegistry;
+  cfg?: OpenClawConfig;
+  agentDir?: string;
+  workspaceDir?: string;
+  authProfileId?: string;
+  preferredProfile?: string;
+  runtimeHooks?: ProviderRuntimeHooks;
+}): Model | undefined {
+  if (!isOpenAICodexSparkRef(params)) {
+    return undefined;
+  }
+  const providerConfig = resolveConfiguredProviderConfig(params.cfg, params.provider);
+  const authProfile = resolveDynamicModelAuthProfile({
+    provider: params.provider,
+    cfg: params.cfg,
+    agentDir: params.agentDir,
+    authProfileId: params.authProfileId,
+    preferredProfile: params.preferredProfile,
+  });
+  if (providerConfigSelectsDirectOpenAI(providerConfig)) {
+    return undefined;
+  }
+  if (
+    !providerConfigSelectsCodexHarness(providerConfig) &&
+    !isCodexHarnessAuthProfile(authProfile)
+  ) {
+    return undefined;
+  }
+  const model = resolvePluginDynamicModelWithRegistry(params);
+  return isCodexHarnessModel(model) ? model : undefined;
 }
 
 function resolveConfiguredFallbackModel(params: {
@@ -1298,6 +1408,10 @@ export function resolveModelWithRegistry(params: {
   };
   const explicitModel = resolveExplicitModelWithRegistry(scopedParams);
   if (explicitModel?.kind === "suppressed") {
+    const dynamicModel = resolveSuppressedCodexHarnessModel(scopedParams);
+    if (dynamicModel) {
+      return dynamicModel;
+    }
     return undefined;
   }
   if (explicitModel?.kind === "resolved") {
@@ -1445,20 +1559,6 @@ export async function resolveModelAsync(
     workspaceDir,
     runtimeHooks,
   });
-  if (explicitModel?.kind === "suppressed") {
-    return {
-      error: buildUnknownModelError({
-        provider: normalizedRef.provider,
-        modelId: normalizedRef.model,
-        cfg,
-        agentDir: resolvedAgentDir,
-        workspaceDir,
-        runtimeHooks,
-      }),
-      authStorage,
-      modelRegistry,
-    };
-  }
   const providerConfig = resolveConfiguredProviderConfig(cfg, normalizedRef.provider);
   const authProfile = resolveDynamicModelAuthProfile({
     provider: normalizedRef.provider,
@@ -1546,6 +1646,29 @@ export async function resolveModelAsync(
     workspaceDir,
     runtimeHooks,
   });
+  if (explicitModel?.kind === "suppressed") {
+    const model = shouldAttemptSuppressedCodexHarnessModel({
+      provider: normalizedRef.provider,
+      modelId: normalizedRef.model,
+    })
+      ? await resolveDynamicAttempt()
+      : undefined;
+    if (model) {
+      return { model, authStorage, modelRegistry };
+    }
+    return {
+      error: buildUnknownModelError({
+        provider: normalizedRef.provider,
+        modelId: normalizedRef.model,
+        cfg,
+        agentDir: resolvedAgentDir,
+        workspaceDir,
+        runtimeHooks,
+      }),
+      authStorage,
+      modelRegistry,
+    };
+  }
   let model =
     explicitModel?.kind === "resolved" && !providerRuntimeMetadataShouldWin
       ? explicitModel.model
