@@ -289,6 +289,7 @@ export type WorkboardLifecycle = {
   session: GatewaySessionRow | null;
   state: WorkboardLifecycleState;
   targetStatus?: WorkboardStatus;
+  sourceUpdatedAt?: number;
 };
 
 export type WorkboardTaskStatus =
@@ -1021,6 +1022,15 @@ function taskUpdatedAtValue(task: WorkboardTaskSummary): number {
   return 0;
 }
 
+function sessionUpdatedAtValue(session: GatewaySessionRow): number | undefined {
+  return typeof session.updatedAt === "number" ? session.updatedAt : undefined;
+}
+
+function taskLifecycleSourceUpdatedAt(task: WorkboardTaskSummary): number | undefined {
+  const updatedAt = taskUpdatedAtValue(task);
+  return updatedAt > 0 ? updatedAt : undefined;
+}
+
 function taskSessionKeyMatchesCardSession(
   cardSessionKey: string,
   taskSessionKey: string | undefined,
@@ -1297,12 +1307,14 @@ export function getWorkboardLifecycle(
           session,
           state: "running",
           targetStatus: "running",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
       case "completed":
         return {
           session,
           state: "succeeded",
           targetStatus: "review",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
       case "failed":
       case "cancelled":
@@ -1311,6 +1323,7 @@ export function getWorkboardLifecycle(
           session,
           state: "failed",
           targetStatus: "blocked",
+          sourceUpdatedAt: taskLifecycleSourceUpdatedAt(task),
         };
     }
   }
@@ -1321,16 +1334,36 @@ export function getWorkboardLifecycle(
     return { session: null, state: "missing" };
   }
   if (staleSessionState(session)) {
-    return { session, state: "stale", targetStatus: "running" };
+    return {
+      session,
+      state: "stale",
+      targetStatus: "running",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.hasActiveRun === true || session.status === "running") {
-    return { session, state: "running", targetStatus: "running" };
+    return {
+      session,
+      state: "running",
+      targetStatus: "running",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.abortedLastRun || isFailedSessionStatus(session.status)) {
-    return { session, state: "failed", targetStatus: "blocked" };
+    return {
+      session,
+      state: "failed",
+      targetStatus: "blocked",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   if (session.status === "done") {
-    return { session, state: "succeeded", targetStatus: "review" };
+    return {
+      session,
+      state: "succeeded",
+      targetStatus: "review",
+      sourceUpdatedAt: sessionUpdatedAtValue(session),
+    };
   }
   return { session, state: "idle" };
 }
@@ -1346,6 +1379,15 @@ function shouldSyncCardStatus(card: WorkboardCard, targetStatus: WorkboardStatus
     return card.status === "running" || card.status === "todo" || card.status === "ready";
   }
   return false;
+}
+
+function shouldSkipStaleLifecycleStatusSync(card: WorkboardCard, lifecycle: WorkboardLifecycle) {
+  return (
+    Boolean(lifecycle.targetStatus) &&
+    typeof lifecycle.sourceUpdatedAt === "number" &&
+    lifecycle.sourceUpdatedAt > 0 &&
+    lifecycle.sourceUpdatedAt < card.updatedAt
+  );
 }
 
 function executionStatusForLifecycle(
@@ -1387,6 +1429,7 @@ function lifecycleSyncKey(card: WorkboardCard, lifecycle: WorkboardLifecycle): s
     session?.status ?? "",
     session?.hasActiveRun === true ? "active" : "idle",
     session?.updatedAt ?? "",
+    lifecycle.sourceUpdatedAt ?? "",
     card.execution?.status ?? "",
     card.execution?.updatedAt ?? "",
   ].join(":");
@@ -1621,7 +1664,10 @@ export async function syncWorkboardLifecycle(params: {
     );
     const executionStatus = executionStatusForLifecycle(lifecycle);
     const patch: Record<string, unknown> = {};
-    if (shouldSyncCardStatus(card, lifecycle.targetStatus)) {
+    if (
+      !shouldSkipStaleLifecycleStatusSync(card, lifecycle) &&
+      shouldSyncCardStatus(card, lifecycle.targetStatus)
+    ) {
       patch.status = lifecycle.targetStatus;
     }
     if (shouldSyncExecutionStatus(card, executionStatus)) {
