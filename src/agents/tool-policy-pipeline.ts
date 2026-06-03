@@ -1,12 +1,13 @@
-import { filterToolsByPolicy } from "./agent-tools.policy.js";
+import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import type { AnyAgentTool } from "./agent-tools.types.js";
 import { isKnownCoreToolId } from "./tool-catalog.js";
 import { auditToolPolicyFilter, type ToolPolicyAuditLogLevel } from "./tool-policy-audit.js";
+import { isToolAllowedByPolicyName } from "./tool-policy-match.js";
 import {
   analyzeAllowlistByToolType,
-  buildPluginToolGroups,
   expandPolicyWithPluginGroups,
   normalizeToolName,
+  type PluginToolGroups,
   type ToolPolicyLike,
 } from "./tool-policy.js";
 
@@ -37,6 +38,87 @@ export type ToolPolicyPipelineStep = {
   suppressUnavailableCoreToolWarningAllowlist?: string[];
   unavailableCoreToolReason?: string;
 };
+
+type PolicyToolEntry = {
+  tool: AnyAgentTool;
+  name: string;
+};
+
+function readPolicyToolName(tool: AnyAgentTool): { ok: true; name: string } | { ok: false } {
+  try {
+    const name = normalizeToolName(tool.name);
+    return name ? { ok: true, name } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function readPolicyToolEntries(params: {
+  tools: readonly AnyAgentTool[];
+  warn: (message: string) => void;
+}): PolicyToolEntry[] {
+  let length: number;
+  try {
+    length = params.tools.length;
+  } catch {
+    params.warn("tools: policy filtering skipped unreadable tool list.");
+    return [];
+  }
+  const entries: PolicyToolEntry[] = [];
+  for (let index = 0; index < length; index += 1) {
+    let tool: AnyAgentTool;
+    try {
+      tool = params.tools[index];
+    } catch {
+      params.warn(`tools: policy filtering skipped unreadable tool at index ${index}.`);
+      continue;
+    }
+    const nameRead = readPolicyToolName(tool);
+    if (!nameRead.ok) {
+      params.warn(`tools: policy filtering skipped tool with unreadable name at index ${index}.`);
+      continue;
+    }
+    entries.push({ tool, name: nameRead.name });
+  }
+  return entries;
+}
+
+function buildPluginToolGroupsForPolicyEntries(params: {
+  entries: readonly PolicyToolEntry[];
+  toolMeta: (tool: AnyAgentTool) => { pluginId: string } | undefined;
+}): PluginToolGroups {
+  const all: string[] = [];
+  const byPlugin = new Map<string, string[]>();
+  for (const entry of params.entries) {
+    const meta = params.toolMeta(entry.tool);
+    if (!meta) {
+      continue;
+    }
+    all.push(entry.name);
+    const pluginId = normalizeOptionalLowercaseString(meta.pluginId);
+    if (!pluginId) {
+      continue;
+    }
+    const list = byPlugin.get(pluginId) ?? [];
+    list.push(entry.name);
+    byPlugin.set(pluginId, list);
+  }
+  return { all, byPlugin };
+}
+
+function filterPolicyEntriesByPolicy(
+  entries: readonly PolicyToolEntry[],
+  policy?: ToolPolicyLike,
+): PolicyToolEntry[] {
+  if (!policy) {
+    return [...entries];
+  }
+  return entries.filter((entry) => isToolAllowedByPolicyName(entry.name, policy));
+}
+
+function policyAuditTools(entries: readonly PolicyToolEntry[]): Array<{ name: string }> {
+  return entries.map((entry) => ({ name: entry.name }));
+}
 
 export function buildDefaultToolPolicyPipelineSteps(params: {
   profilePolicy?: ToolPolicyLike;
@@ -122,19 +204,17 @@ export function applyToolPolicyPipeline(params: {
   steps: ToolPolicyPipelineStep[];
   auditLogLevel?: ToolPolicyAuditLogLevel;
 }): AnyAgentTool[] {
+  const entries = readPolicyToolEntries({ tools: params.tools, warn: params.warn });
   const coreToolNames = new Set(
-    params.tools
-      .filter((tool) => !params.toolMeta(tool))
-      .map((tool) => normalizeToolName(tool.name))
-      .filter(Boolean),
+    entries.filter((entry) => !params.toolMeta(entry.tool)).map((entry) => entry.name),
   );
 
-  const pluginGroups = buildPluginToolGroups({
-    tools: params.tools,
+  const pluginGroups = buildPluginToolGroupsForPolicyEntries({
+    entries,
     toolMeta: params.toolMeta,
   });
 
-  let filtered = params.tools;
+  let filtered = entries;
   for (const step of params.steps) {
     if (!step.policy) {
       continue;
@@ -165,14 +245,14 @@ export function applyToolPolicyPipeline(params: {
             hasOtherEntries: otherEntries.length > 0,
           })
         ) {
-          const entries = warningEntries.join(", ");
+          const warningEntryText = warningEntries.join(", ");
           const suffix = describeUnknownAllowlistSuffix({
             pluginOnlyAllowlist: resolved.pluginOnlyAllowlist,
             hasGatedCoreEntries: warnableGatedCoreEntries.length > 0,
             hasOtherEntries: otherEntries.length > 0,
             unavailableCoreToolReason: step.unavailableCoreToolReason,
           });
-          const warning = `tools: ${step.label} allowlist contains unknown entries (${entries}). ${suffix}`;
+          const warning = `tools: ${step.label} allowlist contains unknown entries (${warningEntryText}). ${suffix}`;
           if (rememberToolPolicyWarning(warning)) {
             params.warn(warning);
           }
@@ -186,16 +266,16 @@ export function applyToolPolicyPipeline(params: {
       continue;
     }
     const before = filtered;
-    filtered = filterToolsByPolicy(before, expanded);
+    filtered = filterPolicyEntriesByPolicy(before, expanded);
     auditToolPolicyFilter({
       stepLabel: step.label,
       policy: expanded,
-      before,
-      after: filtered,
+      before: policyAuditTools(before),
+      after: policyAuditTools(filtered),
       logLevel: params.auditLogLevel,
     });
   }
-  return filtered;
+  return filtered.map((entry) => entry.tool);
 }
 
 function shouldWarnAboutUnknownAllowlist(params: {

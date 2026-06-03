@@ -93,6 +93,54 @@ describe("tool-policy-pipeline", () => {
     ]);
   });
 
+  test("drops unreadable tools before policy matching", () => {
+    const warnings: string[] = [];
+    const unreadable = {};
+    Object.defineProperty(unreadable, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("tool name getter exploded");
+      },
+    });
+    const tools = [unreadable, { name: "exec" }] as unknown as DummyTool[];
+
+    const filtered = applyToolPolicyPipeline({
+      tools: tools as any,
+      toolMeta: () => undefined,
+      warn: (msg) => warnings.push(msg),
+      steps: [{ policy: { allow: ["exec"] }, label: "tools.allow" }],
+    });
+
+    expect(filtered).toEqual([{ name: "exec" }]);
+    expect(warnings).toEqual([
+      "tools: policy filtering skipped tool with unreadable name at index 0.",
+    ]);
+  });
+
+  test("keeps readable tool name accessors while policy matching", () => {
+    const warnings: string[] = [];
+
+    class AccessorTool {
+      get name() {
+        return "exec";
+      }
+    }
+
+    const tool = new AccessorTool();
+
+    const filtered = applyToolPolicyPipeline({
+      tools: [tool] as any,
+      toolMeta: () => undefined,
+      warn: (msg) => warnings.push(msg),
+      steps: [{ policy: { allow: ["exec"] }, label: "tools.allow" }],
+      auditLogLevel: "debug",
+    });
+
+    expect(filtered).toEqual([tool]);
+    expect(Object.getPrototypeOf(filtered[0])).toBe(AccessorTool.prototype);
+    expect(warnings).toEqual([]);
+  });
+
   test("suppresses built-in profile warnings for unavailable gated core tools", () => {
     const warnings = runAllowlistWarningStep({
       allow: ["apply_patch"],

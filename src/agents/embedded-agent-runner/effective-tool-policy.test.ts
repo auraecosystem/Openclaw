@@ -239,4 +239,31 @@ describe("applyFinalEffectiveToolPolicy", () => {
 
     expect(filtered).toStrictEqual([]);
   });
+
+  it("does not let an unreadable bundled tool crash policy filtering", () => {
+    const warnings: string[] = [];
+    const unreadable = makeTool("bundleProbe__broken");
+    Object.defineProperty(unreadable, "name", {
+      enumerable: true,
+      get() {
+        throw new Error("bundled tool name getter exploded");
+      },
+    });
+    const healthy = makeTool("bundleProbe__bundle_probe");
+    setPluginToolMeta(healthy, { pluginId: "bundle-mcp", optional: false });
+
+    let filtered: AnyAgentTool[] = [];
+    expect(() => {
+      filtered = applyFinalEffectiveToolPolicy({
+        bundledTools: [unreadable, healthy],
+        config: { tools: { allow: ["bundle-mcp"] } },
+        warn: (message) => warnings.push(message),
+      });
+    }).not.toThrow();
+
+    expect(filtered.map((tool) => tool.name)).toEqual(["bundleProbe__bundle_probe"]);
+    expect(warnings).toContain(
+      "tools: policy filtering skipped tool with unreadable name at index 0.",
+    );
+  });
 });
