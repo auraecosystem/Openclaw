@@ -98,7 +98,6 @@ import {
   buildGatewaySessionRow,
   listSessionsFromStoreAsync,
   loadCombinedSessionStoreForGateway,
-  loadGatewaySessionRow,
   loadSessionEntry,
   migrateAndPruneGatewaySessionStoreKey,
   readRecentSessionMessagesWithStatsAsync,
@@ -122,6 +121,7 @@ import { setGatewayDedupeEntry } from "./agent-wait-dedupe.js";
 import { chatHandlers } from "./chat.js";
 import { loadOptionalServerMethodModelCatalog } from "./optional-model-catalog.js";
 import { hasTrackedActiveSessionRun } from "./session-active-runs.js";
+import { emitSessionsChanged } from "./session-change-events.js";
 import type {
   GatewayClient,
   GatewayRequestContext,
@@ -281,103 +281,6 @@ function shouldAttachPendingMessageSeq(params: { payload: unknown; cached?: bool
       ? (params.payload as { status?: unknown }).status
       : undefined;
   return status === "started";
-}
-
-function emitSessionsChanged(
-  context: Pick<
-    GatewayRequestContext,
-    | "broadcastToConnIds"
-    | "chatAbortControllers"
-    | "getRuntimeConfig"
-    | "getSessionEventSubscriberConnIds"
-  >,
-  payload: { sessionKey?: string; agentId?: string; reason: string; compacted?: boolean },
-) {
-  const connIds = context.getSessionEventSubscriberConnIds();
-  if (connIds.size === 0) {
-    return;
-  }
-  const sessionRow = payload.sessionKey
-    ? loadGatewaySessionRow(
-        payload.sessionKey,
-        payload.sessionKey === "global" && payload.agentId
-          ? { agentId: payload.agentId }
-          : undefined,
-      )
-    : null;
-  const omitUnscopedGlobalGoal = payload.sessionKey === "global" && !payload.agentId;
-  const defaultAgentId = resolveDefaultAgentId(context.getRuntimeConfig());
-  context.broadcastToConnIds(
-    "sessions.changed",
-    {
-      ...payload,
-      ts: Date.now(),
-      ...(sessionRow
-        ? {
-            updatedAt: sessionRow.updatedAt ?? undefined,
-            sessionId: sessionRow.sessionId,
-            kind: sessionRow.kind,
-            channel: sessionRow.channel,
-            subject: sessionRow.subject,
-            groupChannel: sessionRow.groupChannel,
-            space: sessionRow.space,
-            chatType: sessionRow.chatType,
-            origin: sessionRow.origin,
-            spawnedBy: sessionRow.spawnedBy,
-            spawnedWorkspaceDir: sessionRow.spawnedWorkspaceDir,
-            spawnedCwd: sessionRow.spawnedCwd,
-            forkedFromParent: sessionRow.forkedFromParent,
-            spawnDepth: sessionRow.spawnDepth,
-            subagentRole: sessionRow.subagentRole,
-            subagentControlScope: sessionRow.subagentControlScope,
-            label: sessionRow.label,
-            displayName: sessionRow.displayName,
-            deliveryContext: sessionRow.deliveryContext,
-            parentSessionKey: sessionRow.parentSessionKey,
-            childSessions: sessionRow.childSessions,
-            thinkingLevel: sessionRow.thinkingLevel,
-            fastMode: sessionRow.fastMode,
-            verboseLevel: sessionRow.verboseLevel,
-            traceLevel: sessionRow.traceLevel,
-            reasoningLevel: sessionRow.reasoningLevel,
-            elevatedLevel: sessionRow.elevatedLevel,
-            sendPolicy: sessionRow.sendPolicy,
-            systemSent: sessionRow.systemSent,
-            abortedLastRun: sessionRow.abortedLastRun,
-            inputTokens: sessionRow.inputTokens,
-            outputTokens: sessionRow.outputTokens,
-            lastChannel: sessionRow.lastChannel,
-            lastTo: sessionRow.lastTo,
-            lastAccountId: sessionRow.lastAccountId,
-            lastThreadId: sessionRow.lastThreadId,
-            totalTokens: sessionRow.totalTokens,
-            totalTokensFresh: sessionRow.totalTokensFresh,
-            ...(omitUnscopedGlobalGoal ? {} : { goal: sessionRow.goal ?? null }),
-            contextTokens: sessionRow.contextTokens,
-            estimatedCostUsd: sessionRow.estimatedCostUsd,
-            responseUsage: sessionRow.responseUsage,
-            modelProvider: sessionRow.modelProvider,
-            model: sessionRow.model,
-            status: sessionRow.status,
-            hasActiveRun: hasTrackedActiveSessionRun({
-              context,
-              requestedKey: payload.sessionKey ?? sessionRow.key,
-              canonicalKey: sessionRow.key,
-              agentId: sessionRow.key === "global" ? payload.agentId : undefined,
-              defaultAgentId,
-            }),
-            startedAt: sessionRow.startedAt,
-            endedAt: sessionRow.endedAt,
-            runtimeMs: sessionRow.runtimeMs,
-            compactionCheckpointCount: sessionRow.compactionCheckpointCount,
-            latestCompactionCheckpoint: sessionRow.latestCompactionCheckpoint,
-            pluginExtensions: sessionRow.pluginExtensions,
-          }
-        : {}),
-    },
-    connIds,
-    { dropIfSlow: true },
-  );
 }
 
 function emitSessionOperation(
@@ -1007,7 +910,7 @@ async function handleSessionSend(params: {
         runId: startedRunId,
       });
     }
-    emitSessionsChanged(params.context, {
+    await emitSessionsChanged(params.context, {
       sessionKey: canonicalKey,
       ...(canonicalKey === "global" && requestedAgentId ? { agentId: requestedAgentId } : {}),
       reason: interruptedActiveRun ? "steer" : "send",
@@ -1132,7 +1035,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       });
       respond(true, result, undefined);
       for (const summary of appliedSummaries) {
-        emitSessionsChanged(context, {
+        await emitSessionsChanged(context, {
           reason: "cleanup",
           sessionKey: undefined,
         });
@@ -1519,7 +1422,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
           },
           undefined,
         );
-        emitSessionsChanged(context, {
+        await emitSessionsChanged(context, {
           sessionKey: resetResult.key,
           ...(resetResult.key === "global" ? { agentId: resetResult.agentId } : {}),
           reason: "new",
@@ -1704,13 +1607,13 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
       undefined,
     );
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: target.canonicalKey,
       ...(target.canonicalKey === "global" ? { agentId: target.agentId } : {}),
       reason: "create",
     });
     if (runStarted) {
-      emitSessionsChanged(context, {
+      await emitSessionsChanged(context, {
         sessionKey: target.canonicalKey,
         ...(target.canonicalKey === "global" ? { agentId: target.agentId } : {}),
         reason: "send",
@@ -1845,14 +1748,14 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
       undefined,
     );
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: canonicalKey,
       ...(canonicalKey === "global" && requestedAgent.agentId
         ? { agentId: requestedAgent.agentId }
         : {}),
       reason: "checkpoint-branch",
     });
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: nextKey,
       reason: "checkpoint-branch",
     });
@@ -1966,7 +1869,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
       undefined,
     );
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: canonicalKey,
       ...(canonicalKey === "global" && requestedAgent.agentId
         ? { agentId: requestedAgent.agentId }
@@ -2161,7 +2064,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       isWebchatConnect,
     });
     if (abortedRunId) {
-      emitSessionsChanged(context, {
+      await emitSessionsChanged(context, {
         sessionKey: canonicalKey,
         ...(canonicalKey === "global" && abortAgentId ? { agentId: abortAgentId } : {}),
         reason: "abort",
@@ -2254,7 +2157,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
     };
     respond(true, result, undefined);
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: target.canonicalKey,
       ...(target.canonicalKey === "global" && requestedAgentId
         ? { agentId: requestedAgentId }
@@ -2332,7 +2235,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     respond(true, { ok: true, key: patched.key, value: patched.value }, undefined);
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: patched.key,
       reason: "plugin-patch",
     });
@@ -2360,7 +2263,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       return;
     }
     respond(true, { ok: true, key: result.key, entry: result.entry }, undefined);
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: result.key,
       ...(result.key === "global" ? { agentId: result.agentId } : {}),
       reason,
@@ -2477,7 +2380,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
 
     respond(true, { ok: true, key: target.canonicalKey, deleted, archived }, undefined);
     if (deleted) {
-      emitSessionsChanged(context, {
+      await emitSessionsChanged(context, {
         sessionKey: target.canonicalKey,
         ...(target.canonicalKey === "global" && requestedAgentId
           ? { agentId: requestedAgentId }
@@ -2726,7 +2629,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
         undefined,
       );
       if (result.ok) {
-        emitSessionsChanged(context, {
+        await emitSessionsChanged(context, {
           sessionKey: target.canonicalKey,
           ...(target.canonicalKey === "global" && target.agentId
             ? { agentId: target.agentId }
@@ -2789,7 +2692,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       },
       undefined,
     );
-    emitSessionsChanged(context, {
+    await emitSessionsChanged(context, {
       sessionKey: target.canonicalKey,
       ...(target.canonicalKey === "global" && target.agentId ? { agentId: target.agentId } : {}),
       reason: "compact",

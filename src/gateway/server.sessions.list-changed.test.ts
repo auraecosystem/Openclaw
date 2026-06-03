@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { expect, test, vi } from "vitest";
+import { emitSessionsChanged } from "./server-methods/session-change-events.js";
 import { embeddedRunMock, rpcReq, testState, writeSessionStore } from "./test-helpers.js";
 import {
   setupGatewaySessionsTestHarness,
@@ -145,7 +146,7 @@ async function invokeSessionMutation({
     context: {
       broadcastToConnIds,
       getSessionEventSubscriberConnIds: () => subscribedConnIds,
-      loadGatewayModelCatalog: async () => ({ providers: [] }),
+      loadGatewayModelCatalog: async () => [],
       getRuntimeConfig,
       ...context,
     } as never,
@@ -158,8 +159,8 @@ async function invokeSessionMutation({
   };
 }
 
-async function invokeSessionsPatch(params: Record<string, unknown>) {
-  return invokeSessionMutation({ method: "sessions.patch", params });
+async function invokeSessionsPatch(params: Record<string, unknown>, context = {}) {
+  return invokeSessionMutation({ method: "sessions.patch", params, context });
 }
 
 async function writeMainSessionStore(options?: SessionStoreEntryOptions) {
@@ -176,7 +177,7 @@ function expectMainPatchBroadcast(
   expected: Record<string, unknown>,
 ) {
   expectFields(result.responsePayload, { ok: true, key: "agent:main:main" });
-  expectChangedBroadcast(result.broadcastToConnIds, {
+  return expectChangedBroadcast(result.broadcastToConnIds, {
     sessionKey: "agent:main:main",
     reason: "patch",
     ...expected,
@@ -438,6 +439,50 @@ test("sessions.list does not block on slow model catalog discovery", async () =>
   }
 });
 
+test("sessions.changed command metadata does not block on slow model catalog discovery", async () => {
+  await writeMainSessionStore({
+    modelProvider: "test-provider",
+    model: "reasoner",
+  });
+
+  vi.useFakeTimers();
+  try {
+    const deferredCatalog = createDeferred<never>();
+    const broadcastToConnIds = vi.fn();
+    const { getRuntimeConfig } = await getGatewayConfigModule();
+    const request = emitSessionsChanged(
+      {
+        broadcastToConnIds,
+        getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+        getRuntimeConfig,
+        loadGatewayModelCatalog: vi.fn(() => deferredCatalog.promise),
+        logGateway: {
+          debug: vi.fn(),
+        },
+      } as never,
+      {
+        sessionKey: "agent:main:main",
+        reason: "command-metadata",
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(800);
+    await request;
+
+    const payload = expectChangedBroadcast(broadcastToConnIds, {
+      sessionKey: "agent:main:main",
+      reason: "command-metadata",
+      modelProvider: "test-provider",
+      model: "reasoner",
+    });
+    expect(payload.thinkingLevels).toBeUndefined();
+    expect(payload.thinkingOptions).toBeUndefined();
+    expect(payload.thinkingDefault).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("sessions.changed mutation events include live usage metadata", async () => {
   const { dir } = await createSessionStoreDir();
   await fs.writeFile(
@@ -490,8 +535,189 @@ test("sessions.changed mutation events include live usage metadata", async () =>
   });
 });
 
+test("sessions.changed command metadata excludes only the command run from active state", async () => {
+  await createSessionStoreDir();
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-main"),
+    },
+  });
+
+  const broadcastToConnIds = vi.fn();
+  const { getRuntimeConfig } = await getGatewayConfigModule();
+  await emitSessionsChanged(
+    {
+      broadcastToConnIds,
+      getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+      getRuntimeConfig,
+      chatAbortControllers: new Map([
+        ["command-run", { sessionKey: "agent:main:main" }],
+        ["other-run", { sessionKey: "agent:main:main" }],
+      ]),
+    } as never,
+    {
+      sessionKey: "agent:main:main",
+      reason: "command-metadata",
+      excludeActiveRunIds: ["command-run"],
+    },
+  );
+
+  const payload = expectChangedBroadcast(broadcastToConnIds, {
+    sessionKey: "agent:main:main",
+    reason: "command-metadata",
+    hasActiveRun: true,
+  });
+  expect(payload.excludeActiveRunIds).toBeUndefined();
+});
+
+test("sessions.changed command metadata ignores hidden internal active runs", async () => {
+  await createSessionStoreDir();
+  await writeSessionStore({
+    entries: {
+      main: sessionStoreEntry("sess-main"),
+    },
+  });
+
+  const broadcastToConnIds = vi.fn();
+  const { getRuntimeConfig } = await getGatewayConfigModule();
+  await emitSessionsChanged(
+    {
+      broadcastToConnIds,
+      getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+      getRuntimeConfig,
+      chatAbortControllers: new Map([
+        ["command-run", { sessionKey: "agent:main:main" }],
+        ["hidden-run", { sessionKey: "agent:main:main", controlUiVisible: false }],
+      ]),
+    } as never,
+    {
+      sessionKey: "agent:main:main",
+      reason: "command-metadata",
+      excludeActiveRunIds: ["command-run"],
+    },
+  );
+
+  expectChangedBroadcast(broadcastToConnIds, {
+    sessionKey: "agent:main:main",
+    reason: "command-metadata",
+    hasActiveRun: false,
+  });
+});
+
+test("sessions.changed command metadata marks selected global runs active", async () => {
+  const { dir } = await createSessionStoreDir();
+  const storeTemplate = path.join(dir, "{agentId}", "sessions.json");
+  testState.sessionStorePath = storeTemplate;
+  testState.sessionConfig = { scope: "global" };
+  await writeSessionStore({
+    entries: {},
+    storePath: path.join(dir, "prime-sessions.json"),
+  });
+  const mainStorePath = storeTemplate.replace("{agentId}", "main");
+  const workStorePath = storeTemplate.replace("{agentId}", "work");
+  await fs.mkdir(path.dirname(mainStorePath), { recursive: true });
+  await fs.mkdir(path.dirname(workStorePath), { recursive: true });
+  await fs.writeFile(
+    mainStorePath,
+    JSON.stringify({ global: sessionStoreEntry("sess-main-global") }, null, 2),
+    "utf-8",
+  );
+  await fs.writeFile(
+    workStorePath,
+    JSON.stringify(
+      {
+        global: sessionStoreEntry("sess-work-global", {
+          label: "Work global",
+        }),
+      },
+      null,
+      2,
+    ),
+    "utf-8",
+  );
+  const configPath = process.env.OPENCLAW_CONFIG_PATH;
+  if (!configPath) {
+    throw new Error("OPENCLAW_CONFIG_PATH is required");
+  }
+  await fs.writeFile(
+    configPath,
+    `${JSON.stringify(
+      {
+        agents: { list: [{ id: "main", default: true }, { id: "work" }] },
+        session: { scope: "global", store: storeTemplate },
+      },
+      null,
+      2,
+    )}\n`,
+    "utf-8",
+  );
+  const { clearConfigCache, clearRuntimeConfigSnapshot, getRuntimeConfig } =
+    await getGatewayConfigModule();
+  clearRuntimeConfigSnapshot();
+  clearConfigCache();
+
+  const broadcastToConnIds = vi.fn();
+  await emitSessionsChanged(
+    {
+      broadcastToConnIds,
+      getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+      getRuntimeConfig,
+      chatAbortControllers: new Map([["agent-run", { sessionKey: "agent:work:global" }]]),
+    } as never,
+    {
+      sessionKey: "global",
+      agentId: "work",
+      reason: "command-metadata",
+      excludeActiveRunIds: ["command-run"],
+    },
+  );
+
+  const payload = expectChangedBroadcast(broadcastToConnIds, {
+    sessionKey: "global",
+    agentId: "work",
+    reason: "command-metadata",
+    sessionId: "sess-work-global",
+    label: "Work global",
+    hasActiveRun: true,
+  });
+  expect(payload.excludeActiveRunIds).toBeUndefined();
+
+  testState.sessionStorePath = undefined;
+  testState.sessionConfig = undefined;
+  await fs.writeFile(configPath, "{}\n", "utf-8");
+  clearRuntimeConfigSnapshot();
+  clearConfigCache();
+});
+
+test("sessions.changed command metadata scopes untagged global runs to the default agent", async () => {
+  const globalStores = await createConfiguredGlobalAgentSessionStore({ writePrimeStore: true });
+
+  const broadcastToConnIds = vi.fn();
+  await emitSessionsChanged(
+    {
+      broadcastToConnIds,
+      getSessionEventSubscriberConnIds: () => new Set(["conn-1"]),
+      getRuntimeConfig: globalStores.getRuntimeConfig,
+      chatAbortControllers: new Map([["work-run", { sessionKey: "global", agentId: "work" }]]),
+    } as never,
+    {
+      sessionKey: "global",
+      reason: "command-metadata",
+    },
+  );
+
+  expectChangedBroadcast(broadcastToConnIds, {
+    sessionKey: "global",
+    reason: "command-metadata",
+    sessionId: "sess-main-global",
+    hasActiveRun: false,
+  });
+  await resetConfiguredGlobalAgentSessionStore(globalStores);
+});
+
 test("sessions.changed mutation events include live session setting metadata", async () => {
   const sessionSettings = {
+    thinkingLevel: "high",
     verboseLevel: "on",
     responseUsage: "full",
     fastMode: true,
@@ -507,7 +733,49 @@ test("sessions.changed mutation events include live session setting metadata", a
     verboseLevel: "on",
   });
 
-  expectMainPatchBroadcast(result, sessionSettings);
+  const changedPayload = expectMainPatchBroadcast(result, sessionSettings);
+  expect(requireArray(changedPayload.thinkingLevels, "broadcast thinking levels")).toContainEqual(
+    expect.objectContaining({ id: "high" }),
+  );
+  expect(requireArray(changedPayload.thinkingOptions, "broadcast thinking options")).toContain(
+    "high",
+  );
+  expect(changedPayload.thinkingDefault).toEqual(expect.any(String));
+});
+
+test("sessions.changed mutation events use catalog-backed thinking metadata", async () => {
+  await writeMainSessionStore({
+    modelProvider: "test-provider",
+    model: "reasoner",
+  });
+  const loadGatewayModelCatalog = vi.fn(async () => [
+    {
+      provider: "test-provider",
+      id: "reasoner",
+      name: "Reasoner",
+      reasoning: true,
+      compat: { supportedReasoningEfforts: ["low", "medium", "high", "xhigh"] },
+    },
+  ]);
+
+  const result = await invokeSessionsPatch(
+    {
+      key: "main",
+      label: "Renamed",
+    },
+    { loadGatewayModelCatalog },
+  );
+
+  const changedPayload = expectMainPatchBroadcast(result, {
+    label: "Renamed",
+  });
+  expect(requireArray(changedPayload.thinkingLevels, "broadcast thinking levels")).toContainEqual(
+    expect.objectContaining({ id: "xhigh" }),
+  );
+  expect(requireArray(changedPayload.thinkingOptions, "broadcast thinking options")).toContain(
+    "xhigh",
+  );
+  expect(loadGatewayModelCatalog).toHaveBeenCalledWith({ readOnly: true });
 });
 
 test("sessions.changed mutation events include sendPolicy metadata", async () => {

@@ -4,7 +4,7 @@ import { enqueueSystemEvent } from "../../infra/system-events.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { MsgContext } from "../templating.js";
 import type { ElevatedLevel } from "../thinking.js";
-import type { ReplyPayload } from "../types.js";
+import type { GetReplyOptions, ReplyPayload } from "../types.js";
 import type { CommandContext } from "./commands-types.js";
 import { isDirectiveOnly } from "./directive-handling.directive-only.js";
 import { resolveModelSelectionFromDirective } from "./directive-handling.model-selection.js";
@@ -125,6 +125,7 @@ export async function applyInlineDirectiveOverrides(params: {
   contextTokens: number;
   effectiveModelDirective?: string;
   typing: TypingController;
+  onSessionMetadataChanged?: GetReplyOptions["onSessionMetadataChanged"];
 }): Promise<ApplyDirectiveResult> {
   const {
     ctx,
@@ -251,6 +252,8 @@ export async function applyInlineDirectiveOverrides(params: {
     gatewayClientScopes: ctx.GatewayClientScopes,
     commandAuthorized: command.isAuthorizedSender,
     senderIsOwner: command.senderIsOwner,
+    agentId,
+    onSessionMetadataChanged: params.onSessionMetadataChanged,
   };
 
   if (
@@ -345,6 +348,8 @@ export async function applyInlineDirectiveOverrides(params: {
       gatewayClientScopes: ctx.GatewayClientScopes,
       commandAuthorized: command.isAuthorizedSender,
       senderIsOwner: command.senderIsOwner,
+      agentId,
+      onSessionMetadataChanged: params.onSessionMetadataChanged,
       workspaceDir,
     });
     let statusReply: ReplyPayload | undefined;
@@ -394,6 +399,7 @@ export async function applyInlineDirectiveOverrides(params: {
       workspaceDir,
       cfg,
       agentId,
+      onSessionMetadataChanged: params.onSessionMetadataChanged,
       isGroup,
       sessionEntry,
       sessionStore,

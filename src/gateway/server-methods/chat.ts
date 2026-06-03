@@ -46,6 +46,7 @@ import { getReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/rep
 import { createReplyDispatcher } from "../../auto-reply/reply/reply-dispatcher.js";
 import { stageSandboxMedia } from "../../auto-reply/reply/stage-sandbox-media.js";
 import type { MsgContext, TemplateContext } from "../../auto-reply/templating.js";
+import type { SessionMetadataChangedEvent } from "../../auto-reply/types.js";
 import { extractCanvasFromText } from "../../chat/canvas-render.js";
 import { resolveSessionFilePath } from "../../config/sessions.js";
 import { resolveMirroredTranscriptText } from "../../config/sessions/transcript-mirror.js";
@@ -165,6 +166,7 @@ import {
 } from "./chat-webchat-media.js";
 import { loadOptionalServerMethodModelCatalog } from "./optional-model-catalog.js";
 import { hasTrackedActiveSessionRun } from "./session-active-runs.js";
+import { emitSessionsChanged } from "./session-change-events.js";
 import type {
   GatewayClient,
   GatewayRequestContext,
@@ -3572,6 +3574,31 @@ export const chatHandlers: GatewayRequestHandlers = {
       const deliveredReplies: Array<{ payload: ReplyPayload; kind: "block" | "final" }> = [];
       let appendedWebchatAgentMedia = false;
       let agentRunStarted = false;
+      const pendingSessionMetadataEvents: SessionMetadataChangedEvent[] = [];
+      const flushSessionMetadataEvents = async (options?: {
+        excludeActiveRunIds?: readonly string[];
+      }) => {
+        while (pendingSessionMetadataEvents.length > 0) {
+          const event = pendingSessionMetadataEvents.shift();
+          if (!event) {
+            continue;
+          }
+          try {
+            await emitSessionsChanged(context, {
+              sessionKey: event.sessionKey,
+              ...(event.agentId ? { agentId: event.agentId } : {}),
+              reason: event.reason,
+              ...(options?.excludeActiveRunIds
+                ? { excludeActiveRunIds: options.excludeActiveRunIds }
+                : {}),
+            });
+          } catch (err) {
+            context.logGateway.warn(
+              `sessions.changed metadata broadcast failed: ${formatForLog(err)}`,
+            );
+          }
+        }
+      };
       const userTurnRecorder: UserTurnTranscriptRecorder = createUserTurnTranscriptRecorder({
         input: baseUserTurnInput,
         resolveInput: () => userTurnInputPromise,
@@ -3796,6 +3823,7 @@ export const chatHandlers: GatewayRequestHandlers = {
                   runId !== clientRunId ? { agentRunId: runId } : undefined,
                   dispatchStartedAtMs,
                 );
+                void flushSessionMetadataEvents();
                 const connId = typeof client?.connId === "string" ? client.connId : undefined;
                 const wantsToolEvents = hasGatewayClientCap(
                   client?.connect?.caps,
@@ -3845,11 +3873,20 @@ export const chatHandlers: GatewayRequestHandlers = {
                   dispatchStartedAtMs,
                 );
               },
+              onSessionMetadataChanged: (event) => {
+                pendingSessionMetadataEvents.push(event);
+                if (agentRunStarted) {
+                  void flushSessionMetadataEvents();
+                }
+              },
             },
           });
           if (dispatchResult.beforeAgentRunBlocked === true) {
             userTurnRecorder.markBlocked();
           }
+          await flushSessionMetadataEvents(
+            agentRunStarted ? undefined : { excludeActiveRunIds: [clientRunId] },
+          );
           return dispatchResult;
         },
         {
@@ -4456,6 +4493,9 @@ export const chatHandlers: GatewayRequestHandlers = {
           );
         })
         .catch(async (err: unknown) => {
+          await flushSessionMetadataEvents(
+            agentRunStarted ? undefined : { excludeActiveRunIds: [clientRunId] },
+          );
           const emitAfterError =
             userTurnRecorder.hasPersisted() || userTurnRecorder.isBlocked()
               ? Promise.resolve()

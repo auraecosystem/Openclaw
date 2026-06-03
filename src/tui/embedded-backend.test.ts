@@ -21,11 +21,13 @@ const buildGatewaySessionInfoMock = vi.fn(
     thinkingLevel: params.entry?.thinkingLevel,
   }),
 );
-const getSessionDefaultsMock = vi.fn(() => ({
-  modelProvider: null,
-  model: null,
-  contextTokens: null,
-}));
+const getSessionDefaultsMock = vi.fn(
+  (_cfg?: unknown, _modelCatalog?: unknown, _options?: unknown) => ({
+    modelProvider: null,
+    model: null,
+    contextTokens: null,
+  }),
+);
 const loadCombinedSessionStoreForGatewayMock = vi.fn((_options?: unknown) => ({
   storePath: "/tmp/openclaw-sessions.json",
   store: {},
@@ -141,7 +143,8 @@ vi.mock("../gateway/server-methods/chat.js", () => ({
 vi.mock("../gateway/session-utils.js", () => ({
   buildGatewaySessionInfo: (params: Parameters<typeof buildGatewaySessionInfoMock>[0]) =>
     buildGatewaySessionInfoMock(params),
-  getSessionDefaults: () => getSessionDefaultsMock(),
+  getSessionDefaults: (cfg?: unknown, modelCatalog?: unknown, options?: unknown) =>
+    getSessionDefaultsMock(cfg, modelCatalog, options),
   listAgentsForGateway: () => [],
   listSessionsFromStoreAsync: (...args: unknown[]) => listSessionsFromStoreAsyncMock(...args),
   loadCombinedSessionStoreForGateway: (...args: unknown[]) =>
@@ -579,6 +582,143 @@ describe("EmbeddedTuiBackend", () => {
       thinkingLevel: undefined,
     });
     expect(loadGatewayModelCatalogMock).not.toHaveBeenCalled();
+  });
+
+  it("reuses loaded history model catalog for embedded session metadata", async () => {
+    const modelCatalog = [
+      {
+        id: "gpt-5.4",
+        name: "gpt-5.4",
+        provider: "openai",
+      },
+    ];
+    const cfg = {
+      models: {
+        providers: {
+          openai: {
+            models: [{ id: "gpt-5.4" }],
+          },
+        },
+      },
+    };
+    loadGatewayModelCatalogMock.mockReturnValue(modelCatalog);
+    loadSessionEntryMock.mockReturnValue({
+      cfg,
+      canonicalKey: "agent:main:main",
+      storePath: "/tmp/openclaw-sessions.json",
+      store: {},
+      entry: { sessionId: "sess-main" },
+    });
+
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+    const backend = new EmbeddedTuiBackend();
+
+    await expect(backend.loadHistory({ sessionKey: "agent:main:main" })).resolves.toMatchObject({
+      sessionKey: "agent:main:main",
+      sessionId: "sess-main",
+      messages: [],
+    });
+    expect(loadGatewayModelCatalogMock).toHaveBeenCalled();
+    expect(getSessionDefaultsMock).toHaveBeenCalledWith(cfg, modelCatalog, {
+      allowPluginNormalization: false,
+    });
+    expect(buildGatewaySessionInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+        modelCatalog,
+        key: "agent:main:main",
+      }),
+    );
+  });
+
+  it("loads history model catalog when a thinking level is already persisted", async () => {
+    const modelCatalog = [
+      {
+        id: "gpt-5.4",
+        name: "gpt-5.4",
+        provider: "openai",
+      },
+    ];
+    const cfg = {
+      models: {
+        providers: {
+          openai: {
+            models: [{ id: "gpt-5.4" }],
+          },
+        },
+      },
+    };
+    loadGatewayModelCatalogMock.mockReturnValue(modelCatalog);
+    loadSessionEntryMock.mockReturnValue({
+      cfg,
+      canonicalKey: "agent:main:main",
+      storePath: "/tmp/openclaw-sessions.json",
+      store: {},
+      entry: { sessionId: "sess-main", thinkingLevel: "high" },
+    });
+
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+    const backend = new EmbeddedTuiBackend();
+
+    await expect(backend.loadHistory({ sessionKey: "agent:main:main" })).resolves.toMatchObject({
+      sessionKey: "agent:main:main",
+      sessionId: "sess-main",
+      thinkingLevel: "high",
+      sessionInfo: { thinkingLevel: "high" },
+    });
+    expect(loadGatewayModelCatalogMock).toHaveBeenCalled();
+    expect(getSessionDefaultsMock).toHaveBeenCalledWith(cfg, modelCatalog, {
+      allowPluginNormalization: false,
+    });
+    expect(buildGatewaySessionInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+        modelCatalog,
+        key: "agent:main:main",
+      }),
+    );
+  });
+
+  it("loads history when model catalog discovery fails", async () => {
+    const cfg = {
+      models: {
+        providers: {
+          openai: {
+            models: [{ id: "gpt-5.4" }],
+          },
+        },
+      },
+    };
+    loadGatewayModelCatalogMock.mockImplementation(() => {
+      throw new Error("catalog unavailable");
+    });
+    loadSessionEntryMock.mockReturnValue({
+      cfg,
+      canonicalKey: "agent:main:main",
+      storePath: "/tmp/openclaw-sessions.json",
+      store: {},
+      entry: { sessionId: "sess-main", thinkingLevel: "high" },
+    });
+
+    const { EmbeddedTuiBackend } = await import("./embedded-backend.js");
+    const backend = new EmbeddedTuiBackend();
+
+    await expect(backend.loadHistory({ sessionKey: "agent:main:main" })).resolves.toMatchObject({
+      sessionKey: "agent:main:main",
+      sessionId: "sess-main",
+      thinkingLevel: "high",
+      sessionInfo: { thinkingLevel: "high" },
+    });
+    expect(getSessionDefaultsMock).toHaveBeenCalledWith(cfg, undefined, {
+      allowPluginNormalization: false,
+    });
+    expect(buildGatewaySessionInfoMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cfg,
+        modelCatalog: undefined,
+        key: "agent:main:main",
+      }),
+    );
   });
 
   it("loads selected-agent global history from the selected agent store", async () => {

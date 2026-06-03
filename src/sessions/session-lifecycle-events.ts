@@ -1,6 +1,7 @@
 export type SessionLifecycleEvent = {
   sessionKey: string;
   reason: string;
+  agentId?: string;
   parentSessionKey?: string;
   label?: string;
   displayName?: string;
