@@ -82,7 +82,13 @@ function normalizeWsUrl(value: string): string | null {
   return trimmed;
 }
 
-export function resolveTargets(cfg: OpenClawConfig, explicitUrl?: string): GatewayStatusTarget[] {
+type ResolvePort = (cfg?: OpenClawConfig, env?: NodeJS.ProcessEnv) => number;
+
+export function resolveTargets(
+  cfg: OpenClawConfig,
+  explicitUrl?: string,
+  resolvePort: ResolvePort = resolveGatewayPort,
+): GatewayStatusTarget[] {
   const targets: GatewayStatusTarget[] = [];
   const add = (t: GatewayStatusTarget) => {
     if (!targets.some((x) => x.url === t.url)) {
@@ -106,7 +112,7 @@ export function resolveTargets(cfg: OpenClawConfig, explicitUrl?: string): Gatew
     });
   }
 
-  const port = resolveGatewayPort(cfg);
+  const port = resolvePort(cfg);
   const localScheme = cfg.gateway?.tls?.enabled === true ? "wss" : "ws";
   add({
     id: "localLoopback",
@@ -244,9 +250,12 @@ export function extractConfigSummary(snapshotUnknown: unknown): GatewayConfigSum
   };
 }
 
-export function buildNetworkHints(cfg: OpenClawConfig) {
+export function buildNetworkHints(
+  cfg: OpenClawConfig,
+  resolvePort: ResolvePort = resolveGatewayPort,
+) {
   const { tailnetIPv4 } = inspectBestEffortPrimaryTailnetIPv4();
-  const port = resolveGatewayPort(cfg);
+  const port = resolvePort(cfg);
   const localScheme = cfg.gateway?.tls?.enabled === true ? "wss" : "ws";
   return {
     localLoopbackUrl: `${localScheme}://127.0.0.1:${port}`,
