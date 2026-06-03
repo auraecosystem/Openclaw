@@ -375,6 +375,7 @@ import {
   EmbeddedAttemptSessionTakeoverError,
   type EmbeddedAttemptSessionFileOwner,
   createEmbeddedAttemptSessionLockController,
+  installEmbeddedPromptRetryDefault,
   installPromptSubmissionLockRelease,
 } from "./attempt.session-lock.js";
 import {
@@ -3315,7 +3316,9 @@ export async function runEmbeddedAttempt(
           if (options?.steeringMode) {
             activeSession.agent.steeringMode = options.steeringMode;
           }
-          await steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options);
+          await withOwnedSessionTranscriptWrites(ownedTranscriptWriteContext, async () => {
+            await steerActiveSessionWithOptionalDeliveryWait(activeSession, text, options);
+          });
         },
         isStreaming: () => activeSession.isStreaming,
         isCompacting: () => subscription.isCompacting(),
@@ -3961,6 +3964,9 @@ export async function runEmbeddedAttempt(
             if (googlePromptCacheStreamFn) {
               activeSession.agent.streamFn = googlePromptCacheStreamFn;
             }
+            // Default to disabling SDK-level retries inside the embedded prompt lock window;
+            // an explicit settings.retry.provider.maxRetries still wins (see helper comment).
+            installEmbeddedPromptRetryDefault(activeSession);
             installPromptSubmissionLockRelease({
               session: activeSession,
               waitForSessionEvents: (sessionToDrain) =>
@@ -5205,7 +5211,7 @@ export async function runEmbeddedAttempt(
       }
       const synthesizedCleanupTakeoverError =
         !cleanupError && promptError && sessionLockController.hasSessionTakeover()
-          ? new EmbeddedAttemptSessionTakeoverError(params.sessionFile)
+          ? new EmbeddedAttemptSessionTakeoverError(params.sessionFile, "prompt_reacquire")
           : undefined;
       const cleanupFailure = cleanupError ?? synthesizedCleanupTakeoverError;
       const shouldPreservePromptError = shouldPreservePromptErrorAfterCleanupError({
