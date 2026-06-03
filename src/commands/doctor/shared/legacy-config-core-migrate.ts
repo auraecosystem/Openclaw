@@ -1,6 +1,6 @@
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { runPluginSetupConfigMigrations } from "../../../plugins/setup-registry.js";
-import { normalizeAgentId } from "../../../routing/session-key.js";
+import { DEFAULT_AGENT_ID, normalizeAgentId } from "../../../routing/session-key.js";
 import { migrateLegacySecretRefEnvMarkers } from "../../../secrets/legacy-secretref-env-marker.js";
 import { applyChannelDoctorCompatibilityMigrations } from "./channel-legacy-config-migrate.js";
 import { normalizeBaseCompatibilityConfigValues } from "./legacy-config-compatibility-base.js";
@@ -24,6 +24,7 @@ function pruneBindingsForMissingAgents(cfg: OpenClawConfig, changes: string[]): 
   }
 
   const agentIds = new Set(validAgents.map((agent) => normalizeAgentId(agent.id)));
+  agentIds.add(DEFAULT_AGENT_ID);
   const nextBindings = bindings.filter((binding) => {
     const agentId = binding && typeof binding === "object" ? binding.agentId : undefined;
     return typeof agentId !== "string" || agentIds.has(normalizeAgentId(agentId));
