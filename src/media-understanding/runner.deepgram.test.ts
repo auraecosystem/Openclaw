@@ -154,3 +154,381 @@ describe("runCapability deepgram provider options", () => {
     });
   });
 });
+
+describe("runCapability audio diarization options", () => {
+  it("maps providerOptions response_format/chunking_strategy to audio request fields and preserves segments", async () => {
+    await withAudioFixture("openclaw-diarized-json", async ({ ctx, media, cache }) => {
+      let seenResponseFormat: string | undefined;
+      let seenChunkingStrategy: string | undefined;
+
+      const providerRegistry = buildProviderRegistry({
+        openai: {
+          id: "openai",
+          capabilities: ["audio"],
+          transcribeAudio: async (req) => {
+            seenResponseFormat = req.responseFormat;
+            seenChunkingStrategy = req.chunkingStrategy;
+            return {
+              text: "Speaker A then Speaker B",
+              model: req.model,
+              segments: [
+                { speaker: "A", start: 0, end: 1, text: "Speaker A" },
+                { speaker: "B", start: 1, end: 2, text: "Speaker B" },
+              ],
+            };
+          },
+        },
+      });
+
+      const cfg = {
+        models: {
+          providers: {
+            openai: {
+              apiKey: "test-key",
+              models: [],
+            },
+          },
+        },
+        tools: {
+          media: {
+            audio: {
+              enabled: true,
+              providerOptions: {
+                openai: {
+                  response_format: "diarized_json",
+                  chunking_strategy: "auto",
+                },
+              },
+              models: [
+                {
+                  provider: "openai",
+                  model: "gpt-4o-transcribe-diarize",
+                },
+              ],
+            },
+          },
+        },
+      } as unknown as OpenClawConfig;
+
+      const result = await runCapability({
+        capability: "audio",
+        cfg,
+        ctx,
+        attachments: cache,
+        media,
+        providerRegistry,
+      });
+
+      expect(seenResponseFormat).toBe("diarized_json");
+      expect(seenChunkingStrategy).toBe("auto");
+      expect(result.outputs[0]?.segments).toEqual([
+        { speaker: "A", start: 0, end: 1, text: "Speaker A" },
+        { speaker: "B", start: 1, end: 2, text: "Speaker B" },
+      ]);
+    });
+  });
+
+  it("omits the default audio prompt for OpenAI diarized transcription", async () => {
+    await withAudioFixture(
+      "openclaw-diarized-json-default-prompt",
+      async ({ ctx, media, cache }) => {
+        let seenPrompt: string | undefined;
+
+        const providerRegistry = buildProviderRegistry({
+          openai: {
+            id: "openai",
+            capabilities: ["audio"],
+            transcribeAudio: async (req) => {
+              seenPrompt = req.prompt;
+              return { text: "ok", model: req.model };
+            },
+          },
+        });
+
+        const cfg = {
+          models: {
+            providers: {
+              openai: {
+                apiKey: "test-key",
+                models: [],
+              },
+            },
+          },
+          tools: {
+            media: {
+              audio: {
+                enabled: true,
+                providerOptions: {
+                  openai: {
+                    response_format: "diarized_json",
+                  },
+                },
+                models: [
+                  {
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                  },
+                ],
+              },
+            },
+          },
+        } as unknown as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "audio",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          providerRegistry,
+        });
+
+        expect(result.decision.outcome).toBe("success");
+        expect(seenPrompt).toBeUndefined();
+      },
+    );
+  });
+
+  it("fails clearly before sending an explicit prompt to OpenAI diarized transcription", async () => {
+    await withAudioFixture(
+      "openclaw-diarized-json-explicit-prompt",
+      async ({ ctx, media, cache }) => {
+        const transcribeAudio = vi.fn(async (req) => ({ text: "ok", model: req.model }));
+
+        const providerRegistry = buildProviderRegistry({
+          openai: {
+            id: "openai",
+            capabilities: ["audio"],
+            transcribeAudio,
+          },
+        });
+
+        const cfg = {
+          models: {
+            providers: {
+              openai: {
+                apiKey: "test-key",
+                models: [],
+              },
+            },
+          },
+          tools: {
+            media: {
+              audio: {
+                enabled: true,
+                _requestPromptOverride: "Focus on named speakers",
+                providerOptions: {
+                  openai: {
+                    response_format: "diarized_json",
+                  },
+                },
+                models: [
+                  {
+                    provider: "openai",
+                    model: "gpt-4o-transcribe-diarize",
+                  },
+                ],
+              },
+            },
+          },
+        } as unknown as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "audio",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          providerRegistry,
+        });
+
+        expect(result.outputs).toHaveLength(0);
+        expect(result.decision.outcome).toBe("failed");
+        expect(transcribeAudio).not.toHaveBeenCalled();
+        expect(result.decision.attachments[0]?.attempts[0]?.reason).toMatch(
+          /does not support prompt/,
+        );
+      },
+    );
+  });
+
+  it("omits the default audio prompt for OpenAI Codex diarized transcription", async () => {
+    await withAudioFixture(
+      "openclaw-codex-diarized-json-default-prompt",
+      async ({ ctx, media, cache }) => {
+        let seenPrompt: string | undefined;
+
+        const providerRegistry = buildProviderRegistry({
+          "openai-codex": {
+            id: "openai-codex",
+            capabilities: ["audio"],
+            transcribeAudio: async (req) => {
+              seenPrompt = req.prompt;
+              return { text: "ok", model: req.model };
+            },
+          },
+        });
+
+        const cfg = {
+          models: {
+            providers: {
+              "openai-codex": {
+                apiKey: "test-key",
+                models: [],
+              },
+            },
+          },
+          tools: {
+            media: {
+              audio: {
+                enabled: true,
+                providerOptions: {
+                  "openai-codex": {
+                    response_format: "diarized_json",
+                  },
+                },
+                models: [
+                  {
+                    provider: "openai-codex",
+                    model: "gpt-4o-transcribe-diarize",
+                  },
+                ],
+              },
+            },
+          },
+        } as unknown as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "audio",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          providerRegistry,
+        });
+
+        expect(result.decision.outcome).toBe("success");
+        expect(seenPrompt).toBeUndefined();
+      },
+    );
+  });
+
+  it("fails clearly before sending an explicit prompt to OpenAI Codex diarized transcription", async () => {
+    await withAudioFixture(
+      "openclaw-codex-diarized-json-explicit-prompt",
+      async ({ ctx, media, cache }) => {
+        const transcribeAudio = vi.fn(async (req) => ({ text: "ok", model: req.model }));
+
+        const providerRegistry = buildProviderRegistry({
+          "openai-codex": {
+            id: "openai-codex",
+            capabilities: ["audio"],
+            transcribeAudio,
+          },
+        });
+
+        const cfg = {
+          models: {
+            providers: {
+              "openai-codex": {
+                apiKey: "test-key",
+                models: [],
+              },
+            },
+          },
+          tools: {
+            media: {
+              audio: {
+                enabled: true,
+                _requestPromptOverride: "Focus on named speakers",
+                providerOptions: {
+                  "openai-codex": {
+                    response_format: "diarized_json",
+                  },
+                },
+                models: [
+                  {
+                    provider: "openai-codex",
+                    model: "gpt-4o-transcribe-diarize",
+                  },
+                ],
+              },
+            },
+          },
+        } as unknown as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "audio",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          providerRegistry,
+        });
+
+        expect(result.outputs).toHaveLength(0);
+        expect(result.decision.outcome).toBe("failed");
+        expect(transcribeAudio).not.toHaveBeenCalled();
+        expect(result.decision.attachments[0]?.attempts[0]?.reason).toMatch(
+          /does not support prompt/,
+        );
+      },
+    );
+  });
+
+  it("keeps the default prompt for non-diarized OpenAI audio transcription", async () => {
+    await withAudioFixture(
+      "openclaw-non-diarized-default-prompt",
+      async ({ ctx, media, cache }) => {
+        let seenPrompt: string | undefined;
+
+        const providerRegistry = buildProviderRegistry({
+          openai: {
+            id: "openai",
+            capabilities: ["audio"],
+            transcribeAudio: async (req) => {
+              seenPrompt = req.prompt;
+              return { text: "ok", model: req.model };
+            },
+          },
+        });
+
+        const cfg = {
+          models: {
+            providers: {
+              openai: {
+                apiKey: "test-key",
+                models: [],
+              },
+            },
+          },
+          tools: {
+            media: {
+              audio: {
+                enabled: true,
+                models: [
+                  {
+                    provider: "openai",
+                    model: "gpt-4o-transcribe",
+                  },
+                ],
+              },
+            },
+          },
+        } as unknown as OpenClawConfig;
+
+        const result = await runCapability({
+          capability: "audio",
+          cfg,
+          ctx,
+          attachments: cache,
+          media,
+          providerRegistry,
+        });
+
+        expect(result.decision.outcome).toBe("success");
+        expect(seenPrompt).toBe("Transcribe the audio.");
+      },
+    );
+  });
+});
