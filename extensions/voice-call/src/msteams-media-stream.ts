@@ -95,6 +95,12 @@ export interface MsteamsMediaStreamConfig {
    * server clock. Mitigates replay. Default 60_000 (60 seconds).
    */
   hmacWindowMs?: number;
+  /** Hard cap on total concurrent connections (pending + active). Default 64. */
+  maxConnections?: number;
+  /** Hard cap on concurrent connections per source IP. Default 8. */
+  maxConnectionsPerIp?: number;
+  /** Close a connection that has not sent session.start within this many ms. Default 10_000. */
+  preStartTimeoutMs?: number;
   logger?: MsteamsLogger;
   onSessionStart?: (session: MsteamsSession) => void;
   onSessionEnd?: (info: { callId: string; reason: string }) => void;
@@ -124,16 +130,40 @@ const DEFAULT_BIND_ADDRESS = "127.0.0.1";
  */
 const MAX_INBOUND_PAYLOAD_BYTES = 64 * 1024;
 
+/**
+ * Connection guardrails, mirroring the Twilio media-stream path so a valid
+ * shared secret (or a leaked/misbehaving worker) cannot open call sockets
+ * unbounded and exhaust file descriptors or memory.
+ */
+const DEFAULT_MAX_CONNECTIONS = 64;
+const DEFAULT_MAX_CONNECTIONS_PER_IP = 8;
+const DEFAULT_PRE_START_TIMEOUT_MS = 10_000;
+
+/** Per-connection bookkeeping for caps + pre-start idle reaping. */
+interface ConnectionMeta {
+  ip: string;
+  started: boolean;
+  preStartTimer: ReturnType<typeof setTimeout>;
+}
+
 export class MsteamsMediaStream {
   private readonly config: MsteamsMediaStreamConfig;
   private readonly hmacWindowMs: number;
+  private readonly maxConnections: number;
+  private readonly maxConnectionsPerIp: number;
+  private readonly preStartTimeoutMs: number;
   private readonly sessions = new Map<string, WebSocket>();
+  private readonly connectionMeta = new Map<string, ConnectionMeta>();
+  private readonly connectionsByIp = new Map<string, number>();
   private server?: http.Server;
   private wss?: WebSocketServer;
 
   constructor(config: MsteamsMediaStreamConfig) {
     this.config = config;
     this.hmacWindowMs = config.hmacWindowMs ?? DEFAULT_HMAC_WINDOW_MS;
+    this.maxConnections = config.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
+    this.maxConnectionsPerIp = config.maxConnectionsPerIp ?? DEFAULT_MAX_CONNECTIONS_PER_IP;
+    this.preStartTimeoutMs = config.preStartTimeoutMs ?? DEFAULT_PRE_START_TIMEOUT_MS;
   }
 
   async start(): Promise<void> {
@@ -181,6 +211,11 @@ export class MsteamsMediaStream {
         // best-effort close
       }
     }
+    for (const meta of this.connectionMeta.values()) {
+      clearTimeout(meta.preStartTimer);
+    }
+    this.connectionMeta.clear();
+    this.connectionsByIp.clear();
     this.sessions.clear();
 
     this.wss?.close();
@@ -250,12 +285,29 @@ export class MsteamsMediaStream {
       return;
     }
 
+    const ip = normalizeIp(request.socket.remoteAddress);
+    // Bound total + per-IP concurrent sockets before accepting the upgrade.
+    if (this.sessions.size >= this.maxConnections) {
+      this.config.logger?.warn(
+        `MsteamsMediaStream: rejecting ${callId} — max connections (${this.maxConnections}) reached`,
+      );
+      this.rejectUpgrade(socket, 503, "Too Many Connections");
+      return;
+    }
+    if ((this.connectionsByIp.get(ip) ?? 0) >= this.maxConnectionsPerIp) {
+      this.config.logger?.warn(
+        `MsteamsMediaStream: rejecting ${callId} — per-IP cap (${this.maxConnectionsPerIp}) reached for ${ip}`,
+      );
+      this.rejectUpgrade(socket, 503, "Too Many Connections");
+      return;
+    }
+
     wss.handleUpgrade(request, socket, head, (ws) => {
-      this.attachSession(callId, ws);
+      this.attachSession(callId, ws, ip);
     });
   }
 
-  private attachSession(callId: string, ws: WebSocket): void {
+  private attachSession(callId: string, ws: WebSocket, ip: string): void {
     if (this.sessions.has(callId)) {
       // Same callId already connected — close the new one to avoid clobbering.
       try {
@@ -268,17 +320,45 @@ export class MsteamsMediaStream {
     }
 
     this.sessions.set(callId, ws);
+    this.connectionsByIp.set(ip, (this.connectionsByIp.get(ip) ?? 0) + 1);
+    // Reap sockets that authenticate but never send session.start (idle hold).
+    const preStartTimer = setTimeout(() => {
+      this.config.logger?.warn(
+        `MsteamsMediaStream: closing ${callId} — no session.start within ${this.preStartTimeoutMs}ms`,
+      );
+      this.closeSession(callId, "pre-start-timeout");
+    }, this.preStartTimeoutMs);
+    if (typeof preStartTimer.unref === "function") {
+      preStartTimer.unref();
+    }
+    this.connectionMeta.set(callId, { ip, started: false, preStartTimer });
     this.config.logger?.info(`MsteamsMediaStream: connection open ${callId}`);
 
     ws.on("message", (data) => this.handleMessage(callId, data));
     ws.on("close", () => {
-      this.sessions.delete(callId);
+      this.cleanupConnection(callId);
       this.config.logger?.info(`MsteamsMediaStream: connection closed ${callId}`);
     });
     ws.on("error", (err) => {
       const message = err instanceof Error ? err.message : String(err);
       this.config.logger?.warn(`MsteamsMediaStream: ws error ${callId} — ${message}`);
     });
+  }
+
+  /** Release per-connection tracking (timer, per-IP count, session entry). */
+  private cleanupConnection(callId: string): void {
+    const meta = this.connectionMeta.get(callId);
+    if (meta) {
+      clearTimeout(meta.preStartTimer);
+      const remaining = (this.connectionsByIp.get(meta.ip) ?? 1) - 1;
+      if (remaining > 0) {
+        this.connectionsByIp.set(meta.ip, remaining);
+      } else {
+        this.connectionsByIp.delete(meta.ip);
+      }
+      this.connectionMeta.delete(callId);
+    }
+    this.sessions.delete(callId);
   }
 
   private handleMessage(callId: string, data: RawData): void {
@@ -299,8 +379,23 @@ export class MsteamsMediaStream {
 
     switch (parsed.type) {
       case "session.start": {
+        // The callId is authenticated via HMAC in the URL path; a session.start
+        // body claiming a different callId must be rejected, otherwise the call
+        // record and the send/close closures would key off different ids.
+        if (parsed.callId !== callId) {
+          this.config.logger?.warn(
+            `MsteamsMediaStream: session.start callId mismatch (authenticated=${callId} payload=${parsed.callId}); closing`,
+          );
+          this.closeSession(callId, "callid-mismatch");
+          return;
+        }
+        const meta = this.connectionMeta.get(callId);
+        if (meta) {
+          meta.started = true;
+          clearTimeout(meta.preStartTimer);
+        }
         this.config.onSessionStart?.({
-          callId: parsed.callId,
+          callId,
           threadId: parsed.threadId,
           caller: parsed.caller,
           send: (message) => this.sendTo(callId, message),
@@ -346,13 +441,21 @@ export class MsteamsMediaStream {
     } catch {
       // ignore
     }
-    this.sessions.delete(callId);
+    this.cleanupConnection(callId);
   }
 
   private rejectUpgrade(socket: Duplex, code: number, reason: string): void {
     socket.write(`HTTP/1.1 ${code} ${reason}\r\nConnection: close\r\n\r\n`);
     socket.destroy();
   }
+}
+
+function normalizeIp(raw: string | undefined): string {
+  if (!raw) {
+    return "unknown";
+  }
+  // Collapse IPv4-mapped IPv6 (::ffff:1.2.3.4 -> 1.2.3.4) for stable per-IP keys.
+  return raw.startsWith("::ffff:") ? raw.slice("::ffff:".length) : raw;
 }
 
 function rawDataToString(data: RawData): string | null {

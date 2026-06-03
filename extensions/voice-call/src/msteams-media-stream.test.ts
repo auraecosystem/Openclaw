@@ -17,6 +17,9 @@ function randomPort(): number {
 
 async function startServer(opts: {
   port: number;
+  maxConnections?: number;
+  maxConnectionsPerIp?: number;
+  preStartTimeoutMs?: number;
   onSessionStart?: (s: MsteamsSession) => void;
   onSessionEnd?: (info: { callId: string; reason: string }) => void;
   onAudioFrame?: (info: {
@@ -30,12 +33,26 @@ async function startServer(opts: {
     port: opts.port,
     path: PATH,
     sharedSecret: SECRET,
+    maxConnections: opts.maxConnections,
+    maxConnectionsPerIp: opts.maxConnectionsPerIp,
+    preStartTimeoutMs: opts.preStartTimeoutMs,
     onSessionStart: opts.onSessionStart,
     onSessionEnd: opts.onSessionEnd,
     onAudioFrame: opts.onAudioFrame,
   });
   await server.start();
   return server;
+}
+
+/** Open an authenticated WS connection for a callId. */
+function openAuthed(port: number, callId: string): WebSocket {
+  const ts = Date.now();
+  return new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
+    headers: {
+      "x-azurebot-timestamp": String(ts),
+      "x-azurebot-signature": signHmac(SECRET, ts, callId),
+    },
+  });
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs = 1000): Promise<void> {
@@ -290,5 +307,103 @@ describe("MsteamsMediaStream", () => {
 
     expect(closeCode).toBe(1009);
     expect(frames).toBe(0);
+  });
+
+  it("rejects connections beyond maxConnections", async () => {
+    const port = randomPort();
+    server = await startServer({ port, maxConnections: 1 });
+
+    const ws1 = openAuthed(port, "call-cap-1");
+    await new Promise<void>((resolve, reject) => {
+      ws1.once("open", () => resolve());
+      ws1.once("error", reject);
+    });
+    expect(server.sessionCount).toBe(1);
+
+    const ws2 = openAuthed(port, "call-cap-2");
+    const outcome = await new Promise<"unexpected-response" | "error" | "open">((resolve) => {
+      ws2.once("unexpected-response", (_req, res) => {
+        expect(res.statusCode).toBe(503);
+        resolve("unexpected-response");
+      });
+      ws2.once("error", () => resolve("error"));
+      ws2.once("open", () => resolve("open"));
+    });
+    expect(outcome).not.toBe("open");
+    expect(server.sessionCount).toBe(1);
+    ws1.close();
+  });
+
+  it("rejects connections beyond maxConnectionsPerIp", async () => {
+    const port = randomPort();
+    server = await startServer({ port, maxConnectionsPerIp: 1 });
+
+    const ws1 = openAuthed(port, "call-ip-1");
+    await new Promise<void>((resolve, reject) => {
+      ws1.once("open", () => resolve());
+      ws1.once("error", reject);
+    });
+
+    const ws2 = openAuthed(port, "call-ip-2");
+    const outcome = await new Promise<"unexpected-response" | "error" | "open">((resolve) => {
+      ws2.once("unexpected-response", (_req, res) => {
+        expect(res.statusCode).toBe(503);
+        resolve("unexpected-response");
+      });
+      ws2.once("error", () => resolve("error"));
+      ws2.once("open", () => resolve("open"));
+    });
+    expect(outcome).not.toBe("open");
+    ws1.close();
+  });
+
+  it("rejects session.start whose callId does not match the authenticated path", async () => {
+    const port = randomPort();
+    let started = false;
+    server = await startServer({
+      port,
+      onSessionStart: () => {
+        started = true;
+      },
+    });
+
+    const ws = openAuthed(port, "call-auth");
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    const closeCode = await new Promise<number>((resolve) => {
+      ws.once("close", (code) => resolve(code));
+      ws.send(
+        JSON.stringify({
+          type: "session.start",
+          callId: "call-spoofed",
+          threadId: "thread-1",
+          caller: { aadId: "aad-1" },
+        }),
+      );
+    });
+
+    expect(started).toBe(false);
+    expect(closeCode).toBeGreaterThan(0);
+    expect(server.sessionCount).toBe(0);
+  });
+
+  it("closes a connection that never sends session.start", async () => {
+    const port = randomPort();
+    server = await startServer({ port, preStartTimeoutMs: 120 });
+
+    const ws = openAuthed(port, "call-idle");
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+    expect(server.sessionCount).toBe(1);
+
+    await new Promise<void>((resolve) => {
+      ws.once("close", () => resolve());
+    });
+    expect(server.sessionCount).toBe(0);
   });
 });
