@@ -452,6 +452,15 @@ export const tr: TranslationMap = {
     logs: "Canlı Gateway günlükleri.",
     dreams: "Uyku sırasında bellek birleştirme.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Etkinlik",
     subtitle: "Canlı oturum olaylarından türetilen geçici araç etkinliği.",

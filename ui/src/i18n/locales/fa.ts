@@ -450,6 +450,15 @@ export const fa: TranslationMap = {
     logs: "گزارش‌های زنده Gateway.",
     dreams: "رؤیاپردازی حافظه، یکپارچه‌سازی و بازتاب.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "فعالیت",
     subtitle: "فعالیت موقتی ابزار که از رویدادهای نشست زنده استخراج شده است.",

@@ -529,9 +529,7 @@ describe("kitchen-sink RPC command catalog assertions", () => {
   it("requires every expected Kitchen Sink plugin tool", () => {
     expect(() =>
       assertExpectedKitchenSinkToolEntries(
-        [
-          { id: "kitchen_sink_text", source: "plugin", pluginId: "openclaw-kitchen-sink-fixture" },
-        ],
+        [{ id: "kitchen_sink_text", source: "plugin", pluginId: "openclaw-kitchen-sink-fixture" }],
         "tools.catalog plugin tools",
         { requirePluginProvenance: true },
       ),

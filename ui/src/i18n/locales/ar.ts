@@ -448,6 +448,15 @@ export const ar: TranslationMap = {
     logs: "سجلات Gateway المباشرة.",
     dreams: "حلم الذاكرة، والدمج، والتأمل.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "النشاط",
     subtitle: "نشاط أدوات مؤقت مشتق من أحداث الجلسة المباشرة.",

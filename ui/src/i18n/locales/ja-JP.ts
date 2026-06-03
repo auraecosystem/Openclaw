@@ -452,6 +452,15 @@ export const ja_JP: TranslationMap = {
     logs: "ライブ Gateway ログ。",
     dreams: "スリープ中のメモリ統合。",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "アクティビティ",
     subtitle: "ライブセッションイベントから生成される一時的なツールアクティビティ。",

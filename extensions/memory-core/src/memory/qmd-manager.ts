@@ -129,8 +129,33 @@ function buildQmdProcessPath(rawPath: string | undefined): string {
 
 type McporterState = {
   coldStartWarned: boolean;
-  daemonStart: Promise<void> | null;
+  daemonStarts: Map<string, Promise<void>>;
 };
+
+type McporterConfigMode = "generated" | "external";
+type McporterEnvMode = "discovery" | McporterConfigMode;
+
+type ConfiguredMcporterServer =
+  | { mode: "generated"; server: Record<string, unknown> }
+  | { mode: "external" };
+
+const MCPORTER_REMOTE_AUTH_KEYS = new Set(
+  [
+    "auth",
+    "authProvider",
+    "authProviderEnv",
+    "bearerToken",
+    "bearerTokenEnv",
+    "oauth",
+    "oauthClientId",
+    "oauthClientSecret",
+    "oauthClientSecretEnv",
+    "refresh",
+    "refreshToken",
+    "refreshTokenEnv",
+    "tokenCacheDir",
+  ].map(normalizeMcporterConfigKey),
+);
 
 function normalizePositiveInteger(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value)
@@ -146,11 +171,201 @@ type QmdUpdateQueueState = {
   tails: Map<string, Promise<void>>;
 };
 
+type JsonExtractionResult = { found: true; value: unknown } | { found: false };
+
 function getMcporterState(): McporterState {
   return resolveGlobalSingleton<McporterState>(MCPORTER_STATE_KEY, () => ({
     coldStartWarned: false,
-    daemonStart: null,
+    daemonStarts: new Map(),
   }));
+}
+
+function normalizeMcporterConfigKey(key: string): string {
+  return key.toLowerCase().replace(/[_-]/g, "");
+}
+
+function isMcporterAuthLikeKey(key: string): boolean {
+  const normalized = normalizeMcporterConfigKey(key);
+  return (
+    MCPORTER_REMOTE_AUTH_KEYS.has(normalized) ||
+    normalized.includes("apikey") ||
+    normalized.includes("auth") ||
+    normalized.includes("bearer") ||
+    normalized.includes("credential") ||
+    normalized.includes("header") ||
+    normalized.includes("jwt") ||
+    normalized.includes("secret") ||
+    normalized.includes("signature") ||
+    normalized.includes("token") ||
+    normalized === "key" ||
+    normalized === "sig"
+  );
+}
+
+function hasMcporterHeaderAuthMaterial(value: unknown): boolean {
+  const headers = asRecord(value);
+  if (!headers) {
+    return true;
+  }
+  for (const [key, headerValue] of Object.entries(headers)) {
+    const normalized = normalizeMcporterConfigKey(key);
+    if (
+      normalized === "accept" &&
+      typeof headerValue === "string" &&
+      hasRequiredMcporterAcceptTokens(headerValue)
+    ) {
+      continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+function hasRequiredMcporterAcceptTokens(value: string): boolean {
+  const lower = value.toLowerCase();
+  return lower.includes("application/json") && lower.includes("text/event-stream");
+}
+
+function hasMcporterRemoteAuthMaterial(server: Record<string, unknown>): boolean {
+  if (hasMcporterRemoteUrlCredentials(server)) {
+    return true;
+  }
+  return Object.entries(server).some(([key, value]) => {
+    if (normalizeMcporterConfigKey(key) === "env") {
+      return true;
+    }
+    if (normalizeMcporterConfigKey(key) === "headers") {
+      return hasMcporterHeaderAuthMaterial(value);
+    }
+    return isMcporterAuthLikeKey(key);
+  });
+}
+
+function hasMcporterStdioUserOwnedMaterial(server: Record<string, unknown>): boolean {
+  return Object.entries(server).some(([key, value]) => {
+    const normalizedKey = normalizeMcporterConfigKey(key);
+    if (normalizedKey === "env") {
+      return true;
+    }
+    if (normalizedKey === "command") {
+      return hasMcporterAuthLikeText(value);
+    }
+    if (normalizedKey === "args") {
+      return hasMcporterAuthLikeArgs(value);
+    }
+    return isMcporterAuthLikeKey(key);
+  });
+}
+
+function isGeneratedMcporterQmdStdioServer(server: Record<string, unknown>): boolean {
+  if (!isQmdExecutableCommand(server.command)) {
+    return false;
+  }
+  const args = server.args;
+  return Array.isArray(args) && args.length === 1 && args[0] === "mcp";
+}
+
+function isQmdExecutableCommand(command: unknown): boolean {
+  if (typeof command !== "string" || command.length === 0) {
+    return false;
+  }
+  const normalized = command.replace(/\\/g, "/");
+  const commandName = normalized.split("/").findLast(Boolean) ?? normalized;
+  return normalizeMcporterConfigKey(commandName) === "qmd";
+}
+
+function hasMcporterAuthLikeArgs(value: unknown): boolean {
+  return Array.isArray(value) && value.some((entry) => hasMcporterAuthLikeText(entry));
+}
+
+function hasMcporterAuthLikeText(value: unknown): boolean {
+  return typeof value === "string" && isMcporterAuthLikeKey(value);
+}
+
+function hasMcporterRemoteUrlCredentials(server: Record<string, unknown>): boolean {
+  for (const key of ["baseUrl", "url", "serverUrl"]) {
+    const value = server[key];
+    if (typeof value !== "string" || value.length === 0) {
+      continue;
+    }
+    try {
+      const parsed = new URL(value);
+      if (parsed.username.length > 0 || parsed.password.length > 0) {
+        return true;
+      }
+      for (const queryKey of parsed.searchParams.keys()) {
+        if (isMcporterAuthLikeKey(queryKey)) {
+          return true;
+        }
+      }
+    } catch {
+      if (/^[a-z][a-z0-9+.-]*:\/\/[^/?#@]+@/i.test(value)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+function parseMcporterResponseJson(stdout: string): unknown {
+  const trimmed = stdout.trim();
+  try {
+    return JSON.parse(trimmed) as unknown;
+  } catch (err) {
+    const payload = extractFirstJsonValue(trimmed);
+    if (payload.found) {
+      return payload.value;
+    }
+    throw err;
+  }
+}
+
+function extractFirstJsonValue(raw: string): JsonExtractionResult {
+  for (let start = 0; start < raw.length; start += 1) {
+    const opening = raw[start];
+    if (opening !== "{" && opening !== "[") {
+      continue;
+    }
+    const closing = opening === "{" ? "}" : "]";
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < raw.length; index += 1) {
+      const char = raw[index];
+      if (char === undefined) {
+        break;
+      }
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (char === "\\") {
+          escaped = true;
+        } else if (char === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (char === '"') {
+        inString = true;
+        continue;
+      }
+      if (char === opening) {
+        depth += 1;
+      } else if (char === closing) {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return { found: true, value: JSON.parse(raw.slice(start, index + 1)) as unknown };
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return { found: false };
 }
 
 function getQmdEmbedQueueState(): QmdEmbedQueueState {
@@ -340,7 +555,9 @@ export class QmdMemoryManager implements MemorySearchManager {
   private readonly xdgConfigHome: string;
   private readonly xdgCacheHome: string;
   private readonly indexPath: string;
+  private readonly mcporterConfigPath: string;
   private readonly env: NodeJS.ProcessEnv;
+  private readonly mcporterEnv: NodeJS.ProcessEnv;
   private readonly syncSettings: ReturnType<typeof resolveMemorySearchSyncConfig>;
   private readonly managedCollectionNames: string[];
   private readonly collectionRoots = new Map<string, CollectionRoot>();
@@ -380,6 +597,7 @@ export class QmdMemoryManager implements MemorySearchManager {
   private vectorStatusDetail: string | null = null;
   private attemptedNullByteCollectionRepair = false;
   private attemptedDuplicateDocumentRepair = false;
+  private mcporterConfigMode: Promise<McporterConfigMode> | null = null;
   private readonly sessionWarm = new Set<string>();
   private collectionPatternFlag: QmdCollectionPatternFlag | null = "--mask";
   private multiCollectionFilterSupported: boolean | null = null;
@@ -404,6 +622,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     this.xdgConfigHome = path.join(this.qmdDir, "xdg-config");
     this.xdgCacheHome = path.join(this.qmdDir, "xdg-cache");
     this.indexPath = path.join(this.xdgCacheHome, "qmd", "index.sqlite");
+    this.mcporterConfigPath = path.join(this.qmdDir, "mcporter", "mcporter.json");
 
     this.env = {
       ...process.env,
@@ -413,6 +632,11 @@ export class QmdMemoryManager implements MemorySearchManager {
       // Point it at the nested qmd config directory so per-agent collections are visible.
       QMD_CONFIG_DIR: path.join(this.xdgConfigHome, "qmd"),
       XDG_CACHE_HOME: this.xdgCacheHome,
+      NO_COLOR: "1",
+    };
+    this.mcporterEnv = {
+      ...process.env,
+      PATH: buildQmdProcessPath(process.env.PATH),
       NO_COLOR: "1",
     };
     this.closeSignal = new Promise<void>((resolve) => {
@@ -2096,6 +2320,7 @@ export class QmdMemoryManager implements MemorySearchManager {
     if (!mcporter.enabled) {
       return;
     }
+    const configMode = await this.ensureMcporterConfig();
     const state = getMcporterState();
     if (!mcporter.startDaemon) {
       if (!state.coldStartWarned) {
@@ -2106,38 +2331,253 @@ export class QmdMemoryManager implements MemorySearchManager {
       }
       return;
     }
-    if (!state.daemonStart) {
-      state.daemonStart = (async () => {
+    const daemonKey = this.mcporterDaemonKey(configMode);
+    let daemonStart = state.daemonStarts.get(daemonKey);
+    if (!daemonStart) {
+      daemonStart = (async () => {
         try {
-          await this.runMcporter(["daemon", "start"], { timeoutMs: 10_000 });
+          await this.runMcporterCommand(["daemon", "start"], {
+            envMode: configMode,
+            includeGeneratedConfig: configMode === "generated",
+            timeoutMs: 10_000,
+          });
         } catch (err) {
           log.warn(`mcporter daemon start failed: ${String(err)}`);
           // Allow future searches to retry daemon start on transient failures.
-          state.daemonStart = null;
+          state.daemonStarts.delete(daemonKey);
         }
       })();
+      state.daemonStarts.set(daemonKey, daemonStart);
     }
-    await state.daemonStart;
+    await daemonStart;
+  }
+
+  private async ensureMcporterConfig(): Promise<McporterConfigMode> {
+    if (!this.mcporterConfigMode) {
+      this.mcporterConfigMode = this.resolveMcporterConfigMode().catch((err: unknown) => {
+        this.mcporterConfigMode = null;
+        throw err;
+      });
+    }
+    return await this.mcporterConfigMode;
+  }
+
+  private async resolveMcporterConfigMode(): Promise<McporterConfigMode> {
+    await fs.mkdir(path.dirname(this.mcporterConfigPath), { recursive: true });
+    const configured = await this.resolveConfiguredMcporterServer();
+    if (configured?.mode === "external") {
+      return "external";
+    }
+    const server = configured?.server ?? this.buildDefaultMcporterQmdServer();
+    const config = {
+      imports: [],
+      mcpServers: {
+        [this.qmd.mcporter.serverName]: server,
+      },
+    };
+    await this.writeMcporterConfigIfChanged(`${JSON.stringify(config, null, 2)}\n`);
+    return "generated";
+  }
+
+  private async writeMcporterConfigIfChanged(contents: string): Promise<void> {
+    try {
+      if ((await fs.readFile(this.mcporterConfigPath, "utf8")) === contents) {
+        return;
+      }
+    } catch (err) {
+      if (!isFileMissingError(err)) {
+        throw err;
+      }
+    }
+    await fs.writeFile(this.mcporterConfigPath, contents, "utf8");
+  }
+
+  private buildDefaultMcporterQmdServer(): Record<string, unknown> {
+    return {
+      command: this.qmd.command,
+      args: ["mcp"],
+      env: this.buildMcporterQmdEnv(),
+      lifecycle: { mode: "keep-alive", idleTimeoutMs: 300_000 },
+    };
+  }
+
+  private async resolveConfiguredMcporterServer(): Promise<ConfiguredMcporterServer | null> {
+    const serverName = this.qmd.mcporter.serverName;
+    let result: { stdout: string; stderr: string };
+    try {
+      result = await this.runMcporterCommand(["config", "get", serverName, "--json"], {
+        envMode: "discovery",
+        includeGeneratedConfig: false,
+        timeoutMs: 5_000,
+      });
+    } catch (err) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(
+        `mcporter server "${serverName}" is not configured or could not be read: ${formatErrorMessage(
+          err,
+        )}`,
+        { cause: err },
+      );
+    }
+
+    let parsed: unknown;
+    try {
+      parsed = parseMcporterResponseJson(result.stdout);
+    } catch (err) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned invalid JSON`, { cause: err });
+    }
+    const serialized = asRecord(parsed);
+    if (!serialized) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned an invalid JSON definition`);
+    }
+
+    const server = this.toMcporterRawServerEntry(serialized);
+    if (!server) {
+      if (serverName === "qmd") {
+        return null;
+      }
+      throw new Error(`mcporter server "${serverName}" returned an unsupported definition`);
+    }
+    return server;
+  }
+
+  private toMcporterRawServerEntry(
+    serialized: Record<string, unknown>,
+  ): ConfiguredMcporterServer | null {
+    const server: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(serialized)) {
+      if (key === "name" || key === "source" || value === undefined) {
+        continue;
+      }
+      server[key] = value;
+    }
+
+    if (typeof server.command === "string" && server.command.length > 0) {
+      if (!isGeneratedMcporterQmdStdioServer(server) || hasMcporterStdioUserOwnedMaterial(server)) {
+        return { mode: "external" };
+      }
+      return { mode: "generated", server: this.toGeneratedMcporterStdioServer(server) };
+    }
+
+    const hasRemoteEndpoint =
+      typeof server.baseUrl === "string" ||
+      typeof server.url === "string" ||
+      typeof server.serverUrl === "string";
+    if (hasRemoteEndpoint) {
+      // The generated per-agent config is persisted under OpenClaw state. Do not
+      // copy remote auth material from a user's mcporter config into that file;
+      // keep using the original mcporter config for authenticated remotes.
+      if (hasMcporterRemoteAuthMaterial(server)) {
+        return { mode: "external" };
+      }
+      return { mode: "generated", server };
+    }
+
+    return null;
+  }
+
+  private toGeneratedMcporterStdioServer(server: Record<string, unknown>): Record<string, unknown> {
+    return {
+      ...server,
+      env: this.buildMcporterQmdEnv(),
+    };
+  }
+
+  private buildMcporterQmdEnv(): Record<string, string> {
+    const keys = [
+      "PATH",
+      "XDG_CONFIG_HOME",
+      "QMD_CONFIG_DIR",
+      "XDG_CACHE_HOME",
+      "QMD_EMBED_MODEL",
+      "QMD_RERANK_MODEL",
+      "QMD_GENERATE_MODEL",
+      "QMD_LLAMA_GPU",
+      "QMD_EMBED_CONTEXT_SIZE",
+      "QMD_RERANK_CONTEXT_SIZE",
+      "QMD_EXPAND_CONTEXT_SIZE",
+      "NO_COLOR",
+    ];
+    const env: Record<string, string> = {};
+    for (const key of keys) {
+      const value = this.env[key];
+      if (typeof value === "string" && value.length > 0) {
+        env[key] = value;
+      }
+    }
+    return env;
+  }
+
+  private buildMcporterProcessEnv(mode: McporterEnvMode): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...this.mcporterEnv };
+    delete env.QMD_CONFIG_DIR;
+    delete env.XDG_CACHE_HOME;
+    if (mode === "generated") {
+      delete env.XDG_CONFIG_HOME;
+      delete env.MCPORTER_CONFIG;
+    }
+    return env;
+  }
+
+  private mcporterDaemonKey(configMode: McporterConfigMode): string {
+    if (configMode === "generated") {
+      return this.mcporterConfigPath;
+    }
+    return [
+      "external",
+      this.qmd.mcporter.serverName,
+      this.mcporterEnv.MCPORTER_CONFIG ?? "",
+      this.mcporterEnv.XDG_CONFIG_HOME ?? "",
+      this.workspaceDir,
+    ].join(":");
+  }
+
+  private async runMcporterCommand(
+    args: string[],
+    opts?: {
+      envMode?: McporterEnvMode;
+      includeGeneratedConfig?: boolean;
+      timeoutMs?: number;
+    },
+  ): Promise<{ stdout: string; stderr: string }> {
+    const mcporterArgs =
+      opts?.includeGeneratedConfig === false
+        ? args
+        : [...args, "--config", this.mcporterConfigPath];
+    const env = this.buildMcporterProcessEnv(opts?.envMode ?? "generated");
+    const spawnInvocation = resolveCliSpawnInvocation({
+      command: "mcporter",
+      args: mcporterArgs,
+      env,
+      packageName: "mcporter",
+    });
+    return await runCliCommand({
+      commandSummary: `${spawnInvocation.command} ${spawnInvocation.argv.join(" ")}`,
+      spawnInvocation,
+      env,
+      cwd: this.workspaceDir,
+      timeoutMs: opts?.timeoutMs,
+      maxOutputChars: this.maxQmdOutputChars,
+    });
   }
 
   private async runMcporter(
     args: string[],
     opts?: { timeoutMs?: number },
   ): Promise<{ stdout: string; stderr: string }> {
-    const spawnInvocation = resolveCliSpawnInvocation({
-      command: "mcporter",
-      args,
-      env: this.env,
-      packageName: "mcporter",
-    });
-    return await runCliCommand({
-      commandSummary: `${spawnInvocation.command} ${spawnInvocation.argv.join(" ")}`,
-      spawnInvocation,
-      // Keep mcporter and direct qmd commands on the same agent-scoped XDG state.
-      env: this.env,
-      cwd: this.workspaceDir,
-      timeoutMs: opts?.timeoutMs,
-      maxOutputChars: this.maxQmdOutputChars,
+    const configMode = await this.ensureMcporterConfig();
+    return await this.runMcporterCommand(args, {
+      ...opts,
+      envMode: configMode,
+      includeGeneratedConfig: configMode === "generated",
     });
   }
 
@@ -2226,7 +2666,7 @@ export class QmdMemoryManager implements MemorySearchManager {
       throw err;
     }
 
-    const parsedUnknown: unknown = JSON.parse(result.stdout);
+    const parsedUnknown = parseMcporterResponseJson(result.stdout);
     const parsedRecord = asRecord(parsedUnknown);
     const structuredContent = parsedRecord ? asRecord(parsedRecord.structuredContent) : null;
     const structured: unknown = structuredContent ?? parsedUnknown;

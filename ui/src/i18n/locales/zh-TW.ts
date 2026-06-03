@@ -446,6 +446,15 @@ export const zh_TW: TranslationMap = {
     logs: "實時網關日誌。",
     dreams: "睡眠期間的記憶整合。",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "活動",
     subtitle: "從即時工作階段事件衍生的暫時性工具活動。",

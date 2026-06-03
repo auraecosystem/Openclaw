@@ -450,6 +450,15 @@ export const es: TranslationMap = {
     logs: "Seguimiento en vivo de los registros de la puerta de enlace.",
     dreams: "Consolidación de la memoria durante el sueño.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Actividad",
     subtitle: "Actividad efímera de herramientas derivada de eventos de sesión en vivo.",

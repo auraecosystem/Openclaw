@@ -449,6 +449,15 @@ export const pt_BR: TranslationMap = {
     logs: "Logs ao vivo do gateway.",
     dreams: "Consolidação de memória durante o sono.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Atividade",
     subtitle: "Atividade efêmera de ferramentas derivada de eventos de sessão ao vivo.",

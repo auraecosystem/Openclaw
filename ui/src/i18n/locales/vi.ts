@@ -450,6 +450,15 @@ export const vi: TranslationMap = {
     logs: "Nhật ký gateway trực tiếp.",
     dreams: "Mơ bộ nhớ, hợp nhất và phản chiếu.",
   },
+  skillWorkshop: {
+    modeSwitcher: {
+      label: "Workshop view",
+      board: "Board",
+      boardTitle: "Board view",
+      today: "Today",
+      todayTitle: "Today view",
+    },
+  },
   activity: {
     title: "Hoạt động",
     subtitle: "Hoạt động công cụ tạm thời được lấy từ các sự kiện phiên trực tiếp.",
