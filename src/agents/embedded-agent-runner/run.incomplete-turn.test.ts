@@ -7,6 +7,7 @@ import {
 import { makeAttemptResult } from "./run.overflow-compaction.fixture.js";
 import {
   loadRunOverflowCompactionHarness,
+  mockedBuildEmbeddedRunPayloads,
   mockedClassifyFailoverReason,
   mockedGlobalHookRunner,
   mockedLog,
@@ -30,6 +31,7 @@ import {
   resolvePlanningOnlyRetryLimit,
   resolvePlanningOnlyRetryInstruction,
   isIncompleteTerminalAssistantTurn,
+  isTruncatedTerminalAssistantTurn,
   resolveIncompleteTurnPayloadText as resolveIncompleteTurnPayloadTextCore,
   resolveReasoningOnlyRetryInstruction,
   STRICT_AGENTIC_BLOCKED_TEXT,
@@ -1550,6 +1552,47 @@ describe("runEmbeddedAgent incomplete-turn safety", () => {
     expectWarnMessageWith("incomplete turn detected");
   });
 
+  it("surfaces error and logs warning for truncated API response with partial streamed text (#89051)", async () => {
+    mockedClassifyFailoverReason.mockReturnValue(null);
+    // Simulate: model streamed partial text (payloadCount > 0) but the
+    // response was truncated mid-thinking — no stopReason, incomplete content.
+    // Before fix: run exits silently as "working" with no log or error.
+    // After fix: surfaces incomplete-turn error + warn log.
+    mockedBuildEmbeddedRunPayloads.mockReturnValueOnce([{ text: "partial reasoning..." }]);
+    mockedRunEmbeddedAttempt.mockResolvedValueOnce(
+      makeAttemptResult({
+        assistantTexts: ["partial reasoning..."],
+        toolMetas: [],
+        lastAssistant: {
+          role: "assistant",
+          // No stopReason — stream ended without finish_reason
+          provider: "ollama",
+          model: "qwen3.6-35b",
+          content: [{ type: "thinking", thinking: "Let me analyze the migration script..." }],
+        } as unknown as EmbeddedRunAttemptResult["lastAssistant"],
+        currentAttemptAssistant: {
+          role: "assistant",
+          provider: "ollama",
+          model: "qwen3.6-35b",
+          content: [{ type: "thinking", thinking: "Let me analyze the migration script..." }],
+        } as unknown as EmbeddedRunAttemptResult["currentAttemptAssistant"],
+      }),
+    );
+
+    const result = await runEmbeddedAgent({
+      ...overflowBaseRunParams,
+      provider: "ollama",
+      model: "qwen3.6-35b",
+      runId: "run-truncated-api-response-89051",
+    });
+
+    expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
+    expect(result.payloads?.[0]?.isError).toBe(true);
+    expect(result.payloads?.[0]?.text).toContain("couldn't generate a response");
+    expectWarnMessageWith("truncated API response detected");
+    expectWarnMessageWith("stopReason=missing");
+  });
+
   it("treats missing replay metadata as replay-invalid", () => {
     const attempt = makeAttemptResult();
     delete (attempt as Partial<EmbeddedRunAttemptResult>).replayMetadata;
@@ -2935,6 +2978,111 @@ describe("resolvePlanningOnlyRetryInstruction single-action loophole", () => {
       attempt: makeAttemptWithTools(["read"], "I'll check that next."),
     });
 
+    expect(result).toBeNull();
+  });
+});
+
+describe("isTruncatedTerminalAssistantTurn (#89051)", () => {
+  it("detects unsigned/partial thinking with missing stopReason", () => {
+    const msg = {
+      role: "assistant" as const,
+      content: [{ type: "thinking", thinking: "partial thoughts..." }],
+    };
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: msg as never })).toBe(true);
+  });
+
+  it("detects unsigned/partial thinking with stopReason=length", () => {
+    const msg = {
+      role: "assistant" as const,
+      stopReason: "length",
+      content: [{ type: "thinking", thinking: "cut off mid-sentence" }],
+    };
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: msg as never })).toBe(true);
+  });
+
+  it("does not flag normal stop with valid content", () => {
+    const msg = {
+      role: "assistant" as const,
+      stopReason: "stop",
+      content: [
+        { type: "thinking", thinking: "reasoning", signature: "valid-sig" },
+        { type: "text", text: "Here is the answer." },
+      ],
+    };
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: msg as never })).toBe(false);
+  });
+
+  it("does not flag toolUse stop reason", () => {
+    const msg = {
+      role: "assistant" as const,
+      stopReason: "toolUse",
+      content: [{ type: "thinking", thinking: "I will call a tool" }],
+    };
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: msg as never })).toBe(false);
+  });
+
+  it("returns false for null lastAssistant", () => {
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: null })).toBe(false);
+  });
+
+  it("detects empty content array with missing stopReason", () => {
+    const msg = { role: "assistant" as const, content: [] };
+    expect(isTruncatedTerminalAssistantTurn({ lastAssistant: msg as never })).toBe(true);
+  });
+});
+
+describe("resolveIncompleteTurnPayloadText truncation guard (#89051)", () => {
+  it("surfaces error when payloadCount > 0 but response is truncated", () => {
+    const result = resolveIncompleteTurnPayloadText({
+      payloadCount: 3,
+      aborted: false,
+      timedOut: false,
+      attempt: {
+        lastAssistant: {
+          role: "assistant" as const,
+          content: [{ type: "thinking", thinking: "partial..." }],
+        },
+        currentAttemptAssistant: {
+          role: "assistant" as const,
+          content: [{ type: "thinking", thinking: "partial..." }],
+        },
+        assistantTexts: [],
+        clientToolCalls: false,
+        yieldDetected: false,
+        didSendDeterministicApprovalPrompt: false,
+        lastToolError: false,
+        messagesSnapshot: [],
+        toolMetas: [],
+      } as never,
+    });
+    expect(result).not.toBeNull();
+    expect(result).toContain("couldn't generate a response");
+  });
+
+  it("still returns null for normal payloadCount > 0 with valid response", () => {
+    const result = resolveIncompleteTurnPayloadText({
+      payloadCount: 3,
+      aborted: false,
+      timedOut: false,
+      attempt: {
+        lastAssistant: {
+          role: "assistant" as const,
+          stopReason: "stop",
+          content: [
+            { type: "thinking", thinking: "done", signature: "sig" },
+            { type: "text", text: "Final answer." },
+          ],
+        },
+        currentAttemptAssistant: null,
+        assistantTexts: ["Final answer."],
+        clientToolCalls: false,
+        yieldDetected: false,
+        didSendDeterministicApprovalPrompt: false,
+        lastToolError: false,
+        messagesSnapshot: [],
+        toolMetas: [],
+      } as never,
+    });
     expect(result).toBeNull();
   });
 });

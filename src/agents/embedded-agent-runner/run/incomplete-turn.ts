@@ -116,6 +116,33 @@ export function isIncompleteTerminalAssistantTurn(params: {
   return params.lastAssistant?.stopReason === "toolUse";
 }
 
+/**
+ * Detects truncated assistant responses where the API stream ended without a
+ * proper finish reason or produced an incomplete thinking block. When this
+ * fires, the turn should NOT be treated as successful even if partial text
+ * was streamed (payloadCount > 0). Without this guard the run terminates
+ * silently with livenessState "working" and no error log. (#89051)
+ */
+export function isTruncatedTerminalAssistantTurn(params: {
+  lastAssistant?: AgentMessage | null;
+}): boolean {
+  if (!params.lastAssistant) {
+    return false;
+  }
+  const stopReason = (params.lastAssistant as { stopReason?: string }).stopReason;
+  // Missing stopReason indicates the stream ended without finish_reason
+  // "length" indicates the model hit its output token limit mid-generation
+  const isTruncatedStopReason = !stopReason || stopReason === "length";
+  if (!isTruncatedStopReason) {
+    return false;
+  }
+  // Only flag as truncated when the content is actually incomplete (avoids
+  // false positives on normal short responses that legitimately lack a
+  // stopReason due to transport quirks)
+  const assessment = assessLastAssistantMessage(params.lastAssistant);
+  return assessment === "incomplete-thinking" || assessment === "incomplete-text";
+}
+
 const PLANNING_ONLY_PROMISE_RE =
   /\b(?:i(?:'ll| will)|let me|i(?:'m| am)\s+going to|first[, ]+i(?:'ll| will)|next[, ]+i(?:'ll| will)|i can do that)\b/i;
 const PLANNING_ONLY_COMPLETION_RE =
@@ -267,8 +294,17 @@ export function resolveIncompleteTurnPayloadText(params: {
   // produced. (#76477)
   const toolUseTerminal = params.attempt.lastAssistant?.stopReason === "toolUse";
 
+  // Truncation guard: when the API stream ended without a proper finish
+  // reason and the content is incomplete (unsigned thinking, no visible text),
+  // partial streamed payloads must not suppress the error — the turn was
+  // cut off mid-generation and the session would otherwise go silent. (#89051)
+  const truncatedTerminal = isTruncatedTerminalAssistantTurn({
+    lastAssistant: (params.attempt.currentAttemptAssistant ??
+      params.attempt.lastAssistant) as AgentMessage | null,
+  });
+
   if (
-    (params.payloadCount !== 0 && !toolUseTerminal) ||
+    (params.payloadCount !== 0 && !toolUseTerminal && !truncatedTerminal) ||
     (params.aborted && params.externalAbort) ||
     params.timedOut ||
     params.attempt.clientToolCalls ||
@@ -311,6 +347,7 @@ export function resolveIncompleteTurnPayloadText(params: {
     !incompleteTerminalAssistant &&
     !reasoningOnlyAssistant &&
     !emptyResponseAssistant &&
+    !truncatedTerminal &&
     stopReason !== "error"
   ) {
     return null;
