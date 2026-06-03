@@ -64,6 +64,7 @@ export const BOUNDARY_CHECKS = [
     ["run", "lint:extensions:telegram-grammy-types"],
   ],
   ["lint:ui:no-raw-window-open", "pnpm", ["lint:ui:no-raw-window-open"]],
+  ["lint:agents-md:size", "pnpm", ["run", "lint:agents-md:size"]],
 ].map(([label, command, args]) => ({ label, command, args }));
 
 export function resolveConcurrency(value, fallback = 4, label = "concurrency") {
