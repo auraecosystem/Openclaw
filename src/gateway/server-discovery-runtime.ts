@@ -4,6 +4,7 @@ import { pickPrimaryTailnetIPv4, pickPrimaryTailnetIPv6 } from "../infra/tailnet
 import { parseTcpPort } from "../infra/tcp-port.js";
 import { resolveWideAreaDiscoveryDomain, writeWideAreaGatewayZone } from "../infra/widearea-dns.js";
 import type { PluginGatewayDiscoveryServiceRegistration } from "../plugins/registry-types.js";
+import type { OpenClawGatewayDiscoveryService } from "../plugins/types.js";
 import {
   formatBonjourInstanceName,
   resolveBonjourCliPath,
@@ -22,6 +23,37 @@ function resolveDiscoveryAdvertiseTimeoutMs(env: NodeJS.ProcessEnv): number {
     return DEFAULT_DISCOVERY_ADVERTISE_TIMEOUT_MS;
   }
   return parsed;
+}
+
+type ReadableGatewayDiscoveryServiceRegistration = {
+  readonly pluginId: string;
+  readonly serviceId: string;
+  readonly pluginService: OpenClawGatewayDiscoveryService;
+  readonly advertise: OpenClawGatewayDiscoveryService["advertise"];
+};
+
+type GatewayDiscoveryServiceRegistrationReadResult =
+  | { readonly ok: true; readonly entry: ReadableGatewayDiscoveryServiceRegistration }
+  | { readonly ok: false; readonly error: unknown };
+
+function readGatewayDiscoveryServiceRegistration(
+  entry: PluginGatewayDiscoveryServiceRegistration,
+): GatewayDiscoveryServiceRegistrationReadResult {
+  try {
+    const pluginId = entry.pluginId;
+    const service = entry.service;
+    return {
+      ok: true,
+      entry: {
+        pluginId,
+        serviceId: service.id,
+        pluginService: service,
+        advertise: service.advertise,
+      },
+    };
+  } catch (error) {
+    return { ok: false, error };
+  }
 }
 
 export async function startGatewayDiscovery(params: {
@@ -62,8 +94,16 @@ export async function startGatewayDiscovery(params: {
     const stops: Array<() => void | Promise<void>> = [];
     let attemptedLocalDiscovery = false;
     let stoppedLocalDiscovery = false;
-    for (const entry of params.gatewayDiscoveryServices ?? []) {
+    for (const registration of params.gatewayDiscoveryServices ?? []) {
       attemptedLocalDiscovery = true;
+      const readable = readGatewayDiscoveryServiceRegistration(registration);
+      if (!readable.ok) {
+        params.logDiscovery.warn(
+          `gateway discovery service registration unreadable: ${String(readable.error)}`,
+        );
+        continue;
+      }
+      const entry = readable.entry;
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
         let timedOut = false;
@@ -80,7 +120,7 @@ export async function startGatewayDiscovery(params: {
           minimal: mdnsMinimal,
         };
         const advertisePromise = Promise.resolve()
-          .then(() => entry.service.advertise(context))
+          .then(() => entry.advertise.call(entry.pluginService, context))
           .then(
             async (started) => {
               if (timedOut) {
@@ -96,14 +136,14 @@ export async function startGatewayDiscovery(params: {
                   }
                 }
                 params.logDiscovery.warn(
-                  `gateway discovery service completed after startup timeout (${entry.service.id}, plugin=${entry.pluginId})`,
+                  `gateway discovery service completed after startup timeout (${entry.serviceId}, plugin=${entry.pluginId})`,
                 );
               }
               return started;
             },
             (err: unknown) => {
               params.logDiscovery.warn(
-                `gateway discovery service failed${timedOut ? " after startup timeout" : ""} (${entry.service.id}, plugin=${entry.pluginId}): ${String(err)}`,
+                `gateway discovery service failed${timedOut ? " after startup timeout" : ""} (${entry.serviceId}, plugin=${entry.pluginId}): ${String(err)}`,
               );
               return undefined;
             },
@@ -112,7 +152,7 @@ export async function startGatewayDiscovery(params: {
           timer = setTimeout(() => {
             timedOut = true;
             params.logDiscovery.warn(
-              `gateway discovery service timed out after ${advertiseTimeoutMs}ms (${entry.service.id}, plugin=${entry.pluginId}); continuing startup`,
+              `gateway discovery service timed out after ${advertiseTimeoutMs}ms (${entry.serviceId}, plugin=${entry.pluginId}); continuing startup`,
             );
             resolve(undefined);
           }, advertiseTimeoutMs);
@@ -127,7 +167,7 @@ export async function startGatewayDiscovery(params: {
         }
       } catch (err) {
         params.logDiscovery.warn(
-          `gateway discovery service failed (${entry.service.id}, plugin=${entry.pluginId}): ${String(err)}`,
+          `gateway discovery service failed (${entry.serviceId}, plugin=${entry.pluginId}): ${String(err)}`,
         );
       }
     }

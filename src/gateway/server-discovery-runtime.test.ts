@@ -186,6 +186,93 @@ describe("startGatewayDiscovery", () => {
     expect(stopped).toEqual(["peer", "bonjour"]);
   });
 
+  it("keeps healthy local discovery services after unreadable service registration metadata", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.VITEST;
+
+    const stopped: string[] = [];
+    const unreadableServiceRegistration = {
+      get pluginId() {
+        return "broken-discovery";
+      },
+      get service() {
+        throw new Error("gateway discovery service getter exploded");
+      },
+      source: "test",
+    } as never;
+    const unreadableOwnerRegistration = {
+      get pluginId() {
+        throw new Error("gateway discovery plugin id getter exploded");
+      },
+      source: "test",
+      service: {
+        id: "broken-owner-discovery",
+        advertise: vi.fn(async () => ({ stop: () => stopped.push("broken-owner") })),
+      },
+    } as never;
+    const healthy = makeDiscoveryService({
+      id: "healthy-discovery",
+      pluginId: "healthy",
+      stop: () => {
+        stopped.push("healthy");
+      },
+    });
+    const logs = makeLogs();
+
+    const result = await startGatewayDiscovery({
+      machineDisplayName: "Lab Mac",
+      port: 18789,
+      wideAreaDiscoveryEnabled: false,
+      tailscaleMode: "serve",
+      mdnsMode: "full",
+      gatewayDiscoveryServices: [
+        unreadableServiceRegistration,
+        unreadableOwnerRegistration,
+        healthy,
+      ],
+      logDiscovery: logs,
+    });
+
+    expect(healthy.service.advertise).toHaveBeenCalledTimes(1);
+    expect(logs.warn.mock.calls.slice(0, 2)).toEqual([
+      [
+        "gateway discovery service registration unreadable: Error: gateway discovery service getter exploded",
+      ],
+      [
+        "gateway discovery service registration unreadable: Error: gateway discovery plugin id getter exploded",
+      ],
+    ]);
+
+    await result.bonjourStop?.();
+    expect(stopped).toEqual(["healthy"]);
+  });
+
+  it("preserves the gateway discovery service receiver while using snapshotted metadata", async () => {
+    process.env.NODE_ENV = "development";
+    delete process.env.VITEST;
+
+    const advertised: string[] = [];
+    const service = makeDiscoveryService({ id: "receiver-discovery" });
+    Object.assign(service.service, {
+      marker: "receiver-ok",
+      advertise(this: { marker: string }) {
+        advertised.push(this.marker);
+      },
+    });
+
+    await startGatewayDiscovery({
+      machineDisplayName: "Lab Mac",
+      port: 18789,
+      wideAreaDiscoveryEnabled: false,
+      tailscaleMode: "off",
+      mdnsMode: "full",
+      gatewayDiscoveryServices: [service],
+      logDiscovery: makeLogs(),
+    });
+
+    expect(advertised).toEqual(["receiver-ok"]);
+  });
+
   it("omits invalid SSH discovery ports", async () => {
     await expectSshPortOmitted("2222abc");
   });
