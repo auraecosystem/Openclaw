@@ -88,6 +88,10 @@ import {
 import { resetReplyRunSession } from "./agent-runner-session-reset.js";
 import { appendUsageLine, formatResponseUsageLine } from "./agent-runner-usage-line.js";
 import { resolveQueuedReplyExecutionConfig } from "./agent-runner-utils.js";
+import { buildUsageContract } from "../usage-bar/contract.js";
+import { loadUsageBarTemplate } from "../usage-bar/template.js";
+import { renderUsageBar } from "../usage-bar/translator.js";
+import type { PluginHookReplyUsageState } from "../../plugins/hook-types.js";
 import { createAudioAsVoiceBuffer, createBlockReplyPipeline } from "./block-reply-pipeline.js";
 import { resolveEffectiveBlockStreamingConfig } from "./block-streaming.js";
 import { resolveEffectiveReplyRoute } from "./effective-reply-route.js";
@@ -1715,15 +1719,15 @@ export async function runReplyAgent(params: {
 
     // Hand the turn's execution state to the reply_payload_sending hook (harness-
     // agnostic: every harness produces runResult.meta). A footer/readout plugin
-    // reads it at deliver time, correlated by runId/sessionKey.
+    // reads it at deliver time, correlated by runId/sessionKey. The same snapshot
+    // also drives the native templated /usage full renderer below.
+    let replyUsageSnapshot: PluginHookReplyUsageState | undefined;
     {
       const winnerProvider = runResult.meta?.executionTrace?.winnerProvider ?? providerUsed;
       const winnerModel = runResult.meta?.executionTrace?.winnerModel ?? modelUsed;
       const ctxTokens = runResult.meta?.agentMeta?.contextTokens;
       const compactions = runResult.meta?.agentMeta?.compactionCount;
-      recordReplyUsageState(
-        { runId, sessionKey },
-        {
+      replyUsageSnapshot = {
           provider: providerUsed,
           model: modelUsed,
           resolvedRef:
@@ -1781,8 +1785,8 @@ export async function runReplyAgent(params: {
           limits: getProviderUsageLimitsCached(providerUsed, {
             credentialType: runResult.meta?.requestShaping?.authMode ?? undefined,
           }),
-        },
-      );
+      };
+      recordReplyUsageState({ runId, sessionKey }, replyUsageSnapshot);
     }
     const verboseEnabled = resolvedVerboseLevel !== "off";
     const preserveUserFacingSessionState = shouldPreserveUserFacingSessionStateForInputProvenance(
@@ -2142,7 +2146,25 @@ export async function runReplyAgent(params: {
         showCost,
         costConfig,
       });
-      if (formatted && responseUsageMode === "full" && sessionKey) {
+      // /usage full: if a custom template is configured, render it from the same
+      // per-turn snapshot and use it in place of the built-in line. Fail-open —
+      // an absent/invalid template or empty render falls back to the line above.
+      let customUsageLine: string | undefined;
+      if (responseUsageMode === "full" && replyUsageSnapshot) {
+        const template = loadUsageBarTemplate(cfg.messages?.usageTemplate);
+        if (template) {
+          const rendered = renderUsageBar(
+            template,
+            buildUsageContract(replyUsageSnapshot, replyToChannel),
+          );
+          if (rendered) {
+            customUsageLine = rendered;
+          }
+        }
+      }
+      if (customUsageLine) {
+        formatted = customUsageLine;
+      } else if (formatted && responseUsageMode === "full" && sessionKey) {
         formatted = `${formatted} · session \`${sessionKey}\``;
       }
       if (formatted) {
