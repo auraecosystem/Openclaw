@@ -7,7 +7,8 @@ export function collectUnavailableAgentSkills(report: SkillStatusReport): SkillS
       !skill.eligible &&
       !skill.disabled &&
       !skill.blockedByAllowlist &&
-      !skill.blockedByAgentFilter,
+      !skill.blockedByAgentFilter &&
+      !skill.blockedByPlatform,
   );
 }
 

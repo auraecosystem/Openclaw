@@ -58,6 +58,7 @@ export type SkillStatusEntry = {
   disabled: boolean;
   blockedByAllowlist: boolean;
   blockedByAgentFilter: boolean;
+  blockedByPlatform: boolean;
   eligible: boolean;
   modelVisible: boolean;
   userInvocable: boolean;
@@ -258,6 +259,10 @@ function buildSkillStatus(
   const disabled = skillConfig?.enabled === false;
   const blockedByAllowlist = !isBundledSkillAllowed(entry, allowBundled);
   const blockedByAgentFilter = agentSkillFilter !== undefined && !indexed.agentAllowed;
+  const blockedByPlatform =
+    entry.metadata?.os !== undefined &&
+    entry.metadata.os.length > 0 &&
+    !entry.metadata.os.includes(process.platform);
   const always = entry.metadata?.always === true;
   const isEnvSatisfied = (envName: string) =>
     Boolean(
@@ -308,6 +313,7 @@ function buildSkillStatus(
     disabled,
     blockedByAllowlist,
     blockedByAgentFilter,
+    blockedByPlatform,
     eligible,
     modelVisible: availableToAgent && indexed.promptVisible,
     userInvocable,
