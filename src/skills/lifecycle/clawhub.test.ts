@@ -48,6 +48,22 @@ function expectInstallPackageSourceDir(sourceDir: string) {
   expect(call[0]?.sourceDir).toBe(sourceDir);
 }
 
+function expectClawHubSetupHookSkipped() {
+  const call = installPackageDirMock.mock.calls.at(0);
+  if (!call) {
+    throw new Error("expected installPackageDir call");
+  }
+  expect((call[0] as { afterInstall?: unknown }).afterInstall).toBeUndefined();
+}
+
+function expectClawHubSetupHookEnabled() {
+  const call = installPackageDirMock.mock.calls.at(0);
+  if (!call) {
+    throw new Error("expected installPackageDir call");
+  }
+  expect((call[0] as { afterInstall?: unknown }).afterInstall).toEqual(expect.any(Function));
+}
+
 function expectInstalledSkill(
   result: Awaited<ReturnType<typeof installSkillFromClawHub>>,
   expected: { slug?: string; version?: string; targetDir?: string } = {},
@@ -185,12 +201,24 @@ describe("skills-clawhub", () => {
       baseUrl: undefined,
     });
     expectInstallPackageSourceDir("/tmp/extracted-skill");
+    expectClawHubSetupHookSkipped();
     expectInstalledSkill(result, {
       slug: "agentreceipt",
       version: "1.0.0",
       targetDir: "/tmp/workspace/skills/agentreceipt",
     });
     expect(archiveCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs ClawHub setup hooks only when explicitly allowed", async () => {
+    const result = await installSkillFromClawHub({
+      workspaceDir: "/tmp/workspace",
+      slug: "agentreceipt",
+      allowSetupHooks: true,
+    });
+
+    expectInstalledSkill(result);
+    expectClawHubSetupHookEnabled();
   });
 
   it.each(["skill.md", "skills.md", "SKILL.MD"])(
@@ -282,6 +310,28 @@ describe("skills-clawhub", () => {
           baseUrl: "https://legacy.clawhub.ai",
         });
         expectLegacyUpdateSuccess(results, workspaceDir, slug);
+        expectClawHubSetupHookSkipped();
+      } finally {
+        await fs.rm(workspaceDir, { recursive: true, force: true });
+      }
+    });
+
+    it("runs tracked update setup hooks only when explicitly allowed", async () => {
+      const slug = "re\u0430ct";
+      const { workspaceDir } = await createLegacyTrackedSkillFixture(slug);
+      installPackageDirMock.mockResolvedValueOnce({
+        ok: true,
+        targetDir: path.join(workspaceDir, "skills", slug),
+      });
+
+      try {
+        const results = await updateSkillsFromClawHub({
+          workspaceDir,
+          allowSetupHooks: true,
+        });
+
+        expectLegacyUpdateSuccess(results, workspaceDir, slug);
+        expectClawHubSetupHookEnabled();
       } finally {
         await fs.rm(workspaceDir, { recursive: true, force: true });
       }

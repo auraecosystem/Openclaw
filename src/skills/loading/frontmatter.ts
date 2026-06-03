@@ -1,3 +1,4 @@
+import path from "node:path";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { parseFrontmatterBlock } from "../../../packages/markdown-core/src/frontmatter.js";
 import { validateRegistryNpmSpec } from "../../infra/npm-registry-spec.js";
@@ -18,6 +19,7 @@ import type {
   SkillEntry,
   SkillInstallSpec,
   SkillInvocationPolicy,
+  SkillSetupSpec,
 } from "../types.js";
 import type { Skill } from "./skill-contract.js";
 
@@ -184,6 +186,37 @@ function parseInstallSpec(input: unknown): SkillInstallSpec | undefined {
   return spec;
 }
 
+type ResolvedSetupSpec = {
+  spec?: SkillSetupSpec;
+  error?: string;
+};
+
+function resolveSetupSpec(raw: unknown): ResolvedSetupSpec {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+  const obj = raw as Record<string, unknown>;
+  if (!("script" in obj)) {
+    return {};
+  }
+  const script = readStringValue(obj.script);
+  if (!script) {
+    return { error: "Invalid setup.script: expected a non-empty relative path" };
+  }
+  const normalized = script.trim();
+  if (!normalized) {
+    return { error: "Invalid setup.script: expected a non-empty relative path" };
+  }
+  if (path.isAbsolute(normalized)) {
+    return { error: `Invalid setup.script: absolute paths are not allowed (${normalized})` };
+  }
+  if (normalized.includes("..")) {
+    return { error: `Invalid setup.script: path traversal is not allowed (${normalized})` };
+  }
+  const spec: SkillSetupSpec = { script: normalized };
+  return { spec };
+}
+
 export function resolveOpenClawMetadata(
   frontmatter: ParsedSkillFrontmatter,
 ): OpenClawSkillMetadata | undefined {
@@ -194,6 +227,7 @@ export function resolveOpenClawMetadata(
   const requires = resolveOpenClawManifestRequires(metadataObj);
   const install = resolveOpenClawManifestInstall(metadataObj, parseInstallSpec);
   const osRaw = resolveOpenClawManifestOs(metadataObj);
+  const setup = resolveSetupSpec(metadataObj.setup);
   return {
     always: typeof metadataObj.always === "boolean" ? metadataObj.always : undefined,
     emoji: readStringValue(metadataObj.emoji),
@@ -203,6 +237,8 @@ export function resolveOpenClawMetadata(
     os: osRaw.length > 0 ? osRaw : undefined,
     requires,
     install: install.length > 0 ? install : undefined,
+    setup: setup.spec,
+    setupError: setup.error,
   };
 }
 

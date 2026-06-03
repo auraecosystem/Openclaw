@@ -9,6 +9,7 @@ import {
   scanSkillInstallSource,
   type InstallSecurityScanResult,
 } from "../../plugins/install-security-scan.js";
+import { runSkillSetupHook } from "./setup.js";
 
 const VALID_SLUG_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/i;
 const DEFAULT_SKILL_ARCHIVE_ROOT_MARKERS = ["SKILL.md"] as const;
@@ -131,6 +132,8 @@ export async function installExtractedSkillRoot(params: {
   logger?: ArchiveLogger;
   scan?: SkillArchiveInstallScan;
   rootMarkers?: readonly string[];
+  /** Explicitly allow skill-defined setup hooks. Default false for safety. */
+  allowSetupHooks?: boolean;
 }): Promise<SkillArchiveInstallResult> {
   try {
     if (
@@ -180,6 +183,19 @@ export async function installExtractedSkillRoot(params: {
       copyErrorPrefix: "failed to install skill",
       hasDeps: false,
       depsLogMessage: "",
+      afterInstall: params.allowSetupHooks
+        ? async (installedDir) => {
+            const setupResult = await runSkillSetupHook({
+              targetDir: installedDir,
+              mode: params.mode,
+              logger: params.logger,
+            });
+            if (!setupResult.ok) {
+              return { ok: false, error: `Setup hook failed: ${setupResult.error}` };
+            }
+            return { ok: true };
+          }
+        : undefined,
     });
     if (!install.ok) {
       return installFailure(install.error, "unavailable");
@@ -198,6 +214,7 @@ export async function installSkillArchiveFromPath(params: {
   timeoutMs?: number;
   logger?: ArchiveLogger;
   scan?: SkillArchiveInstallScan;
+  allowSetupHooks?: boolean;
 }): Promise<SkillArchiveInstallResult> {
   const result = await withExtractedArchiveRoot({
     archivePath: params.archivePath,
@@ -214,6 +231,7 @@ export async function installSkillArchiveFromPath(params: {
         timeoutMs: params.timeoutMs,
         logger: params.logger,
         scan: params.scan,
+        allowSetupHooks: params.allowSetupHooks,
       }),
   });
   if (!result.ok) {

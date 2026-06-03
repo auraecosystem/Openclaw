@@ -118,3 +118,30 @@ user-invocable: true
     });
   });
 });
+
+describe("resolveOpenClawMetadata setup parsing", () => {
+  it.each([
+    [{ script: "scripts/install.sh" }, { script: "scripts/install.sh" }],
+    [{ script: "scripts/install.sh", timeoutMs: 90000 }, { script: "scripts/install.sh" }],
+    [{ timeoutMs: 5000 }, undefined],
+    [undefined, undefined],
+    [{ script: "run.sh", timeoutMs: "fast" }, { script: "run.sh" }],
+  ])("resolves setup metadata %#", (setup, expected) => {
+    const metadata = resolveOpenClawMetadata({
+      metadata: JSON.stringify({ openclaw: setup === undefined ? {} : { setup } }),
+    });
+    expect(metadata?.setup).toEqual(expected);
+  });
+
+  it.each([
+    ["../outside.sh", "path traversal"],
+    ["/etc/passwd", "absolute paths"],
+    ["", "non-empty relative path"],
+  ])("preserves invalid setup.script errors for %s", (script, expectedError) => {
+    const metadata = resolveOpenClawMetadata({
+      metadata: JSON.stringify({ openclaw: { setup: { script } } }),
+    });
+    expect(metadata?.setup).toBeUndefined();
+    expect(metadata?.setupError).toContain(expectedError);
+  });
+});

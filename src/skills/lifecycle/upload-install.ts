@@ -53,6 +53,7 @@ export async function installUploadedSkillArchive(params: {
   timeoutMs?: number;
   workspaceDir: string;
   config: OpenClawConfig;
+  allowSetupHooks?: boolean;
   log?: ArchiveLogger;
   store?: SkillUploadStore;
 }): Promise<UploadedSkillInstallResult> {
@@ -95,6 +96,7 @@ export async function installUploadedSkillArchive(params: {
         force: record.force,
         timeoutMs: params.timeoutMs,
         logger: params.log,
+        allowSetupHooks: params.allowSetupHooks,
         scan: {
           installId: "upload",
           origin: "skill-upload",

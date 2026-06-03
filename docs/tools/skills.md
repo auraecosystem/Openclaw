@@ -338,6 +338,13 @@ metadata:
   Optional installer specs used by the macOS Skills UI (brew / node / go / uv / download).
 </ParamField>
 
+<ParamField path="setup.script" type="string">
+  Optional bundle-relative setup script. OpenClaw does not run setup hooks during
+  normal ClawHub install/update by default; trusted gateway/admin install or
+  update calls must explicitly set `allowSetupHooks: true`, and the CLI must use
+  `--allow-setup-hooks`.
+</ParamField>
+
 <Note>
   Legacy `metadata.clawdbot` blocks are still accepted when
   `metadata.openclaw` is absent, so older installed skills keep their
@@ -397,6 +404,14 @@ metadata:
     - **Download:** `url` (required), `archive` (`tar.gz` | `tar.bz2` | `zip`),
       `extract` (default: auto when archive detected), `stripComponents`,
       `targetDir` (default: `~/.openclaw/tools/<skillKey>`).
+  </Accordion>
+  <Accordion title="Setup hook runtime">
+    When a trusted install/update call opts in, OpenClaw runs `setup.script`
+    after the install payload is staged and before the new skill directory is
+    published. Files written under `SKILL_DIR` are published with the skill; do
+    not persist `SKILL_DIR` itself as a stable final path. The hook receives only
+    `SKILL_DIR`, `OPENCLAW_HOOK_KIND` (`install` or `update`), and the host `PATH`;
+    skill-config env and `requires.env` values are not forwarded into setup hooks.
   </Accordion>
   <Accordion title="Sandboxing notes">
     `requires.bins` is checked on the **host** at skill load time. If an agent

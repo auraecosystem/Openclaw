@@ -65,6 +65,41 @@ function skillFileContent(name: string): string {
   return ["---", `name: ${name}`, "description: Test skill", "---", "", "# Test", ""].join("\n");
 }
 
+function setupSkillFileContent(name: string, script: string): string {
+  const metadata = JSON.stringify({ openclaw: { setup: { script } } });
+  return [
+    "---",
+    `name: ${name}`,
+    "description: Test skill",
+    `metadata: '${metadata}'`,
+    "---",
+    "",
+    "# Test",
+    "",
+  ].join("\n");
+}
+
+async function prepareSetupSkill(params: { script?: string; scriptContent?: string }) {
+  const root = await tempDirs.make("openclaw-skill-archive-install-");
+  const extractedRoot = path.join(root, "source-skill");
+  const workspaceDir = path.join(root, "workspace");
+  await fs.mkdir(path.join(extractedRoot, "scripts"), { recursive: true });
+  await fs.writeFile(
+    path.join(extractedRoot, "SKILL.md"),
+    setupSkillFileContent("Setup Skill", params.script ?? "scripts/setup.sh"),
+    "utf8",
+  );
+  if (params.scriptContent) {
+    await fs.writeFile(
+      path.join(extractedRoot, "scripts", "setup.sh"),
+      params.scriptContent,
+      "utf8",
+    );
+    await fs.chmod(path.join(extractedRoot, "scripts", "setup.sh"), 0o755);
+  }
+  return { extractedRoot, workspaceDir };
+}
+
 afterEach(async () => {
   await tempDirs.cleanup();
 });
@@ -122,5 +157,43 @@ describe("skill archive install", () => {
       return;
     }
     await expectFlatRootMarkerRejected({ marker: "skill.md", root });
+  });
+
+  it("runs archive setup hooks only when explicitly allowed", async () => {
+    const { extractedRoot, workspaceDir } = await prepareSetupSkill({
+      scriptContent: '#!/bin/sh\nprintf "%s" "$OPENCLAW_HOOK_KIND" > setup-output.txt\n',
+    });
+    const skipped = await installExtractedSkillRoot({
+      workspaceDir,
+      slug: "setup-skill",
+      extractedRoot,
+      mode: "install",
+      scan: false,
+    });
+
+    expect(skipped.ok).toBe(true);
+    if (!skipped.ok) {
+      return;
+    }
+    await expect(fs.stat(path.join(skipped.targetDir, "setup-output.txt"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+
+    const allowed = await installExtractedSkillRoot({
+      workspaceDir,
+      slug: "setup-skill-allowed",
+      extractedRoot,
+      mode: "install",
+      scan: false,
+      allowSetupHooks: true,
+    });
+
+    expect(allowed.ok).toBe(true);
+    if (!allowed.ok) {
+      return;
+    }
+    await expect(
+      fs.readFile(path.join(allowed.targetDir, "setup-output.txt"), "utf8"),
+    ).resolves.toBe("install");
   });
 });

@@ -16,6 +16,10 @@ export type SkillInstallSpec = {
   targetDir?: string;
 };
 
+export type SkillSetupSpec = {
+  script: string;
+};
+
 export type OpenClawSkillMetadata = {
   always?: boolean;
   skillKey?: string;
@@ -30,6 +34,8 @@ export type OpenClawSkillMetadata = {
     config?: string[];
   };
   install?: SkillInstallSpec[];
+  setup?: SkillSetupSpec;
+  setupError?: string;
 };
 
 export type SkillInvocationPolicy = {
