@@ -130,11 +130,19 @@ export function buildStatusLastHeartbeatValue(params: {
     return params.muted("none");
   }
   const age = params.formatTimeAgo(Date.now() - params.lastHeartbeat.ts);
-  const channel = params.lastHeartbeat.channel ?? "unknown";
+  // A skipped heartbeat has no delivery channel by design (e.g. target-none),
+  // so the "unknown" placeholder would read as a resolution failure. Drop it
+  // for skips and let the hint explain why delivery did not happen.
+  const channel =
+    params.lastHeartbeat.channel ?? (params.lastHeartbeat.status === "skipped" ? null : "unknown");
   const accountLabel = params.lastHeartbeat.accountId
     ? `account ${params.lastHeartbeat.accountId}`
     : null;
-  return [params.lastHeartbeat.status, `${age} ago`, channel, accountLabel]
+  const hint =
+    params.lastHeartbeat.status === "skipped" && params.lastHeartbeat.hint
+      ? params.lastHeartbeat.hint
+      : null;
+  return [params.lastHeartbeat.status, `${age} ago`, channel, accountLabel, hint]
     .filter(Boolean)
     .join(" · ");
 }

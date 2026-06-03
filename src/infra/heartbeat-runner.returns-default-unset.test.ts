@@ -441,6 +441,7 @@ describe("resolveHeartbeatDeliveryTarget", () => {
         expected: {
           channel: "none",
           reason: "target-none",
+          hint: "delivery disabled by configuration",
           accountId: undefined,
           lastChannel: undefined,
           lastAccountId: undefined,
@@ -453,6 +454,7 @@ describe("resolveHeartbeatDeliveryTarget", () => {
         expected: {
           channel: "none",
           reason: "target-none",
+          hint: "delivery disabled by configuration",
           accountId: undefined,
           lastChannel: "whatsapp",
           lastAccountId: undefined,
@@ -482,6 +484,7 @@ describe("resolveHeartbeatDeliveryTarget", () => {
         expected: {
           channel: "none",
           reason: "target-none",
+          hint: "delivery disabled by configuration",
           accountId: undefined,
           lastChannel: undefined,
           lastAccountId: undefined,

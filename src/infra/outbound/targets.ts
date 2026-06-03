@@ -42,6 +42,10 @@ export type OutboundTarget = {
   to?: string;
   chatType?: ChatType;
   reason?: string;
+  /** Human-readable explanation for `reason`, surfaced in operator UIs to
+   * avoid misreading machine-stable reason codes (e.g. `target-none` is the
+   * intentional delivery-disabled config, not a session-resolution failure). */
+  hint?: string;
   accountId?: string;
   threadId?: string | number;
   lastChannel?: DeliverableMessageChannel;
@@ -115,6 +119,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
     const base = resolveSessionDeliveryTarget({ entry });
     return buildNoHeartbeatDeliveryTarget({
       reason: "target-none",
+      hint: "delivery disabled by configuration",
       lastChannel: base.lastChannel,
       lastAccountId: base.lastAccountId,
     });
@@ -258,6 +263,7 @@ export function resolveHeartbeatDeliveryTarget(params: {
 
 function buildNoHeartbeatDeliveryTarget(params: {
   reason: string;
+  hint?: string;
   accountId?: string;
   lastChannel?: DeliverableMessageChannel;
   lastAccountId?: string;
@@ -265,6 +271,7 @@ function buildNoHeartbeatDeliveryTarget(params: {
   return {
     channel: "none",
     reason: params.reason,
+    hint: params.hint,
     accountId: params.accountId,
     lastChannel: params.lastChannel,
     lastAccountId: params.lastAccountId,
