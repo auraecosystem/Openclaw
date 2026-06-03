@@ -20,6 +20,7 @@ import {
   resolveChannelStreamingChunkMode,
   resolveChannelStreamingNativeTransport,
   resolveChannelStreamingProgressCommentary,
+  resolveChannelStreamingProgressPersist,
   resolveChannelStreamingPreviewCommandText,
   resolveChannelStreamingPreviewChunk,
   resolveChannelStreamingSuppressDefaultToolProgressMessages,
@@ -115,6 +116,100 @@ describe("channel-streaming", () => {
         streaming: { mode: "progress" },
       }),
     ).toBe(false);
+  });
+
+  it("enables persist progress only for progress-mode drafts", () => {
+    expect(
+      resolveChannelStreamingProgressPersist({
+        streaming: { mode: "progress", progress: { persistProgress: true } },
+      }),
+    ).toBe(true);
+    expect(
+      resolveChannelStreamingProgressPersist({
+        streaming: { mode: "partial", progress: { persistProgress: true } },
+      }),
+    ).toBe(false);
+    expect(
+      resolveChannelStreamingProgressPersist({
+        streaming: { mode: "progress" },
+      }),
+    ).toBe(false);
+  });
+
+  it("stacks completed keyed lines in persist mode instead of replacing", () => {
+    const first = buildChannelProgressDraftLine({
+      event: "item",
+      itemId: "preamble-1",
+      itemKind: "preamble",
+      title: "Preamble",
+      progressText: "Checking the app",
+    });
+    const second = buildChannelProgressDraftLine({
+      event: "item",
+      itemId: "preamble-1",
+      itemKind: "preamble",
+      title: "Preamble",
+      progressText: "Checking the app-server stream",
+    });
+    if (!first || !second) {
+      throw new Error("expected preamble progress lines");
+    }
+
+    const initialLines: Array<string | typeof first> = ["Exec"];
+    const lines = mergeChannelProgressDraftLine(initialLines, first, {
+      maxLines: 8,
+      persist: true,
+    });
+    const updated = mergeChannelProgressDraftLine(lines, second, {
+      maxLines: 8,
+      persist: true,
+    });
+
+    // In persist mode, the completed first entry should be frozen with a
+    // suffixed ID, and the new entry appended -- so 3 lines total.
+    expect(updated).toHaveLength(3);
+    expect(updated[0]).toBe("Exec");
+    // Frozen entry has a :done: suffix on its ID.
+    const frozenEntry = updated[1];
+    expect(typeof frozenEntry === "object" && frozenEntry.id?.startsWith("preamble-1:done:")).toBe(
+      true,
+    );
+    // Active entry keeps original ID.
+    expect(updated[2]).toMatchObject({
+      id: "preamble-1",
+      text: "Checking the app-server stream",
+    });
+  });
+
+  it("does not stack in non-persist mode (default behavior)", () => {
+    const first = buildChannelProgressDraftLine({
+      event: "item",
+      itemId: "preamble-1",
+      itemKind: "preamble",
+      title: "Preamble",
+      progressText: "Checking the app",
+    });
+    const second = buildChannelProgressDraftLine({
+      event: "item",
+      itemId: "preamble-1",
+      itemKind: "preamble",
+      title: "Preamble",
+      progressText: "Checking the app-server stream",
+    });
+    if (!first || !second) {
+      throw new Error("expected preamble progress lines");
+    }
+
+    const initialLines: Array<string | typeof first> = ["Exec"];
+    const lines = mergeChannelProgressDraftLine(initialLines, first, { maxLines: 8 });
+    const updated = mergeChannelProgressDraftLine(lines, second, { maxLines: 8 });
+
+    // Without persist, in-place replacement: 2 lines.
+    expect(updated).toHaveLength(2);
+    expect(updated.at(-1)).toMatchObject({
+      id: "preamble-1",
+      text: "Checking the app-server stream",
+    });
   });
 
   it("falls back to legacy flat fields when the canonical object is absent", () => {

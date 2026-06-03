@@ -682,6 +682,18 @@ export function resolveChannelStreamingProgressCommentary(
   return asBoolean(progress?.commentary) ?? defaultValue;
 }
 
+export function resolveChannelStreamingProgressPersist(
+  entry: StreamingCompatEntry | null | undefined,
+  defaultValue = false,
+): boolean {
+  const config = getChannelStreamingConfigObject(entry);
+  if (resolveChannelPreviewStreamMode(entry, "partial") !== "progress") {
+    return false;
+  }
+  const progress = asObjectRecord(config?.progress);
+  return asBoolean(progress?.persistProgress) ?? defaultValue;
+}
+
 export function resolveChannelStreamingPreviewCommandText(
   entry: StreamingCompatEntry | null | undefined,
   defaultValue: ChannelStreamingCommandTextMode = "raw",
@@ -954,7 +966,7 @@ export function normalizeChannelProgressDraftLineIdentity(
 export function mergeChannelProgressDraftLine<TLine extends string | ChannelProgressDraftLine>(
   lines: TLine[],
   line: TLine,
-  params: { maxLines: number },
+  params: { maxLines: number; persist?: boolean },
 ): TLine[] {
   const normalized = normalizeChannelProgressDraftLineIdentity(line);
   if (!normalized) {
@@ -969,6 +981,18 @@ export function mergeChannelProgressDraftLine<TLine extends string | ChannelProg
     if (existingIndex >= 0) {
       if (normalizeChannelProgressDraftLineIdentity(lines[existingIndex]) === normalized) {
         return lines;
+      }
+      if (params.persist) {
+        // In persist mode, freeze the completed entry with a unique suffix
+        // and append the new active line, so completed lines stack.
+        const completedEntry = lines[existingIndex];
+        const completedLine =
+          typeof completedEntry === "object"
+            ? ({ ...completedEntry, id: `${completedEntry.id}:done:${Date.now()}` } as TLine)
+            : completedEntry;
+        const next = [...lines];
+        next[existingIndex] = completedLine;
+        return [...next, line].slice(-maxLines);
       }
       const next = [...lines];
       next[existingIndex] = line;

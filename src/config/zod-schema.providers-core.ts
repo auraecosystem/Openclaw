@@ -101,6 +101,7 @@ const ChannelStreamingProgressSchema = z
     render: z.enum(["text", "rich"]).optional(),
     toolProgress: z.boolean().optional(),
     commandText: z.enum(["raw", "status"]).optional(),
+    persistProgress: z.boolean().optional(),
   })
   .strict();
 const ChannelCommentaryStreamingProgressSchema = ChannelStreamingProgressSchema.extend({

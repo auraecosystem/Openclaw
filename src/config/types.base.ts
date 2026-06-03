@@ -50,6 +50,8 @@ export type ChannelStreamingProgressConfig = {
   toolProgress?: boolean;
   /** Command/exec progress detail in the draft. "raw" preserves released behavior; "status" shows only the tool label. Default: "raw". */
   commandText?: ChannelStreamingCommandTextMode;
+  /** Persist completed tool/commentary progress lines above the final answer instead of wiping them. Default: false. */
+  persistProgress?: boolean;
 };
 
 export type ChannelStreamingPreviewConfig = {
