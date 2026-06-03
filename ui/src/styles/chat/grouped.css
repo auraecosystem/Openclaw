@@ -647,3 +647,13 @@ details.msg-meta:not([open]) .msg-meta__details {
     display: none;
   }
 }
+
+/* UX-011 — ambient error banner in chat view */
+.chat-tool-error-banner {
+  margin: 0 0 6px;
+  font-size: 13px;
+  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
