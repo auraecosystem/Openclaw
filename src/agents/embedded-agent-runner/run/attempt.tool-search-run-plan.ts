@@ -1,3 +1,7 @@
+import {
+  readClientToolFunctionSnapshot,
+  type ClientToolFunctionSnapshot,
+} from "../../agent-tool-definition-adapter.js";
 import { normalizeToolName } from "../../tool-policy.js";
 import {
   TOOL_CALL_RAW_TOOL_NAME,
@@ -61,6 +65,7 @@ export function buildAutoAddedToolSearchControlNamesForAllowlistCheck(params: {
 
 function collectExplicitlyAllowedClientToolNames(params: {
   clientTools?: CollectAllowedToolNamesParams["clientTools"];
+  clientToolSnapshots?: readonly ClientToolFunctionSnapshot[];
   explicitAllowlistSources: Array<{ entries: string[] }>;
 }): string[] {
   const explicitNames = new Set(
@@ -68,8 +73,14 @@ function collectExplicitlyAllowedClientToolNames(params: {
       source.entries.map((entry) => normalizeToolName(entry)),
     ),
   );
-  return (params.clientTools ?? [])
-    .map((tool) => tool.function?.name)
+  const clientSnapshots =
+    params.clientToolSnapshots ??
+    (params.clientTools ?? []).flatMap((tool) => {
+      const snapshot = readClientToolFunctionSnapshot(tool);
+      return snapshot ? [snapshot] : [];
+    });
+  return clientSnapshots
+    .map((tool) => tool.name)
     .filter((name): name is string => Boolean(name?.trim()))
     .filter((name) => explicitNames.has(normalizeToolName(name)));
 }
@@ -78,6 +89,7 @@ export function buildToolSearchRunPlan(params: {
   visibleTools: CollectAllowedToolNamesParams["tools"];
   uncompactedTools: CollectAllowedToolNamesParams["tools"];
   clientTools?: CollectAllowedToolNamesParams["clientTools"];
+  clientToolSnapshots?: readonly ClientToolFunctionSnapshot[];
   catalogRegistered: boolean;
   catalogToolCount: number;
   controlsEnabled: boolean;
@@ -87,10 +99,12 @@ export function buildToolSearchRunPlan(params: {
   const visibleAllowedToolNames = collectAllowedToolNames({
     tools: params.visibleTools,
     clientTools: params.catalogRegistered ? undefined : params.clientTools,
+    clientToolSnapshots: params.catalogRegistered ? undefined : params.clientToolSnapshots,
   });
   const replayAllowedToolNames = collectAllowedToolNames({
     tools: params.uncompactedTools,
     clientTools: params.clientTools,
+    clientToolSnapshots: params.clientToolSnapshots,
   });
   if (params.controlsEnabled) {
     for (const controlName of params.controlNames ?? TOOL_SEARCH_CONTROL_ALLOWLIST_NAMES) {
@@ -107,6 +121,7 @@ export function buildToolSearchRunPlan(params: {
   const clientCatalogCallableNames = params.catalogRegistered
     ? collectExplicitlyAllowedClientToolNames({
         clientTools: params.clientTools,
+        clientToolSnapshots: params.clientToolSnapshots,
         explicitAllowlistSources: params.explicitAllowlistSources,
       }).map((name) => `tool-search-client:${name}`)
     : [];
