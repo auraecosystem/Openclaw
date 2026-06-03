@@ -1,4 +1,5 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   getActivePluginChannelRegistry,
   requireActivePluginRegistry,
@@ -11,6 +12,10 @@ import type { ChannelId } from "./types.public.js";
 type ChannelSetupPluginView = {
   sorted: ChannelPlugin[];
   byId: Map<string, ChannelPlugin>;
+};
+
+type ChannelSetupPluginOptions = {
+  config?: OpenClawConfig;
 };
 
 function dedupeSetupPlugins(plugins: readonly ChannelPlugin[]): ChannelPlugin[] {
@@ -40,12 +45,16 @@ function sortChannelSetupPlugins(plugins: readonly ChannelPlugin[]): ChannelPlug
   });
 }
 
-function resolveChannelSetupPlugins(): ChannelSetupPluginView {
+function resolveChannelSetupPlugins(
+  options: ChannelSetupPluginOptions = {},
+): ChannelSetupPluginView {
   const registry = requireActivePluginRegistry();
 
   const registryPlugins = (registry.channelSetups ?? []).map((entry) => entry.plugin);
   const sorted = sortChannelSetupPlugins(
-    registryPlugins.length > 0 ? registryPlugins : listBundledChannelSetupPlugins(),
+    registryPlugins.length > 0
+      ? registryPlugins
+      : listBundledChannelSetupPlugins({ config: options.config }),
   );
   const byId = new Map<string, ChannelPlugin>();
   for (const plugin of sorted) {
@@ -58,8 +67,8 @@ function resolveChannelSetupPlugins(): ChannelSetupPluginView {
   };
 }
 
-export function listChannelSetupPlugins(): ChannelPlugin[] {
-  return resolveChannelSetupPlugins().sorted.slice();
+export function listChannelSetupPlugins(options: ChannelSetupPluginOptions = {}): ChannelPlugin[] {
+  return resolveChannelSetupPlugins(options).sorted.slice();
 }
 
 export function listActiveChannelSetupPlugins(): ChannelPlugin[] {
