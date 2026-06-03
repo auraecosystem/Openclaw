@@ -494,7 +494,7 @@ function toConversationRecord(
   const { pageId, pagePath } = resolveConversationPagePath({
     conversationId,
     createdAt: isoFromUnix(conversation.create_time),
-    pageGroups: pageGroups,
+    pageGroups,
   });
   return {
     conversationId,
