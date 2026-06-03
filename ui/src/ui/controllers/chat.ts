@@ -356,6 +356,7 @@ export type ChatState = {
   connected: boolean;
   sessionKey: string;
   currentSessionId?: string | null;
+  reconnectResumeSessionId?: string | null;
   chatLoading: boolean;
   chatMessages: unknown[];
   chatThinkingLevel: string | null;
@@ -706,6 +707,12 @@ async function loadChatHistoryUncached(
         : typeof res.sessionId === "string" && res.sessionId.trim()
           ? res.sessionId
           : null;
+    if (
+      state.reconnectResumeSessionId &&
+      state.reconnectResumeSessionId !== state.currentSessionId
+    ) {
+      state.reconnectResumeSessionId = null;
+    }
     state.chatThinkingLevel = res.sessionInfo?.thinkingLevel ?? res.thinkingLevel ?? null;
     const resetStream = !state.chatRunId || state.chatRunId === previousRunId;
     if (resetStream) {
@@ -834,15 +841,20 @@ export async function requestChatSend(
     canReuseCurrentSessionId && typeof currentSessionId === "string" && currentSessionId.trim()
       ? currentSessionId.trim()
       : undefined;
+  const resumeSession = Boolean(sessionId && state.reconnectResumeSessionId === sessionId);
   const payload = await state.client!.request("chat.send", {
     sessionKey,
     ...(isGlobalSessionKey(sessionKey) && selectedAgentId ? { agentId: selectedAgentId } : {}),
     ...(sessionId ? { sessionId } : {}),
+    ...(resumeSession ? { resumeSession: true } : {}),
     message: params.message,
     deliver: false,
     idempotencyKey: params.runId,
     attachments: buildApiAttachments(params.attachments),
   });
+  if (resumeSession) {
+    state.reconnectResumeSessionId = null;
+  }
   return normalizeChatSendAck(payload, params.runId);
 }
 
