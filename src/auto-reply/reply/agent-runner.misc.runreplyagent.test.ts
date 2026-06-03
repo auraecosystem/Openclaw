@@ -25,6 +25,8 @@ import {
   type MemoryFlushPlanResolver,
 } from "../../plugins/memory-state.js";
 import type { TemplateContext } from "../templating.js";
+import type { VerboseLevel } from "../thinking.shared.js";
+import { enqueueFollowupRun } from "./queue.js";
 import type { FollowupRun, QueueSettings } from "./queue.js";
 import { scheduleFollowupDrain } from "./queue.js";
 import { testing as replyRunRegistryTesting, replyRunRegistry } from "./reply-run-registry.js";
@@ -271,6 +273,7 @@ beforeEach(() => {
   refreshQueuedFollowupSessionMock.mockReset();
   refreshQueuedFollowupSessionMock.mockResolvedValue(undefined);
   vi.mocked(scheduleFollowupDrain).mockReset();
+  vi.mocked(enqueueFollowupRun).mockReset();
   loadCronStoreMock.mockClear();
   // Default: no cron jobs in store.
   loadCronStoreMock.mockResolvedValue({ version: 1, jobs: [] });
@@ -3004,6 +3007,11 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
     finalAssistantText?: string;
     payloadText?: string;
     successfulCronAdds?: number;
+    resolvedVerboseLevel?: VerboseLevel;
+    isNewSession?: boolean;
+    inboundEventKind?: string;
+    transcriptPrompt?: string;
+    summaryLine?: string;
   }) {
     const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-stranded-"));
     const storePath = path.join(tmp, "sessions.json");
@@ -3030,15 +3038,18 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
 
     const sessionCtx = {
       Provider: "whatsapp",
+      OriginatingChannel: "whatsapp",
       OriginatingTo: "+15550001111",
       AccountId: "primary",
       MessageSid: "msg",
       ChatType: "direct",
+      ...(params.inboundEventKind ? { InboundEventKind: params.inboundEventKind } : {}),
     } as unknown as TemplateContext;
     const followupRun = {
       prompt: "hello",
-      summaryLine: "hello",
+      summaryLine: params.summaryLine ?? "hello",
       enqueuedAt: Date.now(),
+      ...(params.transcriptPrompt ? { transcriptPrompt: params.transcriptPrompt } : {}),
       run: {
         agentId: "main",
         agentDir: "/tmp/agent",
@@ -3063,7 +3074,7 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
       },
     } as unknown as FollowupRun;
 
-    await runReplyAgent({
+    const result = await runReplyAgent({
       commandBody: "hello",
       followupRun,
       queueKey: sessionKey,
@@ -3080,13 +3091,14 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
       storePath,
       defaultModel: "anthropic/claude-opus-4-6",
       agentCfgContextTokens: 200_000,
-      resolvedVerboseLevel: "off",
-      isNewSession: false,
+      resolvedVerboseLevel: params.resolvedVerboseLevel ?? "off",
+      isNewSession: params.isNewSession ?? false,
       blockStreamingEnabled: false,
       resolvedBlockStreamingBreak: "message_end",
       shouldInjectGroupIntro: false,
       typingMode: "instant",
     });
+    return { storePath, tmp, sessionKey, result };
   }
 
   it("warns when a substantive private final reply never used the message tool", async () => {
@@ -3095,16 +3107,25 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
     expect(warnPrivateFinalSpy.mock.calls[0]?.[0]).toMatchObject({ sessionKey: "stranded" });
   });
 
-  it("does not warn for a short private final reply", async () => {
-    await runPrivateFinalCase({ finalAssistantText: "Nothing to send here." });
-    expect(warnPrivateFinalSpy).not.toHaveBeenCalled();
+  it("enqueues a followup retry for a stranded substantive reply (#85714)", async () => {
+    await runPrivateFinalCase({});
+    expect(warnPrivateFinalSpy).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(enqueueFollowupRun)).toHaveBeenCalledTimes(1);
+    const retryPrompt = vi.mocked(enqueueFollowupRun).mock.calls[0]?.[1]?.prompt;
+    expect(retryPrompt).toContain("message(action=send)");
+    expect(retryPrompt).toContain("Here is the answer");
   });
 
-  it("does not warn when the message tool delivered this turn", async () => {
+  it("does not enqueue retry for short private final replies", async () => {
+    await runPrivateFinalCase({ finalAssistantText: "Nothing to send here." });
+    expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue retry when the message tool delivered this turn", async () => {
     await runPrivateFinalCase({
       messagingToolSentTargets: [{ tool: "message", provider: "whatsapp", to: "+15550001111" }],
     });
-    expect(warnPrivateFinalSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
   });
 
   it("still warns when only an unrelated cron side effect succeeded", async () => {
@@ -3121,5 +3142,33 @@ describe("runReplyAgent private message_tool_only final warning (#85714)", () =>
       payloadText: "Auto-compaction complete (count 1).",
     });
     expect(warnPrivateFinalSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not enqueue retry for room_event turns (#85714)", async () => {
+    await runPrivateFinalCase({ inboundEventKind: "room_event" });
+    expect(warnPrivateFinalSpy).not.toHaveBeenCalled();
+    expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
+  });
+
+  it("clears transcriptPrompt on retry to prevent original prompt from hiding retry instruction (#85714)", async () => {
+    await runPrivateFinalCase({ transcriptPrompt: "original user question" });
+    expect(vi.mocked(enqueueFollowupRun)).toHaveBeenCalledTimes(1);
+    const retryRun = vi.mocked(enqueueFollowupRun).mock.calls[0]?.[1];
+    // transcriptPrompt must be cleared so the followup runner uses the retry
+    // prompt, not the original user message.
+    expect(retryRun?.transcriptPrompt).toBeUndefined();
+    expect(retryRun?.userTurnTranscriptRecorder).toBeUndefined();
+    expect(retryRun?.currentInboundContext).toBeUndefined();
+    // The retry prompt itself must contain the delivery instruction.
+    expect(retryRun?.prompt).toContain("message(action=send)");
+  });
+
+  it("does not enqueue a second retry when a stranded-reply retry strands again (#85714)", async () => {
+    // The retry turn itself can fail to call message(action=send). Bound the
+    // recovery to a single attempt: a run already marked as a stranded-reply
+    // retry must not enqueue another retry, or it loops forever.
+    await runPrivateFinalCase({ summaryLine: "stranded-reply-retry" });
+    expect(warnPrivateFinalSpy).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(enqueueFollowupRun)).not.toHaveBeenCalled();
   });
 });
