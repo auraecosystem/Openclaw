@@ -386,7 +386,8 @@ export type AgentsFilesSetResult = {
   file: AgentFileEntry;
 };
 
-export type SessionRunStatus = "running" | "done" | "failed" | "killed" | "timeout";
+export type SessionRunStatus = "running" | "done" | "failed" | "killed" | "timeout" | "paused";
+export type SessionPauseReason = "sessions_yield";
 export type SubagentRunState = "active" | "interrupted" | "historical";
 
 export type SessionCompactionCheckpointReason =
