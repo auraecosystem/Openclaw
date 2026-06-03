@@ -11,6 +11,7 @@ export type CodexAppServerClientFactory = (
   authProfileId?: string,
   agentDir?: string,
   config?: AuthProfileOrderConfig,
+  options?: { timeoutMs?: number; initializeTimeoutDeadlineMs?: number },
 ) => Promise<CodexAppServerClient>;
 
 let sharedClientModulePromise: Promise<typeof import("./shared-client.js")> | null = null;
@@ -25,9 +26,17 @@ export const defaultCodexAppServerClientFactory: CodexAppServerClientFactory = (
   authProfileId,
   agentDir,
   config,
+  options,
 ) =>
   loadSharedClientModule().then(({ getSharedCodexAppServerClient }) =>
-    getSharedCodexAppServerClient({ startOptions, authProfileId, agentDir, config }),
+    getSharedCodexAppServerClient({
+      startOptions,
+      authProfileId,
+      agentDir,
+      config,
+      timeoutMs: options?.timeoutMs,
+      initializeTimeoutDeadlineMs: options?.initializeTimeoutDeadlineMs,
+    }),
   );
 
 export const defaultLeasedCodexAppServerClientFactory: CodexAppServerClientFactory = (
@@ -35,7 +44,15 @@ export const defaultLeasedCodexAppServerClientFactory: CodexAppServerClientFacto
   authProfileId,
   agentDir,
   config,
+  options,
 ) =>
   loadSharedClientModule().then(({ getLeasedSharedCodexAppServerClient }) =>
-    getLeasedSharedCodexAppServerClient({ startOptions, authProfileId, agentDir, config }),
+    getLeasedSharedCodexAppServerClient({
+      startOptions,
+      authProfileId,
+      agentDir,
+      config,
+      timeoutMs: options?.timeoutMs,
+      initializeTimeoutDeadlineMs: options?.initializeTimeoutDeadlineMs,
+    }),
   );
