@@ -2947,10 +2947,15 @@ describe("matrix monitor handler draft streaming", () => {
     suppressDefaultToolProgressMessages?: boolean;
     onToolStart?: (payload: { name?: string }) => Promise<void>;
     onItemEvent?: (payload: {
+      itemId?: string;
+      toolCallId?: string;
       progressText?: string;
       summary?: string;
       title?: string;
       name?: string;
+      kind?: string;
+      phase?: string;
+      status?: string;
     }) => Promise<void>;
     onPlanUpdate?: (payload: {
       phase: string;
@@ -2959,9 +2964,12 @@ describe("matrix monitor handler draft streaming", () => {
     }) => Promise<void>;
     onApprovalEvent?: (payload: { phase: string; command?: string }) => Promise<void>;
     onCommandOutput?: (payload: {
+      itemId?: string;
+      toolCallId?: string;
       phase: string;
       name?: string;
       exitCode?: number;
+      status?: string;
       title?: string;
     }) => Promise<void>;
     onPatchSummary?: (payload: {
@@ -3131,6 +3139,64 @@ describe("matrix monitor handler draft streaming", () => {
     });
     expect(singleTextMessageBody()).toBe("- `second`");
     await finish();
+  });
+
+  it("replaces recovered Matrix command progress instead of leaving stale failed text", async () => {
+    const { dispatch } = createStreamingHarness({
+      streaming: "progress",
+      previewToolProgressEnabled: true,
+      accountConfig: {
+        streaming: { mode: "progress", progress: { label: "Working" } },
+      } as never,
+    });
+    const { opts, finish } = await dispatch();
+
+    await opts.onItemEvent?.({
+      itemId: "command-1",
+      toolCallId: "call-1",
+      kind: "command",
+      name: "exec",
+      phase: "end",
+      status: "failed",
+      progressText: "run openclaw cron -> run jq (agent) failed",
+    });
+    await opts.onItemEvent?.({
+      itemId: "command-1",
+      toolCallId: "call-1",
+      kind: "command",
+      name: "exec",
+      phase: "end",
+      status: "failed",
+      progressText: "run openclaw cron -> run jq (agent) failed",
+    });
+
+    await vi.waitFor(() => {
+      expect(sendSingleTextMessageMatrixMock).toHaveBeenCalledTimes(1);
+    });
+    expect(singleTextMessageBody()).toContain("failed");
+
+    await opts.onCommandOutput?.({
+      itemId: "command-1",
+      toolCallId: "call-1",
+      phase: "end",
+      name: "exec",
+      status: "completed",
+      exitCode: 0,
+    });
+
+    await finish();
+    expect(editMessageMatrixMock).toHaveBeenCalledWith(
+      "!room:example.org",
+      "$draft1",
+      expect.stringContaining("completed"),
+      expect.any(Object),
+    );
+    const recoveredEdit = mockCalls(editMessageMatrixMock, "editMessageMatrix").find(
+      ([, eventId, body]) =>
+        eventId === "$draft1" && typeof body === "string" && body.includes("completed"),
+    );
+    expect(recoveredEdit?.[2]).not.toContain("failed");
+    expect(recoveredEdit?.[2]).not.toContain("run openclaw cron -> run jq");
   });
 
   it("keeps Matrix tool progress mentions inside code formatting", async () => {

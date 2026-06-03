@@ -1749,8 +1749,10 @@ export function createMatrixRoomMessageHandler(params: MatrixMonitorHandlerParam
               return;
             }
             await pushPreviewToolProgress(
-              formatChannelProgressDraftLine({
+              buildChannelProgressDraftLineForEntry(progressConfigEntry, {
                 event: "command-output",
+                itemId: payload.itemId,
+                toolCallId: payload.toolCallId,
                 phase: payload.phase,
                 title: payload.title,
                 name: payload.name,
