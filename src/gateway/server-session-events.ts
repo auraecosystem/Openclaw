@@ -78,6 +78,7 @@ function buildGatewaySessionSnapshot(params: {
     deliveryContext: sessionRow.deliveryContext,
     parentSessionKey: params.parentSessionKey ?? sessionRow.parentSessionKey,
     childSessions: sessionRow.childSessions,
+    sessionStartedAt: sessionRow.sessionStartedAt,
     thinkingLevel: sessionRow.thinkingLevel,
     fastMode: sessionRow.fastMode,
     verboseLevel: sessionRow.verboseLevel,
