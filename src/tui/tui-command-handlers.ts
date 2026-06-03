@@ -33,6 +33,7 @@ import { formatStatusSummary } from "./tui-status-summary.js";
 import type {
   AgentSummary,
   GatewayStatusSummary,
+  TuiAbortActiveResult,
   TuiResult,
   TuiOptions,
   TuiStateAccess,
@@ -52,7 +53,7 @@ type CommandHandlerContext = {
   setSession: (key: string) => Promise<void>;
   setEmptySession: (key: string) => Promise<void>;
   refreshAgents: () => Promise<void>;
-  abortActive: (params?: { preferActive?: boolean }) => Promise<void>;
+  abortActive: (params?: { preferActive?: boolean }) => Promise<TuiAbortActiveResult>;
   setActivityStatus: (text: string) => void;
   formatSessionKey: (key: string) => string;
   applySessionInfoFromPatch: (result: SessionsPatchResult) => void;
@@ -747,7 +748,8 @@ export function createCommandHandlers(context: CommandHandlerContext) {
         ) {
           chatLog.reserveAssistantSlot(state.activeChatRunId);
         }
-        chatLog.addUser(text);
+        state.pendingSubmitDraft = { runId, text };
+        chatLog.addPendingUser(runId, text);
         noteLocalRunId?.(runId);
         state.pendingOptimisticUserMessage = true;
         setActivityStatus("sending");
@@ -774,9 +776,19 @@ export function createCommandHandlers(context: CommandHandlerContext) {
           if (!acceptedRunAlreadyCompleted) {
             noteLocalRunId?.(acceptedRunId);
           }
+          if (state.pendingSubmitDraft?.runId === runId) {
+            state.pendingSubmitDraft = { runId: acceptedRunId, text };
+          }
+          if (chatLog.dropPendingUser(runId)) {
+            chatLog.addPendingUser(acceptedRunId, text);
+          }
         }
         if (state.pendingOptimisticUserMessage) {
           if (acceptedRunAlreadyCompleted) {
+            chatLog.commitPendingUser(acceptedRunId);
+            if (state.pendingSubmitDraft?.runId === acceptedRunId) {
+              state.pendingSubmitDraft = null;
+            }
             state.pendingOptimisticUserMessage = false;
             state.pendingChatRunId = null;
             setActivityStatus("idle");
@@ -797,8 +809,10 @@ export function createCommandHandlers(context: CommandHandlerContext) {
       }
       if (!isBtw) {
         forgetLocalRunId?.(runId);
-      }
-      if (!isBtw) {
+        chatLog.commitPendingUser(runId);
+        if (state.pendingSubmitDraft?.runId === runId) {
+          state.pendingSubmitDraft = null;
+        }
         state.pendingOptimisticUserMessage = false;
         state.pendingChatRunId = null;
         state.activeChatRunId = null;

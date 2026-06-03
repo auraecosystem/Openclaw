@@ -1,4 +1,4 @@
-import { OpusErrorCode, isOpusError } from "libopus-wasm";
+import { OpusError } from "libopus-wasm";
 import { formatErrorMessage } from "openclaw/plugin-sdk/ssrf-runtime";
 
 const DECRYPT_FAILURE_WINDOW_MS = 30_000;
@@ -6,6 +6,9 @@ const DECRYPT_FAILURE_RECONNECT_THRESHOLD = 3;
 const DECRYPT_FAILURE_MARKER = "DecryptionFailed(";
 const DAVE_PASSTHROUGH_DISABLED_MARKER = "UnencryptedWhenPassthroughDisabled";
 const WASM_MEMORY_ACCESS_MARKER = "memory access out of bounds";
+// libopus-wasm 0.2.0 exposes OpusError.code, not named error constants.
+// OPUS_INVALID_PACKET is the libopus decode-noise code we suppress here.
+const OPUS_INVALID_PACKET_CODE = -4;
 
 export const DAVE_RECEIVE_PASSTHROUGH_INITIAL_EXPIRY_SECONDS = 30;
 export const DAVE_RECEIVE_PASSTHROUGH_REARM_EXPIRY_SECONDS = 15;
@@ -83,10 +86,14 @@ function isAbortLikeReceiveError(err: unknown): boolean {
 }
 
 function isOpusDecodeInvalidPacketError(err: unknown): boolean {
+  if (!err || typeof err !== "object") {
+    return false;
+  }
+  const code = err instanceof OpusError ? err.code : (err as { code?: unknown }).code;
+  const operation =
+    err instanceof OpusError ? err.operation : (err as { operation?: unknown }).operation;
   return (
-    isOpusError(err) &&
-    err.code === OpusErrorCode.InvalidPacket &&
-    (err.operation === "decode" || err.operation === "decodeFloat")
+    code === OPUS_INVALID_PACKET_CODE && (operation === "decode" || operation === "decodeFloat")
   );
 }
 
