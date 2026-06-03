@@ -473,6 +473,7 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Heartbeat/parser: keep parsing later `tasks:` entries when a task contains an unrecognized indented field (e.g. `notes:`), so silent task drops no longer occur after the first non-`name`/`interval`/`prompt` field. (#74320) Thanks @BSG2000.
 - WebChat: summarize internal message-tool source replies so tool cards no longer duplicate the visible reply body. (#84773) Thanks @jason-allen-oneal.
 - Gateway: preserve deferred lifecycle-error cleanup across later non-terminal events so provider timeouts can persist failed session state instead of leaving sessions stuck running. (#85256, fixes #63819) Thanks @samzong.
 - Agents/subagents: report tool-only child progress during timeout summaries instead of showing no visible output.
