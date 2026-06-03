@@ -21,6 +21,7 @@ import {
   str,
 } from "./render-utils.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
+import { verifyWrittenContent, verifyWrittenStat } from "./write-verification.js";
 
 const writeSchema = Type.Object({
   path: Type.String({ description: "Path to the file to write (relative or absolute)" }),
@@ -313,6 +314,24 @@ async function didWriteMetadataChange(
   return afterStat.size !== beforeStat.size || afterStat.mtimeMs !== beforeStat.mtimeMs;
 }
 
+async function verifyWriteResult(
+  absolutePath: string,
+  content: string,
+  ops: WriteOperations,
+): Promise<void> {
+  if (ops.statFile) {
+    const stat = await ops.statFile(absolutePath).catch(() => null);
+    verifyWrittenStat({ absolutePath, content, stat });
+  }
+
+  if (!ops.readFile) {
+    return;
+  }
+
+  const readback = await ops.readFile(absolutePath).catch(() => undefined);
+  verifyWrittenContent({ absolutePath, content, readback });
+}
+
 function isWriteRecoveryCandidate(error: unknown, signal: AbortSignal | undefined): boolean {
   if (signal?.aborted) {
     return true;
@@ -397,6 +416,7 @@ export function createWriteToolDefinition(
             throw new Error("Operation aborted");
           }
           await ops.writeFile(absolutePath, content);
+          await verifyWriteResult(absolutePath, content, ops);
           if (signal?.aborted) {
             throw new Error("Operation aborted");
           }
