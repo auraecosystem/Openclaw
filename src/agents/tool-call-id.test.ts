@@ -356,6 +356,94 @@ describe("sanitizeToolCallIdsForCloudCodeAssist", () => {
       ).toBe("call123fc123");
     });
 
+    // Regression for #51593: Moonshot/Kimi K2+ returns native tool_call ids
+    // shaped like `functions.<name>:<index>`. The sanitiser already keeps the
+    // native shape on first occurrence (#62319) and the occurrence-aware
+    // resolver mangles the seed for repeats, so duplicates that previously
+    // reached Moonshot verbatim (and triggered HTTP 400 `tool call id <id> is
+    // duplicated`) now get a unique rewritten id — no Kimi-specific option
+    // required.
+    it("preserves the first native Kimi tool_call id and rewrites duplicates", () => {
+      const kimiId = "functions.exec:26";
+      const input = castAgentMessages([
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: kimiId, name: "exec", arguments: { cmd: "ls" } }],
+        },
+        {
+          role: "toolResult",
+          toolCallId: kimiId,
+          toolName: "exec",
+          content: [{ type: "text", text: "first" }],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: kimiId, name: "exec", arguments: { cmd: "pwd" } }],
+        },
+        {
+          role: "toolResult",
+          toolCallId: kimiId,
+          toolName: "exec",
+          content: [{ type: "text", text: "second" }],
+        },
+      ]);
+
+      const out = sanitizeToolCallIdsForCloudCodeAssist(input, "strict");
+
+      const firstAssistant = out[0] as Extract<AgentMessage, { role: "assistant" }>;
+      const firstCall = firstAssistant.content[0] as { id: string };
+      const secondAssistant = out[2] as Extract<AgentMessage, { role: "assistant" }>;
+      const secondCall = secondAssistant.content[0] as { id: string };
+      const firstResult = out[1] as Extract<AgentMessage, { role: "toolResult" }>;
+      const secondResult = out[3] as Extract<AgentMessage, { role: "toolResult" }>;
+
+      expect(firstCall.id).toBe(kimiId);
+      expect(firstResult.toolCallId).toBe(kimiId);
+      expect(secondCall.id).not.toBe(kimiId);
+      expect(secondCall.id.length).toBeGreaterThan(0);
+      expect(secondResult.toolCallId).toBe(secondCall.id);
+    });
+
+    it("still rewrites duplicate native Kimi tool_call ids even when no preserve flag is set", () => {
+      // `sanitizeToolCallId` already preserves the native Kimi id shape on
+      // first encounter (#62319), but without the occurrence-aware preserve
+      // flag the sanitiser still has to give later duplicates a unique id so
+      // Moonshot does not see the same id twice in one request (#51593).
+      const kimiId = "functions.exec:26";
+      const input = castAgentMessages([
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: kimiId, name: "exec", arguments: { cmd: "ls" } }],
+        },
+        {
+          role: "toolResult",
+          toolCallId: kimiId,
+          toolName: "exec",
+          content: [{ type: "text", text: "first" }],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "toolCall", id: kimiId, name: "exec", arguments: { cmd: "pwd" } }],
+        },
+        {
+          role: "toolResult",
+          toolCallId: kimiId,
+          toolName: "exec",
+          content: [{ type: "text", text: "second" }],
+        },
+      ]);
+
+      const out = sanitizeToolCallIdsForCloudCodeAssist(input, "strict");
+      const first = (out[0] as Extract<AgentMessage, { role: "assistant" }>).content[0] as {
+        id: string;
+      };
+      const second = (out[2] as Extract<AgentMessage, { role: "assistant" }>).content[0] as {
+        id: string;
+      };
+
+      expect(first.id).not.toBe(second.id);
+    });
+
     it("preserves replay-safe signed-thinking tool ids when requested", () => {
       const input = castAgentMessages([
         {

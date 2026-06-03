@@ -347,7 +347,7 @@ Config lives under `plugins.entries.moonshot.config.webSearch`:
   </Accordion>
 
   <Accordion title="Tool call id sanitization">
-    Moonshot Kimi serves tool_call ids shaped like `functions.<name>:<index>`. OpenClaw preserves them unchanged so multi-turn tool calls keep working.
+    Moonshot Kimi serves native tool_call ids shaped like `functions.<name>:<index>`. OpenClaw preserves the first occurrence of each native Kimi id; if the same id appears again in replayed history, the shared replay sanitizer rewrites the duplicate so multi-turn tool calls keep unique ids without Moonshot-specific config.
 
     To force strict sanitization on a custom OpenAI-compatible provider, set `sanitizeToolCallIds: true`:
 
