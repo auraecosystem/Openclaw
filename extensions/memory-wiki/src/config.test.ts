@@ -6,6 +6,7 @@ import {
 } from "openclaw/plugin-sdk/json-schema-runtime";
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PAGE_GROUPS,
   DEFAULT_WIKI_RENDER_MODE,
   DEFAULT_WIKI_SEARCH_BACKEND,
   DEFAULT_WIKI_SEARCH_CORPUS,
@@ -64,6 +65,24 @@ describe("resolveMemoryWikiConfig", () => {
     });
 
     expect(canonical.bridge.readMemoryArtifacts).toBe(false);
+  });
+
+  it("has correct default pageGroups", () => {
+    expect(DEFAULT_PAGE_GROUPS).toEqual([
+      { kind: "source", dir: "sources", heading: "Sources" },
+      { kind: "entity", dir: "entities", heading: "Entities" },
+      { kind: "concept", dir: "concepts", heading: "Concepts" },
+      { kind: "synthesis", dir: "syntheses", heading: "Syntheses" },
+      { kind: "report", dir: "reports", heading: "Reports" },
+    ]);
+  });
+
+  it("uses DEFAULT_PAGE_GROUPS when no user config or vault file", () => {
+    const config = resolveMemoryWikiConfig(
+      { vault: { path: "/tmp/nonexistent-wiki" } },
+      { homedir: "/Users/tester" },
+    );
+    expect(config.pageGroups).toEqual(DEFAULT_PAGE_GROUPS);
   });
 });
 

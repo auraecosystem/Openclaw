@@ -71,6 +71,37 @@ Put config under `plugins.entries.memory-wiki.config`:
 }
 ```
 
+### Custom page groups (v2)
+
+Starting with v2, the plugin supports custom `pageGroups` to control which directories are
+scanned, indexed, and displayed in the vault. Page groups can be defined in:
+- `openclaw.json` under `plugins.entries.memory-wiki.config.pageGroups`
+- A standalone `.wiki-page-groups.json` file in the vault root (recommended for portability)
+
+**Merge priority:** `openclaw.json` → `.wiki-page-groups.json` → built-in defaults.
+
+### Standalone config file
+
+```json
+{
+  "pageGroups": [
+    { "kind": "source", "dir": "sources", "heading": "Sources" },
+    { "kind": "entity", "dir": "entities", "heading": "Entities" },
+    { "kind": "concept", "dir": "concepts", "heading": "Concepts" },
+    { "kind": "synthesis", "dir": "syntheses", "heading": "Syntheses" },
+    { "kind": "synthesis", "dir": "views", "heading": "Views" },
+    { "kind": "synthesis", "dir": "templates", "heading": "Templates" }
+  ]
+}
+```
+
+- `kind` — one of `entity`, `concept`, `source`, `synthesis`, `report`
+- `dir` — relative path from vault root (`"."` for vault root itself)
+- `heading` — optional display heading in index; auto-derived from dir name if omitted
+
+If the file is missing or malformed, the plugin silently falls back to the default
+directories (`sources`, `entities`, `concepts`, `syntheses`, `reports`).
+
 ## Vault shape
 
 The plugin initializes a vault like this:

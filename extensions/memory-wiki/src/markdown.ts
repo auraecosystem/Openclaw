@@ -7,6 +7,7 @@ import {
   normalizeSingleOrTrimmedStringList,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import YAML from "yaml";
+import type { WikiPageGroup } from "./config.js";
 
 const WIKI_PAGE_KINDS = ["entity", "concept", "source", "synthesis", "report"] as const;
 export const WIKI_RELATED_START_MARKER = "<!-- openclaw:wiki:related:start -->";
@@ -413,8 +414,27 @@ export function renderMarkdownFence(content: string, infoString = "text"): strin
   return `${fence}${infoString}\n${content}\n${fence}`;
 }
 
-export function inferWikiPageKind(relativePath: string): WikiPageKind | null {
+export function inferWikiPageKind(
+  relativePath: string,
+  pageGroups?: WikiPageGroup[],
+): WikiPageKind | null {
   const normalized = relativePath.split(path.sep).join("/");
+
+  // Use pageGroups for dynamic directory resolution
+  if (pageGroups && pageGroups.length > 0) {
+    const sorted = pageGroups.toSorted((a, b) => b.dir.length - a.dir.length);
+    for (const group of sorted) {
+      if (group.dir === "." && !normalized.includes("/")) {
+        return group.kind;
+      }
+      if (normalized === group.dir || normalized.startsWith(group.dir + "/")) {
+        return group.kind;
+      }
+    }
+    return null;
+  }
+
+  // Fallback: hardcoded English defaults
   if (normalized.startsWith("entities/")) {
     return "entity";
   }
@@ -437,8 +457,9 @@ export function toWikiPageSummary(params: {
   absolutePath: string;
   relativePath: string;
   raw: string;
+  pageGroups?: WikiPageGroup[];
 }): WikiPageSummary | null {
-  const kind = inferWikiPageKind(params.relativePath);
+  const kind = inferWikiPageKind(params.relativePath, params.pageGroups);
   if (!kind) {
     return null;
   }

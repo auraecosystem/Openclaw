@@ -6,21 +6,8 @@ import {
 } from "openclaw/plugin-sdk/memory-host-markdown";
 import { FsSafeError, pathExists, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { buildVaultDirectories } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
-import { resolveMemoryWikiTimestamp } from "./time.js";
-
-export const WIKI_VAULT_DIRECTORIES = [
-  "entities",
-  "concepts",
-  "syntheses",
-  "sources",
-  "reports",
-  "_attachments",
-  "_views",
-  ".openclaw-wiki",
-  ".openclaw-wiki/locks",
-  ".openclaw-wiki/cache",
-] as const;
 
 type InitializeMemoryWikiVaultResult = {
   rootDir: string;
@@ -105,7 +92,7 @@ export async function initializeMemoryWikiVault(
   }
   await fs.mkdir(rootDir, { recursive: true });
 
-  for (const relativeDir of WIKI_VAULT_DIRECTORIES) {
+  for (const relativeDir of buildVaultDirectories(config.pageGroups)) {
     const fullPath = path.join(rootDir, relativeDir);
     if (!(await pathExists(fullPath))) {
       createdDirectories.push(fullPath);
@@ -114,7 +101,12 @@ export async function initializeMemoryWikiVault(
   }
 
   await writeFileIfMissing(rootDir, "AGENTS.md", buildAgentsMarkdown(), createdFiles);
-  await writeFileIfMissing(rootDir, "WIKI.md", buildWikiOverviewMarkdown(config), createdFiles);
+  await writeFileIfMissing(
+    rootDir,
+    "WIKI.md",
+    buildWikiOverviewMarkdown(config),
+    createdFiles,
+  );
   await writeFileIfMissing(rootDir, "index.md", buildIndexMarkdown(), createdFiles);
   await writeFileIfMissing(
     rootDir,
@@ -129,7 +121,7 @@ export async function initializeMemoryWikiVault(
       JSON.stringify(
         {
           version: 1,
-          createdAt: resolveMemoryWikiTimestamp(options?.nowMs),
+          createdAt: new Date(options?.nowMs ?? Date.now()).toISOString(),
           renderMode: config.vault.renderMode,
         },
         null,
@@ -143,7 +135,7 @@ export async function initializeMemoryWikiVault(
   if (createdDirectories.length > 0 || createdFiles.length > 0) {
     await appendMemoryWikiLog(rootDir, {
       type: "init",
-      timestamp: resolveMemoryWikiTimestamp(options?.nowMs),
+      timestamp: new Date(options?.nowMs ?? Date.now()).toISOString(),
       details: {
         createdDirectories: createdDirectories.map((dir) => path.relative(rootDir, dir) || "."),
         createdFiles: createdFiles.map((file) => path.relative(rootDir, file)),

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { listActiveMemoryPublicArtifacts } from "openclaw/plugin-sdk/memory-host-core";
-import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import type { OpenClawConfig } from "../api.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import { inferWikiPageKind, toWikiPageSummary, type WikiPageKind } from "./markdown.js";
@@ -66,7 +65,19 @@ type ResolveMemoryWikiStatusDeps = {
   resolveCommand?: (command: string) => Promise<string | null>;
 };
 
-async function collectVaultCounts(vaultPath: string): Promise<{
+async function pathExists(inputPath: string): Promise<boolean> {
+  try {
+    await fs.access(inputPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function collectVaultCounts(
+  vaultPath: string,
+  config: ResolvedMemoryWikiConfig,
+): Promise<{
   pageCounts: Record<WikiPageKind, number>;
   sourceCounts: MemoryWikiStatus["sourceCounts"];
 }> {
@@ -84,29 +95,27 @@ async function collectVaultCounts(vaultPath: string): Promise<{
     unsafeLocal: 0,
     other: 0,
   };
-  const dirs = ["entities", "concepts", "sources", "syntheses", "reports"] as const;
+  const dirs = config.pageGroups.map((g) => g.dir);
   for (const dir of dirs) {
-    const entries = await fs
-      .readdir(path.join(vaultPath, dir), { withFileTypes: true })
-      .catch(() => []);
-    for (const entry of entries) {
-      if (!entry.isFile() || !entry.name.endsWith(".md") || entry.name === "index.md") {
-        continue;
-      }
-      const kind = inferWikiPageKind(path.join(dir, entry.name));
+    const files: string[] = [];
+    await walkDir(vaultPath, dir, files);
+    for (const relativePath of files) {
+      const kind = inferWikiPageKind(relativePath, config.pageGroups);
       if (kind) {
         pageCounts[kind] += 1;
       }
-      if (dir === "sources") {
-        const absolutePath = path.join(vaultPath, dir, entry.name);
+      // Check all source directories, not just the first one
+      if (kind === "source") {
+        const absolutePath = path.join(vaultPath, relativePath);
         const raw = await fs.readFile(absolutePath, "utf8").catch(() => null);
         if (!raw) {
           continue;
         }
         const page = toWikiPageSummary({
           absolutePath,
-          relativePath: path.join(dir, entry.name),
+          relativePath,
           raw,
+          pageGroups: config.pageGroups,
         });
         if (!page) {
           continue;
@@ -129,6 +138,22 @@ async function collectVaultCounts(vaultPath: string): Promise<{
     }
   }
   return { pageCounts, sourceCounts };
+}
+
+async function walkDir(
+  absRoot: string,
+  relativeDir: string,
+  result: string[],
+): Promise<void> {
+  const absDir = path.join(absRoot, relativeDir);
+  const entries = await fs.readdir(absDir, { withFileTypes: true }).catch(() => []);
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".md") && entry.name !== "index.md") {
+      result.push(path.join(relativeDir, entry.name));
+    } else if (entry.isDirectory()) {
+      await walkDir(absRoot, path.join(relativeDir, entry.name), result);
+    }
+  }
 }
 
 function buildWarnings(params: {
@@ -219,7 +244,7 @@ export async function resolveMemoryWikiStatus(
       : null;
   const obsidianProbe = await probeObsidianCli({ resolveCommand: deps?.resolveCommand });
   const counts = vaultExists
-    ? await collectVaultCounts(config.vault.path)
+    ? await collectVaultCounts(config.vault.path, config)
     : {
         pageCounts: {
           entity: 0,
