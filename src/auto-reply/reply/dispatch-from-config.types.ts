@@ -9,6 +9,7 @@ export type DispatchFromConfigResult = {
   queuedFinal: boolean;
   counts: Record<ReplyDispatchKind, number>;
   failedCounts?: Partial<Record<ReplyDispatchKind, number>>;
+  observedReplyDelivery?: boolean;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
   sendPolicyDenied?: boolean;
   noVisibleReplyFallbackEligible?: boolean;

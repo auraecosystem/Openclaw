@@ -1,5 +1,5 @@
 import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract";
-import type { WebInboundMessage } from "../inbound/types.js";
+import type { WebInboundMessageInput } from "../inbound/types.js";
 import type { ReconnectPolicy } from "../reconnect.js";
 import type { WhatsAppSocketTimingOptions } from "../socket-timing.js";
 
@@ -12,7 +12,8 @@ export type WebChannelHealthState =
   | "logged-out"
   | "stopped";
 
-export type WebInboundMsg = WebInboundMessage;
+/** @deprecated Use `WebInboundMessageInput` for injected messages or `WebInboundMessage` for runtime callbacks. */
+export type WebInboundMsg = WebInboundMessageInput;
 
 export type WebChannelStatus = {
   running: boolean;

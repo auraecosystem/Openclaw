@@ -184,6 +184,8 @@ export type GetReplyOptions = {
   /** Called when the actual model is selected (including after fallback).
    * Use this to get model/provider/thinkLevel for responsePrefix template interpolation. */
   onModelSelected?: (ctx: ModelSelectedContext) => void;
+  /** Called when the run commits visible delivery outside dispatcher queues. */
+  onObservedReplyDelivery?: () => void;
   /**
    * Controls whether normal assistant replies are automatically delivered to
    * the source conversation. `message_tool_only` prefers message-tool visible
