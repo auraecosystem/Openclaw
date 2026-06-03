@@ -81,12 +81,19 @@ const ttsMocks = vi.hoisted(() => ({
     return params.payload;
   }),
   resolveTtsConfig: vi.fn((_cfg: OpenClawConfig) => ({ mode: "final" })),
-  resolveStatusTtsSnapshot: vi.fn(() => ({
-    autoMode: "always",
-    provider: "auto",
-    maxLength: 1500,
-    summarize: true,
-  })),
+  resolveStatusTtsSnapshot: vi.fn(
+    (): {
+      autoMode: string;
+      provider: string;
+      maxLength: number;
+      summarize: boolean;
+    } | null => ({
+      autoMode: "always",
+      provider: "auto",
+      maxLength: 1500,
+      summarize: true,
+    }),
+  ),
 }));
 
 const mediaUnderstandingMocks = vi.hoisted(() => ({
@@ -2342,7 +2349,7 @@ describe("tryDispatchAcpReply", () => {
       block: 1,
       final: 0,
     });
-    const result = await runDispatch({
+    await runDispatch({
       bodyForAgent: "reply",
       cfg,
       dispatcher,
