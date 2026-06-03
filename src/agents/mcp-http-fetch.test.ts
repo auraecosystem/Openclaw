@@ -20,12 +20,12 @@ class TestAgent {
   constructor(readonly options: unknown) {}
 }
 
-function TestEnvHttpProxyAgent(): undefined {
-  return undefined;
+class TestEnvHttpProxyAgent {
+  constructor(readonly options: unknown) {}
 }
 
-function TestProxyAgent(): undefined {
-  return undefined;
+class TestProxyAgent {
+  constructor(readonly options: unknown) {}
 }
 
 function getDispatcher(init: unknown): unknown {
@@ -52,6 +52,14 @@ describe("MCP HTTP fetch helpers", () => {
 
   beforeEach(() => {
     fetchCalls.length = 0;
+    vi.stubEnv("HTTP_PROXY", "");
+    vi.stubEnv("HTTPS_PROXY", "");
+    vi.stubEnv("ALL_PROXY", "");
+    vi.stubEnv("http_proxy", "");
+    vi.stubEnv("https_proxy", "");
+    vi.stubEnv("all_proxy", "");
+    vi.stubEnv("NO_PROXY", "");
+    vi.stubEnv("no_proxy", "");
     lookupMock.mockReset();
     lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     testGlobal[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
@@ -66,6 +74,7 @@ describe("MCP HTTP fetch helpers", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     delete testGlobal[TEST_UNDICI_RUNTIME_DEPS_KEY];
   });
 
@@ -86,6 +95,35 @@ describe("MCP HTTP fetch helpers", () => {
     expect(
       getDispatcherConnectOptions(fetchCalls[1]?.init)?.["rejectUnauthorized"],
     ).toBeUndefined();
+  });
+
+  it("uses configured env proxy for ordinary MCP HTTP requests", async () => {
+    vi.stubEnv("https_proxy", "http://proxy.example:8080");
+    const fetch = buildMcpHttpFetch({
+      resourceUrl: "https://mcp.example.com/mcp",
+    });
+
+    await fetch("https://mcp.example.com/token");
+
+    expect(getDispatcher(fetchCalls[0]?.init)).toBeInstanceOf(TestEnvHttpProxyAgent);
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-origin TLS overrides ahead of configured env proxy", async () => {
+    vi.stubEnv("https_proxy", "http://proxy.example:8080");
+    const fetch = buildMcpHttpFetch({
+      sslVerify: false,
+      resourceUrl: "https://mcp.example.com/mcp",
+    });
+
+    await fetch("https://mcp.example.com/token");
+    await fetch("https://auth.example.com/token");
+
+    expect(getDispatcher(fetchCalls[0]?.init)).toBeInstanceOf(TestAgent);
+    expect(getDispatcherConnectOptions(fetchCalls[0]?.init)).toMatchObject({
+      rejectUnauthorized: false,
+    });
+    expect(getDispatcher(fetchCalls[1]?.init)).toBeInstanceOf(TestEnvHttpProxyAgent);
   });
 
   it("removes static Authorization headers for OAuth-backed runtime requests", () => {

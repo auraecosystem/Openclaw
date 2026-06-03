@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import type { FetchLike } from "@modelcontextprotocol/sdk/shared/transport.js";
-import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
+import {
+  fetchWithSsrFGuard,
+  withTrustedEnvProxyGuardedFetchMode,
+} from "../infra/net/fetch-guard.js";
+import { shouldUseEnvHttpProxyForUrl } from "../infra/net/proxy-env.js";
 import {
   ssrfPolicyFromHttpBaseUrlAllowedOrigin,
   type PinnedDispatcherPolicy,
@@ -135,7 +139,7 @@ export function buildMcpHttpFetch(params: {
 
   return async (url, init) => {
     const request = resolveFetchRequest(url, init);
-    const guarded = await fetchWithSsrFGuard({
+    const guardedFetchOptions = {
       url: request.url,
       init: request.init,
       fetchImpl: fetchWithUndiciGuard,
@@ -144,7 +148,12 @@ export function buildMcpHttpFetch(params: {
       auditContext: "mcp-http",
       ...(policy ? { policy } : {}),
       ...(needsCustomDispatcher ? { resolveDispatcherPolicy: resolveCustomDispatcherPolicy } : {}),
-    });
+    };
+    const guarded = await fetchWithSsrFGuard(
+      shouldUseEnvHttpProxyForUrl(request.url)
+        ? withTrustedEnvProxyGuardedFetchMode(guardedFetchOptions)
+        : guardedFetchOptions,
+    );
     return buildManagedMcpResponse(guarded.response, guarded.release, guarded.refreshTimeout);
   };
 }

@@ -496,6 +496,7 @@ async function fetchWithSsrFGuardInternal(
       await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy);
       const canUseTrustedEnvProxy =
         mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY &&
+        !dispatcherPolicy &&
         shouldUseEnvHttpProxyForUrl(parsedUrl.toString());
       const canUseManagedProxy =
         mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive() && hasProxyEnvConfigured();
