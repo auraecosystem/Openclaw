@@ -109,10 +109,6 @@ export const discordChannelConfigUiHints = {
     label: "Discord Progress Commentary",
     help: "Show assistant commentary/preamble text in the temporary progress draft. Final answer delivery is unchanged.",
   },
-  "streaming.progress.persistProgress": {
-    label: "Discord Persist Progress",
-    help: "Keep completed tool/commentary progress lines and prepend them above the final answer instead of wiping them.",
-  },
   "streaming.progress.commandText": {
     label: "Discord Progress Command Text",
     help: 'Command/exec detail in progress draft lines: "raw" preserves released behavior; "status" shows only the tool label.',
