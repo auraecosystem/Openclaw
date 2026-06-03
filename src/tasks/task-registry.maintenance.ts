@@ -355,6 +355,14 @@ function isTimeoutCronError(error: string | undefined): boolean {
   return error === "cron: job execution timed out";
 }
 
+function isRecoverableLostCronTask(task: TaskRecord): boolean {
+  if (task.status !== "lost") {
+    return false;
+  }
+  const error = task.error?.trim().toLowerCase();
+  return Boolean(error?.includes("backing session missing"));
+}
+
 function mapCronTerminalStatus(status: unknown, error?: string): CronTerminalRecovery["status"] {
   if (status === "ok" || status === "skipped") {
     return "succeeded";
@@ -452,7 +460,7 @@ function resolveDurableCronTaskRecovery(
   task: TaskRecord,
   context: CronRecoveryContext,
 ): CronTerminalRecovery | undefined {
-  if (task.runtime !== "cron" || !isActiveTask(task)) {
+  if (task.runtime !== "cron" || (!isActiveTask(task) && !isRecoverableLostCronTask(task))) {
     return undefined;
   }
   const execution = parseCronExecutionId(task);
@@ -803,7 +811,7 @@ function markTaskRecovered(task: TaskRecord, recovery: CronTerminalRecovery): Ta
       status: recovery.status,
       endedAt: recovery.endedAt,
       lastEventAt: recovery.lastEventAt,
-      ...(recovery.error !== undefined ? { error: recovery.error } : {}),
+      error: recovery.error,
       ...(recovery.terminalSummary !== undefined
         ? { terminalSummary: recovery.terminalSummary }
         : {}),
@@ -818,11 +826,14 @@ function projectTaskRecovered(task: TaskRecord, recovery: CronTerminalRecovery):
     status: recovery.status,
     endedAt: recovery.endedAt,
     lastEventAt: recovery.lastEventAt,
-    ...(recovery.error !== undefined ? { error: recovery.error } : {}),
+    error: recovery.error,
     ...(recovery.terminalSummary !== undefined
       ? { terminalSummary: recovery.terminalSummary }
       : {}),
   };
+  if (recovery.error === undefined) {
+    delete projected.error;
+  }
   return {
     ...projected,
     ...(typeof projected.cleanupAfter === "number"
