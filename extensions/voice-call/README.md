@@ -7,6 +7,7 @@ Providers:
 - **Twilio** (Programmable Voice + Media Streams)
 - **Telnyx** (Call Control v2)
 - **Plivo** (Voice API + XML transfer + GetInput speech)
+- **Microsoft Teams** (`msteams`) — bridges Teams calls via an external Windows worker over an HMAC-authenticated WebSocket (inbound-only). See [Microsoft Teams provider](#microsoft-teams-provider-msteams).
 - **Mock** (dev/no network)
 
 Docs: `https://docs.openclaw.ai/plugins/voice-call`
@@ -35,7 +36,7 @@ Put under `plugins.entries.voice-call.config`:
 
 ```json5
 {
-  provider: "twilio", // or "telnyx" | "plivo" | "mock"
+  provider: "twilio", // or "telnyx" | "plivo" | "msteams" | "mock"
   fromNumber: "+15550001234",
   toNumber: "+15550005678",
   sessionScope: "per-phone", // or "per-call"
@@ -94,6 +95,64 @@ Put under `plugins.entries.voice-call.config`:
   },
 }
 ```
+
+## Microsoft Teams provider (`msteams`)
+
+Teams calls do not arrive on the webhook/media-stream plane. An **external Windows worker** (not part of this repo) owns the Graph Calling notification endpoint and the `Microsoft.Skype.Bots.Media` AudioSocket; when a call is answered it opens a **per-call WebSocket** to OpenClaw and relays PCM 16 kHz audio in both directions. The provider is **inbound-only** (`initiateCall` throws).
+
+Two modes:
+
+- **Agent (streaming):** caller audio -> realtime transcription (STT) -> the OpenClaw agent (`responseModel`, with tools) -> TTS. Use this to have the agent _do work_. Requires `streaming.enabled: true`.
+- **Realtime (speech-to-speech):** caller audio is bridged directly to a realtime voice provider (e.g. OpenAI Realtime). Lowest latency, conversational. Requires `realtime.enabled: true` + a realtime voice provider.
+
+At least one of `streaming.enabled` / `realtime.enabled` must be set (validated), and `msteams.port` + `msteams.sharedSecret` are required.
+
+```json5
+{
+  provider: "msteams",
+  inboundPolicy: "open", // defaulted to "open" for msteams (Teams is inbound-first)
+  responseModel: "microsoft-foundry/gpt-5.4", // agent model for the streaming path
+
+  msteams: {
+    port: 8443,
+    bindAddress: "127.0.0.1", // loopback by default; set a trusted-network IP only if the worker is remote
+    path: "/voice/msteams/stream",
+    sharedSecret: "${MSTEAMS_WS_SECRET}", // SecretRef-compatible; must match the worker
+    requireRecordingStatus: true, // see "Recording status" below
+  },
+
+  // Agent (streaming) mode:
+  streaming: {
+    enabled: true,
+    provider: "elevenlabs",
+    providers: {
+      elevenlabs: {
+        modelId: "scribe_v2_realtime",
+        audioFormat: "pcm_16000",
+        sampleRate: 16000,
+        commitStrategy: "vad",
+      },
+    },
+  },
+  tts: { provider: "elevenlabs", providers: { elevenlabs: { voiceId: "..." } } },
+
+  // OR realtime mode (instead of streaming):
+  // realtime: { enabled: true, provider: "openai" },
+}
+```
+
+**Security / transport**
+
+- Every WS upgrade is authenticated with **HMAC-SHA256** over `timestamp.callId` (headers `x-azurebot-timestamp` / `x-azurebot-signature`), compared in constant time, with a replay window.
+- The server **binds loopback (`127.0.0.1`) by default** - set `bindAddress` to a specific trusted-network address only when the worker connects from another host.
+- Connection guardrails: total + per-IP connection caps, a pre-start idle timeout, and a 64 KB inbound frame cap.
+- `sharedSecret` is SecretRef-compatible (`${ENV}` / secret refs) and never logged.
+
+**Recording status (Microsoft Media Access API)**
+
+Microsoft requires that media or media-derived data not be persisted before the bot has called Graph `updateRecordingStatus`. The worker reports this over the bridge (`recordingStatus` on `session.start`, and the `recording.status` message when it changes). With `requireRecordingStatus: true` (default), the streaming path **drops transcripts until recording status is active**. VAD is handled by the STT provider (`commitStrategy: "vad"`); barge-in is supported.
+
+**WebSocket protocol** (worker -> OpenClaw): `session.start` (`callId`, `threadId`, `caller.{aadId,displayName,tenantId}`, `recordingStatus?`), `recording.status` (`status`), `audio.frame` (`seq`, `timestampMs`, `payloadBase64` = PCM 16 kHz 16-bit mono), `session.end` (`reason`), `ping` (`ts`). OpenClaw -> worker: `audio.frame` (TTS / realtime audio) and `assistant.cancel` (barge-in).
 
 Notes:
 

@@ -13,13 +13,16 @@ import type { VoiceCallConfig } from "./config.js";
 import {
   resolveVoiceCallEffectiveConfig,
   resolveVoiceCallSessionKey,
+  resolveMsteamsSharedSecret,
   resolveTwilioAuthToken,
   resolveVoiceCallConfig,
   validateProviderConfig,
 } from "./config.js";
 import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { CallManager } from "./manager.js";
+import { wireMsteamsRuntime } from "./msteams.runtime.js";
 import type { VoiceCallProvider } from "./providers/base.js";
+import type { MsteamsProvider } from "./providers/msteams.js";
 import type { TwilioProvider } from "./providers/twilio.js";
 import { buildRealtimeVoiceInstructions } from "./realtime-agent-context.js";
 import { resolveRealtimeFastContextConsult } from "./realtime-fast-context.js";
@@ -59,6 +62,7 @@ type TelnyxProviderModule = typeof import("./providers/telnyx.js");
 type TwilioProviderModule = typeof import("./providers/twilio.js");
 type PlivoProviderModule = typeof import("./providers/plivo.js");
 type MockProviderModule = typeof import("./providers/mock.js");
+type MsteamsProviderModule = typeof import("./providers/msteams.js");
 type RealtimeVoiceRuntimeModule = typeof import("./realtime-voice.runtime.js");
 type RealtimeHandlerModule = typeof import("./webhook/realtime-handler.js");
 
@@ -75,6 +79,7 @@ let telnyxProviderPromise: Promise<TelnyxProviderModule> | undefined;
 let twilioProviderPromise: Promise<TwilioProviderModule> | undefined;
 let plivoProviderPromise: Promise<PlivoProviderModule> | undefined;
 let mockProviderPromise: Promise<MockProviderModule> | undefined;
+let msteamsProviderPromise: Promise<MsteamsProviderModule> | undefined;
 let realtimeVoiceRuntimePromise: Promise<RealtimeVoiceRuntimeModule> | undefined;
 let realtimeHandlerPromise: Promise<RealtimeHandlerModule> | undefined;
 
@@ -96,6 +101,11 @@ function loadPlivoProvider(): Promise<PlivoProviderModule> {
 function loadMockProvider(): Promise<MockProviderModule> {
   mockProviderPromise ??= import("./providers/mock.js");
   return mockProviderPromise;
+}
+
+function loadMsteamsProvider(): Promise<MsteamsProviderModule> {
+  msteamsProviderPromise ??= import("./providers/msteams.js");
+  return msteamsProviderPromise;
 }
 
 function loadRealtimeVoiceRuntime(): Promise<RealtimeVoiceRuntimeModule> {
@@ -151,9 +161,11 @@ function createRuntimeResourceLifecycle(params: {
   webhookServer: VoiceCallWebhookServer;
 }): {
   setTunnelResult: (result: TunnelResult | null) => void;
+  setProviderStop: (stop: (() => Promise<void>) | null) => void;
   stop: (opts?: { suppressErrors?: boolean }) => Promise<void>;
 } {
   let tunnelResult: TunnelResult | null = null;
+  let providerStop: (() => Promise<void>) | null = null;
   let stopped = false;
 
   const runStep = async (step: () => Promise<void>, suppressErrors: boolean) => {
@@ -168,12 +180,22 @@ function createRuntimeResourceLifecycle(params: {
     setTunnelResult: (result) => {
       tunnelResult = result;
     },
+    setProviderStop: (stop) => {
+      providerStop = stop;
+    },
     stop: async (opts) => {
       if (stopped) {
         return;
       }
       stopped = true;
       const suppressErrors = opts?.suppressErrors ?? false;
+      // Stop the provider first so any network listener it owns (e.g. the Teams
+      // bridge WebSocket server) releases its port before the rest of teardown.
+      await runStep(async () => {
+        if (providerStop) {
+          await providerStop();
+        }
+      }, suppressErrors);
       await runStep(async () => {
         if (tunnelResult) {
           await tunnelResult.stop();
@@ -189,7 +211,7 @@ function createRuntimeResourceLifecycle(params: {
   };
 }
 
-async function resolveProvider(config: VoiceCallConfig): Promise<VoiceCallProvider> {
+async function resolveProvider(config: VoiceCallConfig, log: Logger): Promise<VoiceCallProvider> {
   const allowNgrokFreeTierLoopbackBypass =
     config.tunnel?.provider === "ngrok" &&
     isLoopbackHost(config.serve?.bind ?? "") &&
@@ -243,6 +265,16 @@ async function resolveProvider(config: VoiceCallConfig): Promise<VoiceCallProvid
     case "mock": {
       const { MockProvider } = await loadMockProvider();
       return new MockProvider();
+    }
+    case "msteams": {
+      const { MsteamsProvider } = await loadMsteamsProvider();
+      return new MsteamsProvider({
+        port: config.msteams?.port,
+        bindAddress: config.msteams?.bindAddress,
+        path: config.msteams?.path,
+        sharedSecret: resolveMsteamsSharedSecret(config),
+        logger: log,
+      });
     }
     default:
       throw new Error(`Unsupported voice-call provider: ${String(config.provider)}`);
@@ -304,7 +336,7 @@ export async function createVoiceCallRuntime(params: {
     throw new Error(`Invalid voice-call config: ${validation.errors.join("; ")}`);
   }
 
-  const provider = await resolveProvider(config);
+  const provider = await resolveProvider(config, log);
   if (stateRuntime) {
     setVoiceCallStateRuntime({ state: stateRuntime });
   }
@@ -506,6 +538,60 @@ export async function createVoiceCallRuntime(params: {
         twilioProvider.setMediaStreamHandler(mediaHandler);
         log.info("[voice-call] Media stream handler wired to provider");
       }
+    }
+
+    if (provider.name === "msteams") {
+      const msteamsProvider = provider as MsteamsProvider;
+      let handlerWired = false;
+      if (config.realtime.enabled && realtimeProvider) {
+        // Low-latency speech-to-speech: bridge the Teams call straight to the
+        // realtime model (no STT/agent/TTS pipeline).
+        const realtimeInstructions = await buildRealtimeVoiceInstructions({
+          baseInstructions: config.realtime.instructions,
+          config,
+          coreConfig,
+          agentRuntime,
+        });
+        msteamsProvider.setRealtimeRuntime({
+          provider: realtimeProvider.provider,
+          providerConfig: realtimeProvider.providerConfig,
+          cfg,
+          instructions: realtimeInstructions,
+          greetingInstructions: config.inboundGreeting,
+          inboundPolicy: config.inboundPolicy,
+          allowFrom: config.allowFrom,
+          logger: log,
+        });
+        log.info("[voice-call] msteams realtime voice mode enabled");
+        handlerWired = true;
+      } else if (config.streaming?.enabled) {
+        await wireMsteamsRuntime({
+          config,
+          coreConfig,
+          fullConfig: cfg,
+          agentRuntime,
+          ttsRuntime,
+          manager,
+          provider,
+          logger: log,
+        });
+        handlerWired = true;
+      }
+      // Fail fast instead of binding a listener that would accept Teams calls it
+      // cannot handle (e.g. realtime requested but no realtime provider resolved,
+      // and streaming disabled).
+      if (!handlerWired) {
+        throw new Error(
+          config.realtime.enabled
+            ? "[voice-call] msteams: realtime.enabled is set but no realtime voice provider resolved, and streaming is disabled"
+            : "[voice-call] msteams: neither realtime nor streaming is enabled",
+        );
+      }
+      // Bind the Teams bridge WebSocket server as part of runtime startup so a
+      // failed bind aborts initialization (the catch below cleans up); register
+      // its stop so teardown releases the port instead of leaving it occupied.
+      await msteamsProvider.start();
+      lifecycle.setProviderStop(() => msteamsProvider.stop());
     }
 
     if (realtimeProvider) {
