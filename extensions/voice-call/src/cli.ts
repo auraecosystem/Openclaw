@@ -19,8 +19,14 @@ import {
 import { sleep } from "../api.js";
 import { validateProviderConfig, type VoiceCallConfig } from "./config.js";
 import { getCallHistoryFromStore } from "./manager/store.js";
+import {
+  redactCallRecordForRead,
+  redactCallRecordsForRead,
+  redactVoiceCallJsonLineForRead,
+} from "./readback.js";
 import { setVoiceCallStateRuntime, type VoiceCallStateRuntime } from "./runtime-state.js";
 import type { VoiceCallRuntime } from "./runtime.js";
+import type { CallRecord } from "./types.js";
 import { resolveUserPath } from "./utils.js";
 import { resolveWebhookExposureStatus } from "./webhook-exposure.js";
 import {
@@ -112,6 +118,27 @@ function isGatewayUnavailableForLocalFallback(err: unknown): boolean {
     message.includes("gateway closed (1006") ||
     message.includes("gateway not connected")
   );
+}
+
+function hasPostCallContent(call: CallRecord): boolean {
+  return (
+    call.transcript.length > 0 ||
+    typeof call.metadata?.objective === "string" ||
+    typeof call.metadata?.initialMessage === "string"
+  );
+}
+
+function findCallInHistory(history: CallRecord[], callIdOrProviderCallId: string) {
+  const newestFirst = history.toReversed();
+  const exact = newestFirst.find((candidate) => candidate.callId === callIdOrProviderCallId);
+  if (exact) {
+    return exact;
+  }
+
+  const providerMatches = newestFirst.filter(
+    (candidate) => candidate.providerCallId === callIdOrProviderCallId,
+  );
+  return providerMatches.find(hasPostCallContent) ?? providerMatches[0];
 }
 
 async function callVoiceCallGateway(
@@ -363,10 +390,12 @@ async function initiateCallAndPrintId(params: {
   runtime: VoiceCallRuntime;
   to: string;
   message?: string;
+  objective?: string;
   mode?: string;
 }) {
   const result = await params.runtime.manager.initiateCall(params.to, undefined, {
     message: params.message,
+    objective: params.objective,
     mode: resolveCallMode(params.mode),
   });
   if (!result.success) {
@@ -392,6 +421,7 @@ async function initiateCallViaGatewayOrRuntime(params: {
   method: "voicecall.initiate" | "voicecall.start";
   to?: string;
   message?: string;
+  objective?: string;
   mode?: string;
 }) {
   const mode = resolveCallMode(params.mode);
@@ -400,6 +430,7 @@ async function initiateCallViaGatewayOrRuntime(params: {
     {
       ...(params.to ? { to: params.to } : {}),
       ...(params.message ? { message: params.message } : {}),
+      ...(params.objective ? { objective: params.objective } : {}),
       ...(mode ? { mode } : {}),
     },
     {
@@ -420,6 +451,7 @@ async function initiateCallViaGatewayOrRuntime(params: {
     runtime: rt,
     to,
     message: params.message,
+    objective: params.objective,
     mode: params.mode,
   });
 }
@@ -545,6 +577,7 @@ export function registerVoiceCallCli(params: {
     .command("call")
     .description("Initiate an outbound voice call")
     .requiredOption("-m, --message <text>", "Message to speak when call connects")
+    .option("--objective <text>", "Private per-call objective for realtime task calls")
     .option(
       "-t, --to <phone>",
       "Phone number to call (E.164 format, uses config toNumber if not set)",
@@ -554,37 +587,44 @@ export function registerVoiceCallCli(params: {
       "Call mode: notify (hangup after message) or conversation (stay open)",
       "conversation",
     )
-    .action(async (options: { message: string; to?: string; mode?: string }) => {
-      await initiateCallViaGatewayOrRuntime({
-        ensureRuntime,
-        config,
-        method: "voicecall.initiate",
-        to: options.to,
-        message: options.message,
-        mode: options.mode,
-      });
-    });
+    .action(
+      async (options: { message: string; objective?: string; to?: string; mode?: string }) => {
+        await initiateCallViaGatewayOrRuntime({
+          ensureRuntime,
+          config,
+          method: "voicecall.initiate",
+          to: options.to,
+          message: options.message,
+          objective: options.objective,
+          mode: options.mode,
+        });
+      },
+    );
 
   root
     .command("start")
     .description("Alias for voicecall call")
     .requiredOption("--to <phone>", "Phone number to call")
     .option("--message <text>", "Message to speak when call connects")
+    .option("--objective <text>", "Private per-call objective for realtime task calls")
     .option(
       "--mode <mode>",
       "Call mode: notify (hangup after message) or conversation (stay open)",
       "conversation",
     )
-    .action(async (options: { to: string; message?: string; mode?: string }) => {
-      await initiateCallViaGatewayOrRuntime({
-        ensureRuntime,
-        config,
-        method: "voicecall.start",
-        to: options.to,
-        message: options.message,
-        mode: options.mode,
-      });
-    });
+    .action(
+      async (options: { to: string; message?: string; objective?: string; mode?: string }) => {
+        await initiateCallViaGatewayOrRuntime({
+          ensureRuntime,
+          config,
+          method: "voicecall.start",
+          to: options.to,
+          message: options.message,
+          objective: options.objective,
+          mode: options.mode,
+        });
+      },
+    );
 
   root
     .command("continue")
@@ -732,13 +772,16 @@ export function registerVoiceCallCli(params: {
       }
       const rt = await ensureRuntime();
       if (options.callId) {
-        const call = rt.manager.getCall(options.callId);
-        writeStdoutJson(call ?? { found: false });
+        const call =
+          rt.manager.getCall(options.callId) ??
+          rt.manager.getCallByProviderCallId(options.callId) ??
+          findCallInHistory(await rt.manager.getCallHistory(100), options.callId);
+        writeStdoutJson(call ? redactCallRecordForRead(call) : { found: false });
         return;
       }
       writeStdoutJson({
         found: true,
-        calls: rt.manager.getActiveCalls(),
+        calls: redactCallRecordsForRead(rt.manager.getActiveCalls()),
       });
     });
 
@@ -757,7 +800,7 @@ export function registerVoiceCallCli(params: {
         ensureHistoryStateRuntime();
         const seen = new Set<string>();
         const printCall = (call: unknown): void => {
-          const line = JSON.stringify(call);
+          const line = redactVoiceCallJsonLineForRead(JSON.stringify(call));
           if (!seen.has(line)) {
             seen.add(line);
             writeStdoutLine(line);
@@ -784,7 +827,7 @@ export function registerVoiceCallCli(params: {
         const initial = fs.readFileSync(file, "utf8");
         const lines = initial.split("\n").filter(Boolean);
         for (const line of lines.slice(Math.max(0, lines.length - since))) {
-          writeStdoutLine(line);
+          writeStdoutLine(redactVoiceCallJsonLineForRead(line));
         }
 
         let offset = Buffer.byteLength(initial, "utf8");
@@ -802,7 +845,7 @@ export function registerVoiceCallCli(params: {
                 offset = stat.size;
                 const text = buf.toString("utf8");
                 for (const line of text.split("\n").filter(Boolean)) {
-                  writeStdoutLine(line);
+                  writeStdoutLine(redactVoiceCallJsonLineForRead(line));
                 }
               } finally {
                 fs.closeSync(fd);
