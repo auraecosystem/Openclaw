@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSessionStore, type SessionEntry } from "../config/sessions.js";
 import { callGateway } from "../gateway/call.js";
@@ -748,7 +749,7 @@ describe("main-session-restart-recovery", () => {
       lockPath,
       JSON.stringify({ pid: 999_999, createdAt: new Date().toISOString() }),
     );
-    await new Promise((r) => setTimeout(r, 10));
+    await delay(10);
     const gatewayStartedAt = Date.now();
 
     await writeStore(sessionsDir, {
@@ -780,7 +781,7 @@ describe("main-session-restart-recovery", () => {
     const sessionsDir = await makeSessionsDir();
     const unrelatedLockPath = path.join(sessionsDir, "unrelated-session.jsonl.lock");
     await fs.writeFile(unrelatedLockPath, JSON.stringify({ pid: 999_999 }));
-    await new Promise((r) => setTimeout(r, 10));
+    await delay(10);
     const gatewayStartedAt = Date.now();
 
     await writeStore(sessionsDir, {
@@ -814,7 +815,7 @@ describe("main-session-restart-recovery", () => {
       },
     });
 
-    await new Promise((r) => setTimeout(r, 20));
+    await delay(20);
     const lockPath = path.join(sessionsDir, "main-session.jsonl.lock");
     await fs.writeFile(
       lockPath,
@@ -842,7 +843,7 @@ describe("main-session-restart-recovery", () => {
         createdAt: new Date(Date.now() - 60_000).toISOString(),
       }),
     );
-    await new Promise((r) => setTimeout(r, 10));
+    await delay(10);
     const gatewayStartedAt = Date.now();
 
     await writeStore(sessionsDir, {
