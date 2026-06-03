@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import fs, { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path, { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -20,13 +20,23 @@ import {
 import {
   filterSparseMissingOxlintTargets,
   shouldPrepareExtensionPackageBoundaryArtifacts,
+  shouldRunNativeTypeAwareOxlint,
 } from "../../scripts/run-oxlint.mjs";
+import { createScriptTestHarness } from "./test-helpers.js";
+
+const { createTempDir } = createScriptTestHarness();
 
 describe("run-oxlint", () => {
   it("prepares extension package boundary artifacts for normal lint runs", () => {
     expect(shouldPrepareExtensionPackageBoundaryArtifacts([])).toBe(true);
     expect(shouldPrepareExtensionPackageBoundaryArtifacts(["src/index.ts"])).toBe(true);
     expect(shouldPrepareExtensionPackageBoundaryArtifacts(["--type-aware"])).toBe(true);
+  });
+
+  it("treats type-aware oxlint as native type-aware work even with explicit file targets", () => {
+    expect(shouldRunNativeTypeAwareOxlint(["--type-aware", "--", "src/index.ts"])).toBe(true);
+    expect(shouldRunNativeTypeAwareOxlint(["src/index.ts"])).toBe(false);
+    expect(shouldRunNativeTypeAwareOxlint(["--help", "--type-aware"])).toBe(false);
   });
 
   it("skips artifact preparation for metadata-only oxlint commands", () => {
@@ -602,5 +612,72 @@ describe("run-oxlint", () => {
       skippedTargets: [],
       skippedConfigs: [],
     });
+  });
+
+  it("does not create local heavy-check temp directories when sharded oxlint is refused", () => {
+    const tmpDir = path.join(createTempDir("openclaw-run-oxlint-refused-"), "heavy-tmp");
+    const result = spawnSync(process.execPath, ["scripts/run-oxlint-shards.mjs"], {
+      cwd: path.resolve("."),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI: "",
+        GITHUB_ACTIONS: "",
+        OPENCLAW_LOCAL_CHECK_MODE: "",
+        OPENCLAW_LOCAL_HEAVY_CHECK_TMPDIR: tmpDir,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Refusing to start sharded type-aware oxlint on this local host",
+    );
+    expect(fs.existsSync(tmpDir)).toBe(false);
+  });
+
+  it("delegates sharded metadata-only commands before heavy setup", () => {
+    const tmpDir = path.join(createTempDir("openclaw-run-oxlint-metadata-"), "heavy-tmp");
+    const result = spawnSync(process.execPath, ["scripts/run-oxlint-shards.mjs", "--help"], {
+      cwd: path.resolve("."),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI: "",
+        GITHUB_ACTIONS: "",
+        OPENCLAW_LOCAL_CHECK_MODE: "",
+        OPENCLAW_LOCAL_HEAVY_CHECK_TMPDIR: tmpDir,
+      },
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).not.toContain("prepare-extension-package-boundary-artifacts");
+    expect(result.stderr).not.toContain("Refusing to start sharded type-aware oxlint");
+    expect(fs.existsSync(tmpDir)).toBe(false);
+  });
+
+  it("delegates explicit file-target sharded oxlint requests before heavy setup", () => {
+    const fixtureDir = createTempDir("openclaw-run-oxlint-file-target-");
+    const fixtureFile = path.join(fixtureDir, "target.ts");
+    const tmpDir = path.join(fixtureDir, "heavy-tmp");
+    fs.writeFileSync(fixtureFile, "export const ok = 1;\n");
+
+    const result = spawnSync(process.execPath, ["scripts/run-oxlint-shards.mjs", fixtureFile], {
+      cwd: path.resolve("."),
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        CI: "",
+        GITHUB_ACTIONS: "",
+        OPENCLAW_LOCAL_CHECK_MODE: "",
+        OPENCLAW_LOCAL_HEAVY_CHECK_TMPDIR: tmpDir,
+      },
+    });
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).not.toContain("prepare-extension-package-boundary-artifacts");
+    expect(result.stderr).not.toContain("[oxlint:core] starting");
+    expect(result.stderr).toContain("Refusing to start type-aware oxlint");
+    expect(result.stderr).not.toContain("Refusing to start sharded type-aware oxlint");
+    expect(fs.existsSync(tmpDir)).toBe(false);
   });
 });

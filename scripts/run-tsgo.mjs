@@ -5,6 +5,9 @@ import { readFlagValue } from "./lib/arg-utils.mjs";
 import {
   acquireLocalHeavyCheckLockSync,
   applyLocalTsgoPolicy,
+  getLocalHeavyCheckPressureError,
+  getLocalNativeTypecheckRefusalError,
+  prepareLocalHeavyCheckEnvironment,
   resolveLocalHeavyCheckEnv,
   shouldAcquireLocalHeavyCheckLockForTsgo,
 } from "./lib/local-heavy-check-runtime.mjs";
@@ -14,38 +17,65 @@ import {
 } from "./lib/tsgo-sparse-guard.mjs";
 import { createManagedCommandInvocation } from "./lib/managed-child-process.mjs";
 
-const { args: finalArgs, env } = applyLocalTsgoPolicy(
+const { args: finalArgs, env: policyEnv } = applyLocalTsgoPolicy(
   process.argv.slice(2),
   resolveLocalHeavyCheckEnv(process.env),
 );
 
 const tsgoPath = path.resolve("node_modules", ".bin", "tsgo");
 const tsBuildInfoFile = readFlagValue(finalArgs, "--tsBuildInfoFile");
-if (tsBuildInfoFile) {
-  fs.mkdirSync(path.dirname(path.resolve(tsBuildInfoFile)), { recursive: true });
-}
 const sparseGuardError = getSparseTsgoGuardError(finalArgs, { cwd: process.cwd() });
+const shouldRunHeavyCheck = shouldAcquireLocalHeavyCheckLockForTsgo(finalArgs, policyEnv);
+const nativeTypecheckRefusalError = sparseGuardError
+  ? null
+  : getLocalNativeTypecheckRefusalError({
+      args: finalArgs,
+      env: policyEnv,
+      shouldRunHeavyCheck,
+      toolName: "tsgo",
+    });
 const releaseLock =
+  policyEnv.OPENCLAW_TSGO_SKIP_LOCK === "1" ||
   sparseGuardError ||
-  env.OPENCLAW_TSGO_HEAVY_CHECK_LOCK_HELD === "1" ||
-  !shouldAcquireLocalHeavyCheckLockForTsgo(finalArgs, env)
+  nativeTypecheckRefusalError ||
+  policyEnv.OPENCLAW_TSGO_HEAVY_CHECK_LOCK_HELD === "1" ||
+  !shouldRunHeavyCheck
     ? () => {}
     : acquireLocalHeavyCheckLockSync({
         cwd: process.cwd(),
-        env,
+        env: policyEnv,
         toolName: "tsgo",
       });
 
 try {
+  const pressureGuardError =
+    sparseGuardError || nativeTypecheckRefusalError || !shouldRunHeavyCheck
+      ? null
+      : getLocalHeavyCheckPressureError({ cwd: process.cwd(), env: policyEnv });
+
   if (sparseGuardError) {
     console.error(sparseGuardError);
-    if (shouldSkipSparseTsgoGuardError(env)) {
+    if (shouldSkipSparseTsgoGuardError(policyEnv)) {
       console.error("[tsgo] skipping sparse-missing project because OPENCLAW_TSGO_SPARSE_SKIP=1");
       process.exitCode = 0;
     } else {
       process.exitCode = 1;
     }
+  } else if (nativeTypecheckRefusalError) {
+    console.error(nativeTypecheckRefusalError);
+    process.exitCode = 1;
+  } else if (pressureGuardError) {
+    console.error(pressureGuardError);
+    process.exitCode = 1;
   } else {
+    const env = shouldRunHeavyCheck
+      ? prepareLocalHeavyCheckEnvironment({ cwd: process.cwd(), env: policyEnv })
+      : policyEnv;
+
+    if (tsBuildInfoFile) {
+      fs.mkdirSync(path.dirname(path.resolve(tsBuildInfoFile)), { recursive: true });
+    }
+
     const tsgo = createManagedCommandInvocation({
       args: finalArgs,
       bin: tsgoPath,
