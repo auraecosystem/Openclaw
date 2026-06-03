@@ -1014,3 +1014,187 @@ describe("buildInboundUserContextPrefix", () => {
     expect(text).not.toContain("private-token");
   });
 });
+
+describe("sanitizeTranscriptBody — head+tail truncation for reply context", () => {
+  it("passes a body under the cap through unchanged (apart from whitespace collapse)", () => {
+    const body = "Short bot reply with HEAD_MARK and TAIL_MARK.";
+    const text = buildInboundUserContextPrefix({
+      ChatType: "group",
+      UntrustedStructuredContext: [
+        {
+          label: "Conversation context",
+          source: "telegram",
+          type: "chat_window",
+          payload: {
+            order: "chronological",
+            relation: "before_current_message",
+            messages: [
+              {
+                message_id: "m1",
+                sender: "bot",
+                body,
+                is_reply_target: true,
+              },
+            ],
+          },
+        },
+      ],
+    } as TemplateContext);
+
+    expect(text).toContain(body);
+    expect(text).not.toContain("chars omitted");
+  });
+
+  it("preserves both head and tail when body exceeds cap, with explicit omission marker", () => {
+    // Head padding exceeds BODY_HEAD_CHARS (2000) so MIDDLE never reaches the head window;
+    // tail padding exceeds BODY_TAIL_CHARS (3500) so MIDDLE never reaches the tail window.
+    const headPart = "HEAD_MARKER ".repeat(400); // ~4800 chars
+    const middlePart = "MIDDLE_ONLY_SENTINEL ".repeat(800); // ~16800 chars, must be dropped
+    const tailPart = " TAIL_MARKER".repeat(500); // ~6000 chars
+    const longBody = headPart + middlePart + tailPart;
+    expect(longBody.length).toBeGreaterThan(6000);
+
+    const text = buildInboundUserContextPrefix({
+      ChatType: "group",
+      UntrustedStructuredContext: [
+        {
+          label: "Conversation context",
+          source: "telegram",
+          type: "chat_window",
+          payload: {
+            order: "chronological",
+            relation: "before_current_message",
+            messages: [
+              {
+                message_id: "m1",
+                sender: "bot",
+                body: longBody,
+                is_reply_target: true,
+              },
+            ],
+          },
+        },
+      ],
+    } as TemplateContext);
+
+    // Head and tail content survive
+    expect(text).toContain("HEAD_MARKER");
+    expect(text).toContain("TAIL_MARKER");
+    // Middle is dropped, replaced by omission marker
+    expect(text).toContain("chars omitted");
+    expect(text).not.toContain("MIDDLE_ONLY_SENTINEL");
+    // Reply target framing is intact
+    expect(text).toContain("[reply target]");
+  });
+
+  it("does not relax the 500-char cap on short metadata fields like sender", () => {
+    const longSender = "x".repeat(900);
+    const text = buildInboundUserContextPrefix({
+      ChatType: "group",
+      UntrustedStructuredContext: [
+        {
+          label: "Conversation context",
+          source: "telegram",
+          type: "chat_window",
+          payload: {
+            order: "chronological",
+            relation: "before_current_message",
+            messages: [
+              {
+                message_id: "m1",
+                sender: longSender,
+                body: "hi",
+              },
+            ],
+          },
+        },
+      ],
+    } as TemplateContext);
+
+    // Sender is still capped, not extended to body-size budget
+    expect(text).not.toContain("x".repeat(600));
+    expect(text).toContain("…[truncated]");
+  });
+
+  it("uses head+tail cap for Telegram inline ReplyToBody quote", () => {
+    // Padding exceeds BODY_HEAD_CHARS / BODY_TAIL_CHARS so middle sentinel is strictly inside dropped zone.
+    const head = "OPENING_CONTEXT ".repeat(400); // ~6400 chars
+    const middle = "FILLER_ONLY_SENTINEL ".repeat(800); // ~16800 chars, must be dropped
+    const tail = " CLOSING_OPTIONS".repeat(400); // ~6400 chars
+    const longReplyBody = head + middle + tail;
+    expect(longReplyBody.length).toBeGreaterThan(6000);
+
+    const text = buildInboundUserContextPrefix({
+      Provider: "telegram",
+      Surface: "telegram",
+      OriginatingChannel: "telegram",
+      ChatType: "group",
+      MessageSid: "u-1",
+      ReplyToId: "b-1",
+      ReplyToBody: longReplyBody,
+      SenderName: "user",
+    } as TemplateContext);
+
+    expect(text).toContain("[Replying to:");
+    expect(text).toContain("OPENING_CONTEXT");
+    expect(text).toContain("CLOSING_OPTIONS");
+    expect(text).toContain("chars omitted");
+    expect(text).not.toContain("FILLER_ONLY_SENTINEL");
+  });
+
+  it("does not leave a lone surrogate when an emoji straddles the tail window boundary", () => {
+    // Build a body whose surrogate pair straddles the tail-window boundary at
+    // body.length - BODY_TAIL_CHARS (3500): the high surrogate sits just
+    // outside the tail window, the low surrogate sits just inside it. Without
+    // surrogate-safe slicing, the preserved tail would begin with a lone low
+    // surrogate, producing invalid UTF-16 in the injected prompt.
+    const LOBSTER_HIGH = String.fromCharCode(0xd83e);
+    const LOBSTER_LOW = String.fromCharCode(0xdd9e); // pair = "🦞" U+1F99E
+    const headFiller = "h".repeat(2500); // > BODY_HEAD_CHARS so head window is pure
+    const middleFiller = "m".repeat(7000) + LOBSTER_HIGH;
+    const tailMarker = "TAIL_AFTER_LOBSTER";
+    const tailFiller = LOBSTER_LOW + tailMarker + "t".repeat(3500 - 1 - tailMarker.length);
+    const longBody = headFiller + middleFiller + tailFiller;
+    expect(longBody.length).toBeGreaterThan(6000);
+    // Sanity: surrogate pair really straddles the boundary at length - 3500.
+    expect(longBody.charCodeAt(longBody.length - 3501)).toBe(0xd83e);
+    expect(longBody.charCodeAt(longBody.length - 3500)).toBe(0xdd9e);
+
+    const text = buildInboundUserContextPrefix({
+      ChatType: "group",
+      UntrustedStructuredContext: [
+        {
+          label: "Conversation context",
+          source: "telegram",
+          type: "chat_window",
+          payload: {
+            order: "chronological",
+            relation: "before_current_message",
+            messages: [
+              {
+                message_id: "m1",
+                sender: "bot",
+                body: longBody,
+                is_reply_target: true,
+              },
+            ],
+          },
+        },
+      ],
+    } as TemplateContext);
+
+    // No lone surrogate anywhere in the rendered output.
+    for (let i = 0; i < text.length; i += 1) {
+      const c = text.charCodeAt(i);
+      if (c >= 0xd800 && c <= 0xdbff) {
+        const next = text.charCodeAt(i + 1);
+        expect(next >= 0xdc00 && next <= 0xdfff).toBe(true);
+        i += 1;
+      } else {
+        expect(c >= 0xdc00 && c <= 0xdfff).toBe(false);
+      }
+    }
+    // Tail content immediately following the would-be-split boundary survives.
+    expect(text).toContain(tailMarker);
+  });
+});
