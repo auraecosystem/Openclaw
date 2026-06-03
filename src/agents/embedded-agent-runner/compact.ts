@@ -1141,6 +1141,9 @@ async function compactEmbeddedAgentSessionDirectOnce(
         provider,
         modelId,
         model,
+        modelRegistry,
+        agentDir,
+        workspaceDir: resolvedWorkspace,
       });
       const resourceLoader = createEmbeddedAgentResourceLoader({
         cwd: effectiveCwd,
