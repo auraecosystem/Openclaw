@@ -608,12 +608,14 @@ function mergeLockedProviderCooldownStoreForSave(params: {
   callerStore: AuthProfileStore;
   callerProfileIds: string[];
 }): AuthProfileStore {
-  const callerRuntimeExternalProfileIds = new Set(params.callerStore.runtimeExternalProfileIds ?? []);
+  const callerRuntimeExternalProfileIds = new Set(
+    params.callerStore.runtimeExternalProfileIds ?? [],
+  );
   const callerProfileIdSet = new Set(
     params.callerProfileIds.filter((profileId) => callerRuntimeExternalProfileIds.has(profileId)),
   );
   const mergedUsageStats: NonNullable<AuthProfileStore["usageStats"]> = {
-    ...(params.lockedStore.usageStats ?? {}),
+    ...params.lockedStore.usageStats,
   };
   for (const profileId of callerProfileIdSet) {
     if (params.callerStore.usageStats?.[profileId]) {
@@ -1126,10 +1128,7 @@ export async function clearProviderAuthProfileCooldowns(params: {
     updater: (freshStore) => {
       const lockedProfileIds =
         profileIds === undefined
-          ? [
-              ...(providerWideProfileIds ?? []),
-              ...listProfilesForProvider(freshStore, provider),
-            ]
+          ? [...(providerWideProfileIds ?? []), ...listProfilesForProvider(freshStore, provider)]
           : profileIds;
       lockedStoreChanged = clearProviderCooldownEntries(freshStore, provider, lockedProfileIds);
       return lockedStoreChanged;

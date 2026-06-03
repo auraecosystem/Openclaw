@@ -488,6 +488,14 @@ async function resolveModelFallbackCandidateHarnessAuthPrecheck(
 ): Promise<{ skipsProviderAuthCooldown: boolean }> {
   const policy = resolveModelFallbackCandidateHarnessAuthCooldownPolicy(params);
   if (!policy.skipsProviderAuthCooldown) {
+    // Even when auth cooldown is not being skipped, validate that the
+    // resolved agent harness is registered before proceeding to cooldown
+    // handling. A missing harness should fail-closed ahead of any cooldown
+    // logic so that downstream callers never bypass the harness gate.
+    const agentRuntime = policy.agentRuntime;
+    if (agentRuntime && !getRegisteredAgentHarness(agentRuntime)) {
+      throw new MissingAgentHarnessError(agentRuntime);
+    }
     return { skipsProviderAuthCooldown: false };
   }
   const agentRuntime = policy.agentRuntime;
