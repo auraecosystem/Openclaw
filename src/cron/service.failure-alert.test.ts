@@ -76,7 +76,9 @@ function simulateScheduledRun(
 ) {
   const state = (cron as any).state;
   const job = cron.getJob(jobId);
-  if (!job) throw new Error(`job ${jobId} not found`);
+  if (!job) {
+    throw new Error(`job ${jobId} not found`);
+  }
   const now = Date.now();
   applyJobResult(state, job, { ...result, startedAt: now, endedAt: now });
 }
