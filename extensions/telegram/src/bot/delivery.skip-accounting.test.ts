@@ -81,9 +81,11 @@ describe("deliverReplies skipped-send accounting", () => {
   });
 
   it("treats every-chunk-skipped text reply as a no-op across hooks, mirror, and delivered flag", async () => {
-    // Regression: sendTelegramText resolves undefined for empty post-strip HTML
-    // (bare <br>, &nbsp;, etc.). Before the fix, the chunked reply loop still
-    // called markDelivered and markReplyApplied for skipped chunks, advancing
+    // Regression: sendTelegramText can resolve undefined when the pre-flight
+    // trim short-circuits an empty-after-trim html payload (with plainText also
+    // empty), or when Telegram rejects post-strip text with the empty-text 400
+    // wording. Before the fix, the chunked reply loop still called
+    // markDelivered and markReplyApplied for skipped chunks, advancing
     // deliveredCount and producing a phantom message_sent success with
     // messageId=undefined plus a transcript mirror entry for nothing.
     messageHookRunner.hasHooks.mockImplementation(

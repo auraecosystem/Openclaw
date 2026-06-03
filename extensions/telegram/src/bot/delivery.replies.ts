@@ -529,7 +529,7 @@ async function deliverMediaReply(params: {
             await sendVoiceMedia(noCaptionParams);
             const fallbackText = resolveVoiceFallbackText(params.reply);
             if (fallbackText?.trim()) {
-              await sendTelegramVoiceFallbackText({
+              const captionFallbackMessageId = await sendTelegramVoiceFallbackText({
                 bot: params.bot,
                 chatId: params.chatId,
                 runtime: params.runtime,
@@ -541,7 +541,16 @@ async function deliverMediaReply(params: {
                 silent: params.silent,
                 replyMarkup: params.replyMarkup,
               });
-              visibleFallbackText = fallbackText;
+              // Mirror only the text that actually reached Telegram. The
+              // voice-text fallback funnels through sendTelegramText and can
+              // resolve undefined (skipped send) when the resolved fallback
+              // text strips to empty post-HTML normalization. Setting
+              // visibleFallbackText unconditionally would push a transcript /
+              // hook entry for text that was never delivered (ClawSweeper P2
+              // finding on #88810).
+              if (captionFallbackMessageId != null) {
+                visibleFallbackText = fallbackText;
+              }
             }
             markReplyApplied(params.progress, replyToMessageId);
             continue;
