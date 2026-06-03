@@ -19,7 +19,7 @@ import {
   resolveChannelMessageToolSchemaProperties,
 } from "./message-action-discovery.js";
 import type { ChannelMessageCapability } from "./message-capabilities.js";
-import type { ChannelPlugin } from "./types.js";
+import type { ChannelMessageToolSchemaContribution, ChannelPlugin } from "./types.js";
 
 const emptyRegistry = createTestRegistry([]);
 
@@ -193,6 +193,52 @@ describe("message action capability checks", () => {
     ).toHaveProperty("components");
   });
 
+  it("skips unreadable schema contributions without dropping healthy fields", () => {
+    const unreadableSchema = {} as ChannelMessageToolSchemaContribution;
+    Object.defineProperty(unreadableSchema, "visibility", {
+      value: "all-configured",
+    });
+    Object.defineProperty(unreadableSchema, "properties", {
+      get() {
+        throw new Error("schema properties exploded");
+      },
+    });
+    const schemaPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-schema-read",
+        label: "Demo Schema Read",
+        capabilities: { chatTypes: ["direct", "group"] },
+        config: {
+          listAccountIds: () => ["default"],
+        },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          schema: [
+            unreadableSchema,
+            {
+              visibility: "all-configured",
+              properties: {
+                safeField: Type.Optional(Type.String()),
+              },
+            },
+          ],
+        }),
+      },
+    };
+    setActivePluginRegistry(
+      createTestRegistry([{ pluginId: "demo-schema-read", source: "test", plugin: schemaPlugin }]),
+    );
+
+    expect(
+      resolveChannelMessageToolSchemaProperties({
+        cfg: {} as OpenClawConfig,
+        channel: "demo-schema-read",
+      }),
+    ).toHaveProperty("safeField");
+    expect(errorSpy).toHaveBeenCalledOnce();
+  });
+
   it("filters only actions that depend on current-channel-only schema", () => {
     const scopedSchemaPlugin: ChannelPlugin = {
       ...createChannelTestPluginBase({
@@ -227,6 +273,53 @@ describe("message action capability checks", () => {
         channel: "demo-scoped-schema",
       }),
     ).toEqual(["read", "list-pins"]);
+  });
+
+  it("fails closed when scoped schema action lists are unreadable", () => {
+    const unreadableSchema = {
+      visibility: "current-channel",
+      properties: {
+        pinnedMessageId: Type.Optional(Type.String()),
+      },
+    } as ChannelMessageToolSchemaContribution;
+    Object.defineProperty(unreadableSchema, "actions", {
+      get() {
+        throw new Error("schema actions exploded");
+      },
+    });
+    const scopedSchemaPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-unreadable-scoped-schema",
+        label: "Demo Unreadable Scoped Schema",
+        capabilities: { chatTypes: ["direct", "group"] },
+        config: {
+          listAccountIds: () => ["default"],
+        },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          actions: ["read", "unpin"],
+          schema: unreadableSchema,
+        }),
+      },
+    };
+    setActivePluginRegistry(
+      createTestRegistry([
+        {
+          pluginId: "demo-unreadable-scoped-schema",
+          source: "test",
+          plugin: scopedSchemaPlugin,
+        },
+      ]),
+    );
+
+    expect(
+      listCrossChannelSchemaSupportedMessageActions({
+        cfg: {} as OpenClawConfig,
+        channel: "demo-unreadable-scoped-schema",
+      }),
+    ).toStrictEqual([]);
+    expect(errorSpy).toHaveBeenCalledOnce();
   });
 
   it("keeps unscoped current-channel schema conservative for cross-channel actions", () => {
