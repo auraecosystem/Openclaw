@@ -83,7 +83,7 @@ const FRAME_BYTES = (MSTEAMS_SAMPLE_RATE_HZ / 1000) * FRAME_DURATION_MS * BYTES_
  * Microsoft Teams voice-call provider.
  *
  * Unlike Twilio/Telnyx/Plivo, Teams calls do not arrive on the voice-call
- * webhook plane. The Windows-side worker (AzureBot) owns the Graph calling
+ * webhook plane. An external Windows-side bridge worker owns the Graph calling
  * notification endpoint and opens a per-call WebSocket to OpenClaw when a call
  * is answered. The real transport lives in `MsteamsMediaStream`; this provider
  * wires that transport into the existing voice-call machinery (CallManager,
@@ -404,9 +404,9 @@ export class MsteamsProvider implements VoiceCallProvider {
   }
 
   async initiateCall(_input: InitiateCallInput): Promise<InitiateCallResult> {
-    // Outbound calls (OpenClaw asking the worker to dial into a meeting)
-    // were intentionally deferred past Sprint 2 — locked decision.
-    throw new Error("MsteamsProvider.initiateCall is not supported in Sprint 2 (inbound-only)");
+    // Outbound calls (OpenClaw asking the worker to dial into a meeting) are not
+    // supported — the msteams provider is inbound-only.
+    throw new Error("MsteamsProvider.initiateCall is not supported (inbound-only)");
   }
 
   async hangupCall(input: HangupCallInput): Promise<void> {

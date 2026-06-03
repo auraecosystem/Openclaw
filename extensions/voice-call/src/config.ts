@@ -64,7 +64,7 @@ const TwilioConfigSchema = z
 
 const MsteamsConfigSchema = z
   .object({
-    /** TCP port for the MaryamBot WebSocket server. */
+    /** TCP port the Teams bridge WebSocket server listens on. */
     port: z.number().int().min(1).max(65535).optional(),
     /** URL path prefix for the WebSocket upgrade (per-call path = {path}/{callId}). */
     path: z.string().min(1).optional(),
@@ -424,7 +424,7 @@ export const VoiceCallConfigSchema = z
     /** Plivo-specific configuration */
     plivo: PlivoConfigSchema.optional(),
 
-    /** Microsoft Teams provider — bridges Skype.Bots.Media via the MaryamBot worker */
+    /** Microsoft Teams provider — bridges Teams call audio via an external Windows worker */
     msteams: MsteamsConfigSchema.optional(),
 
     /** Phone number to call from (E.164) */
@@ -795,6 +795,13 @@ export function resolveVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallC
     resolved.webhookSecurity.trustForwardingHeaders ?? false;
   resolved.webhookSecurity.trustedProxyIPs = resolved.webhookSecurity.trustedProxyIPs ?? [];
 
+  // Microsoft Teams is inbound-first: calls and meeting joins are delivered to the
+  // bot, so requiring the operator to also flip inboundPolicy is redundant. Default
+  // it to "open" for msteams unless an explicit policy was configured.
+  if (resolved.provider === "msteams" && config.inboundPolicy === undefined) {
+    resolved.inboundPolicy = "open";
+  }
+
   return normalizeVoiceCallConfig(resolved);
 }
 
@@ -815,7 +822,9 @@ export function validateProviderConfig(config: VoiceCallConfig): {
     errors.push("plugins.entries.voice-call.config.provider is required");
   }
 
-  if (!config.fromNumber && config.provider !== "mock") {
+  // msteams and mock are inbound-first providers that never place outbound PSTN
+  // calls, so a fromNumber is meaningless for them.
+  if (!config.fromNumber && config.provider !== "mock" && config.provider !== "msteams") {
     errors.push(
       config.provider === "twilio"
         ? "plugins.entries.voice-call.config.fromNumber is required (or set TWILIO_FROM_NUMBER env)"

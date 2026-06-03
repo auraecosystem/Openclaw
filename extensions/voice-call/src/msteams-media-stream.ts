@@ -1,19 +1,19 @@
 /**
  * MsteamsMediaStream
  *
- * WebSocket server that accepts connections from AzureBot (Windows-side worker)
- * and bridges Microsoft Teams call audio in both directions. One connection per
- * Teams call, keyed by callId in the URL path.
+ * WebSocket server that accepts connections from an external Windows-side Teams
+ * bridge worker and relays Microsoft Teams call audio in both directions. One
+ * connection per Teams call, keyed by callId in the URL path.
  *
- * Phase 2.0 scope (this file at first cut):
- * - HTTP upgrade with HMAC-SHA256 verification of timestamp + callId
+ * Responsibilities:
+ * - HTTP upgrade with HMAC-SHA256 verification of timestamp + callId, plus a
+ *   replay window on the timestamp.
  * - Session lifecycle messages (session.start / session.end) parsed and emitted
- *   via callbacks for the host to wire into voice-call's session machinery
- * - Audio frames are accepted and surfaced via `onAudioFrame`, but the host
- *   does not yet pipe them into the realtime-transcription provider — that is
- *   task #13.
- * - Outbound `send` and `close` exposed on the SessionStart callback so the
- *   host can push TTS / control back to the worker once task #16 lands.
+ *   via callbacks for the host to wire into voice-call's session machinery.
+ * - Inbound audio frames surfaced via `onAudioFrame` for the host to forward to
+ *   the realtime-transcription provider.
+ * - Outbound `send` and `close` exposed on the SessionStart callback so the host
+ *   can push synthesized TTS audio and control messages back to the worker.
  */
 
 import crypto from "node:crypto";

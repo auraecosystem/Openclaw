@@ -73,7 +73,7 @@ describe("MsteamsProvider (stub surface)", () => {
     expect(result.statusCode).toBe(204);
   });
 
-  it("initiateCall throws — outbound dialing is out of Sprint 2 scope", async () => {
+  it("initiateCall throws — outbound dialing is not supported (inbound-only)", async () => {
     const p = new MsteamsProvider({});
     await expect(p.initiateCall(STUB_INITIATE_INPUT)).rejects.toThrow(/inbound-only/);
   });
