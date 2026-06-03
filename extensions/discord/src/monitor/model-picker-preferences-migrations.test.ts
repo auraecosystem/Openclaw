@@ -192,7 +192,7 @@ describe("Discord model picker preference migration", () => {
     expect(plan.pluginId).toBe("discord");
     expect(plan.namespace).toBe("thread-bindings");
     const entries = await plan.readEntries();
-    expect(entries).toEqual([
+    expect(entries).toStrictEqual([
       {
         key: "default:legacy-thread",
         value: {

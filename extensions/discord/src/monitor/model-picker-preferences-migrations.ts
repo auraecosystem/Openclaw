@@ -194,7 +194,10 @@ export const detectDiscordLegacyStateMigrations: BundledChannelLegacyStateMigrat
         )) {
           const normalized = normalizePersistedBinding(rawKey, rawEntry);
           if (normalized) {
-            out.push({ key: toBindingRecordKey(normalized), value: normalized });
+            out.push({
+              key: toBindingRecordKey(normalized),
+              value: normalized,
+            });
           }
         }
         return out;
