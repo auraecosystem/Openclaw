@@ -1,4 +1,35 @@
-import { hasFlag } from "./argv.js";
+import { getFlagValue, hasFlag } from "./argv.js";
+
+const AGENTS_ADD_CONFIG_ONLY_FLAGS = [
+  // Mirrors register.agent.ts hasExplicitOptions: these flags select the
+  // config-only add path after startup policy has already been resolved.
+  "--workspace",
+  "--model",
+  "--agent-dir",
+  "--non-interactive",
+] as const;
+
+const AGENTS_ADD_PLUGIN_AWARE_FLAGS = [
+  // agents.bindings.ts may need loaded channel plugins to resolve omitted
+  // binding account scopes, so --bind keeps the existing preload behavior.
+  "--bind",
+] as const;
+
+function hasAgentsAddConfigOnlyArgFlag(argv: string[], flag: string): boolean {
+  return hasFlag(argv, flag) || getFlagValue(argv, flag) !== undefined;
+}
+
+function hasAgentsAddConfigOnlyFlags(argv: string[]): boolean {
+  return AGENTS_ADD_CONFIG_ONLY_FLAGS.some((flag) => hasAgentsAddConfigOnlyArgFlag(argv, flag));
+}
+
+function hasAgentsAddPluginAwareFlags(argv: string[]): boolean {
+  return AGENTS_ADD_PLUGIN_AWARE_FLAGS.some((flag) => hasAgentsAddConfigOnlyArgFlag(argv, flag));
+}
+
+function shouldLoadPluginsForAgentsAdd(argv: string[]): boolean {
+  return hasAgentsAddPluginAwareFlags(argv) || !hasAgentsAddConfigOnlyFlags(argv);
+}
 
 export type CliCommandPluginLoadPolicy =
   | "never"
@@ -73,6 +104,13 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
   },
   { commandPath: ["directory"], policy: { loadPlugins: "always" } },
   { commandPath: ["agents"], policy: { loadPlugins: "always", networkProxy: "bypass" } },
+  {
+    commandPath: ["agents", "add"],
+    exact: true,
+    policy: {
+      loadPlugins: ({ argv }) => shouldLoadPluginsForAgentsAdd(argv),
+    },
+  },
   {
     commandPath: ["agents"],
     exact: true,
