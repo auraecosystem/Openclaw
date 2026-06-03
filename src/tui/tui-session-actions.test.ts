@@ -40,7 +40,12 @@ describe("tui session actions", () => {
       client: { listSessions: vi.fn() } as unknown as TuiBackend,
       chatLog: {
         addSystem: vi.fn(),
+        addUser: vi.fn(),
+        finalizeAssistant: vi.fn(),
+        clearPendingUsers: vi.fn(),
         clearAll: vi.fn(),
+        reconcilePendingUsers: vi.fn(),
+        restorePendingUsers: vi.fn(),
       } as unknown as import("./components/chat-log.js").ChatLog,
       btw: createBtwPresenter(),
       tui: { requestRender: vi.fn() } as unknown as import("@earendil-works/pi-tui").TUI,
@@ -500,8 +505,11 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      clearPendingUsers: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
+      reconcilePendingUsers: vi.fn(),
+      restorePendingUsers: vi.fn(),
       updateAssistant,
       startTool: vi.fn(),
     } as unknown as import("./components/chat-log.js").ChatLog;
@@ -532,8 +540,11 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      clearPendingUsers: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
+      reconcilePendingUsers: vi.fn(),
+      restorePendingUsers: vi.fn(),
       updateAssistant,
       startTool: vi.fn(),
     } as unknown as import("./components/chat-log.js").ChatLog;
@@ -561,8 +572,11 @@ describe("tui session actions", () => {
     const chatLog = {
       addSystem: vi.fn(),
       clearAll: vi.fn(),
+      clearPendingUsers: vi.fn(),
       addUser: vi.fn(),
       finalizeAssistant: vi.fn(),
+      reconcilePendingUsers: vi.fn(),
+      restorePendingUsers: vi.fn(),
       updateAssistant,
       startTool: vi.fn(),
     } as unknown as import("./components/chat-log.js").ChatLog;
@@ -1096,6 +1110,48 @@ describe("tui session actions", () => {
 
     expect(state.currentSessionId).toBe("session-main");
     expect(rememberSessionKey).toHaveBeenCalledWith("agent:main:main");
+  });
+
+  it("preserves optimistic user messages across stale history rebuilds", async () => {
+    const listSessions = vi.fn().mockResolvedValue({
+      ts: Date.now(),
+      path: "/tmp/sessions.json",
+      count: 1,
+      defaults: {},
+      sessions: [{ key: "agent:main:main", sessionId: "session-main" }],
+    });
+    const loadHistory = vi.fn().mockResolvedValue({
+      sessionId: "session-main",
+      messages: [
+        { role: "user", content: "persisted", timestamp: 2_000 },
+        { role: "assistant", content: [{ type: "text", text: "reply" }] },
+      ],
+    });
+    const chatLog = {
+      addSystem: vi.fn(),
+      addUser: vi.fn(),
+      finalizeAssistant: vi.fn(),
+      clearAll: vi.fn(),
+      clearPendingUsers: vi.fn(),
+      reconcilePendingUsers: vi.fn(),
+      restorePendingUsers: vi.fn(),
+    };
+
+    const { loadHistory: runLoadHistory } = createTestSessionActions({
+      client: {
+        listSessions,
+        loadHistory,
+      } as unknown as TuiBackend,
+      chatLog: chatLog as unknown as import("./components/chat-log.js").ChatLog,
+    });
+
+    await runLoadHistory();
+
+    expect(chatLog.clearAll).toHaveBeenCalledWith({ preservePendingUsers: true });
+    expect(chatLog.reconcilePendingUsers).toHaveBeenCalledWith([
+      { text: "persisted", timestamp: 2_000 },
+    ]);
+    expect(chatLog.restorePendingUsers).toHaveBeenCalledTimes(1);
   });
 
   it("hydrates session info from chat history without listing sessions", async () => {

@@ -102,6 +102,8 @@ function createHarness(params?: {
   const setEmptySession =
     params?.setEmptySession ?? (vi.fn().mockResolvedValue(undefined) as SetEmptySessionMock);
   const addUser = vi.fn();
+  const addPendingUser = vi.fn();
+  const dropPendingUser = vi.fn();
   const addSystem = vi.fn();
   const clearTools = vi.fn();
   const reserveAssistantSlot = vi.fn();
@@ -147,7 +149,14 @@ function createHarness(params?: {
       resetSession,
       runGoalCommand,
     } as never,
-    chatLog: { addUser, addSystem, clearTools, reserveAssistantSlot } as never,
+    chatLog: {
+      addUser,
+      addPendingUser,
+      dropPendingUser,
+      addSystem,
+      clearTools,
+      reserveAssistantSlot,
+    } as never,
     tui: { requestRender } as never,
     opts: params?.opts ?? {},
     state: state as never,
@@ -189,6 +198,8 @@ function createHarness(params?: {
     setSession,
     setEmptySession,
     addUser,
+    addPendingUser,
+    dropPendingUser,
     addSystem,
     clearTools,
     reserveAssistantSlot,
@@ -263,12 +274,13 @@ describe("tui command handlers", () => {
   });
 
   it("forwards unknown slash commands to the gateway", async () => {
-    const { handleCommand, sendChat, addUser, addSystem, requestRender } = createHarness();
+    const { handleCommand, sendChat, addPendingUser, addSystem, requestRender } =
+      createHarness();
 
     await handleCommand("/unregistered-command");
 
     expect(addSystem).not.toHaveBeenCalled();
-    expect(addUser).toHaveBeenCalledWith("/unregistered-command");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/unregistered-command");
     expectSendChatFields(sendChat, {
       sessionKey: "agent:main:main",
       message: "/unregistered-command",
@@ -292,10 +304,11 @@ describe("tui command handlers", () => {
 
   it("starts local goals and sends the objective to the model", async () => {
     const runGoalCommand = vi.fn().mockResolvedValue({ text: "Goal started: ship" });
-    const { handleCommand, sendChat, addSystem, refreshSessionInfo, addUser } = createHarness({
-      opts: { local: true },
-      runGoalCommand,
-    });
+    const { handleCommand, sendChat, addSystem, refreshSessionInfo, addPendingUser } =
+      createHarness({
+        opts: { local: true },
+        runGoalCommand,
+      });
 
     await handleCommand("/goal start ship");
 
@@ -308,7 +321,7 @@ describe("tui command handlers", () => {
       sessionKey: "agent:main:main",
       message: "ship",
     });
-    expect(addUser).toHaveBeenCalledWith("ship");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "ship");
     expect(addSystem).toHaveBeenCalledWith("Goal started: ship");
     expect(refreshSessionInfo).toHaveBeenCalled();
   });
@@ -326,7 +339,7 @@ describe("tui command handlers", () => {
       sessionKey: "agent:main:main",
       message: slashPrompt,
     });
-    expect(slashHarness.addUser).toHaveBeenCalledWith(slashPrompt);
+    expect(slashHarness.addPendingUser).toHaveBeenCalledWith(expect.any(String), slashPrompt);
 
     const bangRunGoalCommand = vi.fn().mockResolvedValue({ text: "Goal started" });
     const bangHarness = createHarness({
@@ -340,7 +353,7 @@ describe("tui command handlers", () => {
       sessionKey: "agent:main:main",
       message: bangPrompt,
     });
-    expect(bangHarness.addUser).toHaveBeenCalledWith(bangPrompt);
+    expect(bangHarness.addPendingUser).toHaveBeenCalledWith(expect.any(String), bangPrompt);
   });
 
   it("keeps local goal status as a control command", async () => {
@@ -358,7 +371,7 @@ describe("tui command handlers", () => {
 
   it("wraps command-prefixed local goal resume notes before sending", async () => {
     const runGoalCommand = vi.fn().mockResolvedValue({ text: "Goal resumed: ship" });
-    const { handleCommand, sendChat, addUser } = createHarness({
+    const { handleCommand, sendChat, addPendingUser } = createHarness({
       opts: { local: true },
       runGoalCommand,
     });
@@ -370,7 +383,7 @@ describe("tui command handlers", () => {
       sessionKey: "agent:main:main",
       message: prompt,
     });
-    expect(addUser).toHaveBeenCalledWith(prompt);
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), prompt);
   });
 
   it("passes the selected agent for local global goal commands", async () => {
@@ -467,12 +480,12 @@ describe("tui command handlers", () => {
   });
 
   it("forwards /status to the shared gateway command path", async () => {
-    const { handleCommand, sendChat, addUser, addSystem } = createHarness();
+    const { handleCommand, sendChat, addPendingUser, addSystem } = createHarness();
 
     await handleCommand("/status");
 
     expect(addSystem).not.toHaveBeenCalled();
-    expect(addUser).toHaveBeenCalledWith("/status");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/status");
     expectSendChatFields(sendChat, {
       sessionKey: "agent:main:main",
       message: "/status",
@@ -607,10 +620,14 @@ describe("tui command handlers", () => {
 
   it("clears the pending runId if sendChat fails", async () => {
     const sendChat = vi.fn().mockRejectedValue(new Error("boom"));
-    const { handleCommand, state } = createHarness({ sendChat });
+    const { handleCommand, sendChat: sendChatMock, dropPendingUser, state } = createHarness({
+      sendChat,
+    });
 
     await handleCommand("hello");
 
+    const sentRunId = (firstMockArg(sendChatMock, "sendChat") as { runId: string }).runId;
+    expect(dropPendingUser).toHaveBeenCalledWith(sentRunId);
     expect(state.pendingChatRunId).toBeNull();
     expect(state.pendingOptimisticUserMessage).toBe(false);
   });
@@ -836,7 +853,7 @@ describe("tui command handlers", () => {
     const {
       handleCommand,
       sendChat,
-      addUser,
+      addPendingUser,
       addSystem,
       reserveAssistantSlot,
       requestRender,
@@ -856,9 +873,9 @@ describe("tui command handlers", () => {
     });
     expect(reserveAssistantSlot).toHaveBeenCalledWith("run-active");
     const reserveCallOrder = reserveAssistantSlot.mock.invocationCallOrder[0];
-    const addUserCallOrder = addUser.mock.invocationCallOrder[0];
-    expect(reserveCallOrder).toBeLessThan(addUserCallOrder);
-    expect(addUser).toHaveBeenCalledWith("/context detail");
+    const addPendingUserCallOrder = addPendingUser.mock.invocationCallOrder[0];
+    expect(reserveCallOrder).toBeLessThan(addPendingUserCallOrder);
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/context detail");
     expect(addSystem).not.toHaveBeenCalledWith(
       "agent is busy — press Esc to abort before sending a new message",
     );
@@ -868,7 +885,7 @@ describe("tui command handlers", () => {
   });
 
   it("blocks gateway slash prompts while a run is active", async () => {
-    const { handleCommand, sendChat, addUser, addSystem } = createHarness({
+    const { handleCommand, sendChat, addPendingUser, addSystem } = createHarness({
       activeChatRunId: "run-active",
       activityStatus: "streaming",
     });
@@ -876,7 +893,7 @@ describe("tui command handlers", () => {
     await handleCommand("/context detail");
 
     expect(sendChat).not.toHaveBeenCalled();
-    expect(addUser).not.toHaveBeenCalled();
+    expect(addPendingUser).not.toHaveBeenCalled();
     expect(addSystem).toHaveBeenCalledWith(
       "agent is busy — press Esc to abort before sending a new message",
     );
@@ -899,7 +916,7 @@ describe("tui command handlers", () => {
 
   it("sends slash stop to the backend when there is no tracked run", async () => {
     const abortActive = vi.fn().mockResolvedValue(undefined);
-    const { handleCommand, sendChat, addUser } = createHarness({ abortActive });
+    const { handleCommand, sendChat, addPendingUser } = createHarness({ abortActive });
 
     await handleCommand("/stop");
 
@@ -909,18 +926,18 @@ describe("tui command handlers", () => {
       message: "/stop",
       sessionKey: "agent:main:main",
     });
-    expect(addUser).toHaveBeenCalledWith("/stop");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/stop");
   });
 
   it("sends broad stop-like text as a normal prompt when idle", async () => {
     const abortActive = vi.fn().mockResolvedValue(undefined);
-    const { handleCommand, sendChat, addUser } = createHarness({ abortActive });
+    const { handleCommand, sendChat, addPendingUser } = createHarness({ abortActive });
 
     await handleCommand("do not do that");
 
     expect(abortActive).not.toHaveBeenCalled();
     expect(sendChat).toHaveBeenCalledTimes(1);
-    expect(addUser).toHaveBeenCalledWith("do not do that");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "do not do that");
   });
 
   it("rejects normal sends while a queued submit is pending registration", async () => {
@@ -940,7 +957,7 @@ describe("tui command handlers", () => {
   });
 
   it("allows local sends to queue while the current run is finishing", async () => {
-    const { handleCommand, sendChat, addUser, addSystem } = createHarness({
+    const { handleCommand, sendChat, addPendingUser, addSystem } = createHarness({
       opts: { local: true },
       activeChatRunId: "run-active",
       activityStatus: "finishing context",
@@ -949,7 +966,7 @@ describe("tui command handlers", () => {
     await handleCommand("/context detail");
 
     expect(sendChat).toHaveBeenCalledTimes(1);
-    expect(addUser).toHaveBeenCalledWith("/context detail");
+    expect(addPendingUser).toHaveBeenCalledWith(expect.any(String), "/context detail");
     expect(addSystem).not.toHaveBeenCalledWith(
       "agent is busy — press Esc to abort before sending a new message",
     );

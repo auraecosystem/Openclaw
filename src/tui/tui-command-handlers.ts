@@ -747,7 +747,7 @@ export function createCommandHandlers(context: CommandHandlerContext) {
         ) {
           chatLog.reserveAssistantSlot(state.activeChatRunId);
         }
-        chatLog.addUser(text);
+        chatLog.addPendingUser(runId, text);
         noteLocalRunId?.(runId);
         state.pendingOptimisticUserMessage = true;
         setActivityStatus("sending");
@@ -802,6 +802,7 @@ export function createCommandHandlers(context: CommandHandlerContext) {
         state.pendingOptimisticUserMessage = false;
         state.pendingChatRunId = null;
         state.activeChatRunId = null;
+        chatLog.dropPendingUser(runId);
       }
       chatLog.addSystem(`${isBtw ? "btw failed" : "send failed"}: ${String(err)}`);
       if (!isBtw) {
