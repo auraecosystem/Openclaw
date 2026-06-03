@@ -650,6 +650,7 @@ function readExecApprovalPendingDetails(result: unknown): {
   cwd?: string;
   nodeId?: string;
   warningText?: string;
+  nativeApprovalDelivered?: boolean;
 } | null {
   if (!result || typeof result !== "object") {
     return null;
@@ -684,6 +685,7 @@ function readExecApprovalPendingDetails(result: unknown): {
     cwd: readStringValue(details.cwd),
     nodeId: readStringValue(details.nodeId),
     warningText: readStringValue(details.warningText),
+    nativeApprovalDelivered: details.nativeApprovalDelivered === true,
   };
 }
 
@@ -747,6 +749,11 @@ async function emitToolResultOutput(params: {
   );
   const approvalPending = readExecApprovalPendingDetails(result);
   if (!isToolError && approvalPending) {
+    if (approvalPending.nativeApprovalDelivered) {
+      ctx.state.deterministicApprovalPromptPending = false;
+      ctx.state.deterministicApprovalPromptSent = true;
+      return;
+    }
     if (!ctx.params.onToolResult) {
       return;
     }
