@@ -33,6 +33,7 @@ import {
   resolveChannelStreamingPreviewNativeToolProgress,
   resolveChannelStreamingPreviewNativeToolProgressAllowFrom,
   resolveChannelStreamingPreviewToolProgress,
+  resolveChannelStreamingProgressPersist,
   resolveTranscriptBackedChannelFinalText,
 } from "openclaw/plugin-sdk/channel-outbound";
 import type {
@@ -929,6 +930,8 @@ export const dispatchTelegramMessage = async ({
   const reasoningLane = lanes.reasoning;
   const streamToolProgressEnabled =
     Boolean(answerLane.stream) && resolveChannelStreamingPreviewToolProgress(telegramCfg);
+  const persistProgressEnabled = resolveChannelStreamingProgressPersist(telegramCfg);
+  const persistedProgressLog: string[] = [];
   const nativeToolProgressDraft =
     streamToolProgressEnabled &&
     !isRoomEvent &&
@@ -1709,12 +1712,34 @@ export const dispatchTelegramMessage = async ({
                       return;
                     }
 
+                    const prependPersistedProgress = (answerText: string): string => {
+                      if (!persistProgressEnabled || persistedProgressLog.length === 0) {
+                        return answerText;
+                      }
+                      const divider = "\n---\n";
+                      const maxChars = 4096;
+                      const budget = maxChars - answerText.length - divider.length;
+                      if (budget <= 0) {
+                        return answerText;
+                      }
+                      const lines = [...persistedProgressLog];
+                      let progressText = lines.join("\n");
+                      while (progressText.length > budget && lines.length > 1) {
+                        lines.shift();
+                        progressText = lines.join("\n");
+                      }
+                      if (progressText.length > budget) {
+                        return answerText;
+                      }
+                      return `${progressText}${divider}${answerText}`;
+                    };
                     const deliverFinalAnswerText = async (
                       answerPayload: ReplyPayload,
                       text: string,
                       buttons?: TelegramInlineButtons,
                     ) => {
-                      const finalText = await resolveTranscriptBackedFinalText(text);
+                      const resolvedText = await resolveTranscriptBackedFinalText(text);
+                      const finalText = prependPersistedProgress(resolvedText);
                       const deliverPostFinalFollowUpText = async () => {
                         await prepareAnswerLaneForText();
                         return deliverLaneText({
@@ -2026,6 +2051,9 @@ export const dispatchTelegramMessage = async ({
                       ),
                       { toolName, startImmediately: true },
                     );
+                    if (persistProgressEnabled && toolName) {
+                      persistedProgressLog.push(`🔧 ${toolName}`);
+                    }
                     if (statusReactionController && toolName) {
                       await statusReactionController.setTool(toolName);
                     }
@@ -2033,6 +2061,9 @@ export const dispatchTelegramMessage = async ({
                   },
                   onItemEvent: async (payload) => {
                     if (payload.kind === "preamble") {
+                      if (persistProgressEnabled && payload.progressText) {
+                        persistedProgressLog.push(`💭 ${payload.progressText}`);
+                      }
                       await progressDraft.pushCommentaryProgress(payload.progressText, {
                         itemId: payload.itemId,
                       });

@@ -46,6 +46,8 @@ export type ChannelStreamingProgressConfig = {
   maxLineChars?: number;
   /** Progress draft renderer. "text" is the portable fallback; "rich" lets supported channels use structured UI. */
   render?: "text" | "rich";
+  /** Persist completed tool+commentary lines above the final answer. Default: false. */
+  persistProgress?: boolean;
   /** Include compact tool/task progress in the draft. Default: true. */
   toolProgress?: boolean;
   /** Command/exec progress detail in the draft. "raw" preserves released behavior; "status" shows only the tool label. Default: "raw". */
