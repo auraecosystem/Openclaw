@@ -44,7 +44,7 @@ export async function sendChunkedTelegramReplyText<
     replyToMessageId?: number;
     replyMarkup?: TReplyMarkup;
     replyQuoteText?: string;
-  }) => Promise<void>;
+  }) => Promise<number | undefined>;
 }): Promise<void> {
   const applyDelivered = params.markDelivered ?? markDelivered;
   for (let i = 0; i < params.chunks.length; i += 1) {
@@ -62,13 +62,20 @@ export async function sendChunkedTelegramReplyText<
       Boolean(replyToMessageId) &&
       Boolean(params.replyQuoteText) &&
       (params.quoteOnlyOnFirstChunk !== true || isFirstChunk);
-    await params.sendChunk({
+    const deliveredMessageId = await params.sendChunk({
       chunk,
       isFirstChunk,
       replyToMessageId,
       replyMarkup: isFirstChunk ? params.replyMarkup : undefined,
       replyQuoteText: shouldAttachQuote ? params.replyQuoteText : undefined,
     });
+    // sendTelegramText resolves undefined for chunks Telegram silently skipped
+    // (empty post-strip HTML such as bare <br> / &nbsp;). Treat those as no-op
+    // so reply state, delivery count, transcript mirroring, and message_sent
+    // hooks do not record a phantom send without a real Telegram message id.
+    if (deliveredMessageId == null) {
+      continue;
+    }
     markReplyApplied(params.progress, replyToMessageId);
     applyDelivered(params.progress);
   }
