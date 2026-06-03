@@ -214,6 +214,9 @@ function collectConfigSecrets(params: {
     if (!hasPlaintext) {
       continue;
     }
+    if (looksLikeEnvVarReference(target.value)) {
+      continue;
+    }
     addFinding(params.collector, {
       code: "PLAINTEXT_FOUND",
       severity: "warn",
@@ -712,4 +715,26 @@ export function resolveSecretsAuditExitCode(report: SecretsAuditReport, check: b
     return 1;
   }
   return 0;
+}
+
+const ENV_VAR_NAME_RE = /^[A-Z_][A-Z0-9_]*$/;
+
+function endsWithEnvVarSuffix(name: string): boolean {
+  return (
+    name.endsWith("_KEY") ||
+    name.endsWith("_TOKEN") ||
+    name.endsWith("_SECRET") ||
+    name.endsWith("_PASSWORD")
+  );
+}
+
+function looksLikeEnvVarReference(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const trimmed = value.trim();
+  if (!ENV_VAR_NAME_RE.test(trimmed)) {
+    return false;
+  }
+  return endsWithEnvVarSuffix(trimmed);
 }
