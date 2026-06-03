@@ -9,7 +9,7 @@ import {
 import { timestampMsToIsoString } from "openclaw/plugin-sdk/number-runtime";
 import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { compileMemoryWikiVault } from "./compile.js";
-import type { ResolvedMemoryWikiConfig } from "./config.js";
+import type { ResolvedMemoryWikiConfig, WikiPageGroup } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import { getDefaultDirForKind } from "./config.js";
 import {
@@ -454,7 +454,7 @@ function buildTranscript(messages: ChatGptMessage[]): string {
 function resolveConversationPagePath(record: {
   conversationId: string;
   createdAt?: string;
-  pageGroups?: Array<{ kind: string; dir: string }>;
+  pageGroups?: WikiPageGroup[];
 }): {
   pageId: string;
   pagePath: string;
@@ -474,7 +474,7 @@ function resolveConversationPagePath(record: {
 function toConversationRecord(
   conversation: Record<string, unknown>,
   sourcePath: string,
-  pageGroups?: Array<{ kind: string; dir: string }>,
+  pageGroups?: WikiPageGroup[],
 ): ChatGptConversationRecord | null {
   const conversationId =
     typeof conversation.conversation_id === "string" ? conversation.conversation_id.trim() : "";
