@@ -18,6 +18,10 @@ Docs: https://docs.openclaw.ai
 - iMessage monitor state, inbound queues, and plugin install ledgers moved toward SQLite-backed state so restarts and local monitors recover with less duplicate filesystem scanning. (#88794, #88797)
 - Release, CI, Docker, E2E, plugin install, and diagnostics lanes now cap more logs, response bodies, readiness probes, artifact checks, status polling, and rollback snapshots so failures report bounded proof instead of stalling.
 
+### Fixes
+
+- Feishu: fix topic session splitting for both native `topic_group` and normal groups using topic message format. Hydrate now queries the replied-to message (`rootId`) instead of the newly sent message, expands the hydrate condition to cover `chat_type="group"` groups with Feishu topic messaging, and suppresses stale `rootId` after successful hydration so the canonical `omt_*` topic ID is used consistently. Refs #78262. Thanks @joeyzenghuan.
+
 ### Changes
 
 - Docs: add a dedicated Skill Workshop guide covering governed skill creation, reviewable proposals, CLI, Gateway, agent tool behavior, approval policy, support files, and recovery. Thanks @shakkernerd.
