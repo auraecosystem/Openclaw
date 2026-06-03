@@ -79,6 +79,23 @@ vi.mock("../plugins/provider-runtime.js", async () => {
   const actual = await vi.importActual<typeof import("../plugins/provider-runtime.js")>(
     "../plugins/provider-runtime.js",
   );
+  const stripCopilotThinking = (message: AgentMessage): AgentMessage => {
+    if (message.role !== "assistant" || !Array.isArray(message.content)) {
+      return message;
+    }
+    const content = message.content.filter((block) => {
+      const type = (block as { type?: unknown }).type;
+      return type !== "thinking" && type !== "redacted_thinking";
+    });
+    if (content.length === message.content.length) {
+      return message;
+    }
+    return {
+      ...message,
+      content:
+        content.length > 0 ? content : [{ type: "text", text: OMITTED_ASSISTANT_REASONING_TEXT }],
+    } as AgentMessage;
+  };
   return {
     ...actual,
     sanitizeProviderReplayHistoryWithPlugin: vi.fn(
@@ -107,6 +124,16 @@ vi.mock("../plugins/provider-runtime.js", async () => {
             { role: "user", content: "(session bootstrap)" } as AgentMessage,
             ...context.messages,
           ];
+        }
+        if (provider === "github-copilot") {
+          const modelId = ((context as { modelId?: string | null }).modelId ?? "").toLowerCase();
+          if (!modelId.includes("claude")) {
+            return context.messages;
+          }
+          const messages = context.messages.map(stripCopilotThinking);
+          return messages.some((message, index) => message !== context.messages[index])
+            ? messages
+            : context.messages;
         }
         return context.messages;
       },
@@ -1433,24 +1460,17 @@ describe("sanitizeSessionHistory", () => {
     ]);
   });
 
-  it("preserves latest assistant thinking blocks for github-copilot models", async () => {
+  it("strips assistant thinking blocks for github-copilot Claude models", async () => {
     setNonGoogleModelApi();
 
     const messages = makeThinkingAndTextAssistantMessages("reasoning_text");
 
     const result = await sanitizeGithubCopilotHistory({ messages });
     const assistant = getAssistantMessage(result);
-    expect(assistant.content).toEqual([
-      {
-        type: "thinking",
-        thinking: "internal",
-        thinkingSignature: "reasoning_text",
-      },
-      { type: "text", text: "hi" },
-    ]);
+    expect(assistant.content).toEqual([{ type: "text", text: "hi" }]);
   });
 
-  it("preserves latest assistant turn when all content is thinking blocks (github-copilot)", async () => {
+  it("replaces thinking-only assistant turns for github-copilot Claude replay", async () => {
     setNonGoogleModelApi();
 
     const messages: AgentMessage[] = [
@@ -1469,16 +1489,10 @@ describe("sanitizeSessionHistory", () => {
 
     expect(result).toHaveLength(3);
     const assistant = getAssistantMessage(result);
-    expect(assistant.content).toEqual([
-      {
-        type: "thinking",
-        thinking: "some reasoning",
-        thinkingSignature: "reasoning_text",
-      },
-    ]);
+    expect(assistant.content).toEqual([{ type: "text", text: OMITTED_ASSISTANT_REASONING_TEXT }]);
   });
 
-  it("preserves thinking blocks alongside tool_use blocks in latest assistant message (github-copilot)", async () => {
+  it("strips github-copilot Claude thinking while preserving tool calls and text", async () => {
     setNonGoogleModelApi();
 
     const messages: AgentMessage[] = [
@@ -1496,7 +1510,7 @@ describe("sanitizeSessionHistory", () => {
 
     const result = await sanitizeGithubCopilotHistory({ messages });
     const types = getAssistantContentTypes(result);
-    expect(types).toContain("thinking");
+    expect(types).not.toContain("thinking");
     expect(types).toContain("toolCall");
     expect(types).toContain("text");
   });
@@ -2070,7 +2084,7 @@ describe("sanitizeSessionHistory", () => {
     ]);
   });
 
-  it("keeps mutable thinking turns outside exact anthropic replay", async () => {
+  it("strips github-copilot Claude thinking while normalizing tool calls", async () => {
     setNonGoogleModelApi();
 
     const messages = castAgentMessages([
@@ -2088,11 +2102,6 @@ describe("sanitizeSessionHistory", () => {
     const result = await sanitizeGithubCopilotHistory({ messages });
     const assistant = getAssistantMessage(result);
     expect(assistant.content).toEqual([
-      {
-        type: "thinking",
-        thinking: "I should use the read tool",
-        thinkingSignature: "reasoning_text",
-      },
       { type: "toolCall", id: "tool_123", name: "read", arguments: { path: "/tmp/test" } },
     ]);
   });
@@ -2382,7 +2391,7 @@ describe("sanitizeSessionHistory", () => {
     expect((thinkingBlocks[0] as { thinking?: string }).thinking).toBe("unsigned kimi reasoning");
   });
 
-  it("preserves unsigned thinking blocks for github copilot claude with anthropic-messages transport", async () => {
+  it("lets github-copilot own final Claude thinking replay sanitization", async () => {
     setNonGoogleModelApi();
 
     const messages = castAgentMessages([
@@ -2393,8 +2402,8 @@ describe("sanitizeSessionHistory", () => {
       ]),
     ]);
 
-    // GitHub Copilot Claude uses anthropic-messages transport but does not
-    // require signed thinking. Its provider-level preserveSignatures is false.
+    // GitHub Copilot Claude uses the provider sanitize hook for final replay
+    // cleanup, so the provider still removes thinking after generic policy work.
     const result = await sanitizeSessionHistory({
       messages,
       modelApi: "anthropic-messages",
@@ -2420,11 +2429,7 @@ describe("sanitizeSessionHistory", () => {
     });
 
     const assistant = getAssistantMessage(result);
-    const thinkingBlocks = assistant.content.filter((b: { type: string }) => b.type === "thinking");
-    expect(thinkingBlocks).toHaveLength(1);
-    expect((thinkingBlocks[0] as { thinking?: string }).thinking).toBe(
-      "unsigned copilot reasoning",
-    );
+    expect(assistant.content).toEqual([{ type: "text", text: "result" }]);
   });
 
   it("strips unsigned thinking for bedrock-converse-stream even when preserveSignatures is false", async () => {

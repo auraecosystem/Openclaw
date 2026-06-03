@@ -745,7 +745,9 @@ export async function sanitizeSessionHistory(params: {
     ? dropReasoningFromHistory(validatedThinkingSignatures)
     : validatedThinkingSignatures;
   const droppedThinking = policy.dropThinkingBlocks
-    ? dropThinkingBlocks(droppedReasoning)
+    ? dropThinkingBlocks(droppedReasoning, {
+        preserveLatestAssistant: preserveLatestAssistantThinking,
+      })
     : droppedReasoning;
   const sanitizedToolCalls = sanitizeToolCallInputs(droppedThinking, {
     allowedToolNames: params.allowedToolNames,
