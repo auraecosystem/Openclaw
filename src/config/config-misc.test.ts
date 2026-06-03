@@ -58,6 +58,73 @@ describe("boolean config validation", () => {
   });
 });
 
+describe("diagnostics memory pressure threshold config", () => {
+  it("accepts positive ordered memory pressure thresholds", () => {
+    const result = OpenClawSchema.safeParse({
+      diagnostics: {
+        memoryPressureThresholds: {
+          rssWarningBytes: 4_000,
+          rssCriticalBytes: 8_000,
+          heapUsedWarningBytes: 2_000,
+          heapUsedCriticalBytes: 6_000,
+          rssGrowthWarningBytes: 1_000,
+          rssGrowthCriticalBytes: 2_000,
+          growthWindowMs: 60_000,
+          pressureRepeatMs: 120_000,
+        },
+      },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects inverted memory pressure thresholds", () => {
+    const result = OpenClawSchema.safeParse({
+      diagnostics: {
+        memoryPressureThresholds: {
+          heapUsedWarningBytes: 6_000,
+          heapUsedCriticalBytes: 2_000,
+        },
+      },
+    });
+
+    expect(result.success).toBe(false);
+  });
+
+  it.each([
+    {
+      name: "rss",
+      memoryPressureThresholds: { rssWarningBytes: 4_000 * 1024 * 1024 },
+      message:
+        "rssWarningBytes must be less than or equal to rssCriticalBytes after applying defaults",
+    },
+    {
+      name: "heap-used",
+      memoryPressureThresholds: { heapUsedWarningBytes: 3_000 * 1024 * 1024 },
+      message:
+        "heapUsedWarningBytes must be less than or equal to heapUsedCriticalBytes after applying defaults",
+    },
+    {
+      name: "rss-growth",
+      memoryPressureThresholds: { rssGrowthWarningBytes: 2_000 * 1024 * 1024 },
+      message:
+        "rssGrowthWarningBytes must be less than or equal to rssGrowthCriticalBytes after applying defaults",
+    },
+  ])(
+    "rejects partial $name thresholds inverted against defaults",
+    ({ memoryPressureThresholds, message }) => {
+      const result = OpenClawSchema.safeParse({
+        diagnostics: { memoryPressureThresholds },
+      });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expectSomeIssueMessageContains(result.error.issues, message);
+      }
+    },
+  );
+});
+
 describe("model provider localService config", () => {
   it("accepts standalone timeout overlays for bundled model providers", () => {
     const result = OpenClawSchema.safeParse({
