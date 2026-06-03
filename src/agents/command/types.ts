@@ -101,6 +101,7 @@ export type AgentCommandOpts = {
   lane?: string;
   runId?: string;
   extraSystemPrompt?: string;
+  extraSystemPromptDirective?: string;
   /** Bootstrap workspace context injection mode for this run. */
   bootstrapContextMode?: "full" | "lightweight";
   /** Run kind hint for bootstrap context behavior. */

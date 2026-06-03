@@ -127,6 +127,7 @@ export type FollowupRun = {
     ownerNumbers?: string[];
     inputProvenance?: InputProvenance;
     extraSystemPrompt?: string;
+    extraSystemPromptDirective?: string;
     sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
     silentReplyPromptMode?: SilentReplyPromptMode;
     extraSystemPromptStatic?: string;

@@ -1661,6 +1661,7 @@ export async function runEmbeddedAgent(
             onAgentEvent: params.onAgentEvent,
             onExecutionPhase: params.onExecutionPhase,
             extraSystemPrompt: params.extraSystemPrompt,
+            extraSystemPromptDirective: params.extraSystemPromptDirective,
             sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
             inputProvenance: params.inputProvenance,
             streamParams: params.streamParams,
@@ -1934,6 +1935,7 @@ export async function runEmbeddedAgent(
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
                     extraSystemPrompt: params.extraSystemPrompt,
+                    extraSystemPromptDirective: params.extraSystemPromptDirective,
                     sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
                     ownerNumbers: params.ownerNumbers,
                     activeProcessSessions: listActiveProcessSessionReferences({
@@ -2125,6 +2127,7 @@ export async function runEmbeddedAgent(
                     reasoningLevel: params.reasoningLevel,
                     bashElevated: params.bashElevated,
                     extraSystemPrompt: params.extraSystemPrompt,
+                    extraSystemPromptDirective: params.extraSystemPromptDirective,
                     sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
                     ownerNumbers: params.ownerNumbers,
                     activeProcessSessions: listActiveProcessSessionReferences({

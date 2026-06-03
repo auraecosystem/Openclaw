@@ -1835,6 +1835,7 @@ export async function runEmbeddedAttempt(
         defaultThinkLevel: params.thinkLevel,
         reasoningLevel: params.reasoningLevel ?? "off",
         extraSystemPrompt: params.extraSystemPrompt,
+        extraSystemPromptDirective: params.extraSystemPromptDirective,
         ownerNumbers: params.ownerNumbers,
         reasoningTagHint,
         heartbeatPrompt,
