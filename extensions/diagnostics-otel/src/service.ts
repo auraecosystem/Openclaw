@@ -1571,6 +1571,18 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         unit: "1",
         description: "Diagnostic telemetry exporter lifecycle and failure events",
       });
+      // GH-5632: per-request counter for in-process model-fallback chain
+      // exhaustion. Labels: `openclaw.requested_provider`,
+      // `openclaw.requested_model`, `openclaw.reason` (FailoverReason),
+      // `openclaw.kind` ("text"|"image"). Powers the ai-central
+      // `AICentralFallbackExhausted{Auth,}` alerts.
+      const modelFallbackExhaustedCounter = meter.createCounter(
+        "openclaw.model.fallback.exhausted",
+        {
+          unit: "1",
+          description: "Model fallback chain exhausted without producing a successful response",
+        },
+      );
 
       let recordLogRecord:
         | ((
@@ -3308,6 +3320,17 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
         });
       };
 
+      const recordModelFallbackExhausted = (
+        evt: Extract<DiagnosticEventPayload, { type: "model.fallback.exhausted" }>,
+      ) => {
+        modelFallbackExhaustedCounter.add(1, {
+          "openclaw.requested_provider": evt.requestedProvider,
+          "openclaw.requested_model": evt.requestedModel,
+          "openclaw.reason": evt.reason,
+          "openclaw.kind": evt.kind,
+        });
+      };
+
       const subscribe = ctx.internalDiagnostics?.onEvent;
       if (!subscribe) {
         ctx.logger.error("diagnostics-otel: internal diagnostics capability unavailable");
@@ -3462,6 +3485,9 @@ export function createDiagnosticsOtelService(): OpenClawPluginService {
               return;
             case "model.failover":
               recordModelFailover(evt, metadata);
+              return;
+            case "model.fallback.exhausted":
+              recordModelFallbackExhausted(evt);
           }
         } catch (err) {
           ctx.logger.error(
