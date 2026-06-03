@@ -148,6 +148,7 @@ import {
 } from "../../embedded-agent-helpers.js";
 import { countActiveToolExecutions } from "../../embedded-agent-subscribe.handlers.tools.js";
 import { subscribeEmbeddedAgentSession } from "../../embedded-agent-subscribe.js";
+import { isCoreToolResultMediaTrustedName } from "../../embedded-agent-subscribe.tools.js";
 import { isTimeoutError } from "../../failover-error.js";
 import { runAgentEndSideEffects } from "../../harness/agent-end-side-effects.js";
 import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-hook-helpers.js";
@@ -2128,6 +2129,9 @@ export async function runEmbeddedAttempt(
           return name ? [name] : [];
         }),
       );
+      const trustedLocalMediaToolNames = new Set(
+        Array.from(builtinToolNames).filter(isCoreToolResultMediaTrustedName),
+      );
       // Admission-time conflict check only against non-plugin core tools, to
       // preserve prior behavior where client tools may coexist with unrelated
       // plugin tool names. MEDIA passthrough is still gated by the raw-name
@@ -3226,6 +3230,7 @@ export async function runEmbeddedAttempt(
           sessionId: params.sessionId,
           agentId: sessionAgentId,
           builtinToolNames,
+          trustedLocalMediaToolNames,
           internalEvents: params.internalEvents,
         }),
       );

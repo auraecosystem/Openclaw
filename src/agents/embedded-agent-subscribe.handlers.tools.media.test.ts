@@ -328,34 +328,38 @@ describe("handleToolExecutionEnd media emission", () => {
     expect(ctx.state.pendingToolMediaUrls).toStrictEqual([]);
   });
 
-  it("queues TTS structured media without leaking spoken text when verbose is full", async () => {
-    const ctx = createMockContext({
-      shouldEmitToolOutput: true,
-      onToolResult: vi.fn(),
-      toolResultFormat: "plain",
-      builtinToolNames: new Set(["tts"]),
-    });
+  it.each(["tts", "openclaw.tts"])(
+    "queues %s structured media without leaking spoken text when verbose is full",
+    async (toolName) => {
+      const ctx = createMockContext({
+        shouldEmitToolOutput: true,
+        onToolResult: vi.fn(),
+        toolResultFormat: "plain",
+        builtinToolNames: new Set(["tts"]),
+      });
 
-    await handleToolExecutionEnd(ctx, {
-      type: "tool_execution_end",
-      toolName: "tts",
-      toolCallId: "tc-1",
-      isError: false,
-      result: {
-        content: [{ type: "text", text: "(spoken) hello" }],
-        details: {
-          media: {
-            mediaUrl: "/tmp/reply.opus",
-            audioAsVoice: true,
+      await handleToolExecutionEnd(ctx, {
+        type: "tool_execution_end",
+        toolName,
+        toolCallId: "tc-1",
+        isError: false,
+        result: {
+          content: [{ type: "text", text: "(spoken) hello" }],
+          details: {
+            media: {
+              mediaUrl: "/tmp/reply.opus",
+              audioAsVoice: true,
+              trustedLocalMedia: true,
+            },
           },
         },
-      },
-    });
+      });
 
-    expect(ctx.emitToolOutput).not.toHaveBeenCalled();
-    expect(ctx.state.pendingToolMediaUrls).toEqual(["/tmp/reply.opus"]);
-    expect(ctx.state.pendingToolAudioAsVoice).toBe(true);
-  });
+      expect(ctx.emitToolOutput).not.toHaveBeenCalled();
+      expect(ctx.state.pendingToolMediaUrls).toEqual(["/tmp/reply.opus"]);
+      expect(ctx.state.pendingToolAudioAsVoice).toBe(true);
+    },
+  );
 
   it("queues one voice copy when TTS output text mentions the generated file", async () => {
     const ctx = createMockContext({
@@ -657,35 +661,6 @@ describe("handleToolExecutionEnd media emission", () => {
       toolCallId: "tc-1",
       isError: false,
       result: {
-        details: {
-          media: {
-            mediaUrl: "/tmp/reply.opus",
-            audioAsVoice: true,
-            trustedLocalMedia: true,
-          },
-        },
-      },
-    });
-
-    expect(ctx.state.pendingToolMediaUrls).toEqual(["/tmp/reply.opus"]);
-    expect(ctx.state.pendingToolAudioAsVoice).toBe(true);
-    expect(ctx.state.pendingToolTrustedLocalMedia).toBe(true);
-  });
-
-  it("queues trusted TTS local media when the exact built-in name is absent", async () => {
-    const ctx = createMockContext({
-      shouldEmitToolOutput: false,
-      onToolResult: vi.fn(),
-      builtinToolNames: new Set(["web_search"]),
-    });
-
-    await handleToolExecutionEnd(ctx, {
-      type: "tool_execution_end",
-      toolName: "tts",
-      toolCallId: "tc-1",
-      isError: false,
-      result: {
-        content: [{ type: "text", text: "(spoken) hello" }],
         details: {
           media: {
             mediaUrl: "/tmp/reply.opus",

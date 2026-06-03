@@ -298,10 +298,14 @@ describe("extractToolResultMediaPaths", () => {
     ).toEqual(["/tmp/screenshot.png"]);
   });
 
-  it("keeps trusted TTS local media when the raw built-in name is absent", () => {
+  it.each([
+    ["tts", ["/tmp/reply.opus"]],
+    ["openclaw.tts", ["/tmp/reply.opus"]],
+    ["external.tts", []],
+  ])("filters trusted TTS local media for %s", (toolName, expected) => {
     expect(
       filterToolResultMediaUrls(
-        "tts",
+        toolName,
         ["/tmp/reply.opus"],
         {
           details: {
@@ -311,9 +315,9 @@ describe("extractToolResultMediaPaths", () => {
             },
           },
         },
-        new Set(["web_search"]),
+        new Set(["tts"]),
       ),
-    ).toEqual(["/tmp/reply.opus"]);
+    ).toEqual(expected);
   });
 
   it("keeps local media for bundled plugin tool names trusted in this run", () => {

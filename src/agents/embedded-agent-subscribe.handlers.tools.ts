@@ -415,9 +415,12 @@ function shouldSuppressStructuredMediaToolOutput(params: {
   hasDeliverableStructuredMedia: boolean;
   builtinToolNames?: ReadonlySet<string>;
 }): boolean {
+  const rawToolName = params.rawToolName.trim();
+  const ownedTtsTool =
+    (params.toolName === "tts" && rawToolName === "tts") ||
+    (params.toolName === "openclaw.tts" && rawToolName === "openclaw.tts");
   return (
-    params.toolName === "tts" &&
-    params.rawToolName.trim() === "tts" &&
+    ownedTtsTool &&
     params.builtinToolNames?.has("tts") === true &&
     !params.isToolError &&
     params.hasDeliverableStructuredMedia

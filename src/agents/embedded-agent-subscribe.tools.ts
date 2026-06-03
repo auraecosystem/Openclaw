@@ -356,11 +356,19 @@ function isTrustedOwnedTtsLocalMedia(
   result: unknown,
   trustedLocalMediaToolNames?: ReadonlySet<string>,
 ): boolean {
+  const normalizedToolName = toolName ? normalizeToolName(toolName) : "";
   if (
     !toolName ||
-    !isToolResultMediaTrusted(toolName, result, trustedLocalMediaToolNames) ||
-    normalizeToolName(toolName) !== "tts"
+    isExternalToolResult(result) ||
+    (normalizedToolName !== "tts" && normalizedToolName !== "openclaw.tts")
   ) {
+    return false;
+  }
+  const registeredTtsTool =
+    trustedLocalMediaToolNames === undefined
+      ? normalizedToolName === "tts" && isCoreToolResultMediaTrustedName(toolName)
+      : trustedLocalMediaToolNames.has(toolName.trim()) || trustedLocalMediaToolNames.has("tts");
+  if (!registeredTtsTool) {
     return false;
   }
   const media = readToolResultDetails(result)?.media;
@@ -384,7 +392,10 @@ export function filterToolResultMediaUrls(
     result,
     trustedLocalMediaToolNames,
   );
-  if (isToolResultMediaTrusted(toolName, result, trustedLocalMediaToolNames)) {
+  if (
+    trustedOwnedTtsLocalMedia ||
+    isToolResultMediaTrusted(toolName, result, trustedLocalMediaToolNames)
+  ) {
     // When the current run provides its exact trusted local-media tool names,
     // require the raw emitted tool name to match one of them before allowing
     // local media paths.
