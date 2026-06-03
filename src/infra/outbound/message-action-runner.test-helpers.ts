@@ -26,7 +26,10 @@ export const directChatConfig = {
   },
 } as OpenClawConfig;
 
-export const directOutbound: ChannelOutboundAdapter = { deliveryMode: "direct" };
+export const directOutbound: ChannelOutboundAdapter = {
+  deliveryMode: "direct",
+  sendText: async ({ to }) => ({ channel: "test", messageId: `test:${to}` }),
+};
 
 function hasChannelBotToken(channelConfig: unknown): boolean {
   if (channelConfig == null || typeof channelConfig !== "object" || Array.isArray(channelConfig)) {
