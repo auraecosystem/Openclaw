@@ -86,18 +86,8 @@ on:
         required: false
         default: ""
         type: string
-      advisory:
-        description: Treat failures as advisory for the caller
-        required: false
-        default: false
-        type: boolean
   workflow_call:
     inputs:
-      advisory:
-        description: Treat failures as advisory for the caller
-        required: false
-        default: false
-        type: boolean
       ref:
         description: Public OpenClaw ref to validate (tag, branch, or full commit SHA)
         required: true
@@ -193,14 +183,14 @@ concurrency:
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
   NODE_VERSION: "24.15.0"
+  PNPM_VERSION: "11.0.8"
   OPENCLAW_REPOSITORY: openclaw/openclaw
   TSX_VERSION: "4.21.0"
-  OPENCLAW_CROSS_OS_OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENCLAW_CROSS_OS_OPENAI_MODEL || 'openai/gpt-5.5' }}
+  OPENCLAW_CROSS_OS_OPENAI_MODEL: ${{ inputs.openai_model || vars.OPENCLAW_CROSS_OS_OPENAI_MODEL || 'openai/gpt-5.4' }}
 
 jobs:
   prepare:
     runs-on: ubuntu-24.04
-    continue-on-error: ${{ inputs.advisory }}
     outputs:
       baseline_file_name: ${{ steps.baseline_metadata.outputs.file_name }}
       baseline_spec: ${{ steps.baseline.outputs.value }}
@@ -338,7 +328,7 @@ jobs:
           ref: ${{ steps.workflow_ref.outputs.value }}
           path: workflow
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
 
       - name: Checkout public source ref
         if: inputs.candidate_artifact_name == ''
@@ -348,21 +338,21 @@ jobs:
           ref: ${{ inputs.ref }}
           path: source
           fetch-depth: 0
-          persist-credentials: true
+          persist-credentials: false
           submodules: recursive
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-
-      - name: Setup pnpm
-        uses: ./workflow/.github/actions/setup-pnpm-store-cache
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-file: ${{ inputs.candidate_artifact_name == '' && 'source/package.json' || 'workflow/package.json' }}
-          lockfile-path: ${{ inputs.candidate_artifact_name == '' && 'source/pnpm-lock.yaml' || 'workflow/pnpm-lock.yaml' }}
-          use-actions-cache: ${{ inputs.candidate_artifact_name == '' && 'true' || 'false' }}
+          cache: pnpm
+          cache-dependency-path: ${{ inputs.candidate_artifact_name == '' && 'source/pnpm-lock.yaml' || 'workflow/pnpm-lock.yaml' }}
 
       - name: Ensure pnpm store cache directory exists
         run: mkdir -p "$(pnpm store path --silent)"
@@ -451,7 +441,7 @@ jobs:
           OUTPUT_DIR: ${{ runner.temp }}/openclaw-cross-os-release-checks/prepare/baseline
         run: |
           mkdir -p "${OUTPUT_DIR}"
-          timeout --preserve-status 300s npm pack --ignore-scripts --json "${BASELINE_SPEC}" --pack-destination "${OUTPUT_DIR}" > "${OUTPUT_DIR}/pack.json"
+          npm pack --ignore-scripts --json "${BASELINE_SPEC}" --pack-destination "${OUTPUT_DIR}" > "${OUTPUT_DIR}/pack.json"
 
       - name: Capture candidate metadata
         id: candidate_metadata
@@ -523,7 +513,6 @@ jobs:
   cross_os_release_checks:
     name: "${{ matrix.display_name }} / ${{ matrix.suite_label }}"
     needs: prepare
-    continue-on-error: ${{ inputs.advisory }}
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
@@ -537,31 +526,20 @@ jobs:
           ref: ${{ needs.prepare.outputs.workflow_ref }}
           path: workflow
           fetch-depth: 1
-          persist-credentials: true
+          persist-credentials: false
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Setup pnpm
-        uses: ./workflow/.github/actions/setup-pnpm-store-cache
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          package-manager-file: workflow/package.json
-          lockfile-path: workflow/pnpm-lock.yaml
-          use-actions-cache: "false"
-
       - name: Download candidate artifact
-        id: download_candidate
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          name: openclaw-cross-os-release-checks-candidate-${{ github.run_id }}
-          path: ${{ runner.temp }}/openclaw-cross-os-release-checks/candidate
-
-      - name: Retry candidate artifact download
-        if: ${{ steps.download_candidate.outcome == 'failure' }}
         uses: actions/download-artifact@v8
         with:
           name: openclaw-cross-os-release-checks-candidate-${{ github.run_id }}
@@ -569,37 +547,10 @@ jobs:
 
       - name: Download baseline artifact
         if: ${{ matrix.suite == 'packaged-upgrade' }}
-        id: download_baseline
-        continue-on-error: true
         uses: actions/download-artifact@v8
         with:
           name: openclaw-cross-os-release-checks-baseline-${{ github.run_id }}
           path: ${{ runner.temp }}/openclaw-cross-os-release-checks/baseline
-
-      - name: Retry baseline artifact download
-        if: ${{ matrix.suite == 'packaged-upgrade' && steps.download_baseline.outcome == 'failure' }}
-        uses: actions/download-artifact@v8
-        with:
-          name: openclaw-cross-os-release-checks-baseline-${{ github.run_id }}
-          path: ${{ runner.temp }}/openclaw-cross-os-release-checks/baseline
-
-      - name: Verify release-check inputs
-        shell: bash
-        env:
-          CANDIDATE_TGZ: ${{ runner.temp }}/openclaw-cross-os-release-checks/candidate/${{ needs.prepare.outputs.candidate_file_name }}
-          BASELINE_TGZ: ${{ runner.temp }}/openclaw-cross-os-release-checks/baseline/${{ needs.prepare.outputs.baseline_file_name }}
-          OUTPUT_DIR: ${{ runner.temp }}/openclaw-cross-os-release-checks/${{ matrix.artifact_name }}-${{ matrix.suite }}
-          SUITE: ${{ matrix.suite }}
-        run: |
-          mkdir -p "${OUTPUT_DIR}"
-          if [[ ! -f "${CANDIDATE_TGZ}" ]]; then
-            echo "::error::candidate artifact missing: ${CANDIDATE_TGZ}"
-            exit 1
-          fi
-          if [[ "${SUITE}" == "packaged-upgrade" ]] && [[ ! -f "${BASELINE_TGZ}" ]]; then
-            echo "::error::baseline artifact missing: ${BASELINE_TGZ}"
-            exit 1
-          fi
 
       - name: Run cross-OS release checks
         shell: bash
@@ -651,8 +602,7 @@ jobs:
           if [[ -f "${SUMMARY_PATH}" ]]; then
             cat "${SUMMARY_PATH}" >> "$GITHUB_STEP_SUMMARY"
           else
-            mkdir -p "$(dirname "${SUMMARY_PATH}")"
-            echo "No summary generated." | tee "${SUMMARY_PATH}" >> "$GITHUB_STEP_SUMMARY"
+            echo "No summary generated." >> "$GITHUB_STEP_SUMMARY"
           fi
 
       - name: Upload release-check artifacts
