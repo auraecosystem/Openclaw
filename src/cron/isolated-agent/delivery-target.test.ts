@@ -336,6 +336,23 @@ describe("resolveDeliveryTarget", () => {
     expect(result.to).toBe("room-denied");
   });
 
+  it("does not expose stale session targets as aliases for a different explicit target", async () => {
+    setLastSessionEntry({
+      sessionId: "sess-stale-alias",
+      lastChannel: "forum",
+      lastTo: "room:previous",
+    });
+
+    const result = await resolveDeliveryTarget(makeCfg({ bindings: [] }), AGENT_ID, {
+      channel: "forum",
+      to: "room:current",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.to).toBe("room:current");
+    expect(result.aliases).toBeUndefined();
+  });
+
   it("does not use pairing-store entries as implicit automation recipients", async () => {
     setMainSessionEntry(undefined);
 
