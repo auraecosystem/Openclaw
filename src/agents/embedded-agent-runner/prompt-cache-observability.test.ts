@@ -17,6 +17,23 @@ describe("prompt cache observability", () => {
     ).toEqual(["read", "write"]);
   });
 
+  it("ignores malformed tool names without crashing diagnostics", () => {
+    const unreadableToolName = Object.defineProperty({}, "name", {
+      get() {
+        throw new Error("tool name getter exploded");
+      },
+    });
+
+    expect(
+      collectPromptCacheToolNames([
+        { name: "read" },
+        { name: 123 } as never,
+        unreadableToolName,
+        { name: " write " },
+      ]),
+    ).toEqual(["read", "write"]);
+  });
+
   it("tracks cache-relevant changes and reports a real cache-read drop", () => {
     const first = beginPromptCacheObservation({
       sessionId: "session-1",
