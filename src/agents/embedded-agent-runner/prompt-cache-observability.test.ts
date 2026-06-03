@@ -17,6 +17,18 @@ describe("prompt cache observability", () => {
     ).toEqual(["read", "write"]);
   });
 
+  it("collects prompt-cache tool names without aborting on unreadable descriptors", () => {
+    const unreadableTool = {
+      get name(): string {
+        throw new Error("tool name getter exploded");
+      },
+    };
+
+    expect(
+      collectPromptCacheToolNames([{ name: " read " }, unreadableTool, { name: "write" }]),
+    ).toEqual(["read", "write"]);
+  });
+
   it("tracks cache-relevant changes and reports a real cache-read drop", () => {
     const first = beginPromptCacheObservation({
       sessionId: "session-1",
