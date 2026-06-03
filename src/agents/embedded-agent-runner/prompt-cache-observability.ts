@@ -137,8 +137,20 @@ function diffSnapshots(
   return changes.length > 0 ? changes : null;
 }
 
+function readPromptCacheToolName(tool: { name?: string }): string | undefined {
+  try {
+    const name = tool.name?.trim();
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function collectPromptCacheToolNames(tools: Array<{ name?: string }>): string[] {
-  return tools.map((tool) => tool.name?.trim()).filter((name): name is string => Boolean(name));
+  return tools.flatMap((tool) => {
+    const name = readPromptCacheToolName(tool);
+    return name ? [name] : [];
+  });
 }
 
 export function beginPromptCacheObservation(params: {
