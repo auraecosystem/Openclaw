@@ -286,6 +286,105 @@ describe("app-tool-stream fallback lifecycle handling", () => {
     expect(host.chatModelOverrides?.main).toBeNull();
   });
 
+  it("emits streamed tool result images as message-level image blocks", () => {
+    const host = createHost();
+
+    handleAgentEvent(host, {
+      runId: "run-image",
+      seq: 1,
+      stream: "tool",
+      ts: Date.now(),
+      sessionKey: "main",
+      data: {
+        phase: "result",
+        name: "image_gen.generate",
+        toolCallId: "image-tool-1",
+        result: {
+          content: [
+            { type: "text", text: "Generated image" },
+            { type: "image", url: "https://example.com/generated.png" },
+          ],
+        },
+      },
+    });
+
+    expect(host.chatToolMessages).toHaveLength(1);
+    expect(host.chatToolMessages[0]).toMatchObject({
+      role: "assistant",
+      toolCallId: "image-tool-1",
+      content: [
+        {
+          type: "toolcall",
+          name: "image_gen.generate",
+        },
+        {
+          type: "toolresult",
+          name: "image_gen.generate",
+          text: "Generated image",
+        },
+        {
+          type: "image",
+          url: "https://example.com/generated.png",
+        },
+      ],
+    });
+  });
+
+  it("preserves streamed tool result data URLs without re-encoding them", () => {
+    const host = createHost();
+
+    handleAgentEvent(host, {
+      runId: "run-data-image",
+      seq: 1,
+      stream: "tool",
+      ts: Date.now(),
+      sessionKey: "main",
+      data: {
+        phase: "result",
+        name: "image_gen.generate",
+        toolCallId: "image-tool-data",
+        result: {
+          content: [
+            { type: "image", data: "data:image/png;base64,abc123", mimeType: "image/png" },
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: "image/jpeg",
+                data: "data:image/jpeg;base64,def456",
+              },
+            },
+            { type: "image", data: "rawbase64", mimeType: "image/webp" },
+          ],
+        },
+      },
+    });
+
+    expect(host.chatToolMessages[0]?.content).toEqual([
+      {
+        type: "toolcall",
+        name: "image_gen.generate",
+        arguments: {},
+      },
+      expect.objectContaining({
+        type: "toolresult",
+        name: "image_gen.generate",
+      }),
+      {
+        type: "image",
+        url: "data:image/png;base64,abc123",
+      },
+      {
+        type: "image",
+        url: "data:image/jpeg;base64,def456",
+      },
+      {
+        type: "image",
+        url: "data:image/webp;base64,rawbase64",
+      },
+    ]);
+  });
+
   it("records tool activity summaries without storing raw argument values", () => {
     useToolStreamFakeTimers();
     const host = createHost();

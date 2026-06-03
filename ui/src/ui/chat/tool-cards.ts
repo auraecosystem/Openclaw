@@ -1,4 +1,5 @@
 import { html, nothing } from "lit";
+import { until } from "lit/directives/until.js";
 import { extractCanvasFromText } from "../../../../src/chat/canvas-render.js";
 import { t } from "../../i18n/index.ts";
 import { resolveCanvasIframeUrl } from "../canvas-url.ts";
@@ -7,6 +8,11 @@ import { icons } from "../icons.ts";
 import type { SidebarContent } from "../sidebar-content.ts";
 import { formatToolDetail, resolveToolDisplay } from "../tool-display.ts";
 import type { ToolCard } from "../types/chat-types.ts";
+import {
+  isManagedOutgoingImageSource,
+  resolveManagedOutgoingImageBlobUrl,
+  type ManagedOutgoingImageOptions,
+} from "./managed-outgoing-images.ts";
 import { extractTextCached } from "./message-extract.ts";
 import { isToolResultMessage } from "./role-normalizer.ts";
 import { formatToolOutputForSidebar, getTruncatedPreview } from "./tool-helpers.ts";
@@ -58,6 +64,63 @@ function coerceArgs(value: unknown): unknown {
   } catch {
     return value;
   }
+}
+
+function buildBase64ImageUrl(data: string, mediaType?: string): string {
+  if (data.startsWith("data:")) {
+    return data;
+  }
+  return `data:${mediaType ?? "image/png"};base64,${data}`;
+}
+
+function extractToolImages(item: Record<string, unknown>): string[] {
+  const content = normalizeContent(item.content);
+  const urls: string[] = [];
+  for (const block of content) {
+    if (block.type !== "image") {
+      continue;
+    }
+    if (typeof block.url === "string" && block.url.trim()) {
+      urls.push(block.url);
+    } else if (typeof block.data === "string") {
+      const mimeType = typeof block.mimeType === "string" ? block.mimeType : undefined;
+      urls.push(buildBase64ImageUrl(block.data, mimeType));
+    } else if (block.source && typeof block.source === "object") {
+      const s = block.source as Record<string, unknown>;
+      if (s.type === "base64" && typeof s.data === "string") {
+        const mt = typeof s.media_type === "string" ? s.media_type : undefined;
+        urls.push(buildBase64ImageUrl(s.data, mt));
+      }
+    }
+  }
+  return urls;
+}
+
+function renderToolCardImage(
+  url: string,
+  alt: string,
+  managedImageOptions?: ManagedOutgoingImageOptions,
+) {
+  const renderImageElement = (src: string) =>
+    html`<img class="chat-tool-card__image" src=${src} alt=${alt} />`;
+  if (!isManagedOutgoingImageSource(url)) {
+    return renderImageElement(url);
+  }
+  const preview = resolveManagedOutgoingImageBlobUrl(url, managedImageOptions).then((previewUrl) =>
+    previewUrl ? renderImageElement(previewUrl) : nothing,
+  );
+  return until(preview, nothing);
+}
+
+function renderToolCardImages(card: ToolCard, managedImageOptions?: ManagedOutgoingImageOptions) {
+  if (!card.images?.length) {
+    return nothing;
+  }
+  return html`<div class="chat-tool-card__images">
+    ${card.images.map((url) =>
+      renderToolCardImage(url, `${card.name} output`, managedImageOptions),
+    )}
+  </div>`;
 }
 
 function extractToolText(item: Record<string, unknown>): string | undefined {
@@ -295,12 +358,16 @@ export function extractToolCards(message: unknown, prefix = "tool"): ToolCard[] 
       const text = extractToolText(item);
       const preview = extractToolPreview(text, name);
       const isError = readToolErrorFlag(item) ?? messageIsError;
+      const images = extractToolImages(item);
       if (existing) {
         fallbackMatchedCards.add(existing);
         existing.outputText = text;
         existing.preview = preview;
         if (isError !== undefined) {
           existing.isError = isError;
+        }
+        if (images.length > 0) {
+          existing.images = images;
         }
         continue;
       }
@@ -310,6 +377,7 @@ export function extractToolCards(message: unknown, prefix = "tool"): ToolCard[] 
         outputText: text,
         messageId: transcriptMessageId,
         ...(isError !== undefined ? { isError } : {}),
+        ...(images.length > 0 ? { images } : {}),
         preview,
       });
     }
@@ -329,12 +397,14 @@ export function extractToolCards(message: unknown, prefix = "tool"): ToolCard[] 
       (typeof m.tool_name === "string" && m.tool_name) ||
       "tool";
     const text = extractTextCached(message) ?? undefined;
+    const images = extractToolImages(m);
     cards.push({
       id: resolveToolCardId({}, m, 0, prefix),
       name,
       outputText: text,
       messageId: transcriptMessageId,
       ...(messageIsError !== undefined ? { isError: messageIsError } : {}),
+      ...(images.length > 0 ? { images } : {}),
       preview: extractToolPreview(text, name),
     });
   }
@@ -638,6 +708,8 @@ export function renderToolCard(
     canvasPluginSurfaceUrl?: string | null;
     embedSandboxMode?: EmbedSandboxMode;
     allowExternalEmbedUrls?: boolean;
+    basePath?: string;
+    assistantAttachmentAuthToken?: string | null;
   },
 ) {
   const display = resolveToolDisplay({ name: card.name, args: card.args, detailMode: "explain" });
@@ -673,6 +745,10 @@ export function renderToolCard(
                 opts.canvasPluginSurfaceUrl,
                 opts.embedSandboxMode ?? "scripts",
                 opts.allowExternalEmbedUrls ?? false,
+                {
+                  basePath: opts.basePath,
+                  authToken: opts.assistantAttachmentAuthToken,
+                },
               )}
             </div>
           `
@@ -688,6 +764,7 @@ export function renderExpandedToolCardContent(
   canvasPluginSurfaceUrl?: string | null,
   embedSandboxMode: EmbedSandboxMode = "scripts",
   allowExternalEmbedUrls = false,
+  managedImageOptions?: ManagedOutgoingImageOptions,
 ) {
   const display = resolveToolDisplay({ name: card.name, args: card.args });
   const detail = formatToolDetail(display);
@@ -761,6 +838,7 @@ export function renderExpandedToolCardContent(
               expanded: true,
             })
         : nothing}
+      ${renderToolCardImages(card, managedImageOptions)}
     </div>
   `;
 }
@@ -770,7 +848,12 @@ export function renderToolCardSidebar(
   onOpenSidebar?: (content: SidebarContent) => void,
   canvasPluginSurfaceUrl?: string | null,
   embedSandboxMode: EmbedSandboxMode = "scripts",
-  options?: { sessionKey?: string; agentId?: string },
+  options?: {
+    sessionKey?: string;
+    agentId?: string;
+    basePath?: string;
+    assistantAttachmentAuthToken?: string | null;
+  },
 ) {
   const display = resolveToolDisplay({ name: card.name, args: card.args });
   const detail = formatToolDetail(display);
@@ -862,6 +945,10 @@ export function renderToolCardSidebar(
       ${showInline
         ? html`<div class="chat-tool-card__inline mono">${card.outputText}</div>`
         : nothing}
+      ${renderToolCardImages(card, {
+        basePath: options?.basePath,
+        authToken: options?.assistantAttachmentAuthToken,
+      })}
     </div>
   `;
 }

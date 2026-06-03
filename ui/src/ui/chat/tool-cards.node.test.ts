@@ -442,4 +442,87 @@ with Example Deck
       expect(card?.preview, testCase.name).toBeUndefined();
     }
   });
+
+  it("does not copy message-level streamed images into tool cards", () => {
+    const [card] = extractToolCards(
+      {
+        role: "assistant",
+        toolCallId: "call-image",
+        content: [
+          {
+            type: "toolcall",
+            id: "call-image",
+            name: "image_gen.generate",
+            arguments: { prompt: "chart" },
+          },
+          {
+            type: "toolresult",
+            id: "call-image",
+            name: "image_gen.generate",
+            text: "Generated image",
+          },
+          {
+            type: "image",
+            url: "https://example.com/generated.png",
+          },
+        ],
+      },
+      "msg:streamed-image",
+    );
+
+    expect(card?.outputText).toBe("Generated image");
+    expect(card?.images).toBeUndefined();
+  });
+
+  it("keeps images nested inside tool result content on the owning card", () => {
+    const [card] = extractToolCards(
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolcall",
+            id: "call-nested-image",
+            name: "image_gen.generate",
+          },
+          {
+            type: "toolresult",
+            id: "call-nested-image",
+            name: "image_gen.generate",
+            content: [
+              { type: "text", text: "Generated image" },
+              { type: "image", url: "https://example.com/nested.png" },
+            ],
+          },
+        ],
+      },
+      "msg:nested-image",
+    );
+
+    expect(card?.outputText).toBe("Generated image");
+    expect(card?.images).toEqual(["https://example.com/nested.png"]);
+  });
+
+  it("keeps standalone tool result image content on the tool card", () => {
+    const [card] = extractToolCards(
+      {
+        role: "tool",
+        toolName: "image_gen.generate",
+        content: [
+          { type: "text", text: "Generated image" },
+          {
+            type: "image",
+            url: "/api/chat/media/outgoing/agent%3Amain%3Amain/00000000-0000-4000-8000-000000000000/full",
+          },
+          { type: "image", data: "rawbase64", mimeType: "image/webp" },
+        ],
+      },
+      "msg:standalone-image",
+    );
+
+    expect(card?.outputText).toBe("Generated image");
+    expect(card?.images).toEqual([
+      "/api/chat/media/outgoing/agent%3Amain%3Amain/00000000-0000-4000-8000-000000000000/full",
+      "data:image/webp;base64,rawbase64",
+    ]);
+  });
 });

@@ -1,7 +1,8 @@
 /* @vitest-environment jsdom */
 
 import { render } from "lit";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { resetManagedOutgoingImageBlobUrlCacheForTest } from "./managed-outgoing-images.ts";
 import {
   formatCollapsedToolPreviewText,
   formatCollapsedToolSummaryText,
@@ -9,6 +10,11 @@ import {
   renderToolCard,
   renderToolCardSidebar,
 } from "./tool-cards.ts";
+
+afterEach(() => {
+  resetManagedOutgoingImageBlobUrlCacheForTest();
+  vi.unstubAllGlobals();
+});
 
 vi.mock("../icons.ts", () => ({
   icons: {
@@ -631,5 +637,106 @@ describe("tool-cards", () => {
     const sidebar = requireFirstMockArg(onOpenSidebar, "sidebar open");
     expect(sidebar.kind).toBe("markdown");
     expect(sidebar.fullMessageRequest).toBeUndefined();
+  });
+
+  it("renders images in tool output cards from direct URLs", () => {
+    const container = document.createElement("div");
+    render(
+      renderToolCard(
+        {
+          id: "msg:img:1",
+          name: "chart.generate",
+          outputText: "Generated chart",
+          images: ["https://example.com/chart.png"],
+        },
+        { expanded: true, onToggleExpanded: vi.fn() },
+      ),
+      container,
+    );
+
+    const img = container.querySelector(".chat-tool-card__image") as HTMLImageElement | null;
+    expect(img).not.toBeNull();
+    expect(img?.src).toBe("https://example.com/chart.png");
+  });
+
+  it("renders multiple images in a tool output card", () => {
+    const container = document.createElement("div");
+    render(
+      renderToolCard(
+        {
+          id: "msg:img:2",
+          name: "image_gen.generate",
+          outputText: "Generated images",
+          images: ["https://example.com/img1.png", "data:image/png;base64,iVBORw0KGgo="],
+        },
+        { expanded: true, onToggleExpanded: vi.fn() },
+      ),
+      container,
+    );
+
+    const imgs = container.querySelectorAll(".chat-tool-card__image");
+    expect(imgs.length).toBe(2);
+    expect((imgs[0] as HTMLImageElement).src).toBe("https://example.com/img1.png");
+    expect((imgs[1] as HTMLImageElement).src).toBe("data:image/png;base64,iVBORw0KGgo=");
+  });
+
+  it("fetches managed outgoing image URLs with auth for tool card images", async () => {
+    const managedImageUrl =
+      "/api/chat/media/outgoing/agent%3Amain%3Amain/00000000-0000-4000-8000-000000000000/full";
+    const objectUrl = "blob:managed-tool-image";
+    vi.stubGlobal(
+      "URL",
+      class extends URL {
+        static override createObjectURL = vi.fn(() => objectUrl);
+        static override revokeObjectURL = vi.fn();
+      },
+    );
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
+      const headers = init?.headers as Headers;
+      expect(headers.get("Authorization")).toBe("Bearer session-token");
+      expect(headers.get("x-openclaw-requester-session-key")).toBe("agent:main:main");
+      return {
+        ok: true,
+        blob: async () => new Blob(["png"], { type: "image/png" }),
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const container = document.createElement("div");
+    render(
+      renderToolCard(
+        {
+          id: "msg:img:3",
+          name: "media.export",
+          outputText: "Exported media",
+          images: [
+            "https://example.com/public.png",
+            managedImageUrl,
+            "data:image/gif;base64,R0lGODlh",
+          ],
+        },
+        {
+          expanded: true,
+          onToggleExpanded: vi.fn(),
+          assistantAttachmentAuthToken: "session-token",
+        },
+      ),
+      container,
+    );
+
+    await vi.waitFor(
+      () => {
+        const imgs = container.querySelectorAll<HTMLImageElement>(".chat-tool-card__image");
+        expect([...imgs].map((img) => img.getAttribute("src"))).toEqual([
+          "https://example.com/public.png",
+          objectUrl,
+          "data:image/gif;base64,R0lGODlh",
+        ]);
+      },
+      { interval: 1, timeout: 100 },
+    );
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(managedImageUrl);
+    expect(fetchMock.mock.calls[0]?.[1]?.credentials).toBe("same-origin");
   });
 });
