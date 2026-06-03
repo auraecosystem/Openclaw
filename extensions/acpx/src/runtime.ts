@@ -811,7 +811,24 @@ export class AcpxRuntime implements AcpRuntime {
       startedAt: Date.now(),
       state: "open",
     });
-    return await this.launchLeaseScope.run(launch, params.run);
+    console.warn("[acpx] launch lease opened", {
+      leaseId: launch.leaseId,
+      gatewayInstanceId: launch.gatewayInstanceId,
+      sessionKey: launch.sessionKey,
+      wrapperPath: extractGeneratedWrapperPath(params.command),
+      commandHash: hashAcpxProcessCommand(params.command),
+      cwd: this.cwd,
+    });
+    try {
+      return await this.launchLeaseScope.run(launch, params.run);
+    } catch (error) {
+      console.warn("[acpx] launch lease failed", {
+        leaseId: launch.leaseId,
+        sessionKey: launch.sessionKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
   }
 
   private async withCodexWrapperDiagnostics<T>(params: {

@@ -209,4 +209,72 @@ describe("discord route resolution helpers", () => {
       }),
     ).toBe(false);
   });
+
+  it("ignores ACP bindings when ACP dispatch is disabled", () => {
+    const route: ResolvedAgentRoute = {
+      agentId: "engineering",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:engineering:discord:channel:c1",
+      mainSessionKey: "agent:engineering:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.peer",
+    };
+
+    expect(
+      shouldIgnoreStaleDiscordRouteBinding({
+        route,
+        cfg: {
+          acp: { enabled: false, dispatch: { enabled: false } },
+          plugins: { entries: { acpx: { enabled: false } }, deny: ["acpx"] },
+        } as any,
+        bindingRecord: {
+          bindingId: "acp-binding",
+          targetSessionKey: "agent:codex:acp:session-1",
+          targetKind: "acp",
+          conversation: {
+            channel: "discord",
+            accountId: "default",
+            conversationId: "c1",
+          },
+          status: "active",
+          boundAt: 1,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps ACP bindings when ACP dispatch is enabled", () => {
+    const route: ResolvedAgentRoute = {
+      agentId: "engineering",
+      channel: "discord",
+      accountId: "default",
+      sessionKey: "agent:engineering:discord:channel:c1",
+      mainSessionKey: "agent:engineering:main",
+      lastRoutePolicy: "session",
+      matchedBy: "binding.peer",
+    };
+
+    expect(
+      shouldIgnoreStaleDiscordRouteBinding({
+        route,
+        cfg: {
+          acp: { enabled: true, dispatch: { enabled: true } },
+          plugins: { entries: { acpx: { enabled: true } }, deny: [] },
+        } as any,
+        bindingRecord: {
+          bindingId: "acp-binding",
+          targetSessionKey: "agent:codex:acp:session-1",
+          targetKind: "acp",
+          conversation: {
+            channel: "discord",
+            accountId: "default",
+            conversationId: "c1",
+          },
+          status: "active",
+          boundAt: 1,
+        },
+      }),
+    ).toBe(false);
+  });
 });

@@ -1367,7 +1367,7 @@ describe("tryDispatchAcpReply", () => {
     }
   });
 
-  it("surfaces ACP policy errors as final error replies", async () => {
+  it("suppresses disabled ACP policy errors instead of sending generic final replies", async () => {
     setReadyAcpResolution();
     policyMocks.resolveAcpDispatchPolicyError.mockReturnValue(
       new AcpRuntimeError("ACP_DISPATCH_DISABLED", "ACP dispatch is disabled by policy."),
@@ -1380,14 +1380,11 @@ describe("tryDispatchAcpReply", () => {
     });
 
     expect(managerMocks.runTurn).not.toHaveBeenCalled();
-    expect(dispatcherCall(dispatcher.sendFinalReply).isError).toBe(true);
-    expect(dispatcherCall(dispatcher.sendFinalReply).text).toContain(
-      "ACP dispatch is disabled by policy.",
-    );
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
     expect(bindingServiceMocks.unbind).not.toHaveBeenCalled();
   });
 
-  it("does not unbind stale bindings when ACP dispatch is disabled by policy", async () => {
+  it("does not surface stale ACP bindings when ACP dispatch is disabled by policy", async () => {
     managerMocks.resolveSession.mockReturnValue({
       kind: "stale",
       sessionKey,
@@ -1405,10 +1402,7 @@ describe("tryDispatchAcpReply", () => {
 
     expect(managerMocks.runTurn).not.toHaveBeenCalled();
     expect(bindingServiceMocks.unbind).not.toHaveBeenCalled();
-    expect(dispatcherCall(dispatcher.sendFinalReply).isError).toBe(true);
-    expect(dispatcherCall(dispatcher.sendFinalReply).text).toContain(
-      "ACP dispatch is disabled by policy.",
-    );
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
   it("unbinds stale bound conversations before surfacing stale ACP resolution errors", async () => {
@@ -1514,6 +1508,47 @@ describe("tryDispatchAcpReply", () => {
     });
     expect(dispatcherCall(dispatcher.sendFinalReply).isError).toBe(true);
     expect(dispatcherCall(dispatcher.sendFinalReply).text).toContain("ACP metadata is missing");
+  });
+
+  it("unbinds recoverable ACP bindings on acpx code 1 turn failures without sending generic errors", async () => {
+    const aliasSessionKey = "main";
+    const canonicalSessionKey = "agent:main:main";
+    managerMocks.resolveSession.mockReturnValue({
+      kind: "ready",
+      sessionKey: canonicalSessionKey,
+      meta: createAcpSessionMeta(),
+    });
+    managerMocks.runTurn.mockRejectedValueOnce(
+      new AcpRuntimeError("ACP_TURN_FAILED", "acpx exited with code 1"),
+    );
+    bindingServiceMocks.unbind.mockResolvedValueOnce([
+      {
+        bindingId: "discord:default:thread-1",
+        targetSessionKey: canonicalSessionKey,
+        targetKind: "acp",
+        conversation: {
+          channel: "discord",
+          accountId: "default",
+          conversationId: "thread-1",
+        },
+        status: "active",
+        boundAt: 0,
+      },
+    ]);
+    const { dispatcher } = createDispatcher();
+
+    await runDispatch({
+      bodyForAgent: "test",
+      dispatcher,
+      sessionKeyOverride: aliasSessionKey,
+    });
+
+    expect(bindingServiceMocks.unbind).toHaveBeenCalledTimes(1);
+    expect(bindingServiceMocks.unbind).toHaveBeenCalledWith({
+      targetSessionKey: canonicalSessionKey,
+      reason: "acp-turn-recoverable-reset",
+    });
+    expect(dispatcher.sendFinalReply).not.toHaveBeenCalled();
   });
 
   it("uses canonical session keys for bound-session identity notices", async () => {

@@ -19,6 +19,14 @@ describe("formatAcpRuntimeErrorText", () => {
     );
   });
 
+  it("classifies acpx code 1 exits as recoverable binding cleanup failures", () => {
+    const text = formatAcpRuntimeErrorText(
+      new AcpRuntimeError("ACP_TURN_FAILED", "acpx exited with code 1"),
+    );
+    expect(text).toContain("I cleared any recoverable stale ACP conversation binding");
+    expect(text).toContain("/acp doctor");
+  });
+
   it("surfaces redacted numeric RequestError details in runtime failure text", () => {
     const token = "sk-abcdefghijklmnopqrstuvwxyz123456";
     const requestError = Object.assign(new Error("Internal error"), {

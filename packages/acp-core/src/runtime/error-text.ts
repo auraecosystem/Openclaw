@@ -16,6 +16,9 @@ function resolveAcpRuntimeErrorNextStep(error: AcpRuntimeError): string | undefi
   if (error.code === "ACP_BACKEND_UNSUPPORTED_CONTROL") {
     return "This backend does not support that control; use a supported command.";
   }
+  if (error.code === "ACP_TURN_FAILED" && /\bacpx exited with code 1\b/i.test(error.message)) {
+    return "I cleared any recoverable stale ACP conversation binding. Send the message again; if it repeats, run `/acp doctor` and check the gateway/acpx stderr logs.";
+  }
   if (error.code === "ACP_TURN_FAILED") {
     return "Retry, or use `/acp cancel` and send the message again.";
   }

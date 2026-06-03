@@ -122,13 +122,34 @@ function hasExplicitRuntimeBindingIntent(record: SessionBindingRecord): boolean 
   );
 }
 
+function isAcpRuntimeDisabledForDiscordBinding(cfg?: OpenClawConfig | null): boolean {
+  if (!cfg) {
+    return false;
+  }
+  const acpxEntryEnabled = cfg.plugins?.entries?.acpx?.enabled !== false;
+  const acpxDenied = Array.isArray(cfg.plugins?.deny) && cfg.plugins.deny.includes("acpx");
+  return (
+    cfg.acp?.enabled === false ||
+    cfg.acp?.dispatch?.enabled === false ||
+    !acpxEntryEnabled ||
+    acpxDenied
+  );
+}
+
 export function shouldIgnoreStaleDiscordRouteBinding(params: {
   bindingRecord?: SessionBindingRecord | null;
   route: ResolvedAgentRoute;
+  cfg?: OpenClawConfig | null;
 }): boolean {
   const bindingRecord = params.bindingRecord;
   const boundSessionKey = bindingRecord?.targetSessionKey?.trim();
-  if (!bindingRecord || !boundSessionKey || hasExplicitRuntimeBindingIntent(bindingRecord)) {
+  if (!bindingRecord || !boundSessionKey) {
+    return false;
+  }
+  if (isAcpSessionKey(boundSessionKey) && isAcpRuntimeDisabledForDiscordBinding(params.cfg)) {
+    return true;
+  }
+  if (hasExplicitRuntimeBindingIntent(bindingRecord)) {
     return false;
   }
   const bound = parseAgentSessionKey(boundSessionKey);

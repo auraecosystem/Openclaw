@@ -60,6 +60,7 @@ export async function resolveDiscordPreflightRoute(params: {
     shouldIgnoreStaleDiscordRouteBinding({
       bindingRecord: runtimeRoute.bindingRecord,
       route,
+      cfg: params.preflight.cfg,
     })
   ) {
     logVerbose(

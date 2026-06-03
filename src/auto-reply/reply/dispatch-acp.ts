@@ -210,6 +210,7 @@ function finishAcpDispatchAttempt(params: {
 }
 
 const ACP_STALE_BINDING_UNBIND_REASON = "acp-session-init-failed";
+const ACP_RECOVERABLE_TURN_UNBIND_REASON = "acp-turn-recoverable-reset";
 
 function isStaleSessionInitError(params: { code: string; message: string }): boolean {
   if (params.code !== "ACP_SESSION_INIT_FAILED") {
@@ -220,22 +221,48 @@ function isStaleSessionInitError(params: { code: string; message: string }): boo
   );
 }
 
+function isRecoverableAcpTurnExitError(params: { code: string; message: string }): boolean {
+  if (params.code !== "ACP_TURN_FAILED") {
+    return false;
+  }
+  return /\bacpx exited with code 1\b/i.test(params.message);
+}
+
+function shouldSuppressRecoverableAcpErrorDelivery(params: {
+  cfg: OpenClawConfig;
+  error: { code: string; message: string };
+}): boolean {
+  if (params.error.code === "ACP_DISPATCH_DISABLED") {
+    return true;
+  }
+  if (isRecoverableAcpTurnExitError(params.error)) {
+    return true;
+  }
+  const policyError = resolveAcpDispatchPolicyError(params.cfg);
+  return (
+    policyError?.code === "ACP_DISPATCH_DISABLED" &&
+    (isRecoverableAcpTurnExitError(params.error) || isStaleSessionInitError(params.error))
+  );
+}
+
 async function maybeUnbindStaleBoundConversations(params: {
   targetSessionKey: string;
   error: { code: string; message: string };
 }): Promise<void> {
-  if (!isStaleSessionInitError(params.error)) {
+  const staleSession = isStaleSessionInitError(params.error);
+  const recoverableTurnExit = isRecoverableAcpTurnExitError(params.error);
+  if (!staleSession && !recoverableTurnExit) {
     return;
   }
   try {
     const { getSessionBindingService } = await loadDispatchAcpManagerRuntime();
     const removed = await getSessionBindingService().unbind({
       targetSessionKey: params.targetSessionKey,
-      reason: ACP_STALE_BINDING_UNBIND_REASON,
+      reason: staleSession ? ACP_STALE_BINDING_UNBIND_REASON : ACP_RECOVERABLE_TURN_UNBIND_REASON,
     });
     if (removed.length > 0) {
       logVerbose(
-        `dispatch-acp: removed ${removed.length} stale bound conversation(s) for ${params.targetSessionKey} after ${params.error.code}: ${params.error.message}`,
+        `dispatch-acp: removed ${removed.length} ${staleSession ? "stale" : "recoverable-failed"} bound conversation(s) for ${params.targetSessionKey} after ${params.error.code}: ${params.error.message}`,
       );
     }
   } catch (error) {
@@ -509,6 +536,17 @@ export async function tryDispatchAcpReply(params: {
         targetSessionKey: canonicalSessionKey,
         error: acpResolution.error,
       });
+      if (
+        shouldSuppressRecoverableAcpErrorDelivery({ cfg: params.cfg, error: acpResolution.error })
+      ) {
+        logVerbose(
+          `dispatch-acp: suppressed stale ACP error delivery for ${canonicalSessionKey}: ${acpResolution.error.code} ${acpResolution.error.message}`,
+        );
+        return finishAttempt({
+          queuedFinal,
+          outcome: { kind: "error", error: acpResolution.error },
+        });
+      }
       const delivered = await delivery.deliver("final", {
         text: formatAcpRuntimeErrorText(acpResolution.error),
         isError: true,
@@ -643,6 +681,16 @@ export async function tryDispatchAcpReply(params: {
       targetSessionKey: canonicalSessionKey,
       error: acpError,
     });
+    if (shouldSuppressRecoverableAcpErrorDelivery({ cfg: params.cfg, error: acpError })) {
+      logVerbose(
+        `dispatch-acp: suppressed recoverable ACP error delivery for ${canonicalSessionKey}: ${acpError.code} ${acpError.message}`,
+      );
+      return finishAttempt({
+        queuedFinal,
+        outcome: { kind: "error", error: acpError },
+        lifecyclePhase: "error",
+      });
+    }
     const delivered = await delivery.deliver("final", {
       text: formatAcpRuntimeErrorText(acpError),
       isError: true,

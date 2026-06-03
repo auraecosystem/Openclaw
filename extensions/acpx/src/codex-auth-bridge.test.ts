@@ -130,6 +130,11 @@ describe("prepareAcpxCodexAuthConfig", () => {
     const wrapper = await fs.readFile(generated.wrapperPath, "utf8");
     expect(wrapper).toContain(JSON.stringify(installedBinPath));
     expect(wrapper).toContain("defaultArgs = [installedBinPath]");
+    expect(wrapper).toContain("starting Codex ACP wrapper");
+    expect(wrapper).toContain("spawned Codex ACP child");
+    expect(wrapper).toContain("Codex ACP child exited");
+    expect(wrapper).toContain("stderrLogPath");
+    expect(wrapper).toContain("argsCount");
     await expectPathMissing(path.join(agentDir, "acp-auth", "codex", "auth.json"));
   });
 
@@ -242,10 +247,10 @@ describe("prepareAcpxCodexAuthConfig", () => {
       /forceKillTimer = setTimeout\(\(\) => \{\s*killChildTree\("SIGKILL", \{ force: true \}\);\s*childExitCode = 1;/s,
     );
     expect(wrapper).toMatch(
-      /child\.on\("exit", \(code, signal\) => \{\s*if \(parentWatcher\) \{\s*clearInterval\(parentWatcher\);\s*\}\s*if \(orphanCleanupStarted\) \{\s*return;\s*\}/s,
+      /child\.on\("exit", \(code, signal\) => \{\s*console\.error\("\[openclaw\] Codex ACP child exited"/s,
     );
     expect(wrapper).toMatch(
-      /child\.on\("close", \(\) => \{\s*finishStderrLog\(\);\s*process\.exit\(childExitCode\);/s,
+      /child\.on\("close", \(\) => \{\s*finishStderrLog\(\);\s*console\.error\("\[openclaw\] Codex ACP wrapper closing"/s,
     );
     expect(wrapper).not.toMatch(
       /forceKillTimer = setTimeout\(\(\) => killChildTree\("SIGKILL"\), 1_500\);\s*forceKillTimer\.unref\?\.\(\);\s*process\.exit\(1\);/s,
