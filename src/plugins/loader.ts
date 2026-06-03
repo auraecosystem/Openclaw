@@ -114,6 +114,7 @@ import {
   listMemoryCorpusSupplements,
   listMemoryPromptSupplements,
   restoreMemoryPluginState,
+  type MemoryPluginCapabilityRegistration,
 } from "./memory-state.js";
 import { unwrapDefaultModuleExport } from "./module-export.js";
 import {
@@ -300,6 +301,23 @@ const pluginLoaderCacheState = new PluginLoaderCacheState<CachedPluginState>(
 const fullWorkspacePluginLoaderCacheState = new PluginLoaderCacheState<CachedPluginState>(
   MAX_PLUGIN_REGISTRY_CACHE_ENTRIES,
 );
+
+function resolveSnapshotMemoryCapability(params: {
+  previous: MemoryPluginCapabilityRegistration | undefined;
+  discovered: MemoryPluginCapabilityRegistration | undefined;
+}): MemoryPluginCapabilityRegistration | undefined {
+  if (params.previous) {
+    return params.previous;
+  }
+  const publicArtifacts = params.discovered?.capability.publicArtifacts;
+  if (!publicArtifacts || !params.discovered) {
+    return undefined;
+  }
+  return {
+    pluginId: params.discovered.pluginId,
+    capability: { publicArtifacts },
+  };
+}
 const LAZY_RUNTIME_REFLECTION_KEYS = [
   "version",
   "config",
@@ -2699,13 +2717,17 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         );
         // Snapshot loads should not replace process-global runtime prompt state.
         if (!shouldActivate) {
+          const discoveredMemoryCapability = getMemoryCapabilityRegistration();
           restoreRegisteredAgentHarnesses(previousAgentHarnesses);
           restoreRegisteredCompactionProviders(previousCompactionProviders);
           restoreDetachedTaskLifecycleRuntimeRegistration(previousDetachedTaskRuntimeRegistration);
           restoreRegisteredEmbeddingProviders(previousEmbeddingProviders);
           restoreRegisteredMemoryEmbeddingProviders(previousMemoryEmbeddingProviders);
           restoreMemoryPluginState({
-            capability: previousMemoryCapability,
+            capability: resolveSnapshotMemoryCapability({
+              previous: previousMemoryCapability,
+              discovered: discoveredMemoryCapability,
+            }),
             corpusSupplements: previousMemoryCorpusSupplements,
             promptSupplements: previousMemoryPromptSupplements,
           });
