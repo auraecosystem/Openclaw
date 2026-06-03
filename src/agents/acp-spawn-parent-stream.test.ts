@@ -47,6 +47,7 @@ vi.mock("../config/sessions/paths.js", async () => {
 });
 
 let emitAgentEvent: typeof import("../infra/agent-events.js").emitAgentEvent;
+let resolveAcpProjectionSettings: typeof import("../auto-reply/reply/acp-stream-settings.js").resolveAcpProjectionSettings;
 let resolveAcpSpawnStreamLogPath: typeof import("./acp-spawn-parent-stream.js").resolveAcpSpawnStreamLogPath;
 let startAcpSpawnParentStreamRelay: typeof import("./acp-spawn-parent-stream.js").startAcpSpawnParentStreamRelay;
 
@@ -78,6 +79,7 @@ function firstMockCall(
 describe("startAcpSpawnParentStreamRelay", () => {
   beforeAll(async () => {
     ({ emitAgentEvent } = await import("../infra/agent-events.js"));
+    ({ resolveAcpProjectionSettings } = await import("../auto-reply/reply/acp-stream-settings.js"));
     ({ resolveAcpSpawnStreamLogPath, startAcpSpawnParentStreamRelay } =
       await import("./acp-spawn-parent-stream.js"));
   });
@@ -481,6 +483,185 @@ describe("startAcpSpawnParentStreamRelay", () => {
     const texts = collectedTexts();
     expectNoTextWithFragment(texts, "checking thread context");
     expectNoTextWithFragment(texts, "post a tight progress reply here");
+    relay.dispose();
+  });
+
+  it("relays commentary-phase assistant text when enabled", () => {
+    const relay = startAcpSpawnParentStreamRelay({
+      runId: "run-commentary-enabled",
+      parentSessionKey: "agent:main:main",
+      childSessionKey: "agent:codex:acp:child-commentary-enabled",
+      agentId: "codex",
+      streamFlushMs: 10,
+      noOutputNoticeMs: 120_000,
+      assistantCommentary: true,
+    });
+
+    emitAgentEvent({
+      runId: "run-commentary-enabled",
+      stream: "assistant",
+      data: {
+        delta: "checking thread context; then post a tight progress reply here.",
+        phase: "commentary",
+      },
+    });
+    vi.advanceTimersByTime(15);
+
+    const texts = collectedTexts();
+    expectTextWithFragment(
+      texts,
+      "codex: checking thread context; then post a tight progress reply here.",
+    );
+    relay.dispose();
+  });
+
+  it("relays ACP status progress when assistant commentary and tag visibility are enabled", () => {
+    const relay = startAcpSpawnParentStreamRelay({
+      runId: "run-status-commentary-enabled",
+      parentSessionKey: "agent:main:main",
+      childSessionKey: "agent:codex:acp:child-status-commentary-enabled",
+      agentId: "codex",
+      streamFlushMs: 10,
+      noOutputNoticeMs: 120_000,
+      assistantCommentary: true,
+      acpProjectionSettings: resolveAcpProjectionSettings({
+        acp: {
+          stream: {
+            tagVisibility: {
+              plan: true,
+            },
+          },
+        },
+      }),
+    });
+
+    emitAgentEvent({
+      runId: "run-status-commentary-enabled",
+      stream: "acp",
+      data: {
+        phase: "runtime_event",
+        eventType: "status",
+        tag: "plan",
+        text: "plan: inspect the runtime handoff first",
+      },
+    });
+    vi.advanceTimersByTime(15);
+
+    expectTextWithFragment(collectedTexts(), "codex: plan: inspect the runtime handoff first");
+    relay.dispose();
+  });
+
+  it("does not relay hidden ACP status tags when assistant commentary is enabled", () => {
+    const relay = startAcpSpawnParentStreamRelay({
+      runId: "run-status-commentary-hidden",
+      parentSessionKey: "agent:main:main",
+      childSessionKey: "agent:codex:acp:child-status-commentary-hidden",
+      agentId: "codex",
+      streamFlushMs: 10,
+      noOutputNoticeMs: 120_000,
+      assistantCommentary: true,
+    });
+
+    emitAgentEvent({
+      runId: "run-status-commentary-hidden",
+      stream: "acp",
+      data: {
+        phase: "runtime_event",
+        eventType: "status",
+        tag: "usage_update",
+        text: "usage updated: 10/100",
+      },
+    });
+    emitAgentEvent({
+      runId: "run-status-commentary-hidden",
+      stream: "acp",
+      data: {
+        phase: "runtime_event",
+        eventType: "status",
+        tag: "available_commands_update",
+        text: "available commands updated (7)",
+      },
+    });
+    vi.advanceTimersByTime(15);
+
+    const texts = collectedTexts();
+    expectNoTextWithFragment(texts, "usage updated");
+    expectNoTextWithFragment(texts, "available commands updated");
+    relay.dispose();
+  });
+
+  it("does not relay ACP status tags hidden by default when assistant commentary is enabled", () => {
+    const relay = startAcpSpawnParentStreamRelay({
+      runId: "run-status-commentary-default-hidden",
+      parentSessionKey: "agent:main:main",
+      childSessionKey: "agent:codex:acp:child-status-commentary-default-hidden",
+      agentId: "codex",
+      streamFlushMs: 10,
+      noOutputNoticeMs: 120_000,
+      assistantCommentary: true,
+    });
+
+    emitAgentEvent({
+      runId: "run-status-commentary-default-hidden",
+      stream: "acp",
+      data: {
+        phase: "runtime_event",
+        eventType: "status",
+        tag: "plan",
+        text: "plan: inspect the runtime handoff first",
+      },
+    });
+    vi.advanceTimersByTime(15);
+
+    expectNoTextWithFragment(collectedTexts(), "inspect the runtime handoff");
+    relay.dispose();
+  });
+
+  it("classifies opted-in commentary as visible output for stall notices", () => {
+    const relay = startAcpSpawnParentStreamRelay({
+      runId: "run-commentary-visible-stall",
+      parentSessionKey: "agent:main:main",
+      childSessionKey: "agent:codex:acp:child-commentary-visible-stall",
+      agentId: "codex",
+      streamFlushMs: 1,
+      noOutputNoticeMs: 1_000,
+      noOutputPollMs: 250,
+      assistantCommentary: true,
+    });
+
+    emitAgentEvent({
+      runId: "run-commentary-visible-stall",
+      stream: "acp",
+      data: {
+        phase: "prompt_submitted",
+        at: Date.now(),
+        proxyEnvKeys: [],
+      },
+    });
+    emitAgentEvent({
+      runId: "run-commentary-visible-stall",
+      stream: "acp",
+      data: {
+        phase: "runtime_event",
+        eventType: "status",
+        text: "connecting to upstream",
+      },
+    });
+    emitAgentEvent({
+      runId: "run-commentary-visible-stall",
+      stream: "assistant",
+      data: {
+        delta: "checking active files before patching.",
+        phase: "commentary",
+      },
+    });
+    vi.advanceTimersByTime(5);
+    vi.advanceTimersByTime(1_500);
+
+    const texts = collectedTexts();
+    expectTextWithFragment(texts, "codex: checking active files before patching.");
+    expectNoTextWithFragment(texts, "has ACP runtime activity but no visible assistant output");
+    expectTextWithFragment(texts, "has produced no visible output for 1s");
     relay.dispose();
   });
 
