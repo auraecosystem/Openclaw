@@ -145,6 +145,10 @@ import {
   recordImportedPluginId,
   setActivePluginRegistry,
 } from "./runtime.js";
+import type {
+  RuntimePluginLoadProgressPhase,
+  RuntimePluginLoadProgressReporter,
+} from "./runtime/load-diagnostics.js";
 import type { CreatePluginRuntimeOptions } from "./runtime/types.js";
 import type { PluginRuntime } from "./runtime/types.js";
 import { validateJsonSchemaValue } from "./schema-validator.js";
@@ -196,6 +200,7 @@ export type PluginLoadOptions = {
   startupTrace?: {
     detail: (name: string, metrics: ReadonlyArray<readonly [string, number | string]>) => void;
   };
+  runtimePluginLoadProgress?: RuntimePluginLoadProgressReporter;
   pluginSdkResolution?: PluginSdkResolutionPreference;
   cache?: boolean;
   mode?: "full" | "validate";
@@ -235,6 +240,53 @@ function detailPluginStartupTrace(
     `plugins.gateway-load.plugin.${encodeStartupTraceSegment(pluginId)}`,
     metrics,
   );
+}
+
+function createRuntimePluginLoadProgressTracker(
+  reporter: RuntimePluginLoadProgressReporter | undefined,
+) {
+  let pluginIds: string[] = [];
+  const completedPluginIds: string[] = [];
+  let inFlightPluginId: string | undefined;
+  let inFlightPhase: RuntimePluginLoadProgressPhase | undefined;
+
+  const emit = () => {
+    if (!reporter) {
+      return;
+    }
+    try {
+      reporter({
+        pluginIds: [...pluginIds],
+        completedPluginIds: [...completedPluginIds],
+        ...(inFlightPluginId ? { inFlightPluginId } : {}),
+        ...(inFlightPhase ? { inFlightPhase } : {}),
+      });
+    } catch {
+      // Diagnostic observers must not affect plugin activation.
+    }
+  };
+
+  return {
+    plan(ids: readonly string[]): void {
+      pluginIds = [...new Set(ids)];
+      emit();
+    },
+    enter(pluginId: string, phase: RuntimePluginLoadProgressPhase): void {
+      inFlightPluginId = pluginId;
+      inFlightPhase = phase;
+      emit();
+    },
+    complete(pluginId: string): void {
+      if (!completedPluginIds.includes(pluginId)) {
+        completedPluginIds.push(pluginId);
+      }
+      if (inFlightPluginId === pluginId) {
+        inFlightPluginId = undefined;
+        inFlightPhase = undefined;
+      }
+      emit();
+    },
+  };
 }
 
 const CLI_METADATA_ENTRY_BASENAMES = [
@@ -1974,6 +2026,31 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
     const dreamingEngineId = resolveDreamingSidecarEngineId({ cfg, memorySlot });
     const pluginLoadStartMs = performance.now();
     let pluginLoadAttemptCount = 0;
+    const pluginLoadProgress = createRuntimePluginLoadProgressTracker(
+      options.runtimePluginLoadProgress,
+    );
+    pluginLoadProgress.plan(
+      orderedCandidates.flatMap((candidate) => {
+        const manifestRecord = manifestByRoot.get(candidate.rootDir);
+        if (!manifestRecord) {
+          return [];
+        }
+        return matchesScopedPluginRequest({
+          onlyPluginIdSet,
+          pluginId: manifestRecord.id,
+        })
+          ? [manifestRecord.id]
+          : [];
+      }),
+    );
+    let activeRuntimePluginProgressId: string | undefined;
+    const completeActiveRuntimePluginProgress = () => {
+      if (!activeRuntimePluginProgressId) {
+        return;
+      }
+      pluginLoadProgress.complete(activeRuntimePluginProgressId);
+      activeRuntimePluginProgressId = undefined;
+    };
 
     for (const candidate of orderedCandidates) {
       const manifestRecord = manifestByRoot.get(candidate.rootDir);
@@ -1990,6 +2067,9 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       if (!matchesRequestedScope) {
         continue;
       }
+      completeActiveRuntimePluginProgress();
+      activeRuntimePluginProgressId = pluginId;
+      pluginLoadProgress.enter(pluginId, "resolve");
       const activationState = resolveEffectivePluginActivationState({
         id: pluginId,
         origin: candidate.origin,
@@ -2313,6 +2393,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         recordImportedPluginId(record.id);
         pluginLoadAttemptCount++;
         logger.debug?.(`[plugins] loading ${record.id} from ${safeSource}`);
+        pluginLoadProgress.enter(pluginId, "load");
         mod = withProfile(
           { pluginId: record.id, source: safeSource },
           registrationMode,
@@ -2413,6 +2494,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
             fs.closeSync(runtimeOpened.fd);
             let runtimeMod: OpenClawPluginModule | null = null;
             try {
+              pluginLoadProgress.enter(pluginId, "setup-runtime-load");
               runtimeMod = withProfile(
                 { pluginId: record.id, source: safeRuntimeSource },
                 "load-setup-runtime-entry",
@@ -2442,6 +2524,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
             }
             if (runtimeRegistration.setChannelRuntime) {
               try {
+                pluginLoadProgress.enter(pluginId, "setup-runtime-apply");
                 runtimeRegistration.setChannelRuntime(api.runtime);
                 runtimeSetterApplied = true;
               } catch (err) {
@@ -2517,6 +2600,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
           }
           if (!runtimeSetterApplied) {
             try {
+              pluginLoadProgress.enter(pluginId, "setup-runtime-apply");
               mergedSetupRegistration.setChannelRuntime?.(api.runtime);
             } catch (err) {
               recordPluginError({
@@ -2539,6 +2623,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
             if (registerSetupRuntime) {
               const registrySnapshot = snapshotPluginRegistry(registry);
               try {
+                pluginLoadProgress.enter(pluginId, "setup-runtime-register");
                 runPluginRegisterSync(
                   (registrationApi) => registerSetupRuntime(registrationApi),
                   api,
@@ -2692,6 +2777,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
       const beforeRegister = performance.now();
       let registerFailed = false;
       try {
+        pluginLoadProgress.enter(pluginId, "register");
         withProfile(
           { pluginId: record.id, source: record.source },
           `${registrationMode}:register`,
@@ -2747,6 +2833,7 @@ export function loadOpenClawPlugins(options: PluginLoadOptions = {}): PluginRegi
         ]);
       }
     }
+    completeActiveRuntimePluginProgress();
 
     const pluginLoadElapsedMs = performance.now() - pluginLoadStartMs;
     if (pluginLoadAttemptCount > 0) {
