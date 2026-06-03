@@ -334,8 +334,8 @@ const agentRunnerRuntimeLoader = createLazyImportLoader(() => import("./agent-ru
 const sessionUpdatesRuntimeLoader = createLazyImportLoader(
   () => import("./session-updates.runtime.js"),
 );
-const sessionStoreRuntimeLoader = createLazyImportLoader(
-  () => import("../../config/sessions/store.runtime.js"),
+const sessionAccessorRuntimeLoader = createLazyImportLoader(
+  () => import("../../config/sessions/session-accessor.js"),
 );
 
 function loadEmbeddedAgentRuntime() {
@@ -350,8 +350,8 @@ function loadSessionUpdatesRuntime() {
   return sessionUpdatesRuntimeLoader.load();
 }
 
-function loadSessionStoreRuntime() {
-  return sessionStoreRuntimeLoader.load();
+function loadSessionAccessorRuntime() {
+  return sessionAccessorRuntimeLoader.load();
 }
 
 function stripPromptThinkingDirectives(body: string): string {
@@ -914,10 +914,8 @@ export async function runPreparedReply(
         sessionEntry.updatedAt = Date.now();
         sessionStore[sessionKey] = sessionEntry;
         if (storePath) {
-          const { updateSessionStore } = await loadSessionStoreRuntime();
-          await updateSessionStore(storePath, (store) => {
-            store[sessionKey] = sessionEntry;
-          });
+          const { upsertSessionEntry } = await loadSessionAccessorRuntime();
+          await upsertSessionEntry({ storePath, sessionKey }, sessionEntry);
         }
       }
     }

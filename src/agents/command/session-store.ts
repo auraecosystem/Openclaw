@@ -10,6 +10,7 @@ import {
   updateSessionStore,
   rewriteSessionFileForNewSessionId,
 } from "../../config/sessions.js";
+import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
 import { resolveMaintenanceConfigFromInput } from "../../config/sessions/store-maintenance.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { resolveAgentIdFromSessionKey } from "../../routing/session-key.js";
@@ -327,13 +328,11 @@ export async function clearCliSessionInStore(params: {
   clearCliSession(next, provider);
   next.updatedAt = Date.now();
 
-  const persisted = await updateSessionStore(storePath, (store) => {
-    const merged = mergeSessionEntry(store[sessionKey], next);
-    store[sessionKey] = merged;
-    return merged;
-  });
-  sessionStore[sessionKey] = persisted;
-  return persisted;
+  const persisted = await updateSessionEntry({ storePath, sessionKey }, () => next);
+  if (persisted) {
+    sessionStore[sessionKey] = persisted;
+  }
+  return persisted ?? undefined;
 }
 
 export async function recordCliCompactionInStore(params: {
@@ -395,13 +394,11 @@ export async function recordCliCompactionInStore(params: {
     next.cacheWrite = undefined;
   }
 
-  const persisted = await updateSessionStore(storePath, (store) => {
-    const merged = mergeSessionEntry(store[sessionKey], next);
-    store[sessionKey] = merged;
-    return merged;
-  });
-  sessionStore[sessionKey] = persisted;
-  return persisted;
+  const persisted = await updateSessionEntry({ storePath, sessionKey }, () => next);
+  if (persisted) {
+    sessionStore[sessionKey] = persisted;
+  }
+  return persisted ?? undefined;
 }
 
 function resolveCompactionSessionFile(params: {

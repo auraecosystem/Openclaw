@@ -1,4 +1,4 @@
-import { updateSessionStore } from "../../config/sessions/store.js";
+import { patchSessionEntry } from "../../config/sessions/session-accessor.js";
 import { mergeSessionEntry, type SessionEntry } from "../../config/sessions/types.js";
 import {
   formatAgentInternalEventsForPlainPrompt,
@@ -22,34 +22,37 @@ export type PersistSessionEntryParams = {
 export async function persistSessionEntry(
   params: PersistSessionEntryParams,
 ): Promise<SessionEntry | undefined> {
-  const persisted = await updateSessionStore(
-    params.storePath,
-    (store) => {
-      const current = store[params.sessionKey];
-      if (params.shouldPersist && !params.shouldPersist(current)) {
-        return current;
+  let rejectedMissingEntry = false;
+  const persisted = await patchSessionEntry(
+    { sessionKey: params.sessionKey, storePath: params.storePath },
+    (_entry, context) => {
+      if (params.shouldPersist && !params.shouldPersist(context.existingEntry)) {
+        rejectedMissingEntry = !context.existingEntry;
+        return null;
       }
-      const merged = mergeSessionEntry(store[params.sessionKey], params.entry);
+      const merged = mergeSessionEntry(context.existingEntry, params.entry);
       for (const field of params.clearedFields ?? []) {
         if (!Object.hasOwn(params.entry, field)) {
           Reflect.deleteProperty(merged, field);
         }
       }
-      store[params.sessionKey] = merged;
       return merged;
     },
     {
-      resolveSingleEntryPersistence: (entry) =>
-        entry ? { sessionKey: params.sessionKey, entry } : null,
-      takeCacheOwnership: true,
+      fallbackEntry: params.sessionStore[params.sessionKey] ?? params.entry,
+      replaceEntry: true,
     },
   );
+  if (rejectedMissingEntry) {
+    delete params.sessionStore[params.sessionKey];
+    return undefined;
+  }
   if (persisted) {
     params.sessionStore[params.sessionKey] = persisted;
   } else {
     delete params.sessionStore[params.sessionKey];
   }
-  return persisted;
+  return persisted ?? undefined;
 }
 
 export function prependInternalEventContext(

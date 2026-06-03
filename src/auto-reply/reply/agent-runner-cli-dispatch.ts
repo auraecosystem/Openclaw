@@ -7,7 +7,8 @@ import { runCliAgent } from "../../agents/cli-runner.js";
 import type { RunCliAgentParams } from "../../agents/cli-runner/types.js";
 import { clearCliSession } from "../../agents/cli-session.js";
 import type { EmbeddedAgentRunResult } from "../../agents/embedded-agent.js";
-import { updateSessionStore, type SessionEntry } from "../../config/sessions.js";
+import type { SessionEntry } from "../../config/sessions.js";
+import { updateSessionEntry } from "../../config/sessions/session-accessor.js";
 import type { AgentEventPayload } from "../../infra/agent-events.js";
 import { emitAgentEvent, onAgentEvent } from "../../infra/agent-events.js";
 
@@ -140,9 +141,13 @@ export async function clearDroppedCliSessionBinding(params: {
   if (!params.storePath || !params.sessionKey) {
     return;
   }
-  await updateSessionStore(params.storePath, (store) => {
-    clearEntry(store[params.sessionKey!]);
-  });
+  await updateSessionEntry(
+    { storePath: params.storePath, sessionKey: params.sessionKey },
+    (entry) => {
+      clearEntry(entry);
+      return entry;
+    },
+  );
 }
 
 function createToolEventBridge(params: {

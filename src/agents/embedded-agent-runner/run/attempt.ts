@@ -8,11 +8,8 @@ import { buildHierarchyReinforcementMessage } from "../../../auto-reply/handoff-
 import { filterHeartbeatTranscriptArtifacts } from "../../../auto-reply/heartbeat-filter.js";
 import { getRuntimeConfig } from "../../../config/config.js";
 import { resolveStorePath } from "../../../config/sessions/paths.js";
-import {
-  loadSessionStore,
-  runQuotaSuspensionMaintenance,
-  updateSessionStoreEntry,
-} from "../../../config/sessions/store.js";
+import { updateSessionEntry } from "../../../config/sessions/session-accessor.js";
+import { loadSessionStore, runQuotaSuspensionMaintenance } from "../../../config/sessions/store.js";
 import {
   bindOwnedSessionTranscriptWrites,
   withOwnedSessionTranscriptWrites,
@@ -2862,12 +2859,12 @@ export async function runEmbeddedAttempt(
                 activeSubagents: subagents,
               });
               validated.push(handoffMsg);
-              await updateSessionStoreEntry({
-                storePath,
-                sessionKey: params.sessionKey,
-                skipMaintenance: true,
-                takeCacheOwnership: true,
-                update: async (entry) => {
+              await updateSessionEntry(
+                {
+                  storePath,
+                  sessionKey: params.sessionKey,
+                },
+                async (entry) => {
                   if (entry.quotaSuspension?.state !== "resuming") {
                     return null;
                   }
@@ -2875,7 +2872,11 @@ export async function runEmbeddedAttempt(
                     quotaSuspension: { ...entry.quotaSuspension, state: "active" },
                   };
                 },
-              });
+                {
+                  skipMaintenance: true,
+                  takeCacheOwnership: true,
+                },
+              );
             }
           }
 

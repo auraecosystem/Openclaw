@@ -81,8 +81,8 @@ function shouldLogModelSelectionTiming(): boolean {
 const modelCatalogRuntimeLoader = createLazyImportLoader(
   () => import("../../agents/model-catalog.runtime.js"),
 );
-const sessionStoreRuntimeLoader = createLazyImportLoader(
-  () => import("../../config/sessions/store.runtime.js"),
+const sessionAccessorRuntimeLoader = createLazyImportLoader(
+  () => import("../../config/sessions/session-accessor.js"),
 );
 function normalizeRuntimeModelRef(provider: string, model: string) {
   return normalizeModelRef(provider, model, RUNTIME_MODEL_VISIBILITY_NORMALIZATION);
@@ -92,8 +92,8 @@ function loadModelCatalogRuntime() {
   return modelCatalogRuntimeLoader.load();
 }
 
-function loadSessionStoreRuntime() {
-  return sessionStoreRuntimeLoader.load();
+function loadSessionAccessorRuntime() {
+  return sessionAccessorRuntimeLoader.load();
 }
 
 function findSelectedCatalogEntry(params: {
@@ -269,11 +269,8 @@ export async function createModelSelectionState(params: {
       if (updated) {
         sessionStore[sessionKey] = sessionEntry;
         if (storePath) {
-          await (
-            await loadSessionStoreRuntime()
-          ).updateSessionStore(storePath, (store) => {
-            store[sessionKey] = sessionEntry;
-          });
+          const { replaceSessionEntry } = await loadSessionAccessorRuntime();
+          await replaceSessionEntry({ storePath, sessionKey }, sessionEntry);
         }
       }
       resetModelOverride = updated;
