@@ -2304,6 +2304,16 @@ describe("deriveSessionTitle", () => {
     expect(deriveSessionTitle(entry)).toBe("Dev Team Chat");
   });
 
+  test("prefers subject over autoTitle", () => {
+    const entry = {
+      sessionId: "abc123",
+      updatedAt: Date.now(),
+      subject: "Dev Team Chat",
+      autoTitle: "AI Generated Title",
+    } as SessionEntry;
+    expect(deriveSessionTitle(entry)).toBe("Dev Team Chat");
+  });
+
   test("uses first user message when displayName and subject missing", () => {
     const entry = {
       sessionId: "abc123",
@@ -2370,6 +2380,36 @@ describe("deriveSessionTitle", () => {
       subject: "Actual Subject",
     } as SessionEntry;
     expect(deriveSessionTitle(entry)).toBe("Actual Subject");
+  });
+
+  test("prefers autoTitle over firstUserMessage", () => {
+    const entry = {
+      sessionId: "abc123",
+      updatedAt: Date.now(),
+      autoTitle: "AI Generated Title",
+    } as SessionEntry;
+    expect(deriveSessionTitle(entry, "Hello, how are you?")).toBe("AI Generated Title");
+  });
+
+  test("prefers displayName over autoTitle", () => {
+    const entry = {
+      sessionId: "abc123",
+      updatedAt: Date.now(),
+      displayName: "Custom Name",
+      autoTitle: "AI Generated Title",
+    } as SessionEntry;
+    expect(deriveSessionTitle(entry)).toBe("Custom Name");
+  });
+
+  test("truncates long autoTitle to DERIVED_TITLE_MAX_LEN", () => {
+    const entry = {
+      sessionId: "abc123",
+      updatedAt: Date.now(),
+      autoTitle: "This is an AI generated title that is definitely way too long to display as is",
+    } as SessionEntry;
+    const result = deriveSessionTitle(entry);
+    expect(result).toBeDefined();
+    expect(result!.length).toBeLessThanOrEqual(60);
   });
 });
 
