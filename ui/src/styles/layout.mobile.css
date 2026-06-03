@@ -222,8 +222,8 @@
   .nav-item,
   .sidebar--collapsed .nav-item {
     margin: 0;
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 44px;
+    padding: 10px 16px;
     font-size: 13px;
     border-radius: var(--radius-md);
     white-space: nowrap;
@@ -356,7 +356,7 @@
 
   .topbar-status .pill {
     padding: 4px 8px;
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
     gap: 4px;
   }
 
@@ -610,7 +610,7 @@
   }
 
   .stat-label {
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .stat-value {
@@ -766,15 +766,15 @@
   }
 
   .log-time {
-    font-size: 10px;
+    font-size: 12px; /* was 10px */
   }
 
   .log-level {
-    font-size: 9px;
+    font-size: 12px; /* was 9px */
   }
 
   .log-subsystem {
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .log-message {
@@ -792,14 +792,14 @@
   }
 
   .list-sub {
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   /* Code blocks */
   .code-block {
     padding: 8px;
     border-radius: var(--radius-md);
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .theme-orb__trigger {
@@ -825,7 +825,7 @@
 
   .nav-item {
     padding: 6px 8px;
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .content {
@@ -857,12 +857,12 @@
 
   .btn {
     padding: 6px 10px;
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .topbar-status .pill {
     padding: 3px 6px;
-    font-size: 10px;
+    font-size: 12px; /* was 10px */
   }
 
   .theme-orb__trigger {
@@ -1061,7 +1061,7 @@
   .data-table th,
   .data-table td {
     padding: 6px 4px;
-    font-size: 11px;
+    font-size: 12px; /* was 11px */
   }
 
   .session-key-cell {
