@@ -3,7 +3,6 @@ import path from "node:path";
 import { redactSensitiveUrlLikeString } from "@openclaw/net-policy/redact-sensitive-url";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { sanitizeHostExecEnv } from "../../infra/host-env-security.js";
 import { withTempDir } from "../../infra/install-source-utils.js";
 import { writeJson } from "../../infra/json-files.js";
@@ -200,7 +199,6 @@ async function installLocalSkillDir(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
-  config?: OpenClawConfig;
   allowSetupHooks?: boolean;
   logger?: Logger;
   git?: SkillSourceOrigin["git"];
@@ -217,8 +215,6 @@ async function installLocalSkillDir(params: {
     mode: params.force ? "update" : "install",
     timeoutMs: params.timeoutMs,
     logger: params.logger,
-    config: params.config,
-    skillKey: slug,
     allowSetupHooks: params.allowSetupHooks,
     scan: {
       installId: params.source,
@@ -255,7 +251,6 @@ async function installGitSkill(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
-  config?: OpenClawConfig;
   allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {
@@ -336,7 +331,6 @@ async function installGitSkill(params: {
       slug: params.slug,
       force: params.force,
       timeoutMs: params.timeoutMs,
-      config: params.config,
       allowSetupHooks: params.allowSetupHooks,
       logger: params.logger,
       git,
@@ -350,7 +344,6 @@ async function installPathSkill(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
-  config?: OpenClawConfig;
   allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {
@@ -373,7 +366,6 @@ async function installPathSkill(params: {
     slug: params.slug,
     force: params.force,
     timeoutMs: params.timeoutMs,
-    config: params.config,
     allowSetupHooks: params.allowSetupHooks,
     logger: params.logger,
   });
@@ -396,7 +388,6 @@ export async function installSkillFromSource(params: {
   slug?: string;
   force?: boolean;
   timeoutMs?: number;
-  config?: OpenClawConfig;
   allowSetupHooks?: boolean;
   logger?: Logger;
 }): Promise<SkillSourceInstallResult> {

@@ -96,8 +96,6 @@ export async function installUploadedSkillArchive(params: {
         force: record.force,
         timeoutMs: params.timeoutMs,
         logger: params.log,
-        config: params.config,
-        skillKey: record.slug,
         allowSetupHooks: params.allowSetupHooks,
         scan: {
           installId: "upload",

@@ -1,5 +1,4 @@
 import path from "node:path";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { ArchiveLogger } from "../../infra/archive.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { pathExists } from "../../infra/fs-safe.js";
@@ -133,8 +132,6 @@ export async function installExtractedSkillRoot(params: {
   logger?: ArchiveLogger;
   scan?: SkillArchiveInstallScan;
   rootMarkers?: readonly string[];
-  config?: OpenClawConfig;
-  skillKey?: string;
   /** Explicitly allow skill-defined setup hooks. Default false for safety. */
   allowSetupHooks?: boolean;
 }): Promise<SkillArchiveInstallResult> {
@@ -191,8 +188,6 @@ export async function installExtractedSkillRoot(params: {
             const setupResult = await runSkillSetupHook({
               targetDir: installedDir,
               mode: params.mode,
-              config: params.config,
-              skillKey: params.skillKey ?? params.slug,
               logger: params.logger,
             });
             if (!setupResult.ok) {
@@ -219,8 +214,6 @@ export async function installSkillArchiveFromPath(params: {
   timeoutMs?: number;
   logger?: ArchiveLogger;
   scan?: SkillArchiveInstallScan;
-  config?: OpenClawConfig;
-  skillKey?: string;
   allowSetupHooks?: boolean;
 }): Promise<SkillArchiveInstallResult> {
   const result = await withExtractedArchiveRoot({
@@ -238,8 +231,6 @@ export async function installSkillArchiveFromPath(params: {
         timeoutMs: params.timeoutMs,
         logger: params.logger,
         scan: params.scan,
-        config: params.config,
-        skillKey: params.skillKey ?? params.slug,
         allowSetupHooks: params.allowSetupHooks,
       }),
   });
