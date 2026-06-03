@@ -106,36 +106,57 @@ export async function deliverGoogleChatReply(params: {
       }
     },
     sendMedia: async ({ mediaUrl, caption }) => {
+      const loaded = await core.channel.media.readRemoteMediaBuffer({
+        url: mediaUrl,
+        maxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
+      });
+      let upload: { attachmentUploadToken?: string };
       try {
-        const loaded = await core.channel.media.readRemoteMediaBuffer({
-          url: mediaUrl,
-          maxBytes: (account.config.mediaMaxMb ?? 20) * 1024 * 1024,
-        });
-        const upload = await uploadAttachmentForReply({
+        upload = await uploadAttachmentForReply({
           account,
           spaceId,
           buffer: loaded.buffer,
           contentType: loaded.contentType,
           filename: loaded.fileName ?? "attachment",
         });
-        if (!upload.attachmentUploadToken) {
-          throw new Error("missing attachment upload token");
+      } catch (uploadErr) {
+        // app-auth (chat.bot scope) cannot call media.upload; Google returns 403.
+        // Fall back to a text link so the reply is not silently dropped. (#89430)
+        if (/^https?:\/\//i.test(mediaUrl) && isUploadAuthScopeFailure(uploadErr)) {
+          const fallbackText = [caption, mediaUrl].filter(Boolean).join("\n") || mediaUrl;
+          try {
+            await sendTextMessage(fallbackText);
+            statusSink?.({ lastOutboundAt: Date.now() });
+          } catch (fallbackErr) {
+            runtime.error?.(`Google Chat media link fallback failed: ${String(fallbackErr)}`);
+          }
+          return;
         }
-        await sendGoogleChatMessage({
-          account,
-          space: spaceId,
-          text: caption,
-          thread: payload.replyToId,
-          attachments: [
-            { attachmentUploadToken: upload.attachmentUploadToken, contentName: loaded.fileName },
-          ],
-        });
-        statusSink?.({ lastOutboundAt: Date.now() });
-      } catch (err) {
-        runtime.error?.(`Google Chat attachment send failed: ${String(err)}`);
+        runtime.error?.(`Google Chat attachment send failed: ${String(uploadErr)}`);
+        return;
       }
+      if (!upload.attachmentUploadToken) {
+        runtime.error?.("Google Chat attachment send failed: missing upload token");
+        return;
+      }
+      await sendGoogleChatMessage({
+        account,
+        space: spaceId,
+        text: caption,
+        thread: payload.replyToId,
+        attachments: [
+          { attachmentUploadToken: upload.attachmentUploadToken, contentName: loaded.fileName },
+        ],
+      });
+      statusSink?.({ lastOutboundAt: Date.now() });
     },
   });
+}
+
+// withGoogleChatResponse throws "Google Chat upload 403: ..." for HTTP 403 on the upload endpoint.
+// Matching the exact prefix avoids false positives from sendGoogleChatMessage 403s.
+function isUploadAuthScopeFailure(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)).includes("Google Chat upload 403:");
 }
 
 async function uploadAttachmentForReply(params: {

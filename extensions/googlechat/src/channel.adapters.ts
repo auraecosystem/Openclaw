@@ -310,13 +310,39 @@ export const googlechatOutboundAdapter = {
           });
       const { sendGoogleChatMessage, uploadGoogleChatAttachment } =
         await loadGoogleChatChannelRuntime();
-      const upload = await uploadGoogleChatAttachment({
-        account,
-        space,
-        filename: loaded.fileName ?? "attachment",
-        buffer: loaded.buffer,
-        contentType: loaded.contentType,
-      });
+      let upload: { attachmentUploadToken?: string };
+      try {
+        upload = await uploadGoogleChatAttachment({
+          account,
+          space,
+          filename: loaded.fileName ?? "attachment",
+          buffer: loaded.buffer,
+          contentType: loaded.contentType,
+        });
+      } catch (uploadErr) {
+        // app-auth (chat.bot scope) cannot call media.upload; Google returns 403.
+        // Fall back to a text link so the reply is not silently dropped. (#89430)
+        if (/^https?:\/\//i.test(mediaUrl) && isUploadAuthScopeFailure(uploadErr)) {
+          const fallbackText = [text, mediaUrl].filter(Boolean).join("\n") || mediaUrl;
+          const fallbackResult = await sendGoogleChatMessage({
+            account,
+            space,
+            text: fallbackText,
+            thread,
+          });
+          const fallbackMessageId = fallbackResult?.messageName ?? "";
+          return {
+            messageId: fallbackMessageId,
+            chatId: space,
+            receipt: createGoogleChatSendReceipt({
+              messageId: fallbackMessageId,
+              chatId: space,
+              kind: "media",
+            }),
+          };
+        }
+        throw uploadErr;
+      }
       const result = await sendGoogleChatMessage({
         account,
         space,
@@ -340,6 +366,12 @@ export const googlechatOutboundAdapter = {
     },
   },
 };
+
+// withGoogleChatResponse throws "Google Chat upload 403: ..." for HTTP 403 on the upload endpoint.
+// Matching the exact prefix avoids false positives from sendGoogleChatMessage 403s.
+function isUploadAuthScopeFailure(err: unknown): boolean {
+  return (err instanceof Error ? err.message : String(err)).includes("Google Chat upload 403:");
+}
 
 export const googlechatMessageAdapter = defineChannelMessageAdapter({
   id: "googlechat",
