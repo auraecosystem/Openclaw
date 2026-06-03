@@ -4686,6 +4686,65 @@ describe("openai transport stream", () => {
     expect(first.tools).toEqual(second.tools);
   });
 
+  it("materializes OpenAI transport tool descriptors before request conversion", () => {
+    const responsesModel = {
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      api: "openai-responses",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: 200000,
+      maxTokens: 8192,
+    } satisfies Model<"openai-responses">;
+    const completionsModel = {
+      ...responsesModel,
+      api: "openai-completions",
+    } satisfies Model<"openai-completions">;
+    const toolWithUnreadableDescription = {
+      name: "safe_lookup",
+      get description() {
+        throw new Error("description exploded");
+      },
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    };
+    const toolWithUnreadableName = {
+      get name() {
+        throw new Error("name exploded");
+      },
+      description: "Skip me",
+      parameters: { type: "object", properties: {}, additionalProperties: false },
+    };
+
+    const responsesParams = buildOpenAIResponsesParams(
+      responsesModel,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [toolWithUnreadableDescription, toolWithUnreadableName],
+      } as never,
+      undefined,
+    ) as { tools?: Array<{ name?: string; description?: string }> };
+    const completionsParams = buildOpenAICompletionsParams(
+      completionsModel,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [toolWithUnreadableDescription, toolWithUnreadableName],
+      } as never,
+      undefined,
+    ) as { tools?: Array<{ function?: { name?: string; description?: string } }> };
+
+    expect(responsesParams.tools).toHaveLength(1);
+    expect(responsesParams.tools?.[0]).toMatchObject({ name: "safe_lookup" });
+    expect(responsesParams.tools?.[0]?.description).toBe("");
+    expect(completionsParams.tools).toHaveLength(1);
+    expect(completionsParams.tools?.[0]?.function).toMatchObject({ name: "safe_lookup" });
+    expect(completionsParams.tools?.[0]?.function?.description).toBe("");
+  });
+
   it("falls back to strict:false when a native OpenAI tool schema is not strict-compatible", () => {
     const params = buildOpenAIResponsesParams(
       {

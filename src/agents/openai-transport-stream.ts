@@ -113,6 +113,13 @@ type ReplayableResponseReasoningItem = Omit<ResponseReasoningItem, "id"> & {
   [OPENAI_RESPONSES_REASONING_REPLAY_META_KEY]?: OpenAIResponsesReasoningReplayMetadata;
 };
 type ResponsesClientLike = ReturnType<typeof createOpenAIResponsesClient>;
+type OpenAITransportTool = NonNullable<Context["tools"]>[number];
+type MaterializedOpenAITransportTool = {
+  name: string;
+  description: string;
+  parameters: unknown;
+  sourceIndex: number;
+};
 
 type BaseStreamOptions = {
   temperature?: number;
@@ -1273,11 +1280,12 @@ function convertResponsesTools(
   model: OpenAIModeModel,
   options?: { strict?: boolean | null },
 ): FunctionTool[] {
-  const strict = resolveOpenAIStrictToolFlagWithDiagnostics(tools, options?.strict, {
+  const materializedTools = materializeOpenAITransportTools(tools);
+  const strict = resolveOpenAIStrictToolFlagWithDiagnostics(materializedTools, options?.strict, {
     transport: "responses",
     model,
   });
-  return sortTransportToolsByName(tools).map((tool): FunctionTool => {
+  return sortTransportToolsByName(materializedTools).map((tool): FunctionTool => {
     const result = {
       type: "function" as const,
       name: tool.name,
@@ -1296,7 +1304,7 @@ function convertResponsesTools(
 }
 
 function resolveOpenAIStrictToolFlagWithDiagnostics(
-  tools: NonNullable<Context["tools"]>,
+  tools: readonly { name?: string; parameters: unknown }[],
   strictSetting: boolean | null | undefined,
   context: { transport: "responses" | "completions"; model: OpenAIModeModel },
 ): boolean | undefined {
@@ -3674,8 +3682,9 @@ function convertTools(
   compat: ReturnType<typeof getCompat>,
   model: OpenAIModeModel,
 ) {
+  const materializedTools = materializeOpenAITransportTools(tools);
   const strict = resolveOpenAIStrictToolFlagWithDiagnostics(
-    tools,
+    materializedTools,
     resolveOpenAIStrictToolSetting(model, {
       transport: "stream",
       supportsStrictMode: compat?.supportsStrictMode,
@@ -3685,7 +3694,7 @@ function convertTools(
       model,
     },
   );
-  return sortTransportToolsByName(tools).map((tool) => {
+  return sortTransportToolsByName(materializedTools).map((tool) => {
     const functionTool: {
       name: string;
       description: string | undefined;
@@ -3708,6 +3717,58 @@ function convertTools(
       function: functionTool,
     };
   });
+}
+
+function readOpenAITransportToolField<TField extends keyof OpenAITransportTool>(
+  tool: OpenAITransportTool,
+  field: TField,
+): { ok: true; value: OpenAITransportTool[TField] } | { ok: false } {
+  try {
+    return { ok: true, value: tool[field] };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function materializeOpenAITransportTools(
+  tools: NonNullable<Context["tools"]>,
+): MaterializedOpenAITransportTool[] {
+  const materializedTools: MaterializedOpenAITransportTool[] = [];
+  const skippedTools: string[] = [];
+  tools.forEach((tool, sourceIndex) => {
+    const nameRead = readOpenAITransportToolField(tool, "name");
+    const name = nameRead.ok && typeof nameRead.value === "string" ? nameRead.value : "";
+    const toolLabel = name || `tool[${sourceIndex}]`;
+    if (!name) {
+      skippedTools.push(toolLabel);
+      return;
+    }
+    const parametersRead = readOpenAITransportToolField(tool, "parameters");
+    if (!parametersRead.ok) {
+      skippedTools.push(toolLabel);
+      return;
+    }
+    const descriptionRead = readOpenAITransportToolField(tool, "description");
+    materializedTools.push({
+      name,
+      description:
+        descriptionRead.ok && typeof descriptionRead.value === "string"
+          ? descriptionRead.value
+          : "",
+      parameters: parametersRead.value,
+      sourceIndex,
+    });
+  });
+  if (skippedTools.length > 0) {
+    log.warn(
+      `OpenAI transport skipped ${skippedTools.length} unreadable tool descriptor${skippedTools.length === 1 ? "" : "s"} before request conversion`,
+      {
+        tools: skippedTools.slice(0, 10),
+        omitted: Math.max(0, skippedTools.length - 10),
+      },
+    );
+  }
+  return materializedTools;
 }
 
 function compareTransportToolText(left: string | undefined, right: string | undefined): number {
