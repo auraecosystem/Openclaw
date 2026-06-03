@@ -12,6 +12,7 @@ import {
   type OutboundDeliveryIntent,
 } from "../../infra/outbound/deliver.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
+import type { ChannelOutboundTargetRef } from "../plugins/types.adapters.js";
 import { createLiveMessageState, markLiveMessagePreviewUpdated } from "./live.js";
 import { createMessageReceiptFromOutboundResults } from "./receipt.js";
 import { createRenderedMessageBatch } from "./rendered-batch.js";
@@ -49,6 +50,7 @@ export type DurableMessagePayloadDeliveryOutcome =
       index: number;
       status: "sent";
       results: OutboundDeliveryResult[];
+      target?: ChannelOutboundTargetRef;
     }
   | {
       index: number;
@@ -65,6 +67,7 @@ export type DurableMessagePayloadDeliveryOutcome =
       error: unknown;
       sentBeforeError: boolean;
       stage: DurableMessageFailureStage;
+      target?: ChannelOutboundTargetRef;
     };
 
 export type DurableMessageBatchSendResult =
