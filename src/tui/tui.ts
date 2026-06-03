@@ -212,6 +212,32 @@ export function resolveGatewayDisconnectState(reason?: string): {
   };
 }
 
+export function formatStartupConversationSummary(summaryText?: string): string[] {
+  const normalized = (summaryText ?? "").trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const lines = normalized
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+
+  if (lines.length === 0) {
+    return [];
+  }
+
+  return ["startup summary from your last conversation:", ...lines.map((line) => `- ${line}`)];
+}
+
+export function shouldFetchStartupConversationSummary(params: {
+  isLocalMode: boolean;
+  reconnected: boolean;
+}): boolean {
+  return !params.isLocalMode && !params.reconnected;
+}
+
 export function createBackspaceDeduper(params?: { dedupeWindowMs?: number; now?: () => number }) {
   const dedupeWindowMs = Math.max(0, Math.floor(params?.dedupeWindowMs ?? 8));
   const now = params?.now ?? (() => Date.now());
@@ -1493,6 +1519,26 @@ export async function runTui(opts: RunTuiOptions): Promise<TuiResult> {
       updateHeader();
       updateAutocompleteProvider();
       await loadHistory();
+      if (shouldFetchStartupConversationSummary({ isLocalMode, reconnected })) {
+        try {
+          const summarySession = await client.describeSession(currentSessionKey, {
+            agentId: currentAgentId,
+          });
+          if (summarySession) {
+            const summaryStr =
+              summarySession.derivedTitle || summarySession.lastMessagePreview || "";
+            const dynamicLines = formatStartupConversationSummary(summaryStr);
+            if (dynamicLines.length > 0) {
+              chatLog.addSystem("");
+              for (const line of dynamicLines) {
+                chatLog.addSystem(line);
+              }
+            }
+          }
+        } catch {
+          // Best effort, ignore fetch failures
+        }
+      }
       setConnectionStatus(
         isLocalMode ? "local ready" : reconnected ? "gateway reconnected" : "gateway connected",
         4000,
