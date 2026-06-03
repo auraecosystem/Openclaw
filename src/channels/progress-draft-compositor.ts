@@ -12,6 +12,7 @@ import {
   resolveChannelProgressDraftMaxLineChars,
   resolveChannelProgressDraftMaxLines,
   resolveChannelStreamingProgressCommentary,
+  resolveChannelStreamingProgressPersist,
   resolveChannelStreamingPreviewToolProgress,
   resolveChannelStreamingSuppressDefaultToolProgressMessages,
   type StreamingCompatEntry,
@@ -41,6 +42,8 @@ export function createChannelProgressDraftCompositor(params: {
     params.active && resolveChannelStreamingPreviewToolProgress(params.entry);
   const commentaryProgressEnabled =
     params.active && resolveChannelStreamingProgressCommentary(params.entry);
+  const persistProgressEnabled =
+    params.active && resolveChannelStreamingProgressPersist(params.entry);
   const suppressDefaultToolProgressMessages =
     params.active &&
     resolveChannelStreamingSuppressDefaultToolProgressMessages(params.entry, {
@@ -49,6 +52,7 @@ export function createChannelProgressDraftCompositor(params: {
     });
   let progressSuppressed = false;
   let lines: ProgressDraftLine[] = [];
+  let frozenLines: ProgressDraftLine[] = [];
   let lastRenderedText = "";
   let reasoningRawText = "";
   let lastReasoningLine: string | undefined;
@@ -64,6 +68,10 @@ export function createChannelProgressDraftCompositor(params: {
     });
 
   const clearProgressState = (suppressed: boolean) => {
+    if (persistProgressEnabled && lines.length > 0) {
+      // Freeze current lines instead of wiping them.
+      frozenLines = [...frozenLines, ...lines];
+    }
     progressSuppressed = suppressed;
     lines = [];
     lastRenderedText = "";
@@ -133,6 +141,7 @@ export function createChannelProgressDraftCompositor(params: {
     const nextLines = shouldStoreLine
       ? mergeChannelProgressDraftLine(lines, progressLine, {
           maxLines: resolveChannelProgressDraftMaxLines(params.entry),
+          persist: persistProgressEnabled,
         })
       : lines;
     if (shouldStoreLine && nextLines === lines) {
@@ -178,11 +187,43 @@ export function createChannelProgressDraftCompositor(params: {
     get commentaryProgressEnabled() {
       return commentaryProgressEnabled;
     },
+    get persistProgressEnabled() {
+      return persistProgressEnabled;
+    },
     get suppressDefaultToolProgressMessages() {
       return suppressDefaultToolProgressMessages;
     },
     get hasStarted() {
       return gate.hasStarted;
+    },
+    /** Return frozen progress lines accumulated before the final answer. */
+    get frozenProgressLines(): readonly ProgressDraftLine[] {
+      return frozenLines;
+    },
+    /**
+     * Format frozen progress lines as text suitable for prepending above the final answer.
+     * Returns empty string if persist mode is off or no lines were frozen.
+     * Truncates oldest lines to fit within `charBudget` if provided.
+     */
+    formatFrozenProgressText(charBudget?: number): string {
+      if (!persistProgressEnabled || frozenLines.length === 0) {
+        return "";
+      }
+      const text = formatDraftText(frozenLines);
+      if (!text) {
+        return "";
+      }
+      if (charBudget !== undefined && charBudget > 0 && text.length > charBudget) {
+        // Trim oldest lines to fit the budget.
+        let trimmed = frozenLines;
+        let result = text;
+        while (trimmed.length > 1 && result.length > charBudget) {
+          trimmed = trimmed.slice(1);
+          result = formatDraftText(trimmed);
+        }
+        return result.length > charBudget ? result.slice(0, charBudget) : result;
+      }
+      return text;
     },
     markFinalReplyStarted() {
       finalReplyStarted = true;
@@ -272,6 +313,7 @@ export function createChannelProgressDraftCompositor(params: {
       };
       lines = mergeChannelProgressDraftLine(lines, line, {
         maxLines: resolveChannelProgressDraftMaxLines(params.entry),
+        persist: persistProgressEnabled,
       });
       await gate.startNow();
       return await render();

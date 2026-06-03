@@ -1565,6 +1565,24 @@ export const dispatchTelegramMessage = async ({
         deliveryState.markDelivered();
       },
     });
+    const PROGRESS_DIVIDER = "\n---\n";
+    const prependFrozenProgressToAnswer = (answerText: string): string => {
+      if (!progressDraft.persistProgressEnabled) {
+        return answerText;
+      }
+      // Reserve space for the divider and at least some answer text.
+      const dividerLen = PROGRESS_DIVIDER.length;
+      const maxChars = Math.min(textLimit, 4096);
+      const budgetForProgress = Math.max(0, maxChars - answerText.length - dividerLen);
+      if (budgetForProgress <= 0) {
+        return answerText;
+      }
+      const frozenText = progressDraft.formatFrozenProgressText(budgetForProgress);
+      if (!frozenText) {
+        return answerText;
+      }
+      return `${frozenText}${PROGRESS_DIVIDER}${answerText}`;
+    };
     const deliverProgressModeFinalAnswer = async (
       payload: ReplyPayload,
       text: string,
@@ -1575,7 +1593,10 @@ export const dispatchTelegramMessage = async ({
         await answerLane.stream?.clear();
         resetDraftLaneState(answerLane);
       }
-      const delivered = await sendPayload(applyTextToPayload(payload, text), { durable: true });
+      const finalText = prependFrozenProgressToAnswer(text);
+      const delivered = await sendPayload(applyTextToPayload(payload, finalText), {
+        durable: true,
+      });
       if (!delivered) {
         return { kind: "skipped" };
       }
@@ -1734,7 +1755,7 @@ export const dispatchTelegramMessage = async ({
                       await rotateAnswerLaneAfterToolProgress();
                       const result = await deliverLaneText({
                         laneName: "answer",
-                        text: finalText,
+                        text: prependFrozenProgressToAnswer(finalText),
                         payload: answerPayload,
                         infoKind: "final",
                         buttons,
