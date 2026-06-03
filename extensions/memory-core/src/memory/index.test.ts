@@ -12,6 +12,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import "./test-runtime-mocks.js";
 import type { MemoryIndexManager } from "./index.js";
 import { closeAllMemorySearchManagers, getMemorySearchManager } from "./index.js";
+import { splitSourceWideEmbeddingChunks } from "./manager-embedding-ops.js";
 import { LOCAL_EMBEDDING_WORKER_ERROR_CODES } from "./manager-local-worker-errors.js";
 import type { MemoryIndexMeta } from "./manager-reindex-state.js";
 import { closeMemoryIndexManagersForAgent, EMBEDDING_PROBE_CACHE_TTL_MS } from "./manager.js";
@@ -464,6 +465,14 @@ describe("memory index", () => {
     } finally {
       await manager.close?.();
     }
+  });
+
+  it("splits oversized source-wide embedding requests at the request cap", () => {
+    expect(splitSourceWideEmbeddingChunks(["one", "two", "three", "four", "five"], 2)).toEqual([
+      ["one", "two"],
+      ["three", "four"],
+      ["five"],
+    ]);
   });
 
   it("keeps split chunks from oversized files in one source-wide batch", async () => {

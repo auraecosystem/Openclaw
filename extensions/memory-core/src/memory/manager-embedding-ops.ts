@@ -103,6 +103,15 @@ function formatBatchSourceCounts(counts: Record<string, number>): string {
   );
 }
 
+export function splitSourceWideEmbeddingChunks<T>(chunks: T[], maxRequests: number): T[][] {
+  const limit = Math.max(1, Math.floor(maxRequests));
+  const batches: T[][] = [];
+  for (let start = 0; start < chunks.length; start += limit) {
+    batches.push(chunks.slice(start, start + limit));
+  }
+  return batches;
+}
+
 export function resolveEmbeddingTimeoutMs(params: {
   kind: "query" | "batch";
   providerId?: string;
@@ -857,14 +866,16 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
       const sourceCounts = countBatchSources(current);
       const source = formatBatchSourceLabel(sourceCounts);
       sourceWideBatchGroup += 1;
+      const chunkBatches = splitSourceWideEmbeddingChunks(chunks, SOURCE_WIDE_BATCH_MAX_REQUESTS);
       log.debug(
-        `memory embeddings: source-wide batch submit group=${sourceWideBatchGroup} source=${source} files=${current.length} chunks=${chunks.length} sources=${formatBatchSourceCounts(
+        `memory embeddings: source-wide batch submit group=${sourceWideBatchGroup} source=${source} files=${current.length} chunks=${chunks.length} requests=${chunkBatches.length} sources=${formatBatchSourceCounts(
           sourceCounts,
         )} reason=${reason}`,
         {
           source,
           files: current.length,
           chunks: chunks.length,
+          requests: chunkBatches.length,
           sources: sourceCounts,
           group: sourceWideBatchGroup,
           reason,
@@ -872,11 +883,19 @@ export abstract class MemoryManagerEmbeddingOps extends MemoryManagerSyncOps {
           maxRequests: SOURCE_WIDE_BATCH_MAX_REQUESTS,
         },
       );
-      const embeddings = await this.embedChunksWithBatch(chunks, firstEntry, source, {
-        sourceWideFiles: current.length,
-        sourceWideSources: sourceCounts,
-        sourceWideBatchGroup,
-      });
+      const embeddings: number[][] = [];
+      for (let requestIndex = 0; requestIndex < chunkBatches.length; requestIndex += 1) {
+        const chunkBatch = chunkBatches[requestIndex] ?? [];
+        embeddings.push(
+          ...(await this.embedChunksWithBatch(chunkBatch, firstEntry, source, {
+            sourceWideFiles: current.length,
+            sourceWideSources: sourceCounts,
+            sourceWideBatchGroup,
+            sourceWideRequestGroup: requestIndex + 1,
+            sourceWideRequestGroups: chunkBatches.length,
+          })),
+        );
+      }
       const sample = embeddings.find((embedding) => embedding.length > 0);
       const vectorReady = sample ? await this.ensureVectorReady(sample.length) : false;
       let offset = 0;

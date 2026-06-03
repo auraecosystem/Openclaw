@@ -1807,8 +1807,15 @@ function resolveProviderTransportTurnState(
     transport: "stream" | "websocket";
   },
 ) {
+  const normalizedProvider = model.provider.trim().toLowerCase();
+  const allowRuntimePluginLoad =
+    normalizedProvider === "openai" ||
+    normalizedProvider === "azure-openai" ||
+    normalizedProvider === "azure-openai-responses";
   return resolveProviderTransportTurnStateWithPlugin({
     provider: model.provider,
+    modelId: model.id,
+    allowRuntimePluginLoad,
     context: {
       provider: model.provider,
       modelId: model.id,
@@ -3386,6 +3393,7 @@ function getCompat(model: OpenAIModeModel): {
   vercelGatewayRouting: Record<string, unknown>;
   supportsStrictMode: boolean;
   supportsPromptCacheKey: boolean;
+  supportsLongCacheRetention: boolean;
   requiresStringContent: boolean;
   strictMessageKeys: boolean;
   visibleReasoningDetailTypes: string[];
@@ -3418,6 +3426,7 @@ function getCompat(model: OpenAIModeModel): {
       detected.vercelGatewayRouting,
     supportsStrictMode: compat.supportsStrictMode ?? detected.supportsStrictMode,
     supportsPromptCacheKey: compat.supportsPromptCacheKey === true,
+    supportsLongCacheRetention: compat.supportsLongCacheRetention !== false,
     requiresStringContent: compat.requiresStringContent ?? false,
     strictMessageKeys: compat.strictMessageKeys === true,
     visibleReasoningDetailTypes:
@@ -4072,7 +4081,7 @@ export function buildOpenAICompletionsParams(
     // OpenAI, etc.) can honor the 24h prefix-cache lifetime. Without this
     // the key reaches the wire but the retention preference is silently
     // dropped (issue #81281).
-    if (cacheRetention === "long") {
+    if (cacheRetention === "long" && compat.supportsLongCacheRetention) {
       params.prompt_cache_retention = "24h";
     }
   }
