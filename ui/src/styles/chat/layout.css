@@ -2637,3 +2637,27 @@
 
 /* Mobile dropdown toggle — hidden on desktop */
 /* Mobile gear toggle + dropdown are hidden by default in layout.css */
+
+/* ── Token usage meter ──────────────────────────────────────────────────── */
+.token-meter {
+  height: 2px;
+  background: color-mix(in srgb, var(--border) 60%, transparent);
+  border-radius: 1px;
+  overflow: hidden;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.token-meter__bar {
+  height: 100%;
+  border-radius: 1px;
+  transition: width 400ms var(--ease-out, cubic-bezier(0, 0, 0.2, 1));
+}
+
+.token-meter__bar--low  { background: var(--ok, #22c55e); }
+.token-meter__bar--mid  { background: var(--info, #3b82f6); }
+.token-meter__bar--high { background: var(--danger, #ef4444); }
+
+@media (prefers-reduced-motion: reduce) {
+  .token-meter__bar { transition: none; }
+}

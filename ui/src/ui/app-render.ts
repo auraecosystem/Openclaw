@@ -187,7 +187,7 @@ import {
   resolveModelPrimary,
   sortLocaleStrings,
 } from "./views/agents-utils.ts";
-import { renderChat } from "./views/chat.ts";
+import { renderChat, sessionHasKnownToolErrors } from "./views/chat.ts";
 import { renderCommandPalette } from "./views/command-palette.ts";
 import { getPresetById } from "./views/config-presets.ts";
 import { renderQuickSettings, type QuickSettingsChannel } from "./views/config-quick.ts";
@@ -476,6 +476,8 @@ function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow)
   const label = resolveSessionDisplayName(row.key, row);
   const meta = row.updatedAt ? formatRelativeTimestamp(row.updatedAt) : "n/a";
   const href = `${pathForTab("chat", state.basePath)}?session=${encodeURIComponent(row.key)}`;
+  // UX-011 — tool error indicator
+  const hasToolError = sessionHasKnownToolErrors(row.key);
   return html`
     <a
       href=${href}
@@ -505,6 +507,13 @@ function renderSidebarRecentSession(state: AppViewState, row: GatewaySessionRow)
         <span class="sidebar-recent-session__name">${label}</span>
         <span class="sidebar-recent-session__meta">${meta}</span>
       </span>
+      ${hasToolError
+        ? html`<span
+            class="sidebar-recent-session__error-dot"
+            aria-label="This session has a failed tool call"
+            title="Tool call failed"
+          ></span>`
+        : nothing}
       ${row.hasActiveRun
         ? html`<span
             class="sidebar-recent-session__live"

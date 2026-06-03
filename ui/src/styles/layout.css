@@ -833,6 +833,21 @@
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--ok) 12%, transparent);
 }
 
+/* UX-011 — tool error pulse dot */
+@keyframes sidebar-error-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--danger) 40%, transparent); }
+  50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 0%, transparent); }
+}
+
+.sidebar-recent-session__error-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--danger);
+  animation: sidebar-error-pulse 2s infinite;
+  flex-shrink: 0;
+}
+
 .sidebar-nav::-webkit-scrollbar {
   display: none;
 }
