@@ -338,12 +338,16 @@ describe("MsteamsProvider (audio loop wiring)", () => {
 
     // A transcript before recording is active must not reach the agent.
     captured.current?.callbacks.onTranscript?.("do something");
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise<void>((r) => {
+      setTimeout(r, 50);
+    });
     expect(generateVoiceResponseMock).not.toHaveBeenCalled();
 
     // Worker reports recording active -> subsequent transcripts are processed.
     ws.send(JSON.stringify({ type: "recording.status", status: "active" }));
-    await new Promise((r) => setTimeout(r, 20));
+    await new Promise<void>((r) => {
+      setTimeout(r, 20);
+    });
     captured.current?.callbacks.onTranscript?.("now do it");
     await waitFor(() => generateVoiceResponseMock.mock.calls.length > 0);
     expect(
