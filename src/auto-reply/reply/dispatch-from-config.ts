@@ -138,7 +138,11 @@ import type {
   ReplyDispatcher,
 } from "./reply-dispatcher.types.js";
 import { readDispatcherFailedCounts } from "./reply-dispatcher.types.js";
-import { replyRunRegistry, type ReplyOperation } from "./reply-run-registry.js";
+import {
+  forceClearReplyRunBySessionId,
+  replyRunRegistry,
+  type ReplyOperation,
+} from "./reply-run-registry.js";
 import { isReplyProfilerEnabled } from "./reply-timing-tracker.js";
 import { admitReplyTurn, resolveReplyTurnKind } from "./reply-turn-admission.js";
 import { resolveRoutedDeliveryThreadId } from "./routed-delivery-thread.js";
@@ -166,6 +170,10 @@ function isDispatchReplyOperationAbortedError(
   error: unknown,
 ): error is DispatchReplyOperationAbortedError {
   return error instanceof DispatchReplyOperationAbortedError;
+}
+
+function isRecoverableTerminalSessionStatus(status: SessionEntry["status"] | undefined): boolean {
+  return status === "failed" || status === "timeout" || status === "killed";
 }
 
 function composeAbortSignals(...signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
@@ -1217,7 +1225,7 @@ export async function dispatchReplyFromConfig(
         ctx,
         routeThreadId,
       });
-    const admission = await admitReplyTurn({
+    let admission = await admitReplyTurn({
       sessionKey: dispatchOperationSessionKey,
       sessionId: operationSessionId,
       kind: replyTurnKind,
@@ -1226,6 +1234,39 @@ export async function dispatchReplyFromConfig(
       upstreamAbortSignal: params.replyOptions?.abortSignal,
       waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
     });
+    if (
+      admission.status === "skipped" &&
+      admission.reason === "active-run" &&
+      isRecoverableTerminalSessionStatus(sessionStoreEntry.entry?.status) &&
+      // Only clear the proven stale leftover from the failed lifecycle. A
+      // sibling recovery turn that already cleared the leftover and admitted a
+      // fresh operation marks it `terminalRecovery`; force-failing that op would
+      // drop the very recovery turn this path exists to protect (concurrent
+      // visible turns can read the same terminal snapshot before it clears).
+      !admission.activeOperation?.terminalRecovery
+    ) {
+      const cleared = forceClearReplyRunBySessionId(
+        admission.activeOperation?.sessionId ?? operationSessionId,
+        new Error("clearing stale terminal reply operation"),
+      );
+      if (cleared) {
+        logVerbose(
+          `dispatch-from-config: cleared stale active reply operation for terminal session ${dispatchOperationSessionKey}`,
+        );
+        admission = await admitReplyTurn({
+          sessionKey: dispatchOperationSessionKey,
+          sessionId: operationSessionId,
+          kind: replyTurnKind,
+          resetTriggered: false,
+          routeThreadId,
+          upstreamAbortSignal: params.replyOptions?.abortSignal,
+          waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
+        });
+        if (admission.status === "owned") {
+          admission.operation.markTerminalRecovery();
+        }
+      }
+    }
     if (admission.status === "skipped") {
       if (allowActivePreDispatch && admission.reason === "active-run") {
         preDispatchAbortOperation = admission.activeOperation;
