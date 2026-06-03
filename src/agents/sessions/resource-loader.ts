@@ -880,6 +880,7 @@ export class DefaultResourceLoader implements ResourceLoader {
 
     for (const [index, factory] of this.extensionFactories.entries()) {
       const extensionPath = `<inline:${index + 1}>`;
+      const registrationErrors: string[] = [];
       try {
         const extension = await loadExtensionFromFactory(
           factory,
@@ -887,10 +888,17 @@ export class DefaultResourceLoader implements ResourceLoader {
           this.eventBus,
           runtime,
           extensionPath,
+          registrationErrors,
         );
         extensions.push(extension);
+        for (const registrationError of registrationErrors) {
+          errors.push({ path: extensionPath, error: registrationError });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "failed to load extension";
+        for (const registrationError of registrationErrors) {
+          errors.push({ path: extensionPath, error: registrationError });
+        }
         errors.push({ path: extensionPath, error: message });
       }
     }
