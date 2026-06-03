@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { setImmediate as yieldImmediate } from "node:timers/promises";
 import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { resolveLegacyStateDirs, resolveStateDir } from "../config/paths.js";
 import { openRootFile } from "../infra/boundary-file-read.js";
@@ -48,6 +49,18 @@ const WORKSPACE_ONBOARDING_PROFILE_FILENAMES = [
 const workspaceTemplateCache = new Map<string, Promise<string>>();
 let gitAvailabilityPromise: Promise<boolean> | null = null;
 const MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES = 2 * 1024 * 1024;
+const EXTRA_BOOTSTRAP_IGNORED_DIR_NAMES = new Set([
+  ".git",
+  "node_modules",
+  ".openclaw",
+  ".next",
+  "dist",
+  "build",
+  "coverage",
+  "__pycache__",
+  ".cache",
+]);
+const EXTRA_BOOTSTRAP_GLOB_YIELD_INTERVAL = 256;
 
 // File content cache keyed by stable file identity to avoid stale reads.
 const workspaceFileCache = new Map<string, { content: string; identity: string }>();
@@ -63,7 +76,41 @@ function workspaceFileIdentity(stat: syncFs.Stats, canonicalPath: string): strin
   return `${canonicalPath}|${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeMs}`;
 }
 
-async function readWorkspaceFileWithGuards(params: {
+async function readFdToString(fd: number, maxBytes: number): Promise<string> {
+  const capacity = Math.min(maxBytes, MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES);
+  const buffer = Buffer.allocUnsafe(capacity);
+  let totalRead = 0;
+  while (totalRead < capacity) {
+    const { bytesRead } = await new Promise<{ bytesRead: number }>((resolve, reject) => {
+      syncFs.read(fd, buffer, totalRead, capacity - totalRead, totalRead, (error, readCount) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({ bytesRead: readCount });
+      });
+    });
+    if (bytesRead === 0) {
+      break;
+    }
+    totalRead += bytesRead;
+  }
+  return buffer.subarray(0, totalRead).toString("utf-8");
+}
+
+async function closeFdAsync(fd: number): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    syncFs.close(fd, (error) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+export async function readWorkspaceFileWithGuards(params: {
   filePath: string;
   workspaceDir: string;
 }): Promise<WorkspaceGuardedReadResult> {
@@ -81,19 +128,21 @@ async function readWorkspaceFileWithGuards(params: {
   const identity = workspaceFileIdentity(opened.stat, opened.path);
   const cached = workspaceFileCache.get(params.filePath);
   if (cached && cached.identity === identity) {
-    syncFs.closeSync(opened.fd);
+    await closeFdAsync(opened.fd).catch(() => {});
     return { ok: true, content: cached.content };
   }
 
   try {
-    const content = syncFs.readFileSync(opened.fd, "utf-8");
+    const content = await readFdToString(opened.fd, MAX_WORKSPACE_BOOTSTRAP_FILE_BYTES);
     workspaceFileCache.set(params.filePath, { content, identity });
     return { ok: true, content };
   } catch (error) {
     workspaceFileCache.delete(params.filePath);
     return { ok: false, reason: "io", error };
   } finally {
-    syncFs.closeSync(opened.fd);
+    // Suppress close errors to avoid masking the original read error
+    // or causing unhandled rejections on NFS/FUSE filesystems.
+    await closeFdAsync(opened.fd).catch(() => {});
   }
 }
 
@@ -1049,30 +1098,30 @@ export async function loadWorkspaceBootstrapFiles(dir: string): Promise<Workspac
     },
   ];
 
-  const result: WorkspaceBootstrapFile[] = [];
-  for (const entry of entries) {
-    if (
-      entry.name === DEFAULT_MEMORY_FILENAME &&
-      !(await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME))
-    ) {
-      continue;
-    }
-    const loaded = await readWorkspaceFileWithGuards({
-      filePath: entry.filePath,
-      workspaceDir: resolvedDir,
-    });
-    if (loaded.ok) {
-      result.push({
-        name: entry.name,
-        path: entry.filePath,
-        content: loaded.content,
-        missing: false,
+  const results = await Promise.all(
+    entries.map(async (entry): Promise<WorkspaceBootstrapFile | null> => {
+      if (
+        entry.name === DEFAULT_MEMORY_FILENAME &&
+        !(await exactWorkspaceEntryExists(resolvedDir, DEFAULT_MEMORY_FILENAME))
+      ) {
+        return null;
+      }
+      const loaded = await readWorkspaceFileWithGuards({
+        filePath: entry.filePath,
+        workspaceDir: resolvedDir,
       });
-    } else {
-      result.push({ name: entry.name, path: entry.filePath, missing: true });
-    }
-  }
-  return result;
+      if (loaded.ok) {
+        return {
+          name: entry.name,
+          path: entry.filePath,
+          content: loaded.content,
+          missing: false,
+        };
+      }
+      return { name: entry.name, path: entry.filePath, missing: true };
+    }),
+  );
+  return results.filter((file): file is WorkspaceBootstrapFile => file !== null);
 }
 
 const SUBAGENT_BOOTSTRAP_ALLOWLIST = new Set([DEFAULT_AGENTS_FILENAME, DEFAULT_TOOLS_FILENAME]);
@@ -1123,13 +1172,38 @@ function resolveGlobWalkRoot(pattern: string): string {
   return slashIndex === -1 ? "." : normalized.slice(0, slashIndex) || ".";
 }
 
+function hasIgnoredExtraBootstrapDir(relativePath: string, allowed?: ReadonlySet<string>): boolean {
+  return normalizeWorkspacePatternPath(relativePath)
+    .split("/")
+    .some((segment) => EXTRA_BOOTSTRAP_IGNORED_DIR_NAMES.has(segment) && !allowed?.has(segment));
+}
+
+// Ignored-dir names the pattern explicitly opts into via a literal path segment.
+// An explicit glob like `dist/**/AGENTS.md` must traverse `dist` even though it
+// is a default-pruned name; only wildcard segments (`**`) are excluded so the
+// stall protection still applies to patterns that do not name an ignored dir.
+function resolveAllowedIgnoredDirNames(normalizedPattern: string): ReadonlySet<string> {
+  const allowed = new Set<string>();
+  for (const segment of normalizedPattern.split("/")) {
+    if (EXTRA_BOOTSTRAP_IGNORED_DIR_NAMES.has(segment)) {
+      allowed.add(segment);
+    }
+  }
+  return allowed;
+}
+
 async function* walkWorkspaceFiles(
   workspaceDir: string,
   initialRelativeDir: string,
+  allowedIgnoredDirNames: ReadonlySet<string>,
 ): AsyncGenerator<string> {
   const stack = [initialRelativeDir === "." ? "" : initialRelativeDir];
+  let visitedEntries = 0;
   while (stack.length > 0) {
     const currentRelativeDir = stack.pop() ?? "";
+    if (hasIgnoredExtraBootstrapDir(currentRelativeDir, allowedIgnoredDirNames)) {
+      continue;
+    }
     const currentDir = path.resolve(workspaceDir, currentRelativeDir);
     const relativeToWorkspace = path.relative(workspaceDir, currentDir);
     if (relativeToWorkspace.startsWith("..") || path.isAbsolute(relativeToWorkspace)) {
@@ -1144,10 +1218,20 @@ async function* walkWorkspaceFiles(
     }
 
     for (const entry of entries) {
+      visitedEntries += 1;
+      if (visitedEntries % EXTRA_BOOTSTRAP_GLOB_YIELD_INTERVAL === 0) {
+        await yieldImmediate();
+      }
       const childRelativePath = currentRelativeDir
         ? path.join(currentRelativeDir, entry.name)
         : entry.name;
       if (entry.isDirectory()) {
+        if (
+          EXTRA_BOOTSTRAP_IGNORED_DIR_NAMES.has(entry.name) &&
+          !allowedIgnoredDirNames.has(entry.name)
+        ) {
+          continue;
+        }
         stack.push(childRelativePath);
         continue;
       }
@@ -1158,31 +1242,28 @@ async function* walkWorkspaceFiles(
   }
 }
 
+// Always resolve globs with the yielding walker. fs.glob would be faster for
+// simple patterns, but it only exposes matched paths — Node traverses the
+// directory tree internally, so a sparse pattern like `**/AGENTS.md` across a
+// huge workspace can block the event loop. The walker yields periodically while
+// it walks, so the active path can never stall. The walk always completes and
+// returns every file matched within the real tree; the downstream bootstrap
+// character budget handles content limiting.
 async function resolveExtraBootstrapPatternPaths(
   workspaceDir: string,
   pattern: string,
 ): Promise<string[]> {
-  if (typeof fs.glob === "function") {
-    try {
-      const matches: string[] = [];
-      for await (const match of fs.glob(pattern, { cwd: workspaceDir })) {
-        matches.push(match);
-      }
-      return matches;
-    } catch {
-      // Fall through to the local matcher before treating the pattern as literal.
-    }
-  }
-
   if (typeof path.matchesGlob !== "function") {
     return [pattern];
   }
 
   const normalizedPattern = normalizeWorkspacePatternPath(pattern);
   const matches: string[] = [];
+  const allowedIgnoredDirNames = resolveAllowedIgnoredDirNames(normalizedPattern);
   for await (const candidate of walkWorkspaceFiles(
     workspaceDir,
     resolveGlobWalkRoot(normalizedPattern),
+    allowedIgnoredDirNames,
   )) {
     if (path.matchesGlob(candidate, normalizedPattern)) {
       matches.push(candidate);
@@ -1213,6 +1294,7 @@ export async function loadExtraBootstrapFilesWithDiagnostics(
 
   // Resolve glob patterns into concrete file paths
   const resolvedPaths = new Set<string>();
+  const diagnostics: ExtraBootstrapLoadDiagnostic[] = [];
   for (const pattern of extraPatterns) {
     if (hasGlobPattern(pattern)) {
       const matches = await resolveExtraBootstrapPatternPaths(resolvedDir, pattern);
@@ -1225,7 +1307,6 @@ export async function loadExtraBootstrapFilesWithDiagnostics(
   }
 
   const files: WorkspaceBootstrapFile[] = [];
-  const diagnostics: ExtraBootstrapLoadDiagnostic[] = [];
   for (const relPath of resolvedPaths) {
     const filePath = path.resolve(resolvedDir, relPath);
     // Only load files whose basename is a recognized bootstrap filename
