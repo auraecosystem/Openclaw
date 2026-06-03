@@ -667,6 +667,62 @@ describe("AcpxRuntime fresh reset wrapper", () => {
     expect(testing.isCodexAcpCommand("openclaw acp")).toBe(false);
   });
 
+  it("does not duplicate -c overrides when configured command already has them", () => {
+    const commandWithOverrides =
+      'npx @zed-industries/codex-acp@^0.12.0 -c model=gpt-5.5 -c model_reasoning_effort=medium';
+    expect(
+      testing.appendCodexAcpConfigOverrides(commandWithOverrides, {
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+      }),
+    ).toBe(commandWithOverrides);
+  });
+
+  it("skips already-configured -c model and only appends missing keys", () => {
+    const commandWithModel = 'npx @zed-industries/codex-acp@^0.12.0 -c model=gpt-5.4';
+    expect(
+      testing.appendCodexAcpConfigOverrides(commandWithModel, {
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+      }),
+    ).toBe(
+      "npx @zed-industries/codex-acp@^0.12.0 -c model=gpt-5.4 -c model_reasoning_effort=medium",
+    );
+  });
+
+  it("appends -c overrides to wrapper command without duplicating configured args", () => {
+    const wrapperWithArgs =
+      `${CODEX_ACP_WRAPPER_COMMAND} -c model=gpt-5.5 -c model_reasoning_effort=medium`;
+    expect(testing.isCodexAcpCommand(wrapperWithArgs)).toBe(true);
+    expect(
+      testing.appendCodexAcpConfigOverrides(wrapperWithArgs, {
+        model: "gpt-5.5",
+        reasoningEffort: "medium",
+      }),
+    ).toBe(wrapperWithArgs);
+  });
+
+  it("detects existing -c config keys in command", () => {
+    expect(
+      testing.commandHasConfigKey(
+        'npx @zed-industries/codex-acp@^0.12.0 -c model=gpt-5.5',
+        "model",
+      ),
+    ).toBe(true);
+    expect(
+      testing.commandHasConfigKey(
+        'npx @zed-industries/codex-acp@^0.12.0 -c model=gpt-5.5',
+        "model_reasoning_effort",
+      ),
+    ).toBe(false);
+    expect(
+      testing.commandHasConfigKey(
+        'npx @zed-industries/codex-acp@^0.12.0',
+        "model",
+      ),
+    ).toBe(false);
+  });
+
   it("passes gpt-5.5 Codex ACP startup through instead of blocking it", async () => {
     const baseStore: TestSessionStore = {
       load: vi.fn(async () => undefined),
@@ -698,6 +754,44 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       model: "gpt-5.5",
       sessionOptions: { model: "gpt-5.5" },
     });
+  });
+
+  it("succeeds with configured -c model overrides and no runtime model (#74305)", async () => {
+    const CONFIGURED_COMMAND =
+      `${CODEX_ACP_COMMAND} -c model=gpt-5.5 -c model_reasoning_effort=medium`;
+    const baseStore: TestSessionStore = {
+      load: vi.fn(async () => undefined),
+      save: vi.fn(async () => {}),
+    };
+    const { runtime, delegate } = makeRuntime(baseStore, {
+      agentRegistry: {
+        resolve: (agentName: string) =>
+          agentName === "codex" ? CONFIGURED_COMMAND : agentName,
+        list: () => ["codex"],
+      },
+    });
+    const ensure = vi.spyOn(delegate, "ensureSession").mockResolvedValue({
+      sessionKey: "agent:codex:acp:test",
+      backend: "acpx",
+      runtimeSessionName: "codex",
+    });
+
+    // No model/thinking passed — configured -c args should be the only overrides
+    await runtime.ensureSession({
+      sessionKey: "agent:codex:acp:test",
+      agent: "codex",
+      mode: "persistent",
+    });
+
+    expect(ensure).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionKey: "agent:codex:acp:test",
+        agent: "codex",
+        mode: "persistent",
+      }),
+    );
+    // Should NOT have a model override since none was passed at runtime
+    expect(ensure.mock.calls[0]?.[0]).not.toHaveProperty("model");
   });
 
   it("maps explicit Codex ACP thinking to startup reasoning effort", async () => {
