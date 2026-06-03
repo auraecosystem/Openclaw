@@ -2,6 +2,11 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { loadManifestMetadataSnapshot } from "./manifest-contract-eligibility.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 
+type WebSearchCredentialPluginMetadata = Pick<
+  PluginManifestRecord,
+  "origin" | "contracts" | "setup" | "providerAuthEnvVars"
+>;
+
 function hasConfiguredCredentialValue(value: unknown): boolean {
   if (typeof value === "string") {
     return value.trim().length > 0;
@@ -33,6 +38,21 @@ function hasConfiguredPluginWebSearchCandidate(config: OpenClawConfig): boolean 
   });
 }
 
+function readWebSearchCredentialPluginMetadata(
+  plugin: PluginManifestRecord,
+): WebSearchCredentialPluginMetadata | undefined {
+  try {
+    return {
+      origin: plugin.origin,
+      contracts: plugin.contracts,
+      setup: plugin.setup,
+      providerAuthEnvVars: plugin.providerAuthEnvVars,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function hasManifestWebSearchEnvCredentialCandidate(params: {
   config: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
@@ -42,22 +62,30 @@ function hasManifestWebSearchEnvCredentialCandidate(params: {
   if (!env) {
     return false;
   }
-  return loadManifestMetadataSnapshot({
+  const snapshot = loadManifestMetadataSnapshot({
     config: params.config,
     env,
-  }).plugins.some((plugin) => {
+  });
+  for (const snapshotPlugin of snapshot.plugins) {
+    const plugin = readWebSearchCredentialPluginMetadata(snapshotPlugin);
+    if (!plugin) {
+      continue;
+    }
     if (params.origin && plugin.origin !== params.origin) {
-      return false;
+      continue;
     }
     if ((plugin.contracts?.webSearchProviders?.length ?? 0) === 0) {
-      return false;
+      continue;
     }
     const envVars = [
       ...(plugin.setup?.providers ?? []).flatMap((provider) => provider.envVars ?? []),
       ...Object.values(plugin.providerAuthEnvVars ?? {}).flat(),
     ];
-    return envVars.some((envVar) => hasConfiguredCredentialValue(env[envVar]));
-  });
+    if (envVars.some((envVar) => hasConfiguredCredentialValue(env[envVar]))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function hasConfiguredWebSearchCredential(params: {
