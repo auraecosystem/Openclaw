@@ -222,7 +222,7 @@ function resolveSchtasksCreateUser(env: GatewayServiceEnv, taskUser: string | nu
 
 function shouldUseHiddenWindowsTaskLauncher(env: GatewayServiceEnv): boolean {
   const value = normalizeLowercaseStringOrEmpty(env.OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER);
-  return value === "1" || value === "true" || value === "yes";
+  return value !== "0" && value !== "false" && value !== "no";
 }
 
 function resolveTaskLauncherScriptPath(env: GatewayServiceEnv, scriptPath: string): string {

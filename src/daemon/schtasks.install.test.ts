@@ -210,7 +210,7 @@ describe("installScheduledTask", () => {
     });
   });
 
-  it("creates hidden launcher Windows tasks when requested", async () => {
+  it("creates hidden launcher Windows tasks by default", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
       schtasksResponses.push(okSchtasksResponse, missingTaskResponse);
 
@@ -218,7 +218,6 @@ describe("installScheduledTask", () => {
         ...env,
         USERDOMAIN: "WORKSTATION",
         USERNAME: "alice",
-        OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "1",
       });
       const launcherPath = scriptPath.replace(/\.cmd$/i, ".vbs");
       const launcher = await fs.readFile(launcherPath, "utf8");
@@ -325,7 +324,7 @@ describe("installScheduledTask", () => {
     });
   });
 
-  it("updates existing tasks to use the hidden launcher when requested", async () => {
+  it("updates existing tasks to use the hidden launcher by default", async () => {
     await withUserProfileDir(async (_tmpDir, env) => {
       // /Query, /Query /TN, /Change (TR-only), /Create /XML (upgrade re-apply), /Run.
       schtasksResponses.push(
@@ -340,7 +339,6 @@ describe("installScheduledTask", () => {
         ...env,
         USERDOMAIN: "WORKSTATION",
         USERNAME: "alice",
-        OPENCLAW_WINDOWS_TASK_HIDDEN_LAUNCHER: "true",
       });
       const launcherPath = scriptPath.replace(/\.cmd$/i, ".vbs");
 
