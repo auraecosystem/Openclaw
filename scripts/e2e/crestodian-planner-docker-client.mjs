@@ -79,7 +79,7 @@ async function main() {
   const output = runtime.lines.join("\n");
   assertOutputIncludes(
     output,
-    "[crestodian] planner: claude-cli/claude-opus-4-8",
+    "[crestodian] planner: claude-cli/claude-opus-4-7",
     "configless planner did not use Claude CLI fallback",
   );
   assertOutputIncludes(
@@ -125,9 +125,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(
-  /** @param {unknown} err */ (err) => {
-    console.error(err);
-    process.exit(1);
-  },
-);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

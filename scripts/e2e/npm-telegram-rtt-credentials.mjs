@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 import fs from "node:fs/promises";
-import { readBoundedResponseText } from "./lib/bounded-response-text.mjs";
 
 const DEFAULT_ENDPOINT_PREFIX = "/qa-credentials/v1";
 const DEFAULT_ACQUIRE_TIMEOUT_MS = 90_000;
-const DEFAULT_HTTP_BODY_MAX_BYTES = 1024 * 1024;
 const DEFAULT_HTTP_TIMEOUT_MS = 15_000;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000;
 const DEFAULT_LEASE_TTL_MS = 20 * 60 * 1_000;
@@ -57,10 +55,6 @@ class BrokerError extends Error {
     this.code = options.code;
     this.retryAfterMs = options.retryAfterMs;
   }
-}
-
-function taggedError(message, code) {
-  return Object.assign(new Error(message), { code });
 }
 
 function parsePositiveInteger(value, fallback, label) {
@@ -142,11 +136,6 @@ function resolveConfig() {
       "OPENCLAW_QA_CREDENTIAL_HEARTBEAT_INTERVAL_MS",
     ),
     heartbeatUrl: joinEndpoint("heartbeat"),
-    httpBodyMaxBytes: parsePositiveInteger(
-      process.env.OPENCLAW_QA_CREDENTIAL_HTTP_MAX_BODY_BYTES,
-      DEFAULT_HTTP_BODY_MAX_BYTES,
-      "OPENCLAW_QA_CREDENTIAL_HTTP_MAX_BODY_BYTES",
-    ),
     httpTimeoutMs: parsePositiveInteger(
       process.env.OPENCLAW_QA_CREDENTIAL_HTTP_TIMEOUT_MS,
       DEFAULT_HTTP_TIMEOUT_MS,
@@ -166,49 +155,25 @@ function resolveConfig() {
   };
 }
 
-function parseBrokerPayload(rawPayload, response) {
-  if (!rawPayload.trim()) {
-    return response.ok ? { status: "ok" } : {};
-  }
-  try {
-    return JSON.parse(rawPayload);
-  } catch (error) {
-    throw new Error("Convex credential broker returned invalid JSON.", { cause: error });
-  }
-}
-
 async function postBroker(params) {
   const controller = new AbortController();
-  const timeoutMs = Math.max(1, params.timeoutMs);
-  const timeoutError = taggedError(`${params.label} timed out after ${timeoutMs}ms`, "ETIMEDOUT");
-  let timeout;
-  const timeoutPromise = new Promise((_, reject) => {
-    timeout = setTimeout(() => {
-      controller.abort(timeoutError);
-      reject(timeoutError);
-    }, timeoutMs);
-    timeout.unref?.();
-  });
+  const timeout = setTimeout(() => controller.abort(), params.timeoutMs);
   try {
-    const response = await Promise.race([
-      fetch(params.url, {
-        method: "POST",
-        headers: {
-          authorization: `Bearer ${params.authToken}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(params.body),
-        signal: controller.signal,
-      }),
-      timeoutPromise,
-    ]);
-    const rawPayload = await readBoundedResponseText(
-      response,
-      params.label,
-      params.bodyMaxBytes,
-      timeoutPromise,
-    );
-    const payload = parseBrokerPayload(rawPayload, response);
+    const response = await fetch(params.url, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${params.authToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(params.body),
+      signal: controller.signal,
+    });
+    const rawPayload = await response.text();
+    const payload = rawPayload.trim()
+      ? JSON.parse(rawPayload)
+      : response.ok
+        ? { status: "ok" }
+        : {};
     if (!response.ok || payload?.status === "error") {
       const message =
         typeof payload?.message === "string" && payload.message.trim()
@@ -268,8 +233,6 @@ async function resolveCredentialPayload(config, acquired) {
   for (let index = 0; index < marker.chunkCount; index += 1) {
     const chunk = await postBroker({
       authToken: config.authToken,
-      bodyMaxBytes: config.httpBodyMaxBytes,
-      label: "credential broker payload-chunk",
       timeoutMs: config.httpTimeoutMs,
       url: config.payloadChunkUrl,
       body: {
@@ -350,20 +313,10 @@ async function acquireWithRetry(config) {
   let attempt = 0;
   while (true) {
     attempt += 1;
-    const attemptElapsedMs = Date.now() - startedAt;
-    const attemptRemainingMs = config.acquireTimeoutMs - attemptElapsedMs;
-    if (attemptRemainingMs <= 0) {
-      throw taggedError(
-        `credential broker acquire timed out after ${config.acquireTimeoutMs}ms before retry`,
-        "ETIMEDOUT",
-      );
-    }
     try {
       return await postBroker({
         authToken: config.authToken,
-        bodyMaxBytes: config.httpBodyMaxBytes,
-        label: "credential broker acquire",
-        timeoutMs: Math.min(config.httpTimeoutMs, attemptRemainingMs),
+        timeoutMs: config.httpTimeoutMs,
         url: config.acquireUrl,
         body: {
           kind: "telegram",
@@ -377,28 +330,15 @@ async function acquireWithRetry(config) {
       const code = error instanceof BrokerError ? error.code : undefined;
       const retryable = code ? RETRYABLE_ACQUIRE_CODES.has(code) : false;
       const elapsedMs = Date.now() - startedAt;
-      if (!retryable) {
+      if (!retryable || elapsedMs >= config.acquireTimeoutMs) {
         throw error;
-      }
-      if (elapsedMs >= config.acquireTimeoutMs) {
-        throw taggedError(
-          `credential broker acquire timed out after ${config.acquireTimeoutMs}ms before retry`,
-          "ETIMEDOUT",
-        );
       }
       const fallbackDelay = RETRY_BACKOFF_MS[Math.min(attempt - 1, RETRY_BACKOFF_MS.length - 1)];
       const retryAfterMs = error instanceof BrokerError ? error.retryAfterMs : undefined;
       const delayMs = retryAfterMs ?? fallbackDelay;
-      const remainingMs = config.acquireTimeoutMs - elapsedMs;
-      if (delayMs >= remainingMs) {
-        throw taggedError(
-          `credential broker acquire timed out after ${config.acquireTimeoutMs}ms before retry`,
-          "ETIMEDOUT",
-        );
-      }
-      await new Promise((resolve) => {
-        setTimeout(resolve, delayMs);
-      });
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.min(delayMs, Math.max(config.acquireTimeoutMs - elapsedMs, 0))),
+      );
     }
   }
 }
@@ -406,8 +346,6 @@ async function acquireWithRetry(config) {
 async function releaseLease(config, lease) {
   await postBroker({
     authToken: config.authToken,
-    bodyMaxBytes: config.httpBodyMaxBytes,
-    label: "credential broker release",
     timeoutMs: config.httpTimeoutMs,
     url: config.releaseUrl,
     body: {
@@ -435,8 +373,6 @@ async function heartbeat(opts) {
     const lease = await readLease(leaseFile);
     await postBroker({
       authToken: config.authToken,
-      bodyMaxBytes: config.httpBodyMaxBytes,
-      label: "credential broker heartbeat",
       timeoutMs: config.httpTimeoutMs,
       url: config.heartbeatUrl,
       body: {
@@ -453,9 +389,7 @@ async function heartbeat(opts) {
       config.heartbeatIntervalMs,
       "heartbeatIntervalMs",
     );
-    await new Promise((resolve) => {
-      setTimeout(resolve, intervalMs);
-    });
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }
 

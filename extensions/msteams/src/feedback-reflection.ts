@@ -3,7 +3,6 @@ import {
   dispatchReplyFromConfigWithSettledDispatcher,
   type OpenClawConfig,
 } from "../runtime-api.js";
-import { resolveMSTeamsSdkCloudOptions } from "./cloud.js";
 import type { StoredConversationReference } from "./conversation-store.js";
 import { formatUnknownError } from "./errors.js";
 import { buildReflectionPrompt, parseReflectionResponse } from "./feedback-reflection-prompt.js";
@@ -15,13 +14,12 @@ import {
   recordReflectionTime,
   storeSessionLearning,
 } from "./feedback-reflection-store.js";
+import type { MSTeamsAdapter } from "./messenger.js";
 import { buildConversationReference } from "./messenger.js";
 import type { MSTeamsMonitorLogger } from "./monitor-types.js";
 import { getMSTeamsRuntime } from "./runtime.js";
-import { sendMSTeamsActivityWithReference } from "./sdk-proactive.js";
-import type { MSTeamsApp } from "./sdk.js";
 
-export type FeedbackEvent = {
+type FeedbackEvent = {
   type: "custom";
   event: "feedback";
   ts: number;
@@ -55,9 +53,9 @@ export function buildFeedbackEvent(params: {
   };
 }
 
-export type RunFeedbackReflectionParams = {
+type RunFeedbackReflectionParams = {
   cfg: OpenClawConfig;
-  app: MSTeamsApp;
+  adapter: MSTeamsAdapter;
   appId: string;
   conversationRef: StoredConversationReference;
   sessionKey: string;
@@ -141,18 +139,20 @@ function createReflectionCaptureDispatcher(params: {
 }
 
 async function sendReflectionFollowUp(params: {
-  cfg: OpenClawConfig;
-  app: MSTeamsApp;
+  adapter: MSTeamsAdapter;
+  appId: string;
   conversationRef: StoredConversationReference;
   userMessage: string;
 }): Promise<void> {
   const baseRef = buildConversationReference(params.conversationRef);
-  await sendMSTeamsActivityWithReference(
-    params.app,
-    baseRef,
-    { type: "message", text: params.userMessage },
-    { serviceUrlBoundary: resolveMSTeamsSdkCloudOptions(params.cfg.channels?.msteams) },
-  );
+  const proactiveRef = { ...baseRef, activityId: undefined };
+
+  await params.adapter.continueConversation(params.appId, proactiveRef, async (ctx) => {
+    await ctx.sendActivity({
+      type: "message",
+      text: params.userMessage,
+    });
+  });
 }
 
 /**
@@ -250,8 +250,8 @@ export async function runFeedbackReflection(params: RunFeedbackReflectionParams)
 
   try {
     await sendReflectionFollowUp({
-      cfg,
-      app: params.app,
+      adapter: params.adapter,
+      appId: params.appId,
       conversationRef: params.conversationRef,
       userMessage: parsedReflection.userMessage!,
     });

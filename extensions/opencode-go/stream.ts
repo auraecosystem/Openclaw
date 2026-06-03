@@ -4,7 +4,6 @@ import {
   streamWithPayloadPatch,
 } from "openclaw/plugin-sdk/provider-stream-shared";
 import { isOpencodeGoKimiNoReasoningModelId } from "./provider-catalog.js";
-import { stripOpencodeGoKimiReasoningPayload } from "./reasoning-sanitizer.js";
 
 function isOpencodeGoDeepSeekV4ModelId(modelId: unknown): boolean {
   return modelId === "deepseek-v4-flash" || modelId === "deepseek-v4-pro";
@@ -23,7 +22,9 @@ export function createOpencodeGoDeepSeekV4Wrapper(
 }
 
 function stripReasoningParams(payloadObj: Record<string, unknown>): void {
-  stripOpencodeGoKimiReasoningPayload(payloadObj);
+  delete payloadObj.reasoning;
+  delete payloadObj.reasoning_effort;
+  delete payloadObj.reasoningEffort;
 }
 
 export function createOpencodeGoKimiNoReasoningWrapper(

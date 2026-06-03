@@ -7,6 +7,7 @@ import {
   applyXaiModelCompat,
   HTML_ENTITY_TOOL_CALL_ARGUMENTS_ENCODING,
   normalizeNativeXaiModelId,
+  resolveXaiModelCompatPatch,
   XAI_TOOL_SCHEMA_PROFILE,
 } from "./model-compat.js";
 
@@ -28,8 +29,9 @@ export {
 export { isModernXaiModel, resolveXaiForwardCompatModel } from "./provider-models.js";
 export { applyXaiRuntimeModelCompat } from "./runtime-model-compat.js";
 export { applyXaiModelCompat, HTML_ENTITY_TOOL_CALL_ARGUMENTS_ENCODING, XAI_TOOL_SCHEMA_PROFILE };
+export { resolveXaiModelCompatPatch };
 
-const XAI_NATIVE_ENDPOINT_HOSTS = new Set(["api.x.ai"]);
+const XAI_NATIVE_ENDPOINT_HOSTS = new Set(["api.x.ai", "api.grok.x.ai"]);
 
 function resolveHostname(value: string): string | undefined {
   try {
@@ -75,6 +77,16 @@ function shouldUseXaiResponsesTransport(params: {
     return true;
   }
   return normalizeProviderId(params.provider) === "xai" && !params.baseUrl;
+}
+
+export function shouldContributeXaiCompat(params: {
+  modelId: string;
+  model: { api?: unknown; baseUrl?: unknown };
+}): boolean {
+  if (params.model.api !== "openai-completions") {
+    return false;
+  }
+  return isXaiNativeEndpoint(params.model.baseUrl) || isXaiModelHint(params.modelId);
 }
 
 export function resolveXaiTransport(params: {

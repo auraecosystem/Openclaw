@@ -1,16 +1,5 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-
-const CORE_BUILT_IN_MODEL_APIS = new Set([
-  "anthropic-messages",
-  "azure-openai-responses",
-  "google-generative-ai",
-  "google-vertex",
-  "mistral-conversations",
-  "openai-chatgpt-responses",
-  "openai-completions",
-  "openai-responses",
-]);
 
 export function resolveProviderConfigApiOwnerHint(params: {
   provider: string;
@@ -31,7 +20,7 @@ export function resolveProviderConfigApiOwnerHint(params: {
     )?.[1];
   const api =
     typeof providerConfig?.api === "string" ? normalizeProviderId(providerConfig.api) : "";
-  if (!api || api === normalizedProvider || CORE_BUILT_IN_MODEL_APIS.has(api)) {
+  if (!api || api === normalizedProvider) {
     return undefined;
   }
   return api;

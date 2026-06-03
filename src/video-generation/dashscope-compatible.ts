@@ -1,6 +1,3 @@
-import { readResponseWithLimit } from "@openclaw/media-core/read-response-with-limit";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import {
   assertOkOrThrowHttpError,
   createProviderOperationDeadline,
@@ -12,7 +9,7 @@ import {
   waitProviderOperationPollInterval,
   type ProviderOperationTimeoutMs,
 } from "openclaw/plugin-sdk/provider-http";
-import { resolveGeneratedMediaMaxBytes } from "../media/configured-max-bytes.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type {
   GeneratedVideoAsset,
   VideoGenerationProviderCapabilities,
@@ -162,7 +159,7 @@ export function extractDashscopeVideoUrls(payload: DashscopeVideoGenerationRespo
     ...(payload.output?.results?.map((entry) => entry.video_url).filter(Boolean) ?? []),
     payload.output?.video_url,
   ].filter((value): value is string => typeof value === "string" && value.trim().length > 0);
-  return uniqueStrings(urls);
+  return [...new Set(urls)];
 }
 
 export async function pollDashscopeVideoTaskUntilComplete(params: {
@@ -283,7 +280,6 @@ export async function runDashscopeVideoGenerationTask(params: {
       timeoutMs: createProviderOperationTimeoutResolver({ deadline, defaultTimeoutMs }),
       fetchFn: params.fetchFn,
       defaultTimeoutMs,
-      maxBytes: resolveGeneratedMediaMaxBytes(params.req.cfg, "video"),
     });
     return {
       videos,
@@ -305,7 +301,6 @@ export async function downloadDashscopeGeneratedVideos(params: {
   timeoutMs?: ProviderOperationTimeoutMs;
   fetchFn: typeof fetch;
   defaultTimeoutMs?: number;
-  maxBytes: number;
 }): Promise<GeneratedVideoAsset[]> {
   const videos: GeneratedVideoAsset[] = [];
   for (const [index, url] of params.urls.entries()) {
@@ -317,12 +312,9 @@ export async function downloadDashscopeGeneratedVideos(params: {
       provider: params.providerLabel,
       requestFailedMessage: `${params.providerLabel} generated video download failed`,
     });
-    const buffer = await readResponseWithLimit(response, params.maxBytes, {
-      onOverflow: ({ maxBytes }) =>
-        new Error(`${params.providerLabel} generated video download exceeds ${maxBytes} bytes`),
-    });
+    const arrayBuffer = await response.arrayBuffer();
     videos.push({
-      buffer,
+      buffer: Buffer.from(arrayBuffer),
       mimeType: response.headers.get("content-type")?.trim() || "video/mp4",
       fileName: `video-${index + 1}.mp4`,
       metadata: { sourceUrl: url },

@@ -8,7 +8,7 @@ import type {
   CliBundleMcpMode,
 } from "../plugins/types.js";
 import {
-  testing as cliBackendsTesting,
+  __testing as cliBackendsTesting,
   resolveCliBackendConfig,
   resolveCliBackendLiveTest,
 } from "./cli-backends.js";
@@ -31,7 +31,6 @@ function createBackendEntry(params: {
   bundleMcpMode?: CliBundleMcpMode;
   defaultAuthProfileId?: string;
   authEpochMode?: CliBackendAuthEpochMode;
-  ownsNativeCompaction?: boolean;
   prepareExecution?: () => Promise<null>;
   resolveExecutionArgs?: CliBackendResolveExecutionArgs;
   normalizeConfig?: (
@@ -49,7 +48,6 @@ function createBackendEntry(params: {
       ...(params.bundleMcpMode ? { bundleMcpMode: params.bundleMcpMode } : {}),
       ...(params.defaultAuthProfileId ? { defaultAuthProfileId: params.defaultAuthProfileId } : {}),
       ...(params.authEpochMode ? { authEpochMode: params.authEpochMode } : {}),
-      ...(params.ownsNativeCompaction ? { ownsNativeCompaction: params.ownsNativeCompaction } : {}),
       ...(params.prepareExecution ? { prepareExecution: params.prepareExecution } : {}),
       ...(params.resolveExecutionArgs ? { resolveExecutionArgs: params.resolveExecutionArgs } : {}),
       ...(params.normalizeConfig ? { normalizeConfig: params.normalizeConfig } : {}),
@@ -69,7 +67,7 @@ function createBackendEntry(params: {
             params.id === "claude-cli"
               ? "@anthropic-ai/claude-code"
               : params.id === "codex-cli"
-                ? "@openai/codex@0.132.0"
+                ? "@openai/codex@0.130.0"
                 : params.id === "google-gemini-cli"
                   ? "@google/gemini-cli"
                   : undefined,
@@ -232,7 +230,6 @@ beforeEach(() => {
       id: "claude-cli",
       bundleMcp: true,
       bundleMcpMode: "claude-config-file",
-      ownsNativeCompaction: true,
       config: {
         command: "claude",
         args: [
@@ -372,7 +369,7 @@ beforeEach(() => {
               sessionArg: "--session-id",
               sessionMode: "always",
               systemPromptFileArg: "--append-system-prompt-file",
-              systemPromptWhen: "always", // fix(#80374): was "first"
+              systemPromptWhen: "first",
             },
           },
         },
@@ -501,7 +498,7 @@ describe("resolveCliBackendLiveTest", () => {
       defaultModelRef: "codex-cli/gpt-5.5",
       defaultImageProbe: true,
       defaultMcpProbe: true,
-      dockerNpmPackage: "@openai/codex@0.132.0",
+      dockerNpmPackage: "@openai/codex@0.130.0",
       dockerBinaryName: "codex",
     });
   });
@@ -549,11 +546,6 @@ describe("resolveCliBackendConfig claude-cli defaults", () => {
     expect(resolved?.config.resumeArgs).not.toContain("--dangerously-skip-permissions");
   });
 
-  it("declares ownsNativeCompaction for claude-cli", () => {
-    const resolved = requireCliBackendConfig("claude-cli");
-    expect(resolved?.ownsNativeCompaction).toBe(true);
-  });
-
   it("keeps Claude permission mode unset when OpenClaw exec policy is not YOLO", () => {
     const resolved = requireCliBackendConfig("claude-cli", {
       tools: { exec: { security: "allowlist", ask: "on-miss" } },
@@ -593,7 +585,7 @@ describe("resolveCliBackendConfig claude-cli defaults", () => {
     expect(builder?.config.resumeArgs).toContain("bypassPermissions");
   });
 
-  it("preserves raw Claude permission args during backend normalization", () => {
+  it("uses existing exec policy and raw Claude args as permission overrides", () => {
     const safe = resolveCliBackendConfig("claude-cli", {
       tools: { exec: { security: "full", ask: "off" } },
       agents: {
@@ -922,7 +914,7 @@ describe("resolveCliBackendConfig claude-cli defaults", () => {
       "bypassPermissions",
     ]);
     expect(resolved?.config.systemPromptFileArg).toBe("--append-system-prompt-file");
-    expect(resolved?.config.systemPromptWhen).toBe("always"); // fix(#80374): was "first"
+    expect(resolved?.config.systemPromptWhen).toBe("first");
     expect(resolved?.config.sessionArg).toBe("--session-id");
     expect(resolved?.config.sessionMode).toBe("always");
     expect(resolved?.config.input).toBe("stdin");

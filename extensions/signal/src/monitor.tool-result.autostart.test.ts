@@ -38,6 +38,7 @@ function createAutoAbortController() {
   const abortController = new AbortController();
   streamMock.mockImplementation(async () => {
     abortController.abort();
+    return;
   });
   return abortController;
 }
@@ -113,42 +114,6 @@ describe("monitorSignalProvider autostart", () => {
     expectWaitForTransportReadyTimeout(90_000);
   });
 
-  it("passes channels.signal.configPath to signal-cli daemon startup", async () => {
-    const runtime = createMonitorRuntime();
-    setSignalAutoStartConfig({ configPath: "~/.openclaw/signal-cli" });
-    const abortController = createAutoAbortController();
-
-    await runMonitorWithMocks({
-      autoStart: true,
-      baseUrl: SIGNAL_BASE_URL,
-      abortSignal: abortController.signal,
-      runtime,
-    });
-
-    expect(spawnSignalDaemonMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        configPath: "~/.openclaw/signal-cli",
-      }),
-    );
-  });
-
-  it("omits configPath when channels.signal.configPath is blank", async () => {
-    const runtime = createMonitorRuntime();
-    setSignalAutoStartConfig({ configPath: " " });
-    const abortController = createAutoAbortController();
-
-    await runMonitorWithMocks({
-      autoStart: true,
-      baseUrl: SIGNAL_BASE_URL,
-      abortSignal: abortController.signal,
-      runtime,
-    });
-
-    const [daemonOpts] = spawnSignalDaemonMock.mock.calls[0] ?? [];
-    expect(daemonOpts).toBeDefined();
-    expect(daemonOpts).not.toHaveProperty("configPath");
-  });
-
   it("caps startupTimeoutMs at 2 minutes", async () => {
     const runtime = createMonitorRuntime();
     setSignalAutoStartConfig({ startupTimeoutMs: 180_000 });
@@ -177,18 +142,12 @@ describe("monitorSignalProvider autostart", () => {
       async (params: { abortSignal?: AbortSignal | null }) => {
         await new Promise<void>((_resolve, reject) => {
           if (params.abortSignal?.aborted) {
-            reject(toLintErrorObject(params.abortSignal.reason, "Non-Error rejection"));
+            reject(params.abortSignal.reason);
             return;
           }
           params.abortSignal?.addEventListener(
             "abort",
-            () =>
-              reject(
-                toLintErrorObject(
-                  params.abortSignal?.reason ?? new Error("aborted"),
-                  "Non-Error rejection",
-                ),
-              ),
+            () => reject(params.abortSignal?.reason ?? new Error("aborted")),
             { once: true },
           );
         });
@@ -244,17 +203,3 @@ describe("monitorSignalProvider autostart", () => {
     ).resolves.toBeUndefined();
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

@@ -110,9 +110,8 @@ export type HooksConfig = {
    */
   allowedSessionKeyPrefixes?: string[];
   /**
-   * Restrict hook execution to these effective agent ids, including
-   * default-agent routing when `agentId` is omitted. Omit or include `*` to
-   * allow any agent. Set `[]` to deny all agent routing.
+   * Restrict explicit hook `agentId` routing to these agent ids.
+   * Omit or include `*` to allow any agent. Set `[]` to deny all explicit `agentId` routing.
    */
   allowedAgentIds?: string[];
   maxBodyBytes?: number;

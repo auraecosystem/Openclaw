@@ -8,18 +8,6 @@ export type BundledPluginLoadPathAlias = {
   path: string;
 };
 
-export type PackagedBundledPluginPath = {
-  packageRoot: string;
-  bundledRoot: string;
-  bundledLeaf: string;
-};
-
-export type LegacyBundledPluginPath = {
-  packageRoot: string;
-  legacyRoot: string;
-  bundledLeaf: string;
-};
-
 const PACKAGED_BUNDLED_ROOTS = [
   path.join("dist", "extensions"),
   path.join("dist-runtime", "extensions"),
@@ -58,52 +46,22 @@ function findPackagedBundledRoot(localPath: string): {
   return null;
 }
 
-export function parsePackagedBundledPluginPath(
-  localPath: string,
-): PackagedBundledPluginPath | null {
+export function buildLegacyBundledPath(localPath: string): string | null {
   const packaged = findPackagedBundledRoot(localPath);
   if (!packaged) {
     return null;
   }
   const normalized = normalizeBundledLookupPath(localPath);
-  if (normalized === packaged.bundledRoot) {
-    return null;
-  }
-  return {
-    ...packaged,
-    bundledLeaf: normalized.slice(packaged.bundledRoot.length + path.sep.length),
-  };
-}
-
-export function buildLegacyBundledPath(localPath: string): string | null {
-  const packaged = parsePackagedBundledPluginPath(localPath);
-  if (!packaged) {
-    return null;
-  }
-  return path.join(packaged.packageRoot, "extensions", packaged.bundledLeaf);
+  const bundledLeaf =
+    normalized === packaged.bundledRoot
+      ? ""
+      : normalized.slice(packaged.bundledRoot.length + path.sep.length);
+  return bundledLeaf ? path.join(packaged.packageRoot, "extensions", bundledLeaf) : null;
 }
 
 export function buildLegacyBundledRootPath(localPath: string): string | null {
   const packaged = findPackagedBundledRoot(localPath);
   return packaged ? path.join(packaged.packageRoot, "extensions") : null;
-}
-
-export function parseLegacyBundledPluginPath(localPath: string): LegacyBundledPluginPath | null {
-  const normalized = normalizeBundledLookupPath(localPath);
-  const marker = `${path.sep}extensions`;
-  const markerIndex = normalized.lastIndexOf(marker);
-  if (markerIndex === -1) {
-    return null;
-  }
-  const markerEnd = markerIndex + marker.length;
-  if (normalized.length === markerEnd || normalized[markerEnd] !== path.sep) {
-    return null;
-  }
-  return {
-    packageRoot: normalized.slice(0, markerIndex),
-    legacyRoot: normalized.slice(0, markerEnd),
-    bundledLeaf: normalized.slice(markerEnd + path.sep.length),
-  };
 }
 
 export function buildBundledPluginLoadPathAliases(localPath: string): BundledPluginLoadPathAlias[] {

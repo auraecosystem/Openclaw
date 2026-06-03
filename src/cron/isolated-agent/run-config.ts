@@ -32,7 +32,6 @@ function mergeCronAgentModelOverride(params: {
   return nextDefaults;
 }
 
-/** Builds the agent defaults snapshot used by isolated cron runs. */
 export function buildCronAgentDefaultsConfig(params: {
   defaults?: AgentDefaultsConfig;
   agentConfigOverride?: ResolvedAgentConfig;

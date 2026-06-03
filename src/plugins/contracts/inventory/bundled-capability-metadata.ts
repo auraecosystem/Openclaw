@@ -22,13 +22,11 @@ export type BundledPluginContractSnapshot = {
   pluginId: string;
   cliBackendIds: string[];
   providerIds: string[];
-  providerEnvVars: Record<string, string[]>;
-  embeddingProviderIds: string[];
+  providerAuthEnvVars: Record<string, string[]>;
   speechProviderIds: string[];
   realtimeTranscriptionProviderIds: string[];
   realtimeVoiceProviderIds: string[];
   mediaUnderstandingProviderIds: string[];
-  transcriptSourceProviderIds: string[];
   documentExtractorIds: string[];
   imageGenerationProviderIds: string[];
   videoGenerationProviderIds: string[];
@@ -57,8 +55,8 @@ export type BundledCapabilityManifest = Pick<
   | "cliBackends"
   | "contracts"
   | "legacyPluginIds"
+  | "providerAuthEnvVars"
   | "providers"
-  | "setup"
 >;
 
 function readJsonRecord(filePath: string): Record<string, unknown> | undefined {
@@ -102,14 +100,17 @@ function listBundledCapabilityManifests(): readonly BundledCapabilityManifest[] 
 
 const BUNDLED_CAPABILITY_MANIFESTS = listBundledCapabilityManifests();
 
-function normalizeSetupProviderEnvVars(setup: PluginManifest["setup"]): Record<string, string[]> {
+function normalizeStringListRecord(record: unknown): Record<string, string[]> {
+  if (!record || typeof record !== "object" || Array.isArray(record)) {
+    return {};
+  }
   return Object.fromEntries(
-    (setup?.providers ?? [])
+    Object.entries(record)
       .map(
-        (provider) =>
+        ([key, values]) =>
           [
-            provider.id.trim(),
-            uniqueStrings(provider.envVars ?? [], (value) =>
+            key.trim(),
+            uniqueStrings(Array.isArray(values) ? values : [], (value) =>
               typeof value === "string" ? value.trim() : "",
             ),
           ] as const,
@@ -126,10 +127,7 @@ export function buildBundledPluginContractSnapshot(
     pluginId: manifest.id,
     cliBackendIds: uniqueStrings(manifest.cliBackends, (value) => value.trim()),
     providerIds: uniqueStrings(manifest.providers, (value) => value.trim()),
-    providerEnvVars: normalizeSetupProviderEnvVars(manifest.setup),
-    embeddingProviderIds: uniqueStrings(manifest.contracts?.embeddingProviders, (value) =>
-      value.trim(),
-    ),
+    providerAuthEnvVars: normalizeStringListRecord(manifest.providerAuthEnvVars),
     speechProviderIds: uniqueStrings(manifest.contracts?.speechProviders, (value) => value.trim()),
     realtimeTranscriptionProviderIds: uniqueStrings(
       manifest.contracts?.realtimeTranscriptionProviders,
@@ -140,10 +138,6 @@ export function buildBundledPluginContractSnapshot(
     ),
     mediaUnderstandingProviderIds: uniqueStrings(
       manifest.contracts?.mediaUnderstandingProviders,
-      (value) => value.trim(),
-    ),
-    transcriptSourceProviderIds: uniqueStrings(
-      manifest.contracts?.transcriptSourceProviders,
       (value) => value.trim(),
     ),
     documentExtractorIds: uniqueStrings(manifest.contracts?.documentExtractors, (value) =>
@@ -183,12 +177,10 @@ export function hasBundledPluginContractSnapshotCapabilities(
   return (
     entry.cliBackendIds.length > 0 ||
     entry.providerIds.length > 0 ||
-    entry.embeddingProviderIds.length > 0 ||
     entry.speechProviderIds.length > 0 ||
     entry.realtimeTranscriptionProviderIds.length > 0 ||
     entry.realtimeVoiceProviderIds.length > 0 ||
     entry.mediaUnderstandingProviderIds.length > 0 ||
-    entry.transcriptSourceProviderIds.length > 0 ||
     entry.documentExtractorIds.length > 0 ||
     entry.imageGenerationProviderIds.length > 0 ||
     entry.videoGenerationProviderIds.length > 0 ||
@@ -225,7 +217,7 @@ export const BUNDLED_AUTO_ENABLE_PROVIDER_PLUGIN_IDS = Object.fromEntries(
 
 type BundledContractIdSnapshotKey = Exclude<
   keyof Omit<BundledPluginContractSnapshot, "pluginId">,
-  "providerEnvVars"
+  "providerAuthEnvVars"
 >;
 
 export function resolveBundledContractSnapshotPluginIds(

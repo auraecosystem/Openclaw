@@ -3,14 +3,12 @@ export type SessionStateValue = "idle" | "processing" | "waiting";
 export type SessionState = {
   sessionId?: string;
   sessionKey?: string;
-  sessionFile?: string;
   lastActivity: number;
   generation?: number;
   lastStuckWarnAgeMs?: number;
   lastLongRunningWarnAgeMs?: number;
   state: SessionStateValue;
   queueDepth: number;
-  activeQueuedTurn?: boolean;
   toolCallHistory?: ToolCallRecord[];
   toolLoopWarningBuckets?: Map<string, number>;
   commandPollCounts?: Map<string, { count: number; lastPollAt: number }>;
@@ -29,7 +27,6 @@ export type ToolCallRecord = {
 export type SessionRef = {
   sessionId?: string;
   sessionKey?: string;
-  sessionFile?: string;
 };
 
 export const diagnosticSessionStates = new Map<string, SessionState>();
@@ -101,16 +98,12 @@ function mergeSessionState(target: SessionState, source: SessionState): void {
     sessionStatePriority(source.state) > sessionStatePriority(target.state);
   target.sessionId ??= source.sessionId;
   target.sessionKey ??= source.sessionKey;
-  if (source.sessionFile && (sourceIsNewer || !target.sessionFile)) {
-    target.sessionFile = source.sessionFile;
-  }
   if (sourceIsNewer || sourceIsSameAgeAndMoreActive) {
     target.state = source.state;
   }
   target.generation = Math.max(target.generation ?? 0, source.generation ?? 0);
   target.lastActivity = Math.max(target.lastActivity, source.lastActivity);
   target.queueDepth += source.queueDepth;
-  target.activeQueuedTurn ||= source.activeQueuedTurn;
   target.lastStuckWarnAgeMs =
     target.lastStuckWarnAgeMs === undefined || source.lastStuckWarnAgeMs === undefined
       ? undefined
@@ -159,15 +152,11 @@ export function getDiagnosticSessionState(ref: SessionRef): SessionState {
     if (ref.sessionKey) {
       existing.sessionKey = ref.sessionKey;
     }
-    if (ref.sessionFile) {
-      existing.sessionFile = ref.sessionFile;
-    }
     return existing;
   }
   const created: SessionState = {
     sessionId: ref.sessionId,
     sessionKey: ref.sessionKey,
-    sessionFile: ref.sessionFile,
     lastActivity: Date.now(),
     generation: 0,
     state: "idle",

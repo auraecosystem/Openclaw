@@ -163,7 +163,7 @@ export function createFeishuThreadBindingManager(params: {
       if (!normalizedConversationId || !normalizedTargetSessionKey) {
         return null;
       }
-      const existingLocal = getState().bindingsByAccountConversation.get(
+      const existing = getState().bindingsByAccountConversation.get(
         resolveBindingKey({ accountId, conversationId: normalizedConversationId }),
       );
       const now = Date.now();
@@ -171,29 +171,29 @@ export function createFeishuThreadBindingManager(params: {
         accountId,
         conversationId: normalizedConversationId,
         parentConversationId:
-          normalizeOptionalString(parentConversationId) ?? existingLocal?.parentConversationId,
+          normalizeOptionalString(parentConversationId) ?? existing?.parentConversationId,
         deliveryTo:
           typeof metadata?.deliveryTo === "string" && metadata.deliveryTo.trim()
             ? metadata.deliveryTo.trim()
-            : existingLocal?.deliveryTo,
+            : existing?.deliveryTo,
         deliveryThreadId:
           typeof metadata?.deliveryThreadId === "string" && metadata.deliveryThreadId.trim()
             ? metadata.deliveryThreadId.trim()
-            : existingLocal?.deliveryThreadId,
+            : existing?.deliveryThreadId,
         targetKind: toFeishuTargetKind(targetKind),
         targetSessionKey: normalizedTargetSessionKey,
         agentId:
           typeof metadata?.agentId === "string" && metadata.agentId.trim()
             ? metadata.agentId.trim()
-            : (existingLocal?.agentId ?? resolveAgentIdFromSessionKey(normalizedTargetSessionKey)),
+            : (existing?.agentId ?? resolveAgentIdFromSessionKey(normalizedTargetSessionKey)),
         label:
           typeof metadata?.label === "string" && metadata.label.trim()
             ? metadata.label.trim()
-            : existingLocal?.label,
+            : existing?.label,
         boundBy:
           typeof metadata?.boundBy === "string" && metadata.boundBy.trim()
             ? metadata.boundBy.trim()
-            : existingLocal?.boundBy,
+            : existing?.boundBy,
         boundAt: now,
         lastActivityAt: now,
       };
@@ -319,7 +319,7 @@ export function getFeishuThreadBindingManager(
   return getState().managersByAccountId.get(normalizeAccountId(accountId)) ?? null;
 }
 
-export const testing = {
+export const __testing = {
   resetFeishuThreadBindingsForTests() {
     for (const manager of getState().managersByAccountId.values()) {
       manager.stop();
@@ -328,4 +328,3 @@ export const testing = {
     getState().bindingsByAccountConversation.clear();
   },
 };
-export { testing as __testing };

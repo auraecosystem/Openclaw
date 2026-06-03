@@ -1,7 +1,11 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { asOptionalRecord as readRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 type MutableRecord = Record<string, unknown>;
+
+function readRecord(value: unknown): MutableRecord | undefined {
+  return isRecord(value) ? (value as MutableRecord) : undefined;
+}
 
 function mergeHostConfig(params: {
   legacyHost: MutableRecord;

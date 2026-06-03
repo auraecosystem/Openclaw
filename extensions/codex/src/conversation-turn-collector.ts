@@ -1,9 +1,3 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
-import { asOptionalRecord as readRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
-import {
-  readCodexNotificationThreadId,
-  readCodexNotificationTurnId,
-} from "./app-server/notification-correlation.js";
 import {
   isJsonObject,
   type CodexServerNotification,
@@ -57,7 +51,7 @@ export function createCodexConversationTurnCollector(threadId: string) {
 
   const handleNotification = (notification: CodexServerNotification) => {
     const params = isJsonObject(notification.params) ? notification.params : undefined;
-    if (!params || readCodexNotificationThreadId(params) !== threadId) {
+    if (!params || readString(params, "threadId") !== threadId) {
       return;
     }
     if (!turnId) {
@@ -144,7 +138,7 @@ export function createCodexConversationTurnCollector(threadId: string) {
             reject(new Error("codex app-server bound turn timed out"));
             clearWaitState();
           },
-          resolveTimerTimeoutMs(params.timeoutMs, 100, 100),
+          Math.max(100, params.timeoutMs),
         );
         timeout.unref?.();
       });
@@ -157,7 +151,7 @@ function isNotificationForTurn(
   threadId: string,
   turnId: string | undefined,
 ): boolean {
-  if (readCodexNotificationThreadId(params) !== threadId) {
+  if (readString(params, "threadId") !== threadId) {
     return false;
   }
   if (!turnId) {
@@ -172,7 +166,13 @@ function isNotificationForTurn(
 }
 
 function readNotificationTurnId(params: JsonObject): string | undefined {
-  return readCodexNotificationTurnId(params);
+  return readString(params, "turnId") ?? readString(readRecord(params.turn), "id");
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function readString(record: Record<string, unknown> | JsonObject | undefined, key: string) {

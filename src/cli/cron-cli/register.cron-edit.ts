@@ -1,13 +1,12 @@
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
 import type { Command } from "commander";
 import type { CronJob } from "../../cron/types.js";
 import { danger } from "../../globals.js";
-import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
 import { sanitizeAgentId } from "../../routing/session-key.js";
 import { defaultRuntime } from "../../runtime.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../../shared/string-coerce.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "../gateway-rpc.js";
 import {
   applyExistingCronSchedulePatch,
@@ -103,7 +102,6 @@ export function registerCronEditCommand(cron: Command) {
       .option("--announce", "Fallback-deliver final text to a chat")
       .option("--deliver", "Deprecated (use --announce). Fallback-delivers final text to a chat.")
       .option("--no-deliver", "Disable runner fallback delivery")
-      .option("--webhook <url>", "POST the finished payload to a webhook URL")
       .option("--channel <channel>", `Delivery channel (${getCronChannelOptions()})`)
       .option(
         "--to <dest>",
@@ -111,10 +109,7 @@ export function registerCronEditCommand(cron: Command) {
       )
       .option("--thread-id <id>", "Telegram forum topic thread id")
       .option("--account <id>", "Channel account id for delivery (multi-account setups)")
-      .option(
-        "--best-effort-deliver",
-        "Do not fail job if delivery fails (also implies --announce when used alone)",
-      )
+      .option("--best-effort-deliver", "Do not fail job if delivery fails")
       .option("--no-best-effort-deliver", "Fail job when delivery fails")
       .option("--failure-alert", "Enable failure alerts for this job")
       .option("--no-failure-alert", "Disable failure alerts for this job")
@@ -156,14 +151,8 @@ export function registerCronEditCommand(cron: Command) {
               "Isolated jobs cannot use --system-event; use --message or --session main.",
             );
           }
-          const hasWebhookDelivery = typeof opts.webhook === "string";
-          const deliveryModeFlagCount = [
-            Boolean(opts.announce),
-            typeof opts.deliver === "boolean",
-            hasWebhookDelivery,
-          ].filter(Boolean).length;
-          if (deliveryModeFlagCount > 1) {
-            throw new Error("Choose at most one of --announce, --no-deliver, or --webhook.");
+          if (opts.announce && typeof opts.deliver === "boolean") {
+            throw new Error("Choose --announce or --no-deliver (not multiple).");
           }
           const patch: Record<string, unknown> = {};
           if (typeof opts.name === "string") {
@@ -194,11 +183,7 @@ export function registerCronEditCommand(cron: Command) {
             patch.sessionTarget = sessionTarget;
           }
           if (typeof opts.wake === "string") {
-            const wakeMode = opts.wake.trim();
-            if (wakeMode !== "now" && wakeMode !== "next-heartbeat") {
-              throw new Error("--wake must be now or next-heartbeat");
-            }
-            patch.wakeMode = wakeMode;
+            patch.wakeMode = opts.wake;
           }
           if (opts.agent && opts.clearAgent) {
             throw new Error("Use --agent or --clear-agent, not both");
@@ -241,32 +226,18 @@ export function registerCronEditCommand(cron: Command) {
           const model = normalizeOptionalString(opts.model);
           const thinking = normalizeOptionalString(opts.thinking);
           const toolsAllow = parseCronToolsAllow(opts.tools);
-          const rawTimeoutSeconds =
-            opts.timeoutSeconds === undefined ? undefined : String(opts.timeoutSeconds).trim();
-          if (rawTimeoutSeconds !== undefined && !/^\d+$/u.test(rawTimeoutSeconds)) {
-            throw new Error("Invalid --timeout-seconds (must be a positive integer).");
-          }
-          const timeoutSeconds =
-            rawTimeoutSeconds === undefined ? undefined : Number(rawTimeoutSeconds);
-          const hasTimeoutSeconds =
-            typeof timeoutSeconds === "number" &&
-            Number.isSafeInteger(timeoutSeconds) &&
-            timeoutSeconds > 0;
-          if (rawTimeoutSeconds !== undefined && !hasTimeoutSeconds) {
-            throw new Error("Invalid --timeout-seconds (must be a positive integer).");
-          }
-          const hasDeliveryModeFlag =
-            opts.announce || typeof opts.deliver === "boolean" || hasWebhookDelivery;
+          const timeoutSeconds = opts.timeoutSeconds
+            ? Number.parseInt(String(opts.timeoutSeconds), 10)
+            : undefined;
+          const hasTimeoutSeconds = Boolean(timeoutSeconds && Number.isFinite(timeoutSeconds));
+          const hasDeliveryModeFlag = opts.announce || typeof opts.deliver === "boolean";
           const threadId = parseCronThreadIdOption(opts.threadId);
           const hasDeliveryThreadId = typeof threadId === "number";
           const hasDeliveryTarget =
             typeof opts.channel === "string" || typeof opts.to === "string" || hasDeliveryThreadId;
           const hasDeliveryAccount = typeof opts.account === "string";
           const hasBestEffort = typeof opts.bestEffortDeliver === "boolean";
-          if (hasWebhookDelivery && (hasDeliveryTarget || hasDeliveryAccount)) {
-            throw new Error("--webhook cannot be combined with chat delivery options.");
-          }
-          const hasAgentTurnPayloadField =
+          const hasAgentTurnPatch =
             typeof opts.message === "string" ||
             Boolean(model) ||
             Boolean(thinking) ||
@@ -274,14 +245,11 @@ export function registerCronEditCommand(cron: Command) {
             typeof opts.lightContext === "boolean" ||
             typeof opts.tools === "string" ||
             Array.isArray(opts.tools) ||
-            opts.clearTools;
-          const hasAgentTurnPatch =
-            hasAgentTurnPayloadField ||
-            Boolean(opts.announce) ||
-            opts.deliver === true ||
+            opts.clearTools ||
+            hasDeliveryModeFlag ||
             hasDeliveryTarget ||
             hasDeliveryAccount ||
-            (hasBestEffort && !hasWebhookDelivery);
+            hasBestEffort;
           if (hasSystemEventPatch && hasAgentTurnPatch) {
             throw new Error("Choose at most one payload change");
           }
@@ -313,26 +281,16 @@ export function registerCronEditCommand(cron: Command) {
           if (hasDeliveryModeFlag || hasDeliveryTarget || hasDeliveryAccount || hasBestEffort) {
             const delivery: Record<string, unknown> = {};
             if (hasDeliveryModeFlag) {
-              delivery.mode = hasWebhookDelivery
-                ? "webhook"
-                : opts.announce || opts.deliver === true
-                  ? "announce"
-                  : "none";
-            } else if (
-              opts.bestEffortDeliver === true ||
-              (hasAgentTurnPayloadField && hasBestEffort)
-            ) {
-              // Back-compat: best-effort true and payload edits historically implied announce mode.
+              delivery.mode = opts.announce || opts.deliver === true ? "announce" : "none";
+            } else if (hasBestEffort) {
+              // Back-compat: toggling best-effort alone has historically implied announce mode.
               delivery.mode = "announce";
             }
             if (typeof opts.channel === "string") {
               const channel = opts.channel.trim();
               delivery.channel = channel ? channel : undefined;
             }
-            if (hasWebhookDelivery) {
-              const webhook = normalizeOptionalString(opts.webhook) ?? "";
-              delivery.to = webhook ? webhook : undefined;
-            } else if (typeof opts.to === "string") {
+            if (typeof opts.to === "string") {
               const to = opts.to.trim();
               delivery.to = to ? to : undefined;
             }
@@ -383,8 +341,8 @@ export function registerCronEditCommand(cron: Command) {
           } else if (failureAlertFlag === true || hasFailureAlertFields) {
             const failureAlert: Record<string, unknown> = {};
             if (hasFailureAlertAfter) {
-              const after = parseStrictPositiveInteger(opts.failureAlertAfter);
-              if (after === undefined) {
+              const after = Number.parseInt(String(opts.failureAlertAfter), 10);
+              if (!Number.isFinite(after) || after <= 0) {
                 throw new Error("Invalid --failure-alert-after (must be a positive integer).");
               }
               failureAlert.after = after;

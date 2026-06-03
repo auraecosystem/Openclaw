@@ -1,4 +1,5 @@
 import { resolveDefaultAgentDir } from "../agents/agent-scope.js";
+import { resolveReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
@@ -8,9 +9,6 @@ import { getDaemonStatusSummary, getNodeDaemonStatusSummary } from "./status.dae
 const providerUsageLoader = createLazyImportLoader(() => import("../infra/provider-usage.js"));
 const securityAuditModuleLoader = createLazyImportLoader(
   () => import("../security/audit.runtime.js"),
-);
-const readOnlyChannelPluginsModuleLoader = createLazyImportLoader(
-  () => import("../channels/plugins/read-only.js"),
 );
 const gatewayCallModuleLoader = createLazyImportLoader(() => import("../gateway/call.js"));
 
@@ -22,10 +20,6 @@ function loadSecurityAuditModule() {
   return securityAuditModuleLoader.load();
 }
 
-function loadReadOnlyChannelPluginsModule() {
-  return readOnlyChannelPluginsModuleLoader.load();
-}
-
 function loadGatewayCallModule() {
   return gatewayCallModuleLoader.load();
 }
@@ -33,10 +27,8 @@ function loadGatewayCallModule() {
 export async function resolveStatusSecurityAudit(params: {
   config: OpenClawConfig;
   sourceConfig: OpenClawConfig;
-  timeoutMs?: number;
 }) {
   const { runSecurityAudit } = await loadSecurityAuditModule();
-  const { resolveReadOnlyChannelPluginsForConfig } = await loadReadOnlyChannelPluginsModule();
   const readOnlyPlugins = resolveReadOnlyChannelPluginsForConfig(params.config, {
     activationSourceConfig: params.sourceConfig,
     includeSetupFallbackPlugins: false,
@@ -45,7 +37,6 @@ export async function resolveStatusSecurityAudit(params: {
     config: params.config,
     sourceConfig: params.sourceConfig,
     deep: false,
-    ...(params.timeoutMs !== undefined ? { deepTimeoutMs: params.timeoutMs } : {}),
     includeFilesystem: true,
     includeChannelSecurity: true,
     loadPluginSecurityCollectors: false,
@@ -108,30 +99,7 @@ export async function resolveStatusGatewayHealthSafe(params: {
     timeoutMs: params.timeoutMs,
     config: params.config,
     ...params.callOverrides,
-  }).catch((err: unknown) => ({ error: String(err) }));
-}
-
-export async function resolveStatusGatewayDiagnosticsSafe(params: {
-  config: OpenClawConfig;
-  timeoutMs?: number;
-  gatewayReachable: boolean;
-  callOverrides?: {
-    url: string;
-    token?: string;
-    password?: string;
-  };
-}) {
-  if (!params.gatewayReachable) {
-    return null;
-  }
-  const { callGateway } = await loadGatewayCallModule();
-  return await callGateway<unknown>({
-    method: "diagnostics.stability",
-    params: { limit: 1000 },
-    timeoutMs: params.timeoutMs,
-    config: params.config,
-    ...params.callOverrides,
-  }).catch(() => null);
+  }).catch((err) => ({ error: String(err) }));
 }
 
 export async function resolveStatusLastHeartbeat(params: {
@@ -230,7 +198,6 @@ export async function resolveStatusRuntimeSnapshot(params: {
   resolveSecurityAudit?: (input: {
     config: OpenClawConfig;
     sourceConfig: OpenClawConfig;
-    timeoutMs?: number;
   }) => Promise<StatusSecurityAudit>;
   resolveUsage?: (input: StatusUsageSummaryOptions) => Promise<StatusUsageSummary>;
   resolveHealth?: (input: {
@@ -242,7 +209,6 @@ export async function resolveStatusRuntimeSnapshot(params: {
     ? await (params.resolveSecurityAudit ?? resolveStatusSecurityAudit)({
         config: params.config,
         sourceConfig: params.sourceConfig,
-        timeoutMs: params.timeoutMs,
       })
     : undefined;
   const runtimeDetails = await resolveStatusRuntimeDetails({

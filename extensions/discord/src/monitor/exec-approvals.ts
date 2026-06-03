@@ -112,13 +112,10 @@ export class ExecApprovalButton extends Button {
     } catch {}
 
     const result = await this.ctx.resolveApproval(parsed.approvalId, parsed.action);
-    if (!result.ok) {
+    if (!result.ok && result.reason !== "not-found") {
       try {
         await interaction.followUp({
-          content:
-            result.reason === "not-found"
-              ? `That approval request is no longer pending. It may have expired or already been resolved.`
-              : `Failed to submit approval decision for **${decisionLabel}**. The request may have expired or already been resolved.`,
+          content: `Failed to submit approval decision for **${decisionLabel}**. The request may have expired or already been resolved.`,
           ephemeral: true,
         });
       } catch {}

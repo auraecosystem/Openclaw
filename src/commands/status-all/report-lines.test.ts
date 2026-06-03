@@ -63,7 +63,6 @@ describe("buildStatusAllReportLines", () => {
         pluginCompatibility: [],
         channelsStatus: null,
         channelIssues: [],
-        deliveryDiagnostics: null,
         gatewayReachable: false,
         health: null,
         nodeOnlyGateway: null,

@@ -74,10 +74,6 @@ type MatrixQaCliVerificationStatus = {
   };
   backupVersion?: string | null;
   crossSigningVerified?: boolean;
-  encryptionEnabled?: boolean;
-  pendingVerifications?: number;
-  recoveryKeyStored?: boolean;
-  serverDeviceKnown?: boolean;
   verified?: boolean;
   signedByOwner?: boolean;
   deviceId?: string | null;
@@ -1239,7 +1235,7 @@ async function withMatrixQaIsolatedE2eeDriverRoom<T>(
     );
   };
 
-  let patchedGateway;
+  let patchedGateway = false;
   let client: MatrixQaE2eeScenarioClient | undefined;
   try {
     await applyPatch({
@@ -1789,39 +1785,6 @@ function assertMatrixQaCliE2eeStatus(
   }
 }
 
-function assertMatrixQaCliAccountAddBootstrapStatus(params: {
-  expectedBackupVersion?: string | null;
-  expectedUserId: string;
-  status: MatrixQaCliVerificationStatus;
-}) {
-  const { expectedBackupVersion, expectedUserId, status } = params;
-  if (status.encryptionEnabled !== true || status.recoveryKeyStored !== true) {
-    throw new Error(
-      "Matrix CLI account add --enable-e2ee degraded status did not keep encryption and recovery key state",
-    );
-  }
-  if (status.userId !== expectedUserId) {
-    throw new Error(
-      `Matrix CLI account add --enable-e2ee status user mismatch: expected ${expectedUserId}, got ${status.userId ?? "<none>"}`,
-    );
-  }
-  if (!status.deviceId || status.serverDeviceKnown !== true) {
-    throw new Error(
-      "Matrix CLI account add --enable-e2ee degraded status did not resolve the current server-known device",
-    );
-  }
-  if (expectedBackupVersion && status.backupVersion !== expectedBackupVersion) {
-    throw new Error(
-      `Matrix CLI account add --enable-e2ee backup version mismatch: expected ${expectedBackupVersion}, got ${status.backupVersion ?? "<none>"}`,
-    );
-  }
-  if (status.backup?.keyLoadError) {
-    throw new Error(
-      `Matrix CLI account add --enable-e2ee degraded status reported backup key error: ${status.backup.keyLoadError}`,
-    );
-  }
-}
-
 async function runMatrixQaCliExpectedFailure(params: {
   args: string[];
   start: (args: string[], timeoutMs?: number) => MatrixQaCliSession;
@@ -1968,7 +1931,6 @@ export async function runMatrixQaE2eeCliAccountAddEnableE2eeScenario(
       "status",
       "--account",
       accountId,
-      "--allow-degraded-local-state",
       "--json",
     ]);
     const statusArtifacts = await writeMatrixQaCliOutputArtifacts({
@@ -1977,11 +1939,7 @@ export async function runMatrixQaE2eeCliAccountAddEnableE2eeScenario(
       rootDir: cli.rootDir,
     });
     const status = parseMatrixQaCliJson(statusResult) as MatrixQaCliVerificationStatus;
-    assertMatrixQaCliAccountAddBootstrapStatus({
-      expectedBackupVersion: added.verificationBootstrap.backupVersion,
-      expectedUserId: account.userId,
-      status,
-    });
+    assertMatrixQaCliE2eeStatus("Matrix CLI account add --enable-e2ee", status);
     const cliDeviceId = status.deviceId ?? null;
 
     return {
@@ -1994,7 +1952,7 @@ export async function runMatrixQaE2eeCliAccountAddEnableE2eeScenario(
         verificationBootstrapSuccess: added.verificationBootstrap.success,
       },
       details: [
-        "Matrix CLI account add --enable-e2ee created an encrypted account and bootstrapped recovery state",
+        "Matrix CLI account add --enable-e2ee created an encrypted, verified account",
         `account add stdout: ${addArtifacts.stdoutPath}`,
         `account add stderr: ${addArtifacts.stderrPath}`,
         `verify status stdout: ${statusArtifacts.stdoutPath}`,

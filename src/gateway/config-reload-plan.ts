@@ -30,10 +30,6 @@ type ReloadRule = {
   actions?: ReloadAction[];
 };
 
-export type ConfigReloadMetadata = {
-  kind: ReloadRule["kind"];
-};
-
 type ReloadAction =
   | "reload-hooks"
   | "restart-gmail-watcher"
@@ -48,8 +44,6 @@ type GatewayReloadPlanOptions = {
   noopPaths?: Iterable<string>;
   forceChangedPaths?: Iterable<string>;
 };
-
-const PLUGIN_INSTALL_TIMESTAMP_KEYS = ["installedAt", "resolvedAt"] as const;
 
 const BASE_RELOAD_RULES: ReloadRule[] = [
   { prefix: "gateway.remote", kind: "none" },
@@ -99,10 +93,6 @@ const BASE_RELOAD_RULES: ReloadRule[] = [
     kind: "hot",
     actions: ["restart-heartbeat"],
   },
-  // Auth cooldown readers resolve values from the active runtime config for each
-  // auth failure decision, so cooldown tuning needs a snapshot refresh but not
-  // a gateway restart.
-  { prefix: "auth.cooldowns", kind: "hot" },
   {
     prefix: "agents.list",
     kind: "hot",
@@ -232,13 +222,6 @@ function matchRule(path: string): ReloadRule | null {
   return null;
 }
 
-export function resolveConfigReloadMetadata(path: string): ConfigReloadMetadata {
-  if (isPluginInstallTimestampPath(path)) {
-    return { kind: "none" };
-  }
-  return { kind: matchRule(path)?.kind ?? "restart" };
-}
-
 function isPluginInstallTimestampPath(path: string): boolean {
   // Legacy compatibility only: new plugin install metadata lives in the
   // managed plugin index, but old config writes may still touch this path.
@@ -259,15 +242,9 @@ function getPluginInstallRecords(config: unknown): Record<string, unknown> {
   return isPlainObject(installs) ? installs : {};
 }
 
-function listPluginInstallRecordDiffPaths(
+export function listPluginInstallTimestampMetadataPaths(
   prevConfig: unknown,
   nextConfig: unknown,
-  visit: (record: {
-    id: string;
-    prevRecord: unknown;
-    nextRecord: unknown;
-    paths: string[];
-  }) => void,
 ): string[] {
   const prevInstalls = getPluginInstallRecords(prevConfig);
   const nextInstalls = getPluginInstallRecords(nextConfig);
@@ -275,45 +252,39 @@ function listPluginInstallRecordDiffPaths(
   const paths: string[] = [];
 
   for (const id of ids) {
-    visit({ id, prevRecord: prevInstalls[id], nextRecord: nextInstalls[id], paths });
+    const prevRecord = prevInstalls[id];
+    const nextRecord = nextInstalls[id];
+    if (!isPlainObject(prevRecord) || !isPlainObject(nextRecord)) {
+      continue;
+    }
+    for (const key of ["installedAt", "resolvedAt"] as const) {
+      if (prevRecord[key] !== nextRecord[key]) {
+        paths.push(`plugins.installs.${id}.${key}`);
+      }
+    }
   }
 
   return paths;
-}
-
-export function listPluginInstallTimestampMetadataPaths(
-  prevConfig: unknown,
-  nextConfig: unknown,
-): string[] {
-  return listPluginInstallRecordDiffPaths(
-    prevConfig,
-    nextConfig,
-    ({ id, prevRecord, nextRecord, paths }) => {
-      if (!isPlainObject(prevRecord) || !isPlainObject(nextRecord)) {
-        return;
-      }
-      for (const key of PLUGIN_INSTALL_TIMESTAMP_KEYS) {
-        if (prevRecord[key] !== nextRecord[key]) {
-          paths.push(`plugins.installs.${id}.${key}`);
-        }
-      }
-    },
-  );
 }
 
 export function listPluginInstallWholeRecordPaths(
   prevConfig: unknown,
   nextConfig: unknown,
 ): string[] {
-  return listPluginInstallRecordDiffPaths(
-    prevConfig,
-    nextConfig,
-    ({ id, prevRecord, nextRecord, paths }) => {
-      if (!isPlainObject(prevRecord) || !isPlainObject(nextRecord)) {
-        paths.push(`plugins.installs.${id}`);
-      }
-    },
-  );
+  const prevInstalls = getPluginInstallRecords(prevConfig);
+  const nextInstalls = getPluginInstallRecords(nextConfig);
+  const ids = new Set([...Object.keys(prevInstalls), ...Object.keys(nextInstalls)]);
+  const paths: string[] = [];
+
+  for (const id of ids) {
+    const prevRecord = prevInstalls[id];
+    const nextRecord = nextInstalls[id];
+    if (!isPlainObject(prevRecord) || !isPlainObject(nextRecord)) {
+      paths.push(`plugins.installs.${id}`);
+    }
+  }
+
+  return paths;
 }
 
 export function buildGatewayReloadPlan(

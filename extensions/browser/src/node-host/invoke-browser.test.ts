@@ -1,4 +1,3 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const controlServiceMocks = vi.hoisted(() => ({
@@ -57,10 +56,7 @@ vi.mock("../sdk-node-runtime.js", () => ({
           new Promise<never>((_, reject) => {
             abortCtrl.signal.addEventListener(
               "abort",
-              () =>
-                reject(
-                  toLintErrorObject(abortCtrl.signal.reason ?? timeoutError, "Non-Error rejection"),
-                ),
+              () => reject(abortCtrl.signal.reason ?? timeoutError),
               { once: true },
             );
           }),
@@ -456,29 +452,6 @@ describe("runBrowserProxyCommand", () => {
     expect(request.query).toEqual({ profile: "openclaw" });
   });
 
-  it("caps browser proxy command timeout before dispatch", async () => {
-    dispatcherMocks.dispatch.mockResolvedValue({
-      status: 200,
-      body: { ok: true },
-    });
-    const timeoutSpy = vi
-      .spyOn(globalThis, "setTimeout")
-      .mockReturnValue(1 as unknown as ReturnType<typeof setTimeout>);
-
-    try {
-      await runBrowserProxyCommand(
-        JSON.stringify({
-          method: "GET",
-          path: "/snapshot",
-          timeoutMs: Number.MAX_SAFE_INTEGER,
-        }),
-      );
-      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-    } finally {
-      timeoutSpy.mockRestore();
-    }
-  });
-
   it("rejects persistent profile creation when allowProfiles is empty", async () => {
     await expect(
       runBrowserProxyCommand(
@@ -493,17 +466,3 @@ describe("runBrowserProxyCommand", () => {
     expect(dispatcherMocks.dispatch).not.toHaveBeenCalled();
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

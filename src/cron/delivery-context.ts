@@ -6,7 +6,6 @@ import {
 } from "../utils/delivery-context.shared.js";
 import type { CronDelivery, CronMessageChannel } from "./types.js";
 
-/** Converts an active delivery context into cron announce delivery config. */
 export function cronDeliveryFromContext(context?: DeliveryContext): CronDelivery | null {
   const normalized = normalizeDeliveryContext(context);
   if (!normalized?.to) {
@@ -28,7 +27,6 @@ export function cronDeliveryFromContext(context?: DeliveryContext): CronDelivery
   return delivery;
 }
 
-/** Recovers delivery context from a stored session key captured when the cron job was created. */
 export function resolveCronStoredDeliveryContext(params: {
   cfg: OpenClawConfig;
   sessionKey?: string;
@@ -39,13 +37,11 @@ export function resolveCronStoredDeliveryContext(params: {
   }
   const { deliveryContext, threadId } = extractDeliveryInfo(sessionKey, { cfg: params.cfg });
   if (deliveryContext && threadId) {
-    // Parsed session-key thread ids are canonical; replace any stale thread value in stored context.
     return { ...deliveryContext, threadId };
   }
   return deliveryContext;
 }
 
-/** Resolves initial cron delivery, preferring the live context before falling back to session storage. */
 export function resolveCronCreationDelivery(params: {
   cfg: OpenClawConfig;
   currentDeliveryContext?: DeliveryContext;

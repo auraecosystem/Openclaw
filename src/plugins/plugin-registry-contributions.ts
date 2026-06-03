@@ -1,11 +1,9 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
-import { normalizeSortedUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   normalizePluginsConfigWithResolver,
   type NormalizedPluginsConfig,
 } from "./config-normalization-shared.js";
-import { getCurrentPluginMetadataSnapshot } from "./current-plugin-metadata-snapshot.js";
 import { isInstalledPluginEnabled } from "./installed-plugin-index.js";
 import { loadPluginManifestRegistryForInstalledIndex } from "./manifest-registry-installed.js";
 import type {
@@ -102,6 +100,12 @@ export type ResolveManifestContractPluginIdsByCompatibilityRuntimePathParams =
 
 function normalizeContributionId(value: string): string {
   return value.trim();
+}
+
+function sortUnique(values: Iterable<string>): string[] {
+  return [...new Set([...values].map((value) => value.trim()).filter(Boolean))].toSorted(
+    (left, right) => left.localeCompare(right),
+  );
 }
 
 function collectObjectKeys(value: Record<string, unknown> | undefined): readonly string[] {
@@ -258,68 +262,12 @@ function filterContributionOwnerIds(params: {
       config: params.config,
     }),
   );
-  return normalizeSortedUniqueStringEntries(
-    params.owners.filter((owner) => enabledPluginIds.has(owner)),
-  );
-}
-
-function canReuseCurrentManifestRegistry(params: LoadPluginRegistryManifestParams): boolean {
-  return (
-    params.bundledChannelConfigCollector === undefined &&
-    params.index === undefined &&
-    params.preferPersisted !== false &&
-    params.stateDir === undefined &&
-    params.filePath === undefined &&
-    params.pluginIndexFilePath === undefined &&
-    params.installRecords === undefined &&
-    params.candidates === undefined &&
-    params.diagnostics === undefined
-  );
-}
-
-function loadCurrentManifestRegistryForPluginRegistry(
-  params: LoadPluginRegistryManifestParams,
-): PluginManifestRegistry | undefined {
-  if (!canReuseCurrentManifestRegistry(params)) {
-    return undefined;
-  }
-  const env = params.env ?? process.env;
-  const current = getCurrentPluginMetadataSnapshot({
-    config: params.config,
-    env,
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-    ...(params.workspaceDir === undefined ? { allowWorkspaceScopedSnapshot: true } : {}),
-  });
-  if (!current || current.registryDiagnostics.length > 0) {
-    return undefined;
-  }
-  const pluginIdSet = params.pluginIds === undefined ? undefined : new Set(params.pluginIds);
-  const enabledPluginIds = new Set(
-    current.index.plugins
-      .filter((plugin) => params.includeDisabled || plugin.enabled)
-      .map((plugin) => plugin.pluginId),
-  );
-  return {
-    plugins: current.manifestRegistry.plugins.filter(
-      (plugin) =>
-        (!pluginIdSet || pluginIdSet.has(plugin.id)) &&
-        (params.includeDisabled || enabledPluginIds.has(plugin.id)),
-    ),
-    diagnostics: pluginIdSet
-      ? current.manifestRegistry.diagnostics.filter(
-          (diagnostic) => !diagnostic.pluginId || pluginIdSet.has(diagnostic.pluginId),
-        )
-      : current.manifestRegistry.diagnostics,
-  };
+  return sortUnique(params.owners.filter((owner) => enabledPluginIds.has(owner)));
 }
 
 export function loadPluginManifestRegistryForPluginRegistry(
   params: LoadPluginRegistryManifestParams = {},
 ): PluginManifestRegistry {
-  const current = loadCurrentManifestRegistryForPluginRegistry(params);
-  if (current) {
-    return current;
-  }
   const index = loadPluginRegistrySnapshot(params);
   return loadPluginManifestRegistryForInstalledIndex({
     index,
@@ -350,7 +298,7 @@ export function listPluginContributionIds(
 ): readonly string[] {
   const index = params.lookUpTable?.index ?? loadPluginRegistrySnapshot(params);
   const plugins = listContributionManifestPlugins({ ...params, index });
-  return normalizeSortedUniqueStringEntries(
+  return sortUnique(
     plugins.flatMap((plugin) => listManifestContributionIds(plugin, params.contribution)),
   );
 }
@@ -377,7 +325,7 @@ export function resolvePluginContributionOwners(
       ? (contributionId: string) => contributionId === params.matches
       : params.matches;
   const plugins = listContributionManifestPlugins({ ...params, index });
-  return normalizeSortedUniqueStringEntries(
+  return sortUnique(
     plugins.flatMap((plugin) =>
       listManifestContributionIds(plugin, params.contribution).some(matcher) ? [plugin.id] : [],
     ),

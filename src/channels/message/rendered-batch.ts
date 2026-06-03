@@ -51,7 +51,6 @@ function createRenderedMessageBatchPlanItem(
   };
 }
 
-/** Summarizes rendered reply payloads so delivery can choose adapter paths and recovery metadata. */
 export function createRenderedMessageBatchPlan(
   payloads: readonly ReplyPayload[],
 ): RenderedMessageBatchPlan {
@@ -84,7 +83,6 @@ export function createRenderedMessageBatchPlan(
   );
 }
 
-/** Pairs reply payloads with their render plan for durable send and live-preview flows. */
 export function createRenderedMessageBatch(
   payloads: ReplyPayload[],
 ): RenderedMessageBatch<ReplyPayload> {

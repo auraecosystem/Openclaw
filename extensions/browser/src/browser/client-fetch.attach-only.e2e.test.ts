@@ -37,9 +37,7 @@ describe("browser client fetch attachOnly diagnostics", () => {
       socket.on("close", () => sockets.delete(socket));
       socket.on("error", () => {});
     });
-    await new Promise<void>((resolve) => {
-      server.listen(0, "127.0.0.1", resolve);
-    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const port = (server.address() as { port: number }).port;
     const configPath = path.join(tempHome.home, ".openclaw", "openclaw.json");
     await fs.writeFile(
@@ -80,9 +78,7 @@ describe("browser client fetch attachOnly diagnostics", () => {
       for (const socket of sockets) {
         socket.destroy();
       }
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

@@ -4,12 +4,9 @@ import { normalizeTelegramApiRoot } from "./api-root.js";
 import { resolveTelegramTransport } from "./fetch.js";
 import { isRecoverableTelegramNetworkError } from "./network-errors.js";
 import { makeProxyFetch } from "./proxy.js";
-import {
-  TELEGRAM_GET_UPDATES_REQUEST_TIMEOUT_MS,
-  resolveTelegramLongPollTimeoutSeconds,
-} from "./request-timeouts.js";
+import { TELEGRAM_GET_UPDATES_REQUEST_TIMEOUT_MS } from "./request-timeouts.js";
+import { writeTelegramSpooledUpdate } from "./telegram-ingress-spool.js";
 import type {
-  TelegramIngressWorkerCommand,
   TelegramIngressWorkerMessage,
   TelegramIngressWorkerOptions,
 } from "./telegram-ingress-worker.js";
@@ -20,27 +17,14 @@ const retryInitialMs = 1000;
 const retryMaxMs = 30_000;
 let stopped = false;
 let activeController: AbortController | undefined;
-let nextSpoolRequestId = 0;
-const pendingSpoolRequests = new Map<
-  string,
-  {
-    resolve(updateId: number): void;
-    reject(err: Error): void;
-  }
->();
 
 function post(message: TelegramIngressWorkerMessage): void {
-  if (parentPort) {
-    Reflect.apply(Reflect.get(parentPort, "postMessage") as (value: unknown) => void, parentPort, [
-      message,
-    ]);
-  }
+  // oxlint-disable-next-line unicorn/require-post-message-target-origin -- Node worker_threads ports do not accept a targetOrigin argument.
+  parentPort?.postMessage(message);
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatErrorMessage(err: unknown): string {
@@ -54,52 +38,13 @@ function resolveBackoff(attempt: number): number {
   return Math.min(retryMaxMs, retryInitialMs * 2 ** Math.max(0, attempt - 1));
 }
 
-function rejectPendingSpoolRequests(err: Error): void {
-  for (const pending of pendingSpoolRequests.values()) {
-    pending.reject(err);
-  }
-  pendingSpoolRequests.clear();
-}
-
-parentPort?.on("message", (message: TelegramIngressWorkerCommand) => {
-  if (message?.type === "stop") {
-    stopped = true;
-    const err = new Error("telegram ingress worker stopped");
-    activeController?.abort(err);
-    rejectPendingSpoolRequests(err);
+parentPort?.on("message", (message: { type?: string }) => {
+  if (message?.type !== "stop") {
     return;
   }
-  if (message?.type !== "spool-ack") {
-    return;
-  }
-  const pending = pendingSpoolRequests.get(message.requestId);
-  if (!pending) {
-    return;
-  }
-  pendingSpoolRequests.delete(message.requestId);
-  if (message.result.ok) {
-    pending.resolve(message.result.updateId);
-    return;
-  }
-  pending.reject(new Error(message.result.message));
+  stopped = true;
+  activeController?.abort(new Error("telegram ingress worker stopped"));
 });
-
-async function requestSpoolUpdate(params: { update: unknown; queued: number }): Promise<number> {
-  if (!parentPort) {
-    throw new Error("Telegram ingress worker missing parent port.");
-  }
-  const requestId = String(++nextSpoolRequestId);
-  const updateId = await new Promise<number>((resolve, reject) => {
-    pendingSpoolRequests.set(requestId, { resolve, reject });
-    post({
-      type: "update",
-      requestId,
-      update: params.update,
-      queued: params.queued,
-    });
-  });
-  return updateId;
-}
 
 async function fetchJson(params: {
   fetch: typeof fetch;
@@ -146,7 +91,10 @@ async function main(): Promise<void> {
   const fetchImpl = transport.fetch ?? globalThis.fetch;
   const apiRoot = normalizeTelegramApiRoot(options.apiRoot ?? "https://api.telegram.org");
   const getUpdatesUrl = `${apiRoot}/bot${options.token}/getUpdates`;
-  const pollTimeoutSeconds = resolveTelegramLongPollTimeoutSeconds(options.timeoutSeconds);
+  const pollTimeoutSeconds =
+    typeof options.timeoutSeconds === "number" && Number.isFinite(options.timeoutSeconds)
+      ? Math.max(1, Math.floor(options.timeoutSeconds))
+      : 30;
   let lastUpdateId = options.initialUpdateId;
   let failures = 0;
 
@@ -176,7 +124,10 @@ async function main(): Promise<void> {
           if (stopped) {
             break;
           }
-          const updateId = await requestSpoolUpdate({ update, queued: result.length });
+          const updateId = await writeTelegramSpooledUpdate({
+            spoolDir: options.spoolDir,
+            update,
+          });
           if (lastUpdateId === null || updateId > lastUpdateId) {
             lastUpdateId = updateId;
           }
@@ -211,11 +162,8 @@ async function main(): Promise<void> {
 }
 
 main()
-  .then(() => {
-    parentPort?.close();
-  })
-  .catch((err: unknown) => {
+  .then(() => undefined)
+  .catch((err) => {
     post({ type: "poll-error", message: formatErrorMessage(err), finishedAt: Date.now() });
-    parentPort?.close();
-    process.exitCode = stopped ? 0 : 1;
+    process.exitCode = 1;
   });

@@ -1,5 +1,4 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   callQaBrowserRequest,
   qaBrowserAct,
@@ -17,10 +16,6 @@ function createEnv() {
 }
 
 describe("browser-runtime", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-  });
-
   it("sends normalized browser.request payloads through the gateway", async () => {
     const env = createEnv();
 
@@ -142,28 +137,6 @@ describe("browser-runtime", () => {
     );
   });
 
-  it("caps oversized browser request timeouts", async () => {
-    const env = createEnv();
-
-    await callQaBrowserRequest(env, {
-      method: "GET",
-      path: "/snapshot",
-      timeoutMs: Number.MAX_SAFE_INTEGER,
-    });
-
-    expect(env.gateway.call).toHaveBeenCalledWith(
-      "browser.request",
-      {
-        method: "GET",
-        path: "/snapshot",
-        query: undefined,
-        body: undefined,
-        timeoutMs: MAX_TIMER_TIMEOUT_MS,
-      },
-      { timeoutMs: MAX_TIMER_TIMEOUT_MS },
-    );
-  });
-
   it("waits until browser control reports a ready profile", async () => {
     const env = createEnv();
     env.gateway.call = vi
@@ -175,7 +148,6 @@ describe("browser-runtime", () => {
       profile: "user",
       timeoutMs: 5_000,
       intervalMs: 1,
-      sleepImpl: async () => {},
     });
 
     expect(status).toEqual({ enabled: true, running: true, cdpReady: true });

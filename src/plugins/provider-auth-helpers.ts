@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import type { OAuthCredentials } from "@earendil-works/pi-ai";
 import { resolveDefaultAgentDir } from "../agents/agent-scope-config.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
 import { upsertAuthProfile, upsertAuthProfileWithLock } from "../agents/auth-profiles/profiles.js";
@@ -13,7 +13,6 @@ import {
   type SecretInput,
   type SecretRef,
 } from "../config/types.secrets.js";
-import type { OAuthCredentials } from "../llm/oauth.js";
 import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
 import { normalizeSecretInput } from "../utils/normalize-secret-input.js";
 import type { SecretInputMode } from "./provider-auth-types.js";
@@ -180,7 +179,7 @@ export function applyAuthProfileConfig(
   );
   const existingProviderOrder =
     matchingProviderOrderEntries.length > 0
-      ? uniqueStrings(matchingProviderOrderEntries.flatMap(([, order]) => order))
+      ? [...new Set(matchingProviderOrderEntries.flatMap(([, order]) => order))]
       : undefined;
   const preferProfileFirst = params.preferProfileFirst ?? true;
   const reorderedProviderOrder =

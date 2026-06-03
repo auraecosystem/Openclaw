@@ -1,3 +1,4 @@
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { listCodexAppServerExtensionFactories } from "../../plugins/codex-app-server-extension-factory.js";
 import type {
@@ -6,7 +7,6 @@ import type {
   CodexAppServerExtensionRuntime,
   CodexAppServerToolResultEvent,
 } from "../../plugins/codex-app-server-extension-types.js";
-import type { AgentToolResult } from "../runtime/index.js";
 
 const log = createSubsystemLogger("agents/harness");
 

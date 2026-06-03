@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { withFastReplyConfig } from "./reply/get-reply-fast-path.js";
 import { loadGetReplyModuleForTest } from "./reply/get-reply.test-loader.js";
@@ -172,11 +172,8 @@ function createContinueDirectivesResult() {
 }
 
 describe("block streaming", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     await loadFreshGetReplyModuleForTest();
-  });
-
-  beforeEach(() => {
     vi.stubEnv("OPENCLAW_TEST_FAST", "1");
     mocks.resolveReplyDirectives.mockReset();
     mocks.handleInlineActions.mockReset();

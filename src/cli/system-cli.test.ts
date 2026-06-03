@@ -101,7 +101,7 @@ describe("system-cli", () => {
     await runCli(["system", "event", "--text", "ping"]);
 
     expect(callGatewayFromCli).toHaveBeenCalledTimes(1);
-    const params = gatewayCall()[2];
+    const [, , params] = gatewayCall();
     expect(params).not.toHaveProperty("sessionKey");
   });
 
@@ -109,7 +109,7 @@ describe("system-cli", () => {
     await runCli(["system", "event", "--text", "ping", "--session-key", "  "]);
 
     expect(callGatewayFromCli).toHaveBeenCalledTimes(1);
-    const params = gatewayCall()[2];
+    const [, , params] = gatewayCall();
     expect(params).not.toHaveProperty("sessionKey");
   });
 

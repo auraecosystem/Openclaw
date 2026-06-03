@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
 export function normalizeFingerprint(input: string): string {
   const trimmed = input.trim();

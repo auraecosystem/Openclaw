@@ -4,10 +4,10 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { describe, expect, it } from "vitest";
 import { resolveDefaultAgentDir } from "../src/agents/agent-scope.js";
-import { isBillingErrorMessage } from "../src/agents/embedded-agent-helpers/failover-matches.js";
 import { collectProviderApiKeys } from "../src/agents/live-auth-keys.js";
 import { isLiveProfileKeyModeEnabled, isLiveTestEnabled } from "../src/agents/live-test-helpers.js";
 import { resolveApiKeyForProvider } from "../src/agents/model-auth.js";
+import { isBillingErrorMessage } from "../src/agents/pi-embedded-helpers/failover-matches.js";
 import { loadConfig, type OpenClawConfig } from "../src/config/config.js";
 import {
   DEFAULT_LIVE_IMAGE_MODELS,
@@ -175,16 +175,12 @@ function buildLiveCases(params: {
     },
   ];
   if (params.editEnabled) {
-    const providerModel = resolveProviderModelForLiveTest(params.providerId, params.modelRef);
-    const useReferenceResolution = !(
-      params.providerId === "fal" && providerModel.startsWith("krea/v2/")
-    );
     cases.push({
       id: `${params.providerId}:edit`,
       providerId: params.providerId,
       modelRef: params.modelRef,
       prompt: editPrompt,
-      ...(useReferenceResolution ? { resolution: "1K" as const } : {}),
+      resolution: "1K",
       inputImages: [
         {
           buffer: createEditReferencePng(),
@@ -225,7 +221,7 @@ describeLive("image generation live (provider sweep)", () => {
           requireProfileKeys: REQUIRE_PROFILE_KEYS,
           hasLiveKeys,
         });
-        let authLabel;
+        let authLabel = "unresolved";
         try {
           const auth = await resolveApiKeyForProvider({
             provider: providerCase.providerId,

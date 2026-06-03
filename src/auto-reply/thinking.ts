@@ -1,4 +1,4 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import {
   BASE_THINKING_LEVELS,
   normalizeThinkLevel,
@@ -32,16 +32,16 @@ export type {
   VerboseLevel,
 } from "./thinking.shared.js";
 import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import {
   resolveProviderBinaryThinking,
   resolveProviderDefaultThinkingLevel,
   resolveProviderThinkingProfile,
   resolveProviderXHighThinking,
 } from "../plugins/provider-thinking.js";
 import type { ProviderThinkingProfile } from "../plugins/provider-thinking.types.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../shared/string-coerce.js";
 
 export type ThinkingLevelOption = {
   id: ThinkLevel;
@@ -57,22 +57,6 @@ type ResolvedThinkingProfile = {
   defaultLevel?: ThinkLevel | null;
 };
 
-function buildCatalogModelKey(provider: string, model: string): string {
-  const providerId = provider.trim();
-  const modelId = model.trim();
-  if (!providerId) {
-    return modelId;
-  }
-  if (!modelId) {
-    return providerId;
-  }
-  return normalizeOptionalLowercaseString(modelId)?.startsWith(
-    `${normalizeOptionalLowercaseString(providerId)}/`,
-  )
-    ? modelId
-    : `${providerId}/${modelId}`;
-}
-
 function resolveThinkingPolicyContext(params: {
   provider?: string | null;
   model?: string | null;
@@ -82,12 +66,8 @@ function resolveThinkingPolicyContext(params: {
   const normalizedProvider = providerRaw ? normalizeProviderId(providerRaw) : "";
   const modelId = normalizeOptionalString(params.model) ?? "";
   const modelKey = normalizeOptionalLowercaseString(params.model) ?? "";
-  const selectedCatalogKey =
-    normalizedProvider && modelId ? buildCatalogModelKey(normalizedProvider, modelId) : undefined;
   const candidate = params.catalog?.find(
-    (entry) =>
-      selectedCatalogKey !== undefined &&
-      buildCatalogModelKey(normalizeProviderId(entry.provider), entry.id) === selectedCatalogKey,
+    (entry) => normalizeProviderId(entry.provider) === normalizedProvider && entry.id === modelId,
   );
   return {
     normalizedProvider,
@@ -185,23 +165,19 @@ export function resolveThinkingProfile(params: {
     provider: context.normalizedProvider,
     modelId: context.modelId,
     reasoning: context.reasoning,
-    compat: context.compat,
   };
+  if (context.reasoning === false) {
+    return buildOffOnlyThinkingProfile();
+  }
   const pluginProfile = resolveProviderThinkingProfile({
     provider: context.normalizedProvider,
     context: providerContext,
   });
   if (pluginProfile) {
     const normalized = normalizeThinkingProfile(pluginProfile);
-    if (
-      normalized.levels.length > 0 &&
-      (context.reasoning !== false || pluginProfile.preserveWhenCatalogReasoningFalse === true)
-    ) {
+    if (normalized.levels.length > 0) {
       return normalized;
     }
-  }
-  if (context.reasoning === false) {
-    return buildOffOnlyThinkingProfile();
   }
 
   const defaultLevel = resolveProviderDefaultThinkingLevel({

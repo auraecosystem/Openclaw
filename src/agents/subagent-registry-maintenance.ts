@@ -1,5 +1,4 @@
 import { registerSessionMaintenancePreserveKeysProvider } from "../config/sessions/store-maintenance-preserve.js";
-import { isDeliverySuspended } from "./subagent-delivery-state.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import { getSubagentRunsSnapshotForRead } from "./subagent-registry-state.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
@@ -13,11 +12,11 @@ function isActiveForMaintenance(entry: SubagentRunRecord): boolean {
 }
 
 function isPendingFinalDeliveryForMaintenance(entry: SubagentRunRecord): boolean {
-  return entry.delivery?.status === "pending" || isDeliverySuspended(entry);
+  return entry.pendingFinalDelivery === true;
 }
 
 function isAwaitingCompletionAnnounceForMaintenance(entry: SubagentRunRecord): boolean {
-  return entry.expectsCompletionMessage === true && entry.delivery?.status !== "delivered";
+  return entry.expectsCompletionMessage === true && typeof entry.completionAnnouncedAt !== "number";
 }
 
 function shouldPreserveForMaintenance(entry: SubagentRunRecord): boolean {

@@ -7,8 +7,7 @@ import {
 } from "../config/config.js";
 import { makeNetworkInterfacesSnapshot } from "../test-helpers/network-interfaces.js";
 import {
-  testing,
-  consumeGatewaySigusr1RestartIntent,
+  __testing,
   consumeGatewaySigusr1RestartAuthorization,
   emitGatewayRestart,
   isGatewaySigusr1RestartExternallyAllowed,
@@ -93,7 +92,7 @@ function withRestartSupervisorEnabled(fn: () => void): void {
 describe("infra runtime", () => {
   function setupRestartSignalSuite() {
     beforeEach(() => {
-      testing.resetSigusr1State();
+      __testing.resetSigusr1State();
       relaunchGatewayScheduledTaskMock.mockReset();
       relaunchGatewayScheduledTaskMock.mockReturnValue({ ok: true, method: "schtasks" });
       cleanStaleGatewayProcessesSyncMock.mockReset();
@@ -105,7 +104,7 @@ describe("infra runtime", () => {
     });
 
     afterEach(async () => {
-      testing.resetSigusr1State();
+      __testing.resetSigusr1State();
       clearRuntimeConfigSnapshot();
       clearConfigCache();
       await vi.runOnlyPendingTimersAsync();
@@ -242,29 +241,6 @@ describe("infra runtime", () => {
         await vi.advanceTimersByTimeAsync(1_000);
 
         expect(peekGatewaySigusr1RestartReason()).toBe("update.run");
-      } finally {
-        process.removeListener("SIGUSR1", handler);
-      }
-    });
-
-    it("preserves update restart reason when an in-flight intent coalesces", () => {
-      const handler = () => {};
-      process.on("SIGUSR1", handler);
-      try {
-        expect(
-          emitGatewayRestart("config reload forced restart", {
-            force: true,
-            reason: "config reload forced restart",
-          }),
-        ).toBe(true);
-        const update = scheduleGatewaySigusr1Restart({ delayMs: 0, reason: "update.run" });
-
-        expect(update.coalesced).toBe(true);
-        expect(peekGatewaySigusr1RestartReason()).toBe("update.run");
-        expect(consumeGatewaySigusr1RestartIntent()).toEqual({
-          force: true,
-          reason: "update.run",
-        });
       } finally {
         process.removeListener("SIGUSR1", handler);
       }
@@ -676,9 +652,6 @@ describe("infra runtime", () => {
 
         await vi.advanceTimersByTimeAsync(1_000);
         expect(emitSpy).toHaveBeenCalledWith("SIGUSR1");
-        expect(consumeGatewaySigusr1RestartIntent()).toEqual({
-          force: true,
-        });
       } finally {
         process.removeListener("SIGUSR1", handler);
       }

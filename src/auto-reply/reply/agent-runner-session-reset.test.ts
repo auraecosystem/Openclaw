@@ -50,26 +50,6 @@ describe("resetReplyRunSession", () => {
       modelProvider: "qwencode",
       model: "qwen",
       contextTokens: 123,
-      contextBudgetStatus: {
-        schemaVersion: 1,
-        source: "pre-prompt-estimate",
-        updatedAt: 1,
-        provider: "qwencode",
-        model: "qwen",
-        route: "compact_then_truncate",
-        shouldCompact: true,
-        estimatedPromptTokens: 120_000,
-        contextTokenBudget: 80_000,
-        promptBudgetBeforeReserve: 70_000,
-        reserveTokens: 10_000,
-        effectiveReserveTokens: 10_000,
-        remainingPromptBudgetTokens: 0,
-        overflowTokens: 50_000,
-        toolResultReducibleChars: 0,
-        messageCount: 10,
-        unwindowedMessageCount: 10,
-        sessionId: "session",
-      },
       fallbackNoticeSelectedModel: "anthropic/claude",
       fallbackNoticeActiveModel: "openai/gpt",
       fallbackNoticeReason: "rate limit",
@@ -114,7 +94,6 @@ describe("resetReplyRunSession", () => {
     expect(activeSessionEntry?.modelProvider).toBeUndefined();
     expect(activeSessionEntry?.model).toBeUndefined();
     expect(activeSessionEntry?.contextTokens).toBeUndefined();
-    expect(activeSessionEntry?.contextBudgetStatus).toBeUndefined();
     expect(activeSessionEntry?.fallbackNoticeSelectedModel).toBeUndefined();
     expect(activeSessionEntry?.fallbackNoticeActiveModel).toBeUndefined();
     expect(activeSessionEntry?.fallbackNoticeReason).toBeUndefined();
@@ -131,7 +110,6 @@ describe("resetReplyRunSession", () => {
       main: SessionEntry;
     };
     expect(persisted.main.sessionId).toBe(activeSessionEntry?.sessionId);
-    expect(persisted.main.contextBudgetStatus).toBeUndefined();
     expect(persisted.main.fallbackNoticeReason).toBeUndefined();
   });
 

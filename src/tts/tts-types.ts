@@ -23,7 +23,6 @@ export type ResolvedTtsConfig = {
   prefsPath?: string;
   maxTextLength: number;
   timeoutMs: number;
-  timeoutMsSource?: "config" | "default";
   rawConfig?: TtsConfig;
   sourceConfig?: OpenClawConfig;
 };

@@ -20,10 +20,6 @@ describe("resolveTokenExpiryState", () => {
     expect(resolveTokenExpiryState(Number.POSITIVE_INFINITY, now)).toBe("invalid_expires");
   });
 
-  it("treats Date-invalid future timestamps as invalid_expires", () => {
-    expect(resolveTokenExpiryState(8_700_000_000_000_000, now)).toBe("invalid_expires");
-  });
-
   it("returns expired when expires is in the past", () => {
     expect(resolveTokenExpiryState(now - 1, now)).toBe("expired");
   });
@@ -49,7 +45,7 @@ describe("hasUsableOAuthCredential", () => {
       hasUsableOAuthCredential(
         {
           type: "oauth",
-          provider: "openai",
+          provider: "openai-codex",
           access: "access-token",
           refresh: "refresh-token",
           expires: now + DEFAULT_OAUTH_REFRESH_MARGIN_MS - 1,
@@ -112,7 +108,7 @@ describe("evaluateStoredCredentialEligibility", () => {
     const result = evaluateStoredCredentialEligibility({
       credential: {
         type: "oauth",
-        provider: "openai",
+        provider: "openai-codex",
         access: "",
         refresh: "",
         expires: now + 60_000,

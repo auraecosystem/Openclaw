@@ -1,5 +1,6 @@
-import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
-
 export function resolveMatrixActionLimit(raw: unknown, fallback: number): number {
-  return resolveIntegerOption(raw, fallback, { min: 1 });
+  if (typeof raw !== "number" || !Number.isFinite(raw)) {
+    return fallback;
+  }
+  return Math.max(1, Math.floor(raw));
 }

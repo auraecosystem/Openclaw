@@ -169,7 +169,7 @@ function applyProviderPlanMutations(params: {
   let changed = false;
 
   for (const providerAlias of params.deletes ?? []) {
-    if (!Object.hasOwn(currentProviders, providerAlias)) {
+    if (!Object.prototype.hasOwnProperty.call(currentProviders, providerAlias)) {
       continue;
     }
     delete currentProviders[providerAlias];
@@ -840,8 +840,8 @@ export async function runSecretsApply(params: {
       io,
       afterWrite: { mode: "auto" },
     });
-    for (const writeLocal of writes) {
-      writeTextFileAtomic(writeLocal.path, writeLocal.content, writeLocal.mode);
+    for (const write of writes) {
+      writeTextFileAtomic(write.path, write.content, write.mode);
     }
   } catch (err) {
     for (const [pathname, snapshot] of snapshots.entries()) {
@@ -869,7 +869,7 @@ export async function runSecretsApply(params: {
   };
 }
 
-export const testing = {
+export const __testing = {
   async projectConfigForTest(params: {
     plan: SecretsApplyPlan;
     env?: NodeJS.ProcessEnv;
@@ -883,4 +883,3 @@ export const testing = {
     return projected.nextConfig;
   },
 };
-export { testing as __testing };

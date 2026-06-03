@@ -1,4 +1,4 @@
-import { readPositiveIntegerParam, readStringParam } from "openclaw/plugin-sdk/param-readers";
+import { readNumberParam, readStringParam } from "openclaw/plugin-sdk/param-readers";
 import type { WebSearchProviderPlugin } from "openclaw/plugin-sdk/provider-web-search-contract";
 import { createDuckDuckGoWebSearchProviderBase } from "./ddg-search-provider.shared.js";
 
@@ -16,7 +16,7 @@ const DuckDuckGoSearchSchema = {
   properties: {
     query: { type: "string", description: "Search query string." },
     count: {
-      type: "integer",
+      type: "number",
       description: "Number of results to return (1-10).",
       minimum: 1,
       maximum: 10,
@@ -45,10 +45,7 @@ export function createDuckDuckGoWebSearchProvider(): WebSearchProviderPlugin {
         return await runDuckDuckGoSearch({
           config: ctx.config,
           query: readStringParam(args, "query", { required: true }),
-          count: readPositiveIntegerParam(args, "count", {
-            max: 10,
-            message: "count must be an integer from 1 to 10.",
-          }),
+          count: readNumberParam(args, "count", { integer: true }),
           region: readStringParam(args, "region"),
           safeSearch: readStringParam(args, "safeSearch") as
             | "strict"

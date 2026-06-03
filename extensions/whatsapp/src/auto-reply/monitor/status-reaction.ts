@@ -9,7 +9,6 @@ import { getSenderIdentity } from "../../identity.js";
 import { resolveWhatsAppReactionLevel } from "../../reaction-level.js";
 import { sendReactionWhatsApp } from "../../send.js";
 import type { WebInboundMsg } from "../types.js";
-import { resolveWhatsAppAckEmoji } from "./ack-emoji.js";
 import { resolveGroupActivationFor } from "./group-activation.js";
 
 export type { StatusReactionController };
@@ -45,11 +44,7 @@ export async function createWhatsAppStatusReactionController(
   }
 
   const ackConfig = params.cfg.channels?.whatsapp?.ackReaction;
-  const ackEmoji = resolveWhatsAppAckEmoji({
-    cfg: params.cfg,
-    agentId: params.agentId,
-    ackConfig,
-  });
+  const ackEmoji = (ackConfig?.emoji ?? "").trim();
   if (!ackEmoji) {
     return null;
   }

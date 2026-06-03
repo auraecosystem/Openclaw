@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { OpenClawConfig } from "./config/types.openclaw.js";
 
 const closeTrackedBrowserTabsForSessions = vi.hoisted(() => vi.fn(async () => 0));
 
@@ -28,28 +27,6 @@ describe("cleanupBrowserSessionsForLifecycleEnd", () => {
       sessionKeys: ["session-a", "session-b"],
       onWarn,
     });
-  });
-
-  it("skips cleanup when root browser support is disabled", async () => {
-    await expect(
-      cleanupBrowserSessionsForLifecycleEnd({
-        cfg: { browser: { enabled: false } } as OpenClawConfig,
-        sessionKeys: ["session-a"],
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(closeTrackedBrowserTabsForSessions).not.toHaveBeenCalled();
-  });
-
-  it("skips cleanup when the browser plugin entry is disabled", async () => {
-    await expect(
-      cleanupBrowserSessionsForLifecycleEnd({
-        cfg: { plugins: { entries: { browser: { enabled: false } } } } as OpenClawConfig,
-        sessionKeys: ["session-a"],
-      }),
-    ).resolves.toBeUndefined();
-
-    expect(closeTrackedBrowserTabsForSessions).not.toHaveBeenCalled();
   });
 
   it("swallows browser cleanup failures", async () => {

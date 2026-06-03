@@ -72,7 +72,7 @@ describe("promptYesNo", () => {
   });
 
   it("rejects when input closes before an answer is received", async () => {
-    readlineState.question.mockReturnValueOnce(new Promise<string>(() => {}));
+    readlineState.question.mockReturnValueOnce(new Promise<string>(() => undefined));
 
     const result = promptYesNo("Continue?");
     readlineState.emit("close");

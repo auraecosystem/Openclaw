@@ -129,8 +129,8 @@ export function createLocalShellRunner(deps: LocalShellDeps) {
           .trimEnd();
 
         if (combined) {
-          for (const lineLocal of combined.split("\n")) {
-            deps.chatLog.addSystem(`[local] ${lineLocal}`);
+          for (const line of combined.split("\n")) {
+            deps.chatLog.addSystem(`[local] ${line}`);
           }
         }
         deps.chatLog.addSystem(`[local] exit ${code ?? "?"}${signal ? ` (signal ${signal})` : ""}`);

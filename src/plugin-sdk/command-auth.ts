@@ -32,7 +32,7 @@ export {
   resolveInboundDirectDmAccessWithRuntime,
   type DirectDmCommandAuthorizationRuntime,
   type ResolvedInboundDirectDmAccess,
-} from "../channels/direct-dm-access.js";
+} from "./direct-dm.js";
 
 export {
   hasControlCommand,
@@ -97,9 +97,9 @@ export {
   listSkillCommandsForAgents,
   listSkillCommandsForWorkspace,
   resolveSkillCommandInvocation,
-} from "../skills/discovery/chat-commands.js";
+} from "../auto-reply/skill-commands.js";
 export { getPluginCommandSpecs, listProviderPluginCommandSpecs } from "../plugins/command-specs.js";
-export type { SkillCommandSpec } from "../skills/types.js";
+export type { SkillCommandSpec } from "../agents/skills.js";
 export {
   buildModelsProviderData,
   formatModelsAvailableHeader,

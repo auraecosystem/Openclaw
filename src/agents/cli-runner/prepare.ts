@@ -1,18 +1,11 @@
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { getRuntimeConfig } from "../../config/config.js";
-import {
-  assertContextEngineHostSupport,
-  buildGenericCliContextEngineHostSupport,
-} from "../../context-engine/host-compat.js";
 import { ensureContextEnginesInitialized } from "../../context-engine/init.js";
 import { resolveContextEngine } from "../../context-engine/registry.js";
 import { ensureMcpLoopbackServer } from "../../gateway/mcp-http.js";
 import {
   createMcpLoopbackServerConfig,
   getActiveMcpLoopbackRuntime,
-  resolveMcpLoopbackBearerToken,
 } from "../../gateway/mcp-http.loopback-runtime.js";
-import { resolveMcpLoopbackScopedTools } from "../../gateway/mcp-http.runtime.js";
 import { isClaudeCliProvider } from "../../plugin-sdk/anthropic-cli.js";
 import type {
   CliBackendAuthEpochMode,
@@ -21,8 +14,6 @@ import type {
 import { buildAgentHookContextChannelFields } from "../../plugins/hook-agent-context.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
-import { resolveSkillsPromptForRun } from "../../skills/loading/workspace.js";
-import { resolveUserPath } from "../../utils.js";
 import { resolveAgentDir, resolveSessionAgentIds } from "../agent-scope.js";
 import { externalCliDiscoveryForProviderAuth } from "../auth-profiles/external-cli-discovery.js";
 import { loadAuthProfileStoreForRuntime } from "../auth-profiles/store.js";
@@ -40,33 +31,26 @@ import {
 import { CLI_AUTH_EPOCH_VERSION, resolveCliAuthEpoch } from "../cli-auth-epoch.js";
 import { resolveCliBackendConfig } from "../cli-backends.js";
 import { hashCliSessionText, resolveCliSessionReuse } from "../cli-session.js";
-import {
-  claudeCliSessionTranscriptHasContent,
-  claudeCliSessionTranscriptHasOrphanedToolUse,
-} from "../command/attempt-execution.helpers.js";
+import { claudeCliSessionTranscriptHasContent } from "../command/attempt-execution.helpers.js";
 import { resolveContextWindowInfo } from "../context-window-guard.js";
-import { resolveContextTokensForModel } from "../context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../defaults.js";
+import { resolveHeartbeatPromptForSystemPrompt } from "../heartbeat-system-prompt.js";
 import {
   resolveBootstrapMaxChars,
   resolveBootstrapPromptTruncationWarningMode,
   resolveBootstrapTotalMaxChars,
-} from "../embedded-agent-helpers.js";
-import { resolvePromptBuildHookResult } from "../embedded-agent-runner/run/attempt.prompt-helpers.js";
-import {
-  prependSystemPromptAddition,
-  resolveAttemptMediaTaskSystemPromptAddition,
-} from "../embedded-agent-runner/run/attempt.prompt-helpers.js";
-import { composeSystemPromptWithHookContext } from "../embedded-agent-runner/run/attempt.thread-helpers.js";
-import { buildCurrentInboundPrompt } from "../embedded-agent-runner/run/runtime-context-prompt.js";
-import { resolveHeartbeatPromptForSystemPrompt } from "../heartbeat-system-prompt.js";
+} from "../pi-embedded-helpers.js";
+import { resolvePromptBuildHookResult } from "../pi-embedded-runner/run/attempt.prompt-helpers.js";
+import { resolveAttemptPrependSystemContext } from "../pi-embedded-runner/run/attempt.prompt-helpers.js";
+import { composeSystemPromptWithHookContext } from "../pi-embedded-runner/run/attempt.thread-helpers.js";
+import { buildCurrentInboundPrompt } from "../pi-embedded-runner/run/runtime-context-prompt.js";
 import { applyPluginTextReplacements } from "../plugin-text-transforms.js";
-import { ensureSystemPromptCacheBoundary } from "../system-prompt-cache-boundary.js";
+import { resolveSkillsPromptForRun } from "../skills.js";
+import { resolveSystemPromptOverride } from "../system-prompt-override.js";
 import { buildSystemPromptReport } from "../system-prompt-report.js";
-import { appendModelIdentitySystemPrompt, buildModelIdentityPromptLine } from "../system-prompt.js";
+import { appendModelIdentitySystemPrompt } from "../system-prompt.js";
 import { redactRunIdentifier, resolveRunWorkspaceDir } from "../workspace-run.js";
 import { prepareCliBundleMcpConfig } from "./bundle-mcp.js";
-import { prepareClaudeCliSkillsPlugin } from "./claude-skills-plugin.js";
 import { buildCliAgentSystemPrompt, normalizeCliModel } from "./helpers.js";
 import { cliBackendLog } from "./log.js";
 import {
@@ -74,7 +58,6 @@ import {
   hasCliSessionTranscript,
   loadCliSessionHistoryMessages,
   loadCliSessionReseedMessages,
-  resolveAutoCliSessionReseedHistoryChars,
 } from "./session-history.js";
 import type { CliReusableSession, PreparedCliRunContext, RunCliAgentParams } from "./types.js";
 
@@ -84,34 +67,13 @@ const prepareDeps = {
   getActiveMcpLoopbackRuntime,
   ensureMcpLoopbackServer,
   createMcpLoopbackServerConfig,
-  resolveMcpLoopbackBearerToken,
-  resolveMcpLoopbackScopedTools,
   resolveOpenClawReferencePaths: async (
     params: Parameters<typeof import("../docs-path.js").resolveOpenClawReferencePaths>[0],
   ) => (await import("../docs-path.js")).resolveOpenClawReferencePaths(params),
-  prepareClaudeCliSkillsPlugin,
+  // Surfaced as a dep so tests can stub the on-disk Claude CLI transcript probe
+  // without touching ~/.claude/projects.
   claudeCliSessionTranscriptHasContent,
-  claudeCliSessionTranscriptHasOrphanedToolUse,
 };
-
-const CLAUDE_CLI_CONTEXT_MODEL_ALIASES: Record<string, string> = {
-  opus: "claude-opus-4-8",
-  "opus-4.8": "claude-opus-4-8",
-  "opus-4-8": "claude-opus-4-8",
-  "opus-4.7": "claude-opus-4-7",
-  "opus-4-7": "claude-opus-4-7",
-  "opus-4.6": "claude-opus-4-6",
-  "opus-4-6": "claude-opus-4-6",
-  sonnet: "claude-sonnet-4-6",
-  "sonnet-4.6": "claude-sonnet-4-6",
-  "sonnet-4-6": "claude-sonnet-4-6",
-};
-
-function resolveClaudeCliContextModelId(modelId: string): string {
-  const trimmed = modelId.trim();
-  const lower = trimmed.toLowerCase();
-  return CLAUDE_CLI_CONTEXT_MODEL_ALIASES[lower] ?? trimmed;
-}
 
 export function setCliRunnerPrepareTestDeps(overrides: Partial<typeof prepareDeps>): void {
   Object.assign(prepareDeps, overrides);
@@ -151,8 +113,6 @@ export async function prepareCliRunContext(
     );
   }
   const workspaceDir = resolvedWorkspace;
-  const cwd = params.cwd ? resolveUserPath(params.cwd) : workspaceDir;
-  const cwdHash = hashCliSessionText(cwd);
 
   const backendResolved = resolveCliBackendConfig(params.provider, params.config, {
     agentId: params.agentId,
@@ -201,26 +161,12 @@ export async function prepareCliRunContext(
   const modelId = (params.model ?? "default").trim() || "default";
   const normalizedModel = normalizeCliModel(modelId, backendResolved.config);
   const modelDisplay = `${params.provider}/${modelId}`;
-  const isClaudeCli = isClaudeCliProvider(params.provider);
-  const modelContextTokens = isClaudeCli
-    ? resolveContextTokensForModel({
-        cfg: params.config,
-        provider: params.provider,
-        model: resolveClaudeCliContextModelId(modelId),
-        fallbackContextTokens: 200_000,
-        allowAsyncLoad: false,
-      })
-    : undefined;
   const contextWindowInfo = resolveContextWindowInfo({
     cfg: params.config,
     provider: params.provider,
     modelId,
-    modelContextTokens,
     defaultTokens: DEFAULT_CONTEXT_TOKENS,
   });
-  const autoReseedHistoryChars = isClaudeCli
-    ? resolveAutoCliSessionReseedHistoryChars(contextWindowInfo.tokens)
-    : undefined;
 
   const sessionLabel = params.sessionKey ?? params.sessionId;
   const { bootstrapFiles, contextFiles } = await prepareDeps.resolveBootstrapContextForRun({
@@ -275,21 +221,15 @@ export async function prepareCliRunContext(
       : undefined,
     env: mcpLoopbackRuntime
       ? {
-          OPENCLAW_MCP_TOKEN: prepareDeps.resolveMcpLoopbackBearerToken(
-            mcpLoopbackRuntime,
-            params.senderIsOwner === true,
-          ),
+          OPENCLAW_MCP_TOKEN:
+            params.senderIsOwner === true
+              ? mcpLoopbackRuntime.ownerToken
+              : mcpLoopbackRuntime.nonOwnerToken,
           OPENCLAW_MCP_AGENT_ID: sessionAgentId ?? "",
           OPENCLAW_MCP_ACCOUNT_ID: params.agentAccountId ?? "",
           OPENCLAW_MCP_SESSION_KEY: params.sessionKey ?? "",
           OPENCLAW_MCP_MESSAGE_CHANNEL: params.messageChannel ?? params.messageProvider ?? "",
-          OPENCLAW_MCP_CURRENT_CHANNEL_ID: params.currentChannelId ?? "",
-          OPENCLAW_MCP_CURRENT_THREAD_TS: params.currentThreadTs ?? "",
-          OPENCLAW_MCP_CURRENT_MESSAGE_ID:
-            params.currentMessageId != null ? String(params.currentMessageId) : "",
-          OPENCLAW_MCP_CURRENT_INBOUND_AUDIO: params.currentInboundAudio === true ? "true" : "",
           OPENCLAW_MCP_INBOUND_EVENT_KIND: params.currentInboundEventKind ?? "",
-          OPENCLAW_MCP_SOURCE_REPLY_DELIVERY_MODE: params.sourceReplyDeliveryMode ?? "",
         }
       : undefined,
     warn: (message) => cliBackendLog.warn(message),
@@ -327,20 +267,6 @@ export async function prepareCliRunContext(
           }
         }
       : undefined;
-  const claudeSkillsPlugin = await prepareDeps.prepareClaudeCliSkillsPlugin({
-    backendId: backendResolved.id,
-    skillsSnapshot: params.skillsSnapshot,
-  });
-  const preparedCleanup =
-    preparedBackendCleanup || claudeSkillsPlugin.args.length > 0
-      ? async () => {
-          try {
-            await claudeSkillsPlugin.cleanup();
-          } finally {
-            await preparedBackendCleanup?.();
-          }
-        }
-      : undefined;
   const preparedBackendClearEnv = [
     ...(preparedBackend.backend.clearEnv ?? []),
     ...(preparedExecution?.clearEnv ?? []),
@@ -350,72 +276,42 @@ export async function prepareCliRunContext(
     backend: {
       ...preparedBackend.backend,
       ...(preparedBackendClearEnv.length > 0
-        ? { clearEnv: uniqueStrings(preparedBackendClearEnv) }
+        ? { clearEnv: Array.from(new Set(preparedBackendClearEnv)) }
         : {}),
     },
     ...(preparedBackendEnv ? { env: preparedBackendEnv } : {}),
-    ...(preparedCleanup ? { cleanup: preparedCleanup } : {}),
+    ...(preparedBackendCleanup ? { cleanup: preparedBackendCleanup } : {}),
   };
-  const promptTools =
-    bundleMcpEnabled && mcpLoopbackRuntime
-      ? prepareDeps.resolveMcpLoopbackScopedTools({
-          cfg: params.config ?? getRuntimeConfig(),
-          sessionKey: params.sessionKey ?? "",
-          messageProvider: params.messageChannel ?? params.messageProvider,
-          currentChannelId: params.currentChannelId,
-          currentThreadTs: params.currentThreadTs,
-          currentMessageId: params.currentMessageId,
-          currentInboundAudio: params.currentInboundAudio,
-          accountId: params.agentAccountId,
-          inboundEventKind: params.currentInboundEventKind,
-          sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
-          senderIsOwner: params.senderIsOwner,
-        }).tools
-      : [];
-  const promptToolNamesHash =
-    bundleMcpEnabled && mcpLoopbackRuntime
-      ? hashCliSessionText(JSON.stringify(promptTools.map((tool) => tool.name).toSorted()))
-      : undefined;
-  const reusableCliSessionCandidate: CliReusableSession = params.cliSessionBinding
-    ? resolveCliSessionReuse({
-        binding: params.cliSessionBinding,
-        authProfileId: effectiveAuthProfileId,
-        authEpoch,
-        authEpochVersion: CLI_AUTH_EPOCH_VERSION,
-        extraSystemPromptHash,
-        promptToolNamesHash,
-        cwdHash,
-        mcpConfigHash: preparedBackendFinal.mcpConfigHash,
-        mcpResumeHash: preparedBackendFinal.mcpResumeHash,
-      })
-    : params.cliSessionId
-      ? { sessionId: params.cliSessionId }
-      : {};
-  const candidateClaudeCliSessionId = reusableCliSessionCandidate.sessionId?.trim() || undefined;
-  const hasClaudeCliCandidate =
-    candidateClaudeCliSessionId !== undefined && isClaudeCliProvider(params.provider);
+  // Pre-flight: if a saved Claude CLI sessionId points at a transcript that no
+  // longer exists on disk (e.g. update.run aborted mid-swap, Claude CLI was
+  // reinstalled, or the projects tree was manually pruned), `claude --resume`
+  // hangs or fails outside the cli-runner session_expired path. The persisted
+  // binding then never gets refreshed, causing every subsequent turn to retry
+  // the same dead sessionId. Drop the binding here so this turn starts fresh
+  // and the post-run flow writes the new sessionId back via setCliSessionBinding.
+  const candidateClaudeCliSessionId =
+    params.cliSessionBinding?.sessionId?.trim() || params.cliSessionId?.trim() || undefined;
   const claudeCliTranscriptMissing =
-    hasClaudeCliCandidate &&
+    candidateClaudeCliSessionId !== undefined &&
+    isClaudeCliProvider(params.provider) &&
     !(await prepareDeps.claudeCliSessionTranscriptHasContent({
       sessionId: candidateClaudeCliSessionId,
-      workspaceDir: cwd,
     }));
-  const claudeCliTranscriptOrphanedToolUse =
-    hasClaudeCliCandidate &&
-    !claudeCliTranscriptMissing &&
-    (await prepareDeps.claudeCliSessionTranscriptHasOrphanedToolUse({
-      sessionId: candidateClaudeCliSessionId,
-      workspaceDir: cwd,
-    }));
-  const claudeCliInvalidatedReason: CliReusableSession["invalidatedReason"] | undefined =
-    claudeCliTranscriptMissing
-      ? "missing-transcript"
-      : claudeCliTranscriptOrphanedToolUse
-        ? "orphaned-tool-use"
-        : undefined;
-  const reusableCliSession: CliReusableSession = claudeCliInvalidatedReason
-    ? { invalidatedReason: claudeCliInvalidatedReason }
-    : reusableCliSessionCandidate;
+  const reusableCliSession: CliReusableSession = claudeCliTranscriptMissing
+    ? { invalidatedReason: "missing-transcript" }
+    : params.cliSessionBinding
+      ? resolveCliSessionReuse({
+          binding: params.cliSessionBinding,
+          authProfileId: effectiveAuthProfileId,
+          authEpoch,
+          authEpochVersion: CLI_AUTH_EPOCH_VERSION,
+          extraSystemPromptHash,
+          mcpConfigHash: preparedBackendFinal.mcpConfigHash,
+          mcpResumeHash: preparedBackendFinal.mcpResumeHash,
+        })
+      : params.cliSessionId
+        ? { sessionId: params.cliSessionId }
+        : {};
   if (reusableCliSession.invalidatedReason) {
     cliBackendLog.info(
       `cli session reset: provider=${params.provider} reason=${reusableCliSession.invalidatedReason}`,
@@ -440,7 +336,7 @@ export async function prepareCliRunContext(
   const openClawReferences = await prepareDeps.resolveOpenClawReferencePaths({
     workspaceDir,
     argv1: process.argv[1],
-    cwd,
+    cwd: process.cwd(),
     moduleUrl: import.meta.url,
   });
   const skillsPrompt = resolveSkillsPromptForRun({
@@ -449,25 +345,28 @@ export async function prepareCliRunContext(
     config: params.config,
     agentId: sessionAgentId,
   });
-  const systemPromptSkillsPrompt = claudeSkillsPlugin.args.length > 0 ? "" : skillsPrompt;
-  const builtSystemPrompt = buildCliAgentSystemPrompt({
-    workspaceDir,
-    cwd,
-    config: params.config,
-    defaultThinkLevel: params.thinkLevel,
-    extraSystemPrompt,
-    sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
-    silentReplyPromptMode: params.silentReplyPromptMode,
-    ownerNumbers: params.ownerNumbers,
-    heartbeatPrompt,
-    docsPath: openClawReferences.docsPath ?? undefined,
-    sourcePath: openClawReferences.sourcePath ?? undefined,
-    skillsPrompt: systemPromptSkillsPrompt,
-    tools: promptTools,
-    contextFiles,
-    modelDisplay,
-    agentId: sessionAgentId,
-  });
+  const builtSystemPrompt =
+    resolveSystemPromptOverride({
+      config: params.config,
+      agentId: sessionAgentId,
+    }) ??
+    buildCliAgentSystemPrompt({
+      workspaceDir,
+      config: params.config,
+      defaultThinkLevel: params.thinkLevel,
+      extraSystemPrompt,
+      sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
+      silentReplyPromptMode: params.silentReplyPromptMode,
+      ownerNumbers: params.ownerNumbers,
+      heartbeatPrompt,
+      docsPath: openClawReferences.docsPath ?? undefined,
+      sourcePath: openClawReferences.sourcePath ?? undefined,
+      skillsPrompt,
+      tools: [],
+      contextFiles,
+      modelDisplay,
+      agentId: sessionAgentId,
+    });
   const transformedSystemPrompt =
     backendResolved.transformSystemPrompt?.({
       config: params.config,
@@ -512,37 +411,21 @@ export async function prepareCliRunContext(
     systemPrompt =
       composeSystemPromptWithHookContext({
         baseSystemPrompt: systemPrompt,
-        prependSystemContext: hookResult.prependSystemContext,
+        prependSystemContext: resolveAttemptPrependSystemContext({
+          sessionKey: params.sessionKey,
+          trigger: params.trigger,
+          hookPrependSystemContext: hookResult.prependSystemContext,
+        }),
         appendSystemContext: hookResult.appendSystemContext,
       }) ?? systemPrompt;
-    const mediaTaskSystemPromptAddition = resolveAttemptMediaTaskSystemPromptAddition({
-      sessionKey: params.sessionKey,
-      trigger: params.trigger,
-    });
-    if (mediaTaskSystemPromptAddition) {
-      systemPrompt = prependSystemPromptAddition({
-        systemPrompt: ensureSystemPromptCacheBoundary(systemPrompt),
-        systemPromptAddition: mediaTaskSystemPromptAddition,
-      });
-    }
   } catch (error) {
     cliBackendLog.warn(`cli prompt-build hook preparation failed: ${String(error)}`);
   }
-  const fullCurrentInboundPrompt = buildCurrentInboundPrompt({
+  preparedPrompt = buildCurrentInboundPrompt({
     context: params.currentInboundContext,
     prompt: preparedPrompt,
   });
-  const runCurrentInboundPrompt = buildCurrentInboundPrompt({
-    context: params.currentInboundContext,
-    prompt: preparedPrompt,
-    preferResumableText:
-      params.currentInboundEventKind === "room_event" && Boolean(reusableCliSession.sessionId),
-  });
-  const historyPromptCurrentTurn = annotateInterSessionPromptText(
-    fullCurrentInboundPrompt,
-    params.inputProvenance,
-  );
-  preparedPrompt = annotateInterSessionPromptText(runCurrentInboundPrompt, params.inputProvenance);
+  preparedPrompt = annotateInterSessionPromptText(preparedPrompt, params.inputProvenance);
   const allowRawTranscriptReseed =
     backendResolved.config.reseedFromRawTranscriptWhenUncompacted === true;
   const rawTranscriptReseedReason = reusableCliSession.sessionId
@@ -561,23 +444,11 @@ export async function prepareCliRunContext(
           allowRawTranscriptReseed,
           rawTranscriptReseedReason,
         }),
-        prompt: historyPromptCurrentTurn,
-        maxHistoryChars: autoReseedHistoryChars,
+        prompt: preparedPrompt,
       })
     : undefined;
-  const systemPromptWithReplacements = applyPluginTextReplacements(
-    systemPrompt,
-    backendResolved.textTransforms?.input,
-  );
-  // Ensure the cache boundary before appending the model identity so the identity lands in the
-  // dynamic suffix, not the cached prefix, for marker-free hook overrides — otherwise an idle
-  // turn's prefix (O + identity) diverges from an active media turn's prefix (O) and breaks
-  // prompt caching. Skip empty prompts and turns with no identity line, which need no boundary.
   systemPrompt = appendModelIdentitySystemPrompt({
-    systemPrompt:
-      buildModelIdentityPromptLine(modelDisplay) && systemPromptWithReplacements.trim().length > 0
-        ? ensureSystemPromptCacheBoundary(systemPromptWithReplacements)
-        : systemPromptWithReplacements,
+    systemPrompt: applyPluginTextReplacements(systemPrompt, backendResolved.textTransforms?.input),
     model: modelDisplay,
   });
   const systemPromptReport = buildSystemPromptReport({
@@ -599,8 +470,8 @@ export async function prepareCliRunContext(
     systemPrompt,
     bootstrapFiles,
     injectedFiles: contextFiles,
-    skillsPrompt: systemPromptSkillsPrompt,
-    tools: promptTools,
+    skillsPrompt,
+    tools: [],
     currentTurn: {
       ...(params.currentInboundEventKind ? { kind: params.currentInboundEventKind } : {}),
       promptChars: preparedPrompt.length,
@@ -622,16 +493,6 @@ export async function prepareCliRunContext(
     });
     const contextEngine =
       resolvedContextEngine.info.id !== "legacy" ? resolvedContextEngine : undefined;
-    if (contextEngine) {
-      assertContextEngineHostSupport({
-        contextEngine,
-        operation: "agent-run",
-        host: buildGenericCliContextEngineHostSupport({
-          backendId: backendResolved.id,
-          capabilities: backendResolved.contextEngineHostCapabilities,
-        }),
-      });
-    }
     const hadSessionFile = await hasCliSessionTranscript({
       sessionId: params.sessionId,
       sessionFile: params.sessionFile,
@@ -651,7 +512,6 @@ export async function prepareCliRunContext(
       effectiveAuthProfileId,
       started,
       workspaceDir,
-      cwd,
       backendResolved,
       preparedBackend: preparedBackendFinal,
       reusableCliSession,
@@ -664,15 +524,12 @@ export async function prepareCliRunContext(
       contextWindowInfo,
       systemPrompt,
       systemPromptReport,
-      claudeSkillsPluginArgs: claudeSkillsPlugin.args,
       bootstrapPromptWarningLines: bootstrapPromptWarning.lines,
       ...(openClawHistoryPrompt ? { openClawHistoryPrompt } : {}),
       heartbeatPrompt,
       authEpoch,
       authEpochVersion: CLI_AUTH_EPOCH_VERSION,
       extraSystemPromptHash,
-      promptToolNamesHash,
-      cwdHash,
     };
   } catch (err) {
     try {

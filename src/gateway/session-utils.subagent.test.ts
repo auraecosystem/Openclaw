@@ -111,7 +111,6 @@ describe("listSessionsFromStore subagent metadata", () => {
         updatedAt: now - 1_000,
         spawnedBy: "agent:main:subagent:parent",
         spawnedWorkspaceDir: "/tmp/child-workspace",
-        spawnedCwd: "/tmp/task-repo",
         forkedFromParent: true,
         spawnDepth: 2,
         subagentRole: "orchestrator",
@@ -195,7 +194,6 @@ describe("listSessionsFromStore subagent metadata", () => {
     expect(child?.endedAt).toBe(now - 2_500);
     expect(child?.runtimeMs).toBe(5_000);
     expect(child?.spawnedWorkspaceDir).toBe("/tmp/child-workspace");
-    expect(child?.spawnedCwd).toBe("/tmp/task-repo");
     expect(child?.forkedFromParent).toBe(true);
     expect(child?.spawnDepth).toBe(2);
     expect(child?.subagentRole).toBe("orchestrator");

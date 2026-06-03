@@ -13,13 +13,8 @@ export type GatewayAgentModel = {
 
 export type GatewayAgentRuntime = {
   id: string;
-  fallback?: "openclaw" | "none";
+  fallback?: "pi" | "none";
   source: "env" | "agent" | "defaults" | "model" | "provider" | "implicit" | "session-key";
-};
-
-export type GatewayThinkingLevelOption = {
-  id: string;
-  label: string;
 };
 
 export type GatewayAgentRow = {
@@ -29,9 +24,6 @@ export type GatewayAgentRow = {
   workspace?: string;
   model?: GatewayAgentModel;
   agentRuntime?: GatewayAgentRuntime;
-  thinkingLevels?: GatewayThinkingLevelOption[];
-  thinkingOptions?: string[];
-  thinkingDefault?: string;
 };
 
 export type SessionsListResultBase<TDefaults, TRow> = {
@@ -40,8 +32,6 @@ export type SessionsListResultBase<TDefaults, TRow> = {
   count: number;
   totalCount?: number;
   limitApplied?: number;
-  offset?: number;
-  nextOffset?: number | null;
   hasMore?: boolean;
   defaults: TDefaults;
   sessions: TRow[];

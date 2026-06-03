@@ -1,5 +1,5 @@
 ---
-summary: "OpenClaw Amazon Bedrock provider plugin with model discovery, embeddings, and guardrail support."
+summary: "Adds Amazon Bedrock model provider support to OpenClaw."
 read_when:
   - You are installing, configuring, or auditing the amazon-bedrock plugin
 title: "Amazon Bedrock plugin"
@@ -7,7 +7,7 @@ title: "Amazon Bedrock plugin"
 
 # Amazon Bedrock plugin
 
-OpenClaw Amazon Bedrock provider plugin with model discovery, embeddings, and guardrail support.
+Adds Amazon Bedrock model provider support to OpenClaw.
 
 ## Distribution
 

@@ -2,31 +2,12 @@ import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Worker } from "node:worker_threads";
-import {
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationSeconds,
-} from "@openclaw/normalization-core/number-coercion";
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { uniqueValues } from "@openclaw/normalization-core/string-normalization";
+import type { AgentToolUpdateCallback } from "@earendil-works/pi-agent-core";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { resolveAgentConfig } from "./agent-scope-config.js";
-import type { HookContext } from "./agent-tools.before-tool-call.js";
-import {
-  CODE_MODE_EXEC_TOOL_NAME,
-  CODE_MODE_WAIT_TOOL_NAME,
-  isCodeModeControlTool,
-  markCodeModeControlTool,
-} from "./code-mode-control-tools.js";
-import {
-  createCodeModeApiVirtualFiles,
-  createCodeModeNamespaceRuntime,
-  describeCodeModeNamespacesForPrompt,
-  type CodeModeNamespaceRuntime,
-} from "./code-mode-namespaces.js";
-import type { AgentToolUpdateCallback } from "./runtime/index.js";
+import type { HookContext } from "./pi-tools.before-tool-call.js";
 import { optionalStringEnum } from "./schema/typebox.js";
-import type { ToolDefinition } from "./sessions/index.js";
 import {
   addClientToolsToToolCatalog,
   applyToolCatalogCompaction,
@@ -35,7 +16,6 @@ import {
   TOOL_SEARCH_CODE_MODE_TOOL_NAME,
   TOOL_SEARCH_RAW_TOOL_NAME,
   ToolSearchRuntime,
-  type ToolSearchCatalogEntry,
   type ToolSearchCatalogRef,
   type ToolSearchConfig,
   type ToolSearchToolContext,
@@ -46,11 +26,11 @@ import {
   ToolInputError,
   type AnyAgentTool,
 } from "./tools/common.js";
-export {
-  CODE_MODE_EXEC_TOOL_NAME,
-  CODE_MODE_WAIT_TOOL_NAME,
-  isCodeModeControlTool,
-} from "./code-mode-control-tools.js";
+
+export const CODE_MODE_EXEC_TOOL_NAME = "exec";
+export const CODE_MODE_WAIT_TOOL_NAME = "wait";
+
+const codeModeControlTools = new WeakSet<AnyAgentTool>();
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_MEMORY_LIMIT_BYTES = 64 * 1024 * 1024;
@@ -79,7 +59,7 @@ export type CodeModeConfig = {
   maxSearchLimit: number;
 };
 
-type CodeModeBridgeMethod = "search" | "describe" | "call" | "yield" | "namespace";
+type CodeModeBridgeMethod = "search" | "describe" | "call" | "yield";
 
 type PendingBridgeRequest = {
   id: string;
@@ -110,18 +90,9 @@ type CodeModeRunState = {
   createdAt: number;
   expiresAt: number;
   runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
 };
 
 type CodeModeToolContext = ToolSearchToolContext;
-
-type CodeModeFailureCode =
-  | "invalid_input"
-  | "runtime_unavailable"
-  | "timeout"
-  | "output_limit_exceeded"
-  | "snapshot_limit_exceeded"
-  | "internal_error";
 
 type CodeModeWorkerResult =
   | {
@@ -138,35 +109,28 @@ type CodeModeWorkerResult =
   | {
       status: "failed";
       error: string;
-      code: CodeModeFailureCode;
+      code: "invalid_input" | "internal_error";
       output: unknown[];
     };
 
 const activeRuns = new Map<string, CodeModeRunState>();
 const resumingRunIds = new Set<string>();
-let activeRunReservations = 0;
 let typescriptRuntimePromise: Promise<typeof import("typescript")> | null = null;
-let typescriptRuntimeForTest: typeof import("typescript") | null = null;
 
-function normalizeCodeModeRawConfig(value: unknown): Record<string, unknown> | undefined {
-  const codeMode = value;
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function readCodeModeRawConfig(config?: OpenClawConfig): Record<string, unknown> {
+  const tools = isRecord(config?.tools) ? config.tools : undefined;
+  const codeMode = tools?.codeMode;
   if (codeMode === true) {
     return { enabled: true };
   }
   if (codeMode === false) {
     return { enabled: false };
   }
-  return isRecord(codeMode) ? codeMode : undefined;
-}
-
-function readCodeModeRawConfig(config?: OpenClawConfig, agentId?: string): Record<string, unknown> {
-  const tools = isRecord(config?.tools) ? config.tools : undefined;
-  const globalRaw = normalizeCodeModeRawConfig(tools?.codeMode) ?? {};
-  const agentRaw =
-    config && agentId
-      ? normalizeCodeModeRawConfig(resolveAgentConfig(config, agentId)?.tools?.codeMode)
-      : undefined;
-  return agentRaw ? { ...globalRaw, ...agentRaw } : globalRaw;
+  return isRecord(codeMode) ? codeMode : {};
 }
 
 function readBoolean(value: unknown, fallback: boolean): boolean {
@@ -188,11 +152,11 @@ function readLanguages(value: unknown): CodeModeLanguage[] {
   const languages = value.filter(
     (entry): entry is CodeModeLanguage => entry === "javascript" || entry === "typescript",
   );
-  return languages.length > 0 ? uniqueValues(languages) : ["javascript", "typescript"];
+  return languages.length > 0 ? [...new Set(languages)] : ["javascript", "typescript"];
 }
 
-export function resolveCodeModeConfig(config?: OpenClawConfig, agentId?: string): CodeModeConfig {
-  const raw = readCodeModeRawConfig(config, agentId);
+export function resolveCodeModeConfig(config?: OpenClawConfig): CodeModeConfig {
+  const raw = readCodeModeRawConfig(config);
   const maxSearchLimit = clampInteger(
     readPositiveInteger(raw.maxSearchLimit, DEFAULT_MAX_SEARCH_LIMIT),
     1,
@@ -248,37 +212,29 @@ function toToolSearchConfig(config: CodeModeConfig): ToolSearchConfig {
   };
 }
 
+export function isCodeModeControlTool(tool: AnyAgentTool): boolean {
+  return codeModeControlTools.has(tool);
+}
+
+function markCodeModeControlTool<T extends AnyAgentTool>(tool: T): T {
+  codeModeControlTools.add(tool);
+  return tool;
+}
+
 function removeExpiredRuns(now = Date.now()): void {
   for (const [runId, state] of activeRuns) {
-    if (!isFutureDateTimestampMs(state.expiresAt, { nowMs: now })) {
+    if (state.expiresAt <= now) {
       activeRuns.delete(runId);
       resumingRunIds.delete(runId);
     }
   }
 }
 
-function resolveCodeModeSnapshotExpiresAt(now: number, ttlSeconds: number): number | undefined {
-  return resolveExpiresAtMsFromDurationSeconds(ttlSeconds, { nowMs: now });
-}
-
 function enforceActiveRunLimit(): void {
   removeExpiredRuns();
-  if (activeRuns.size + activeRunReservations >= MAX_ACTIVE_CODE_MODE_RUNS) {
+  if (activeRuns.size >= MAX_ACTIVE_CODE_MODE_RUNS) {
     throw new ToolInputError("too many suspended code mode runs.");
   }
-}
-
-function reserveActiveRunSlot(): () => void {
-  enforceActiveRunLimit();
-  activeRunReservations += 1;
-  let released = false;
-  return () => {
-    if (released) {
-      return;
-    }
-    released = true;
-    activeRunReservations = Math.max(0, activeRunReservations - 1);
-  };
 }
 
 function toJsonSafe(value: unknown): unknown {
@@ -286,8 +242,7 @@ function toJsonSafe(value: unknown): unknown {
     return null;
   }
   try {
-    const serialized = JSON.stringify(value);
-    return serialized === undefined ? null : (JSON.parse(serialized) as unknown);
+    return JSON.parse(JSON.stringify(value)) as unknown;
   } catch {
     if (value instanceof Error) {
       return { name: value.name, message: value.message };
@@ -314,29 +269,9 @@ function jsonByteLength(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(toJsonSafe(value)) ?? "null", "utf8");
 }
 
-class CodeModeLimitError extends ToolInputError {
-  readonly code: Extract<CodeModeFailureCode, "output_limit_exceeded" | "snapshot_limit_exceeded">;
-
-  constructor(
-    code: Extract<CodeModeFailureCode, "output_limit_exceeded" | "snapshot_limit_exceeded">,
-    message: string,
-  ) {
-    super(message);
-    this.name = "CodeModeLimitError";
-    this.code = code;
-  }
-}
-
-function codeModeFailureCode(error: unknown): CodeModeFailureCode {
-  if (error instanceof CodeModeLimitError) {
-    return error.code;
-  }
-  return error instanceof ToolInputError ? "invalid_input" : "internal_error";
-}
-
 function enforceOutputLimit(output: unknown[], config: CodeModeConfig): void {
   if (jsonByteLength(output) > config.maxOutputBytes) {
-    throw new CodeModeLimitError("output_limit_exceeded", "code mode output limit exceeded");
+    throw new ToolInputError("code mode output limit exceeded");
   }
 }
 
@@ -347,24 +282,15 @@ function enforceResultLimit(params: {
 }): void {
   enforceOutputLimit(params.output, params.config);
   if (params.value !== undefined && jsonByteLength(params.value) > params.config.maxOutputBytes) {
-    throw new CodeModeLimitError("output_limit_exceeded", "code mode output limit exceeded");
+    throw new ToolInputError("code mode output limit exceeded");
   }
 }
 
 function readCode(args: unknown): { code: string; language?: CodeModeLanguage } {
   const params = asToolParamsRecord(args);
-  const codeParam = params.code;
-  const commandParam = params.command;
-  if (
-    typeof codeParam === "string" &&
-    typeof commandParam === "string" &&
-    codeParam !== commandParam
-  ) {
-    throw new ToolInputError("code and command must match when both are provided.");
-  }
-  const code = typeof commandParam === "string" ? commandParam : codeParam;
+  const code = params.code;
   if (typeof code !== "string" || !code.trim()) {
-    throw new ToolInputError("code or command must be a non-empty string.");
+    throw new ToolInputError("code must be a non-empty string.");
   }
   const language = params.language;
   if (language !== undefined && language !== "javascript" && language !== "typescript") {
@@ -444,9 +370,6 @@ function rejectsModuleAccess(code: string): boolean {
 }
 
 async function loadTypeScriptRuntime(): Promise<typeof import("typescript")> {
-  if (typescriptRuntimeForTest) {
-    return typescriptRuntimeForTest;
-  }
   typescriptRuntimePromise ??= import("typescript");
   return await typescriptRuntimePromise;
 }
@@ -498,11 +421,10 @@ function errorMessage(error: unknown): string {
 
 async function runBridgeRequest(params: {
   runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
   parentToolCallId: string;
   request: PendingBridgeRequest;
   signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
+  onUpdate?: AgentToolUpdateCallback<unknown>;
 }): Promise<SettledBridgeRequest> {
   try {
     const values = Array.isArray(params.request.args) ? params.request.args : [];
@@ -516,7 +438,6 @@ async function runBridgeRequest(params: {
         const options = isRecord(values[1]) ? values[1] : undefined;
         value = await params.runtime.search(query, {
           limit: typeof options?.limit === "number" ? options.limit : undefined,
-          includeMcp: false,
         });
         break;
       }
@@ -525,7 +446,7 @@ async function runBridgeRequest(params: {
         if (typeof id !== "string") {
           throw new ToolInputError("describe id must be a string.");
         }
-        value = await params.runtime.describe(id, { includeMcp: false });
+        value = await params.runtime.describe(id);
         break;
       }
       case "call": {
@@ -533,8 +454,7 @@ async function runBridgeRequest(params: {
         if (typeof id !== "string") {
           throw new ToolInputError("call id must be a string.");
         }
-        const described = await params.runtime.describe(id, { includeMcp: false });
-        value = await params.runtime.callExactId(described.id, values[1] ?? {}, {
+        value = await params.runtime.call(id, values[1] ?? {}, {
           parentToolCallId: params.parentToolCallId,
           signal: params.signal,
           onUpdate: params.onUpdate,
@@ -543,52 +463,6 @@ async function runBridgeRequest(params: {
       }
       case "yield": {
         value = { status: "yielded", reason: values[0] ?? null };
-        break;
-      }
-      case "namespace": {
-        const namespaceId = values[0];
-        const pathLocal = values[1];
-        const callArgs = values[2];
-        if (typeof namespaceId !== "string") {
-          throw new ToolInputError("namespace id must be a string.");
-        }
-        if (!Array.isArray(pathLocal) || !pathLocal.every((entry) => typeof entry === "string")) {
-          throw new ToolInputError("namespace path must be an array of strings.");
-        }
-        value = await params.namespaceRuntime.invoke(
-          namespaceId,
-          pathLocal,
-          Array.isArray(callArgs) ? callArgs : [],
-          async (request) => {
-            const entry = request.catalogId
-              ? params.runtime
-                  .namespaceEntries()
-                  .find((candidate) => candidate.id === request.catalogId)
-              : params.runtime
-                  .namespaceEntries()
-                  .find(
-                    (candidate) =>
-                      candidate.name === request.toolName &&
-                      candidate.sourceName === request.pluginId,
-                  );
-            if (!entry) {
-              throw new ToolInputError(
-                `namespace tool is not visible in the run catalog: ${request.toolName}`,
-              );
-            }
-            const called = await params.runtime.callExactId(entry.id, request.input, {
-              parentToolCallId: params.parentToolCallId,
-              signal: params.signal,
-              onUpdate: params.onUpdate,
-            });
-            if (request.catalogId) {
-              return called.result;
-            }
-            return isRecord(called.result) && "details" in called.result
-              ? called.result.details
-              : called.result;
-          },
-        );
         break;
       }
     }
@@ -614,49 +488,13 @@ function codeModeWorkerUrl(): URL {
   return resolveCodeModeWorkerUrl(import.meta.url);
 }
 
-function failedCodeModeWorkerResult(
-  error: unknown,
-  code: CodeModeFailureCode,
-): Extract<CodeModeWorkerResult, { status: "failed" }> {
-  return {
-    status: "failed",
-    error: errorMessage(error),
-    code,
-    output: [],
-  };
-}
-
-function isQuickJsInterruptedWorkerError(error: unknown): boolean {
-  return String(error) === "interrupted";
-}
-
-function normalizeCodeModeWorkerResult(result: CodeModeWorkerResult): CodeModeWorkerResult {
-  if (
-    result.status === "failed" &&
-    result.code === "timeout" &&
-    isQuickJsInterruptedWorkerError(result.error)
-  ) {
-    return {
-      ...result,
-      error: "code mode timeout exceeded",
-    };
-  }
-  return result;
-}
-
 async function runCodeModeWorker(
   workerData: unknown,
   timeoutMs: number,
-  workerUrl?: URL,
 ): Promise<CodeModeWorkerResult> {
-  let worker: Worker;
-  try {
-    worker = new Worker(workerUrl ?? codeModeWorkerUrl(), {
-      workerData,
-    });
-  } catch (error) {
-    return failedCodeModeWorkerResult(error, "runtime_unavailable");
-  }
+  const worker = new Worker(codeModeWorkerUrl(), {
+    workerData,
+  });
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await new Promise<CodeModeWorkerResult>((resolve) => {
@@ -673,33 +511,39 @@ async function runCodeModeWorker(
         finish({
           status: "failed",
           error: "code mode worker timeout exceeded",
-          code: "timeout",
+          code: "internal_error",
           output: [],
         });
       }, timeoutMs);
       worker.once("message", (message: unknown) => {
         void worker.terminate();
-        const result = isRecord(message)
-          ? (message as CodeModeWorkerResult)
-          : ({
-              status: "failed",
-              error: "invalid code mode worker response",
-              code: "internal_error",
-              output: [],
-            } satisfies CodeModeWorkerResult);
-        finish(normalizeCodeModeWorkerResult(result));
+        finish(
+          isRecord(message)
+            ? (message as CodeModeWorkerResult)
+            : {
+                status: "failed",
+                error: "invalid code mode worker response",
+                code: "internal_error",
+                output: [],
+              },
+        );
       });
       worker.once("error", (error) => {
-        finish(failedCodeModeWorkerResult(error, "runtime_unavailable"));
+        finish({
+          status: "failed",
+          error: errorMessage(error),
+          code: "internal_error",
+          output: [],
+        });
       });
       worker.once("exit", (code) => {
         if (code !== 0) {
-          finish(
-            failedCodeModeWorkerResult(
-              new Error(`code mode worker exited with code ${code}`),
-              "runtime_unavailable",
-            ),
-          );
+          finish({
+            status: "failed",
+            error: `code mode worker exited with code ${code}`,
+            code: "internal_error",
+            output: [],
+          });
         }
       });
     });
@@ -717,50 +561,19 @@ function snapshotState(params: {
   ctx: ToolSearchToolContext;
   config: CodeModeConfig;
   runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
   output: unknown[];
   signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
-}) {
-  enforceSnapshotStateLimits(params);
-  return storeSnapshotState({
-    ...params,
-    pending: createPendingBridgeStates(params),
-  });
-}
-
-function enforceSnapshotStateLimits(params: {
-  snapshotBytes: Uint8Array;
-  config: CodeModeConfig;
-  output: unknown[];
+  onUpdate?: AgentToolUpdateCallback<unknown>;
 }) {
   enforceActiveRunLimit();
-  enforceSnapshotPayloadLimits(params);
-}
-
-function enforceSnapshotPayloadLimits(params: {
-  snapshotBytes: Uint8Array;
-  config: CodeModeConfig;
-  output: unknown[];
-}) {
   if (params.snapshotBytes.byteLength > params.config.maxSnapshotBytes) {
-    throw new CodeModeLimitError("snapshot_limit_exceeded", "code mode snapshot limit exceeded");
+    throw new ToolInputError("code mode snapshot limit exceeded");
   }
   enforceOutputLimit(params.output, params.config);
-}
-
-function createPendingBridgeStates(params: {
-  pendingRequests: PendingBridgeRequest[];
-  runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
-  parentToolCallId: string;
-  signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
-}): PendingBridgeState[] {
-  return params.pendingRequests.map((request) => {
+  const runId = `cm_${randomUUID()}`;
+  const pending = params.pendingRequests.map((request) => {
     const promise = runBridgeRequest({
       runtime: params.runtime,
-      namespaceRuntime: params.namespaceRuntime,
       parentToolCallId: params.parentToolCallId,
       request,
       signal: params.signal,
@@ -772,42 +585,24 @@ function createPendingBridgeStates(params: {
     });
     return state;
   });
-}
-
-function storeSnapshotState(params: {
-  pending: PendingBridgeState[];
-  snapshotBytes: Uint8Array;
-  parentToolCallId: string;
-  ctx: ToolSearchToolContext;
-  config: CodeModeConfig;
-  runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
-  output: unknown[];
-}) {
-  const runId = `cm_${randomUUID()}`;
   const now = Date.now();
-  const expiresAt = resolveCodeModeSnapshotExpiresAt(now, params.config.snapshotTtlSeconds);
-  if (expiresAt === undefined) {
-    throw new ToolInputError("code mode run expiry is unavailable.");
-  }
   activeRuns.set(runId, {
     runId,
     parentToolCallId: params.parentToolCallId,
     ctx: params.ctx,
     config: params.config,
     snapshotBytes: params.snapshotBytes,
-    pending: params.pending,
+    pending,
     output: params.output,
     createdAt: now,
-    expiresAt,
+    expiresAt: now + params.config.snapshotTtlSeconds * 1000,
     runtime: params.runtime,
-    namespaceRuntime: params.namespaceRuntime,
   });
   return {
     status: "waiting" as const,
     runId,
-    reason: codeModeWaitingReason(params.pending),
-    pendingToolCalls: pendingToolCalls(params.pending),
+    reason: codeModeWaitingReason(pending),
+    pendingToolCalls: pendingToolCalls(pending),
     output: params.output,
     telemetry: telemetry(params.runtime),
   };
@@ -830,38 +625,20 @@ function telemetry(runtime: ToolSearchRuntime) {
   };
 }
 
-function createCodeModeExecDescription(
-  ctx: CodeModeToolContext,
-  catalog?: readonly ToolSearchCatalogEntry[],
-): string {
-  const namespacePrompt = describeCodeModeNamespacesForPrompt(ctx, catalog);
-  return (
-    'Run JavaScript or TypeScript in OpenClaw code mode. Use `return` to pass the final value back to the agent; awaited calls without a returned value complete as `null`. Node.js modules and `require`/`import` are NOT available; for any shell, file, network, or external action, use enabled catalog tools allowed by policy from inside your code: `tools.search(query)` to find catalog entries, `tools.describe(entry.id)` for the input schema, then `tools.call(entry.id, args)`. Read TypeScript-style declaration files with `API.list(prefix?)` and `API.read(path)`. MCP tools are available only through the `MCP` namespace. Registered plugin namespaces are available as direct globals and through `namespaces` when their required tools are visible in the run catalog. The `language` field accepts only "javascript" or "typescript"; do not pass "bash", "shell", or other values.' +
-    (namespacePrompt ? `\n\n${namespacePrompt}` : "")
-  );
-}
-
 async function runExec(params: {
   toolCallId: string;
   ctx: CodeModeToolContext;
   code: string;
   language?: CodeModeLanguage;
   signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
+  onUpdate?: AgentToolUpdateCallback<unknown>;
 }) {
   removeExpiredRuns();
-  const config = resolveCodeModeConfig(
-    params.ctx.runtimeConfig ?? params.ctx.config,
-    params.ctx.agentId,
-  );
+  const config = resolveCodeModeConfig(params.ctx.runtimeConfig ?? params.ctx.config);
   if (!config.enabled) {
     throw new ToolInputError("code mode is disabled.");
   }
   const runtime = new ToolSearchRuntime(params.ctx, toToolSearchConfig(config));
-  const catalog = runtime.all({ includeMcp: false });
-  const namespaceCatalog = runtime.namespaceEntries();
-  const namespaceRuntime = await createCodeModeNamespaceRuntime(params.ctx, namespaceCatalog);
-  const apiFiles = createCodeModeApiVirtualFiles(namespaceCatalog);
   let source: string;
   try {
     source = await prepareSource({ code: params.code, language: params.language, config });
@@ -869,41 +646,48 @@ async function runExec(params: {
     return {
       status: "failed" as const,
       error: errorMessage(error),
-      code: codeModeFailureCode(error),
+      code: error instanceof ToolInputError ? "invalid_input" : "internal_error",
       output: [],
       telemetry: telemetry(runtime),
     };
   }
   try {
-    const result = normalizeCodeModeWorkerResult(
-      await runCodeModeWorker(
-        {
-          kind: "exec",
-          source,
-          config,
-          catalog,
-          apiFiles,
-          namespaces: namespaceRuntime.descriptors,
-        },
-        config.timeoutMs + 1000,
-      ),
+    const result = await runCodeModeWorker(
+      {
+        kind: "exec",
+        source,
+        config,
+        catalog: runtime.all(),
+      },
+      config.timeoutMs + 1000,
     );
-    return await settleCodeModeResult({
-      result,
+    if (result.status === "waiting") {
+      return snapshotState({
+        pendingRequests: result.pendingRequests,
+        snapshotBytes: result.snapshotBytes,
+        parentToolCallId: params.toolCallId,
+        ctx: params.ctx,
+        config,
+        runtime,
+        output: result.output,
+        signal: params.signal,
+        onUpdate: params.onUpdate,
+      });
+    }
+    enforceResultLimit({
       output: result.output,
-      parentToolCallId: params.toolCallId,
-      ctx: params.ctx,
+      value: result.status === "completed" ? result.value : undefined,
       config,
-      runtime,
-      namespaceRuntime,
-      signal: params.signal,
-      onUpdate: params.onUpdate,
     });
+    return {
+      ...result,
+      telemetry: telemetry(runtime),
+    };
   } catch (error) {
     return {
       status: "failed" as const,
       error: errorMessage(error),
-      code: codeModeFailureCode(error),
+      code: error instanceof ToolInputError ? "invalid_input" : "internal_error",
       output: [],
       telemetry: telemetry(runtime),
     };
@@ -930,113 +714,12 @@ async function waitForPending(pending: PendingBridgeState[], timeoutMs: number):
   }
 }
 
-async function settleCodeModeResult(params: {
-  result: CodeModeWorkerResult;
-  output: unknown[];
-  parentToolCallId: string;
-  ctx: ToolSearchToolContext;
-  config: CodeModeConfig;
-  runtime: ToolSearchRuntime;
-  namespaceRuntime: CodeModeNamespaceRuntime;
-  signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
-}) {
-  let result = params.result;
-  const output = params.output;
-  let namespaceRounds = 0;
-  const settleDeadline = Date.now() + params.config.timeoutMs;
-  while (
-    result.status === "waiting" &&
-    result.pendingRequests.length > 0 &&
-    result.pendingRequests.every((request) => request.method === "namespace") &&
-    namespaceRounds < params.config.maxPendingToolCalls
-  ) {
-    const remainingMs = settleDeadline - Date.now();
-    if (remainingMs <= 0) {
-      break;
-    }
-    enforceSnapshotPayloadLimits({
-      snapshotBytes: result.snapshotBytes,
-      config: params.config,
-      output,
-    });
-    const releaseReservation = reserveActiveRunSlot();
-    try {
-      const pending = createPendingBridgeStates({
-        pendingRequests: result.pendingRequests,
-        runtime: params.runtime,
-        namespaceRuntime: params.namespaceRuntime,
-        parentToolCallId: params.parentToolCallId,
-        signal: params.signal,
-        onUpdate: params.onUpdate,
-      });
-      const ready = await waitForPending(pending, remainingMs);
-      if (!ready) {
-        return storeSnapshotState({
-          pending,
-          snapshotBytes: result.snapshotBytes,
-          parentToolCallId: params.parentToolCallId,
-          ctx: params.ctx,
-          config: params.config,
-          runtime: params.runtime,
-          namespaceRuntime: params.namespaceRuntime,
-          output,
-        });
-      }
-      const settledRequests: SettledBridgeRequest[] = [];
-      for (const entry of pending) {
-        settledRequests.push(entry.settled ?? (await entry.promise));
-      }
-      result = normalizeCodeModeWorkerResult(
-        await runCodeModeWorker(
-          {
-            kind: "resume",
-            snapshotBytes: result.snapshotBytes,
-            config: params.config,
-            settledRequests,
-          },
-          Math.max(1, settleDeadline - Date.now()) + 1000,
-        ),
-      );
-    } finally {
-      releaseReservation();
-    }
-    output.push(...result.output);
-    enforceOutputLimit(output, params.config);
-    namespaceRounds += 1;
-  }
-  if (result.status === "waiting") {
-    return snapshotState({
-      pendingRequests: result.pendingRequests,
-      snapshotBytes: result.snapshotBytes,
-      parentToolCallId: params.parentToolCallId,
-      ctx: params.ctx,
-      config: params.config,
-      runtime: params.runtime,
-      namespaceRuntime: params.namespaceRuntime,
-      output,
-      signal: params.signal,
-      onUpdate: params.onUpdate,
-    });
-  }
-  enforceResultLimit({
-    output,
-    value: result.status === "completed" ? result.value : undefined,
-    config: params.config,
-  });
-  return {
-    ...result,
-    output,
-    telemetry: telemetry(params.runtime),
-  };
-}
-
 async function runWait(params: {
   toolCallId: string;
   ctx: CodeModeToolContext;
   runId: string;
   signal?: AbortSignal;
-  onUpdate?: AgentToolUpdateCallback;
+  onUpdate?: AgentToolUpdateCallback<unknown>;
 }) {
   removeExpiredRuns();
   const state = activeRuns.get(params.runId);
@@ -1078,35 +761,45 @@ async function runWait(params: {
     for (const entry of state.pending) {
       settledRequests.push(entry.settled ?? (await entry.promise));
     }
-    const result = normalizeCodeModeWorkerResult(
-      await runCodeModeWorker(
-        {
-          kind: "resume",
-          snapshotBytes: state.snapshotBytes,
-          config: state.config,
-          settledRequests,
-        },
-        state.config.timeoutMs + 1000,
-      ),
+    const result = await runCodeModeWorker(
+      {
+        kind: "resume",
+        snapshotBytes: state.snapshotBytes,
+        config: state.config,
+        settledRequests,
+      },
+      state.config.timeoutMs + 1000,
     );
     const output = [...state.output, ...result.output];
     enforceOutputLimit(output, state.config);
-    return await settleCodeModeResult({
-      result,
+    if (result.status === "waiting") {
+      return snapshotState({
+        pendingRequests: result.pendingRequests,
+        snapshotBytes: result.snapshotBytes,
+        parentToolCallId: params.toolCallId,
+        ctx: state.ctx,
+        config: state.config,
+        runtime: state.runtime,
+        output,
+        signal: params.signal,
+        onUpdate: params.onUpdate,
+      });
+    }
+    enforceResultLimit({
       output,
-      parentToolCallId: params.toolCallId,
-      ctx: state.ctx,
+      value: result.status === "completed" ? result.value : undefined,
       config: state.config,
-      runtime: state.runtime,
-      namespaceRuntime: state.namespaceRuntime,
-      signal: params.signal,
-      onUpdate: params.onUpdate,
     });
+    return {
+      ...result,
+      output,
+      telemetry: telemetry(state.runtime),
+    };
   } catch (error) {
     return {
       status: "failed" as const,
       error: errorMessage(error),
-      code: codeModeFailureCode(error),
+      code: error instanceof ToolInputError ? "invalid_input" : "internal_error",
       output: state.output,
       telemetry: telemetry(state.runtime),
     };
@@ -1119,29 +812,19 @@ export function createCodeModeTools(ctx: CodeModeToolContext): AnyAgentTool[] {
   const execTool = markCodeModeControlTool({
     name: CODE_MODE_EXEC_TOOL_NAME,
     label: "exec",
-    description: createCodeModeExecDescription(ctx),
+    description:
+      "Run JavaScript or TypeScript in OpenClaw code mode. Use ALL_TOOLS and tools.search/describe/call inside the code to discover and call enabled tools.",
     parameters: Type.Object({
-      code: Type.Optional(
-        Type.String({
-          description:
-            "JavaScript or TypeScript source to run. The `tools` object (search/describe/call), `ALL_TOOLS`, `API` virtual declaration files, and registered namespace globals are available in scope; Node built-in modules are not.",
-        }),
-      ),
-      command: Type.Optional(
-        Type.String({
-          description: "Alias for code, provided for exec-compatible hook policies.",
-        }),
-      ),
+      code: Type.String({ description: "JavaScript or TypeScript source to run." }),
       language: optionalStringEnum(["javascript", "typescript"] as const, {
-        description:
-          'Source language. Must be "javascript" or "typescript". Defaults to javascript.',
+        description: "Source language. Defaults to javascript.",
       }),
     }),
     execute: async (
       toolCallId: string,
       args: unknown,
       signal?: AbortSignal,
-      onUpdate?: AgentToolUpdateCallback,
+      onUpdate?: AgentToolUpdateCallback<unknown>,
     ) => {
       const input = readCode(args);
       return jsonResult(
@@ -1167,7 +850,7 @@ export function createCodeModeTools(ctx: CodeModeToolContext): AnyAgentTool[] {
       toolCallId: string,
       args: unknown,
       signal?: AbortSignal,
-      onUpdate?: AgentToolUpdateCallback,
+      onUpdate?: AgentToolUpdateCallback<unknown>,
     ) =>
       jsonResult(
         await runWait({
@@ -1192,7 +875,7 @@ export function applyCodeModeCatalog(params: {
   catalogRef?: ToolSearchCatalogRef;
   toolHookContext?: HookContext;
 }) {
-  const config = resolveCodeModeConfig(params.config, params.agentId);
+  const config = resolveCodeModeConfig(params.config);
   if (!config.enabled) {
     return applyToolCatalogCompaction({
       ...params,
@@ -1208,31 +891,13 @@ export function applyCodeModeCatalog(params: {
         tool.name !== TOOL_DESCRIBE_RAW_TOOL_NAME &&
         tool.name !== TOOL_CALL_RAW_TOOL_NAME),
   );
-  const compacted = applyToolCatalogCompaction({
+  return applyToolCatalogCompaction({
     ...params,
     tools,
     enabled: true,
     isVisibleControlTool: isCodeModeControlTool,
     shouldCatalogTool: (tool) => !isCodeModeControlTool(tool),
   });
-  const visibleCatalog = params.catalogRef?.current?.entries ?? [];
-  for (const tool of compacted.tools) {
-    if (tool.name === CODE_MODE_EXEC_TOOL_NAME) {
-      tool.description = createCodeModeExecDescription(
-        {
-          config: params.config,
-          runtimeConfig: params.config,
-          agentId: params.agentId,
-          sessionId: params.sessionId,
-          sessionKey: params.sessionKey,
-          runId: params.runId,
-          catalogRef: params.catalogRef,
-        },
-        visibleCatalog,
-      );
-    }
-  }
-  return compacted;
 }
 
 export function addClientToolsToCodeModeCatalog(params: {
@@ -1246,21 +911,15 @@ export function addClientToolsToCodeModeCatalog(params: {
 }) {
   return addClientToolsToToolCatalog({
     ...params,
-    enabled: resolveCodeModeConfig(params.config, params.agentId).enabled,
+    enabled: resolveCodeModeConfig(params.config).enabled,
   });
 }
 
-export const testing = {
+export const __testing = {
   activeRuns,
   resumingRunIds,
   codeModeWorkerUrl,
-  normalizeCodeModeWorkerResult,
-  runCodeModeWorker,
   resolveCodeModeWorkerUrl,
   resolveCodeModeConfig,
   getTypescriptRuntimePromise: () => typescriptRuntimePromise,
-  setTypescriptRuntimeForTest: (runtime: typeof import("typescript") | null) => {
-    typescriptRuntimeForTest = runtime;
-  },
 };
-export { testing as __testing };

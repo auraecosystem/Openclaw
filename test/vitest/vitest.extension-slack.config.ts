@@ -10,7 +10,6 @@ export function createExtensionSlackVitestConfig(
     name: "extension-slack",
     passWithNoTests: true,
     setupFiles: ["test/setup.extensions.ts"],
-    fileParallelism: false,
   });
 }
 

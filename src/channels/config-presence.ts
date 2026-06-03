@@ -1,7 +1,5 @@
 import fs from "node:fs";
 import os from "node:os";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import {
   hasBundledChannelPersistedAuthState,
   listBundledChannelIdsWithPersistedAuthState,
@@ -9,7 +7,7 @@ import {
 import { resolveStateDir } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasNonEmptyString } from "../infra/outbound/channel-target.js";
-import type { PluginDiscoveryResult } from "../plugins/discovery.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
 import { listBundledChannelIds } from "./plugins/bundled-ids.js";
 
@@ -17,7 +15,6 @@ const IGNORED_CHANNEL_CONFIG_KEYS = new Set(["defaults", "modelByChannel"]);
 
 type ChannelPresenceOptions = {
   channelIds?: readonly string[];
-  discovery?: PluginDiscoveryResult;
   includePersistedAuthState?: boolean;
   persistedAuthStateProbe?: {
     listChannelIds: () => readonly string[];
@@ -74,9 +71,6 @@ function listPersistedAuthStateChannelIds(options: ChannelPresenceOptions): read
   if (override) {
     return override;
   }
-  if (options.discovery) {
-    return listBundledChannelIdsWithPersistedAuthState(options.discovery);
-  }
   if (persistedAuthStateChannelIds) {
     return persistedAuthStateChannelIds;
   }
@@ -94,12 +88,7 @@ function hasPersistedAuthState(params: {
   if (override) {
     return override.hasState(params);
   }
-  return hasBundledChannelPersistedAuthState({
-    channelId: params.channelId,
-    cfg: params.cfg,
-    env: params.env,
-    discovery: params.options.discovery,
-  });
+  return hasBundledChannelPersistedAuthState(params);
 }
 
 export function listPotentialConfiguredChannelIds(
@@ -107,11 +96,13 @@ export function listPotentialConfiguredChannelIds(
   env: NodeJS.ProcessEnv = process.env,
   options: ChannelPresenceOptions = {},
 ): string[] {
-  return uniqueStrings(
-    listPotentialConfiguredChannelPresenceSignals(cfg, env, options).map(
-      (signal) => signal.channelId,
+  return [
+    ...new Set(
+      listPotentialConfiguredChannelPresenceSignals(cfg, env, options).map(
+        (signal) => signal.channelId,
+      ),
     ),
-  );
+  ];
 }
 
 export function listPotentialConfiguredChannelPresenceSignals(
@@ -130,7 +121,7 @@ export function listPotentialConfiguredChannelPresenceSignals(
     signals.push({ channelId, source });
   };
   const configuredChannelIds = new Set<string>();
-  const channelIds = options.channelIds ?? listBundledChannelIds(env, options.discovery);
+  const channelIds = options.channelIds ?? listBundledChannelIds(env);
   const channelEnvPrefixes = listChannelEnvPrefixes(channelIds);
   const channels = isRecord(cfg.channels) ? cfg.channels : null;
   if (channels) {
@@ -174,7 +165,7 @@ function hasEnvConfiguredChannel(
   env: NodeJS.ProcessEnv,
   options: ChannelPresenceOptions = {},
 ): boolean {
-  const channelIds = options.channelIds ?? listBundledChannelIds(env, options.discovery);
+  const channelIds = options.channelIds ?? listBundledChannelIds(env);
   const channelEnvPrefixes = listChannelEnvPrefixes(channelIds);
   for (const [key, value] of Object.entries(env)) {
     if (!hasNonEmptyString(value)) {

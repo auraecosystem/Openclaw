@@ -3,7 +3,6 @@ import type {
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from "@agentclientprotocol/sdk";
-import { normalizeOptionalString as readNonEmptyString } from "@openclaw/normalization-core/string-coerce";
 
 export type GatewayExecApprovalDecision = "allow-once" | "allow-always" | "deny";
 
@@ -23,6 +22,10 @@ export type GatewayExecApprovalDetails = {
 };
 
 const FALLBACK_EXEC_APPROVAL_DECISIONS = ["allow-once", "deny"] as const;
+
+function readNonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
+}
 
 function normalizeGatewayExecApprovalDecision(
   value: unknown,

@@ -128,21 +128,14 @@ async function handleDiscordComponentEvent(params: {
   }
 
   const values = params.values ? mapSelectValues(consumed, params.values) : undefined;
-  const selectedCallbackData =
-    consumed.kind === "select" &&
-    consumed.callbackDataKind === "callback" &&
-    params.values?.length === 1
-      ? params.values[0]?.trim()
-      : undefined;
-  const pluginCallbackData = consumed.callbackData ?? selectedCallbackData;
-  if (pluginCallbackData) {
+  if (consumed.callbackData) {
     const pluginDispatch = await dispatchPluginDiscordInteractiveEvent({
       ctx: params.ctx,
       interaction: params.interaction,
       interactionCtx,
       channelCtx,
       isAuthorizedSender: commandAuthorized,
-      data: pluginCallbackData,
+      data: consumed.callbackData,
       kind: consumed.kind === "select" ? "select" : "button",
       values,
       messageId: consumed.messageId ?? params.interaction.message?.id,
@@ -151,21 +144,11 @@ async function handleDiscordComponentEvent(params: {
       return;
     }
   }
-  // Command actions opt into synthetic command fallback. Opaque callback actions
-  // are plugin data only; falling through as slash commands would execute data.
-  const buttonCallbackFallback =
-    consumed.kind === "button" && consumed.callbackDataKind !== "callback"
-      ? consumed.callbackData?.trim()
-      : undefined;
-  const selectedCommandFallback =
-    consumed.kind === "select" &&
-    consumed.callbackDataKind === "command" &&
-    params.values?.length === 1
-      ? params.values[0]?.trim()
-      : undefined;
+  // Preserve explicit callback payloads for button fallbacks so Discord
+  // behaves like Telegram when buttons carry synthetic command text. Select
+  // fallbacks still need their chosen values in the synthesized event text.
   const eventText =
-    buttonCallbackFallback ||
-    selectedCommandFallback ||
+    (consumed.kind === "button" ? consumed.callbackData?.trim() : undefined) ||
     (await loadComponentsRuntime()).formatDiscordComponentEventText({
       kind: consumed.kind === "select" ? "select" : "button",
       label: consumed.label,

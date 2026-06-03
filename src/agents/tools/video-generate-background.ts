@@ -46,5 +46,5 @@ export async function wakeVideoGenerationTaskCompletion(params: {
   mediaUrls?: string[];
   statsLine?: string;
 }) {
-  return await videoGenerationTaskLifecycle.wakeTaskCompletion(params);
+  await videoGenerationTaskLifecycle.wakeTaskCompletion(params);
 }

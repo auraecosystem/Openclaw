@@ -9,11 +9,6 @@ vi.mock("../secrets/channel-env-vars.js", () => ({
 
 vi.mock("../secrets/provider-env-vars.js", () => ({
   listKnownProviderAuthEnvVarNames,
-  resolveProviderAuthLookupMaps: () => ({
-    aliasMap: {},
-    envCandidateMap: {},
-    authEvidenceMap: {},
-  }),
 }));
 
 describe("config io shell env expected keys", () => {

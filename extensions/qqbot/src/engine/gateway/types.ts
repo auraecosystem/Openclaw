@@ -39,7 +39,7 @@ export interface GatewayPluginRuntime {
       resolveStorePath: (store: unknown, params: { agentId: string }) => string;
       recordInboundSession: (params: unknown) => Promise<unknown>;
     };
-    inbound: {
+    turn: {
       run: (params: unknown) => Promise<unknown>;
     };
     text: {

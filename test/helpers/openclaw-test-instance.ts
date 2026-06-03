@@ -64,62 +64,7 @@ const GATEWAY_START_TIMEOUT_MS = 60_000;
 const GATEWAY_STOP_TIMEOUT_MS = 1_500;
 const GATEWAY_ENTRYPOINT_PREPARE_TIMEOUT_MS = 120_000;
 const COMMAND_TIMEOUT_MS = 30_000;
-const LOG_TAIL_MAX_BYTES = 256 * 1024;
 const entrypointPromises = new Map<string, Promise<string[]>>();
-
-type BoundedStringLog = string[] & {
-  byteLength?: number;
-  truncated?: boolean;
-};
-
-function createBoundedStringLog(): string[] {
-  const log = [] as BoundedStringLog;
-  log.byteLength = 0;
-  log.truncated = false;
-  return log;
-}
-
-function appendLogChunk(log: string[], chunk: unknown, maxBytes = LOG_TAIL_MAX_BYTES): void {
-  const chunks = log as BoundedStringLog;
-  const limit = Math.max(1, maxBytes);
-  const text = String(chunk);
-  const textBytes = Buffer.byteLength(text);
-  if (textBytes >= limit) {
-    const buffer = Buffer.from(text);
-    const tail = buffer.subarray(buffer.length - limit).toString("utf8");
-    chunks.splice(0, chunks.length, tail);
-    chunks.byteLength = Buffer.byteLength(tail);
-    chunks.truncated = true;
-    return;
-  }
-
-  chunks.push(text);
-  chunks.byteLength = (chunks.byteLength ?? 0) + textBytes;
-  while ((chunks.byteLength ?? 0) > limit && chunks.length > 0) {
-    const first = chunks[0] ?? "";
-    const firstBytes = Buffer.byteLength(first);
-    const overflow = (chunks.byteLength ?? 0) - limit;
-    if (firstBytes <= overflow) {
-      chunks.shift();
-      chunks.byteLength = (chunks.byteLength ?? 0) - firstBytes;
-      chunks.truncated = true;
-      continue;
-    }
-
-    const buffer = Buffer.from(first);
-    const tail = buffer.subarray(overflow).toString("utf8");
-    chunks[0] = tail;
-    chunks.byteLength = chunks.reduce((total, entry) => total + Buffer.byteLength(entry), 0);
-    chunks.truncated = true;
-  }
-}
-
-function readLogBuffer(log: string[]): string {
-  const text = log.join("");
-  return (log as BoundedStringLog).truncated
-    ? `[output truncated to last ${LOG_TAIL_MAX_BYTES} bytes]\n${text}`
-    : text;
-}
 
 async function resolveBuiltGatewayEntrypoint(cwd: string): Promise<string[] | null> {
   const buildStampPath = path.join(cwd, "dist", BUILD_STAMP_FILE);
@@ -145,8 +90,8 @@ async function prepareGatewayEntrypoint(cwd: string): Promise<string[]> {
     return builtEntrypoint;
   }
 
-  const stdout = createBoundedStringLog();
-  const stderr = createBoundedStringLog();
+  const stdout: string[] = [];
+  const stderr: string[] = [];
   const child = spawn("node", ["scripts/run-node.mjs", "--help"], {
     cwd,
     env: { ...process.env, VITEST: "1" },
@@ -154,8 +99,8 @@ async function prepareGatewayEntrypoint(cwd: string): Promise<string[]> {
   });
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (d) => appendLogChunk(stdout, d));
-  child.stderr?.on("data", (d) => appendLogChunk(stderr, d));
+  child.stdout?.on("data", (d) => stdout.push(String(d)));
+  child.stderr?.on("data", (d) => stderr.push(String(d)));
 
   const completed = await Promise.race([
     new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
@@ -167,13 +112,15 @@ async function prepareGatewayEntrypoint(cwd: string): Promise<string[]> {
 
   if (completed === null) {
     child.kill("SIGKILL");
-    throw new Error(`timeout preparing gateway entrypoint\n${formatLogs(stdout, stderr)}`);
+    throw new Error(
+      `timeout preparing gateway entrypoint\n--- stdout ---\n${stdout.join("")}\n--- stderr ---\n${stderr.join("")}`,
+    );
   }
   if (completed.code !== 0) {
     throw new Error(
       `failed preparing gateway entrypoint (code=${String(completed.code)} signal=${String(
         completed.signal,
-      )})\n${formatLogs(stdout, stderr)}`,
+      )})\n--- stdout ---\n${stdout.join("")}\n--- stderr ---\n${stderr.join("")}`,
     );
   }
 
@@ -191,17 +138,13 @@ async function resolveGatewayEntrypoint(cwd: string): Promise<string[]> {
 
 const getFreePort = async () => {
   const srv = net.createServer();
-  await new Promise<void>((resolve) => {
-    srv.listen(0, "127.0.0.1", resolve);
-  });
+  await new Promise<void>((resolve) => srv.listen(0, "127.0.0.1", resolve));
   const addr = srv.address();
   if (!addr || typeof addr === "string") {
     srv.close();
     throw new Error("failed to bind ephemeral port");
   }
-  await new Promise<void>((resolve) => {
-    srv.close(() => resolve());
-  });
+  await new Promise<void>((resolve) => srv.close(() => resolve()));
   return addr.port;
 };
 
@@ -214,7 +157,7 @@ async function waitForPortOpen(
 ) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    if (hasChildExited(proc)) {
+    if (proc.exitCode !== null) {
       throw new Error(
         `gateway exited before listening (code=${String(proc.exitCode)} signal=${String(
           proc.signalCode,
@@ -253,17 +196,12 @@ async function waitForGatewayExit(
   return await Promise.race([
     new Promise<boolean>((resolve) => {
       if (child.exitCode !== null || child.signalCode !== null) {
-        resolve(true);
-        return;
+        return resolve(true);
       }
       child.once("exit", () => resolve(true));
     }),
     sleep(timeoutMs).then(() => false),
   ]);
-}
-
-function hasChildExited(child: Pick<ChildProcessWithoutNullStreams, "exitCode" | "signalCode">) {
-  return child.exitCode !== null || child.signalCode !== null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -286,7 +224,7 @@ function mergeConfig(
 }
 
 function formatLogs(stdout: string[], stderr: string[]): string {
-  return `--- stdout ---\n${readLogBuffer(stdout)}\n--- stderr ---\n${readLogBuffer(stderr)}`;
+  return `--- stdout ---\n${stdout.join("")}\n--- stderr ---\n${stderr.join("")}`;
 }
 
 function createInstanceEnv(params: {
@@ -344,8 +282,8 @@ export async function createOpenClawTestInstance(
     ),
   );
 
-  const stdout = createBoundedStringLog();
-  const stderr = createBoundedStringLog();
+  const stdout: string[] = [];
+  const stderr: string[] = [];
   const env = createInstanceEnv({
     stateEnv: state.env,
     extraEnv: options.env ?? {},
@@ -380,7 +318,7 @@ export async function createOpenClawTestInstance(
       });
     },
     startGateway: async () => {
-      if (child && !hasChildExited(child) && !child.killed) {
+      if (child && child.exitCode === null && !child.killed) {
         return;
       }
       const entrypoint = await resolveGatewayEntrypoint(cwd);
@@ -405,8 +343,8 @@ export async function createOpenClawTestInstance(
 
       child.stdout?.setEncoding("utf8");
       child.stderr?.setEncoding("utf8");
-      child.stdout?.on("data", (d) => appendLogChunk(stdout, d));
-      child.stderr?.on("data", (d) => appendLogChunk(stderr, d));
+      child.stdout?.on("data", (d) => stdout.push(String(d)));
+      child.stderr?.on("data", (d) => stderr.push(String(d)));
 
       try {
         await waitForPortOpen(
@@ -425,7 +363,7 @@ export async function createOpenClawTestInstance(
       if (!child) {
         return;
       }
-      if (!hasChildExited(child) && !child.killed) {
+      if (child.exitCode === null && !child.killed) {
         try {
           child.kill("SIGTERM");
         } catch {
@@ -436,7 +374,7 @@ export async function createOpenClawTestInstance(
         child,
         options.stopTimeoutMs ?? GATEWAY_STOP_TIMEOUT_MS,
       );
-      if (!exited && !hasChildExited(child) && !child.killed) {
+      if (!exited && child.exitCode === null && !child.killed) {
         try {
           child.kill("SIGKILL");
         } catch {
@@ -472,8 +410,8 @@ async function runCommand(params: {
   if (!command) {
     throw new Error("missing command");
   }
-  const stdout = createBoundedStringLog();
-  const stderr = createBoundedStringLog();
+  const stdout: string[] = [];
+  const stderr: string[] = [];
   const child = spawn(command, args, {
     cwd: params.cwd,
     env: params.env,
@@ -481,8 +419,8 @@ async function runCommand(params: {
   });
   child.stdout?.setEncoding("utf8");
   child.stderr?.setEncoding("utf8");
-  child.stdout?.on("data", (d) => appendLogChunk(stdout, d));
-  child.stderr?.on("data", (d) => appendLogChunk(stderr, d));
+  child.stdout?.on("data", (d) => stdout.push(String(d)));
+  child.stderr?.on("data", (d) => stderr.push(String(d)));
 
   const completed = await Promise.race([
     new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
@@ -500,15 +438,7 @@ async function runCommand(params: {
   }
   return {
     ...completed,
-    stdout: readLogBuffer(stdout),
-    stderr: readLogBuffer(stderr),
+    stdout: stdout.join(""),
+    stderr: stderr.join(""),
   };
 }
-
-export const testing = {
-  appendLogChunk,
-  createBoundedStringLog,
-  formatLogs,
-  hasChildExited,
-  waitForPortOpen,
-};

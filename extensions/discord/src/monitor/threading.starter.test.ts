@@ -1,7 +1,10 @@
 import { StickerFormatType } from "discord-api-types/v10";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChannelType, type Client } from "../internal/discord.js";
-import { resetDiscordThreadStarterCacheForTest, resolveDiscordThreadStarter } from "./threading.js";
+import {
+  __resetDiscordThreadStarterCacheForTest,
+  resolveDiscordThreadStarter,
+} from "./threading.js";
 
 type ResolvedThreadStarter = NonNullable<Awaited<ReturnType<typeof resolveDiscordThreadStarter>>>;
 
@@ -103,7 +106,7 @@ async function resolveStarter(params: {
 
 describe("resolveDiscordThreadStarter", () => {
   beforeEach(() => {
-    resetDiscordThreadStarterCacheForTest();
+    __resetDiscordThreadStarterCacheForTest();
   });
 
   it("falls back to joined embed title and description when content is empty", async () => {

@@ -9,9 +9,11 @@ let authRevoked = false;
 let gatewayConfig: {
   trustedProxies?: string[];
   allowRealIpFallback?: boolean;
+  webchat: { chatHistoryMaxChars: number };
 } = {
   trustedProxies: ["10.0.0.1"],
   allowRealIpFallback: false,
+  webchat: { chatHistoryMaxChars: 2000 },
 };
 let authCheckCalls = 0;
 
@@ -41,9 +43,9 @@ vi.mock("./http-utils.js", () => ({
     const value = req.headers[name.toLowerCase()];
     return Array.isArray(value) ? value[0] : value;
   },
-  resolveSharedSecretHttpOperatorScopes: () => ["operator.read"],
+  resolveTrustedHttpOperatorScopes: () => ["operator.read"],
   authorizeScopedGatewayHttpRequestOrReply: async () => ({
-    cfg: { gateway: {} },
+    cfg: { gateway: { webchat: { chatHistoryMaxChars: 2000 } } },
     requestAuth: { trustDeclaredOperatorScopes: true },
     operatorScopes: ["operator.read"],
   }),
@@ -113,14 +115,6 @@ vi.mock("./session-history-state.js", () => ({
 
 import { handleSessionHistoryHttpRequest } from "./sessions-history-http.js";
 
-const SESSION_HISTORY_URL = "/sessions/agent%3Amain/history";
-const SESSION_FILE = "/tmp/session-1.jsonl";
-const TRUSTED_PROXY_STARTUP_OPTIONS = {
-  auth: { mode: "trusted-proxy" } as never,
-  trustedProxies: ["10.0.0.1"],
-  allowRealIpFallback: false,
-} satisfies Parameters<typeof handleSessionHistoryHttpRequest>[2];
-
 class MockReq extends EventEmitter {
   url: string;
   method: string;
@@ -169,51 +163,6 @@ class MockRes extends EventEmitter {
   flushHeaders() {}
 }
 
-async function openSessionHistoryStream(
-  options: Parameters<typeof handleSessionHistoryHttpRequest>[2],
-) {
-  const req = new MockReq(SESSION_HISTORY_URL);
-  const res = new MockRes();
-
-  const handled = await handleSessionHistoryHttpRequest(
-    req as unknown as IncomingMessage,
-    res as unknown as ServerResponse,
-    options,
-  );
-
-  expect(handled).toBe(true);
-  expect(transcriptUpdateHandler).toBeTypeOf("function");
-
-  return res;
-}
-
-function emitTranscriptTextUpdate({
-  sessionFile = SESSION_FILE,
-  text,
-  messageId,
-}: {
-  sessionFile?: string;
-  text: string;
-  messageId: string;
-}) {
-  transcriptUpdateHandler?.({
-    sessionFile,
-    message: { role: "assistant", content: [{ type: "text", text }] },
-    messageId,
-  });
-}
-
-async function expectStreamClosedWithoutMessage(res: MockRes, text: string) {
-  await vi.waitFor(() => {
-    expect(res.writableEnded).toBe(true);
-  });
-
-  const joined = res.writes.join("");
-  expect(joined).not.toContain("event: message");
-  expect(joined).not.toContain(text);
-  expect(res.writableEnded).toBe(true);
-}
-
 afterEach(() => {
   transcriptUpdateHandler = undefined;
   authRevoked = false;
@@ -221,47 +170,105 @@ afterEach(() => {
   gatewayConfig = {
     trustedProxies: ["10.0.0.1"],
     allowRealIpFallback: false,
+    webchat: { chatHistoryMaxChars: 2000 },
   };
 });
 
 describe("session history SSE auth revocation", () => {
   it("closes the stream before delivering transcript updates after auth is revoked", async () => {
-    const res = await openSessionHistoryStream({ auth: { mode: "trusted-proxy" } as never });
+    const req = new MockReq("/sessions/agent%3Amain/history");
+    const res = new MockRes();
 
+    const handled = await handleSessionHistoryHttpRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      { auth: { mode: "trusted-proxy" } as never },
+    );
+
+    expect(handled).toBe(true);
+    expect(transcriptUpdateHandler).toBeTypeOf("function");
     expect(res.headers.get("content-type")).toContain("text/event-stream");
 
     authRevoked = true;
 
-    emitTranscriptTextUpdate({
-      text: "post-revocation secret",
+    transcriptUpdateHandler?.({
+      sessionFile: "/tmp/session-1.jsonl",
+      message: { role: "assistant", content: [{ type: "text", text: "post-revocation secret" }] },
       messageId: "m-1",
     });
 
-    await expectStreamClosedWithoutMessage(res, "post-revocation secret");
+    await vi.waitFor(() => {
+      expect(res.writableEnded).toBe(true);
+    });
+
+    const joined = res.writes.join("");
+    expect(joined).not.toContain("event: message");
+    expect(joined).not.toContain("post-revocation secret");
+    expect(res.writableEnded).toBe(true);
   });
 
   it("rechecks SSE auth against live proxy config instead of startup fallbacks", async () => {
-    const res = await openSessionHistoryStream(TRUSTED_PROXY_STARTUP_OPTIONS);
+    const req = new MockReq("/sessions/agent%3Amain/history");
+    const res = new MockRes();
 
-    gatewayConfig = {};
+    const handled = await handleSessionHistoryHttpRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      {
+        auth: { mode: "trusted-proxy" } as never,
+        trustedProxies: ["10.0.0.1"],
+        allowRealIpFallback: false,
+      },
+    );
 
-    emitTranscriptTextUpdate({
-      text: "stale-proxy event",
+    expect(handled).toBe(true);
+    expect(transcriptUpdateHandler).toBeTypeOf("function");
+
+    gatewayConfig = {
+      webchat: { chatHistoryMaxChars: 2000 },
+    };
+
+    transcriptUpdateHandler?.({
+      sessionFile: "/tmp/session-1.jsonl",
+      message: { role: "assistant", content: [{ type: "text", text: "stale-proxy event" }] },
       messageId: "m-2",
     });
 
-    await expectStreamClosedWithoutMessage(res, "stale-proxy event");
+    await vi.waitFor(() => {
+      expect(res.writableEnded).toBe(true);
+    });
+
+    const joined = res.writes.join("");
+    expect(joined).not.toContain("event: message");
+    expect(joined).not.toContain("stale-proxy event");
+    expect(res.writableEnded).toBe(true);
   });
 
   it("skips SSE reauth for transcript updates outside this stream", async () => {
-    const res = await openSessionHistoryStream(TRUSTED_PROXY_STARTUP_OPTIONS);
+    const req = new MockReq("/sessions/agent%3Amain/history");
+    const res = new MockRes();
+
+    const handled = await handleSessionHistoryHttpRequest(
+      req as unknown as IncomingMessage,
+      res as unknown as ServerResponse,
+      {
+        auth: { mode: "trusted-proxy" } as never,
+        trustedProxies: ["10.0.0.1"],
+        allowRealIpFallback: false,
+      },
+    );
+
+    expect(handled).toBe(true);
+    expect(transcriptUpdateHandler).toBeTypeOf("function");
 
     authCheckCalls = 0;
-    gatewayConfig = {};
+    gatewayConfig = {
+      webchat: { chatHistoryMaxChars: 2000 },
+    };
 
-    emitTranscriptTextUpdate({
+    transcriptUpdateHandler?.({
       sessionFile: "/tmp/other-session.jsonl",
-      text: "other session",
+      message: { role: "assistant", content: [{ type: "text", text: "other session" }] },
       messageId: "m-3",
     });
 

@@ -1,11 +1,11 @@
-import type { CompactEmbeddedAgentSessionDirect } from "../agents/embedded-agent-runner/compact.runtime.types.js";
+import type { CompactEmbeddedPiSessionDirect } from "../agents/pi-embedded-runner/compact.runtime.types.js";
 import { normalizeStructuredPromptSection } from "../agents/prompt-cache-stability.js";
 import type { MemoryCitationsMode } from "../config/types.memory.js";
 import { buildMemoryPromptSection } from "../plugins/memory-state.js";
 import type { ContextEngine, CompactResult, ContextEngineRuntimeContext } from "./types.js";
 
 type CompactRuntimeModule = {
-  compactEmbeddedAgentSessionDirect: CompactEmbeddedAgentSessionDirect;
+  compactEmbeddedPiSessionDirect: CompactEmbeddedPiSessionDirect;
 };
 
 let compactRuntimePromise: Promise<CompactRuntimeModule> | null = null;
@@ -13,7 +13,7 @@ let compactRuntimePromise: Promise<CompactRuntimeModule> | null = null;
 function loadCompactRuntime(): Promise<CompactRuntimeModule> {
   // Use a literal specifier so the bundler rewrites the runtime chunk path
   // instead of resolving a source-tree path at runtime.
-  compactRuntimePromise ??= import("../agents/embedded-agent-runner/compact.runtime.js");
+  compactRuntimePromise ??= import("../agents/pi-embedded-runner/compact.runtime.js");
   return compactRuntimePromise;
 }
 
@@ -35,10 +35,10 @@ export async function delegateCompactionToRuntime(
 ): Promise<CompactResult> {
   // Load through the dedicated runtime boundary without introducing another
   // source-level static edge into the embedded runner graph.
-  const { compactEmbeddedAgentSessionDirect } = await loadCompactRuntime();
-  type RuntimeCompactionParams = Parameters<typeof compactEmbeddedAgentSessionDirect>[0];
+  const { compactEmbeddedPiSessionDirect } = await loadCompactRuntime();
+  type RuntimeCompactionParams = Parameters<typeof compactEmbeddedPiSessionDirect>[0];
 
-  // runtimeContext carries the full CompactEmbeddedAgentSessionParams fields set
+  // runtimeContext carries the full CompactEmbeddedPiSessionParams fields set
   // by runtime callers. We spread them and override the fields that come from
   // the public ContextEngine compact() signature directly.
   const runtimeContext = (params.runtimeContext ?? {}) as ContextEngineRuntimeContext &
@@ -51,7 +51,7 @@ export async function delegateCompactionToRuntime(
       ? Math.floor(runtimeContext.currentTokenCount)
       : undefined);
 
-  const result = await compactEmbeddedAgentSessionDirect({
+  const result = await compactEmbeddedPiSessionDirect({
     ...runtimeContext,
     sessionId: params.sessionId,
     sessionFile: params.sessionFile,

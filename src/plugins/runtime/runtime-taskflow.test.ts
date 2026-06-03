@@ -7,13 +7,6 @@ import {
 } from "./runtime-task-test-harness.js";
 import { createRuntimeTaskFlow } from "./runtime-taskflow.js";
 
-function requireCreatedFlow<T>(flow: T | null): T {
-  if (!flow) {
-    throw new Error("expected managed TaskFlow creation to succeed");
-  }
-  return flow;
-}
-
 afterEach(() => {
   resetRuntimeTaskTestState({ persist: false });
 });
@@ -33,14 +26,12 @@ describe("runtime TaskFlow", () => {
       },
     });
 
-    const created = requireCreatedFlow(
-      taskFlow.createManaged({
-        controllerId: "tests/runtime-taskflow",
-        goal: "Triage inbox",
-        currentStep: "classify",
-        stateJson: { lane: "inbox" },
-      }),
-    );
+    const created = taskFlow.createManaged({
+      controllerId: "tests/runtime-taskflow",
+      goal: "Triage inbox",
+      currentStep: "classify",
+      stateJson: { lane: "inbox" },
+    });
 
     expect(created.syncMode).toBe("managed");
     expect(created.ownerKey).toBe("agent:main:main");
@@ -64,12 +55,10 @@ describe("runtime TaskFlow", () => {
       },
     });
 
-    const created = requireCreatedFlow(
-      taskFlow.createManaged({
-        controllerId: "tests/runtime-taskflow",
-        goal: "Review queue",
-      }),
-    );
+    const created = taskFlow.createManaged({
+      controllerId: "tests/runtime-taskflow",
+      goal: "Review queue",
+    });
 
     expect(created.requesterOrigin?.channel).toBe("discord");
     expect(created.requesterOrigin?.to).toBe("channel:123");
@@ -95,12 +84,10 @@ describe("runtime TaskFlow", () => {
       sessionKey: "agent:main:other",
     });
 
-    const created = requireCreatedFlow(
-      ownerTaskFlow.createManaged({
-        controllerId: "tests/runtime-taskflow",
-        goal: "Inspect PR batch",
-      }),
-    );
+    const created = ownerTaskFlow.createManaged({
+      controllerId: "tests/runtime-taskflow",
+      goal: "Inspect PR batch",
+    });
 
     expect(otherTaskFlow.get(created.flowId)).toBeUndefined();
     expect(otherTaskFlow.list()).toStrictEqual([]);

@@ -1,11 +1,6 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import { formatCliCommand } from "../cli/command-format.js";
-import {
-  commitConfigWriteWithPendingPluginInstalls,
-  hasPendingPluginInstallRecords,
-  stripPendingPluginInstallRecords,
-  unchangedPendingPluginInstallRecordIds,
-} from "../cli/plugins-install-record-commit.js";
+import { commitConfigWriteWithPendingPluginInstalls } from "../cli/plugins-install-record-commit.js";
 import type {
   AuthChoice,
   GatewayAuthChoice,
@@ -40,12 +35,10 @@ type SetupFlowChoice = WizardFlow | "import";
 type AuthChoiceModule = typeof import("../commands/auth-choice.js");
 type ConfigLoggingModule = typeof import("../config/logging.js");
 type ModelPickerModule = typeof import("../commands/model-picker.js");
-type OnboardConfigModule = typeof import("../commands/onboard-config.js");
 
 let authChoiceModulePromise: Promise<AuthChoiceModule> | undefined;
 let configLoggingModulePromise: Promise<ConfigLoggingModule> | undefined;
 let modelPickerModulePromise: Promise<ModelPickerModule> | undefined;
-let onboardConfigModulePromise: Promise<OnboardConfigModule> | undefined;
 
 function loadAuthChoiceModule(): Promise<AuthChoiceModule> {
   authChoiceModulePromise ??= import("../commands/auth-choice.js");
@@ -62,49 +55,13 @@ function loadModelPickerModule(): Promise<ModelPickerModule> {
   return modelPickerModulePromise;
 }
 
-function loadOnboardConfigModule(): Promise<OnboardConfigModule> {
-  onboardConfigModulePromise ??= import("../commands/onboard-config.js");
-  return onboardConfigModulePromise;
-}
-
-async function writeWizardConfigFile(
-  configInput: OpenClawConfig,
-  opts: {
-    allowConfigSizeDrop?: boolean;
-    migrationBaseConfig?: OpenClawConfig;
-    onPendingPluginInstallMigration?: () => void;
-  } = {},
-): Promise<OpenClawConfig> {
-  let config = configInput;
-  const allowConfigSizeDrop = opts.allowConfigSizeDrop === true;
-  if (!allowConfigSizeDrop && hasPendingPluginInstallRecords(config)) {
-    const migrationBaseConfig = opts.migrationBaseConfig;
-    if (migrationBaseConfig && hasPendingPluginInstallRecords(migrationBaseConfig)) {
-      await commitConfigWriteWithPendingPluginInstalls({
-        nextConfig: migrationBaseConfig,
-        writeOptions: { allowConfigSizeDrop: true },
-        commit: async (nextConfig, writeOptions) => {
-          return await replaceConfigFile({
-            nextConfig,
-            ...(writeOptions ? { writeOptions } : {}),
-            afterWrite: { mode: "auto" },
-          });
-        },
-      });
-      config = stripPendingPluginInstallRecords(
-        config,
-        unchangedPendingPluginInstallRecordIds(config, migrationBaseConfig),
-      );
-      opts.onPendingPluginInstallMigration?.();
-    }
-  }
+async function writeWizardConfigFile(config: OpenClawConfig): Promise<OpenClawConfig> {
   const committed = await commitConfigWriteWithPendingPluginInstalls({
     nextConfig: config,
-    writeOptions: { allowConfigSizeDrop },
     commit: async (nextConfig, writeOptions) => {
       return await replaceConfigFile({
         nextConfig,
-        ...(writeOptions ? { writeOptions } : {}),
+        writeOptions: { ...writeOptions, allowConfigSizeDrop: true },
         afterWrite: { mode: "auto" },
       });
     },
@@ -222,10 +179,9 @@ async function requireRiskAcknowledgement(params: {
 
 export async function runSetupWizard(
   opts: OnboardOptions,
-  runtimeInput: RuntimeEnv | undefined,
+  runtime: RuntimeEnv | undefined,
   prompter: WizardPrompter,
 ) {
-  let runtime = runtimeInput;
   runtime ??= defaultRuntime;
   const onboardHelpers = await import("../commands/onboard-helpers.js");
   onboardHelpers.printWizardHeader(runtime);
@@ -238,22 +194,6 @@ export async function runSetupWizard(
       ? (snapshot.sourceConfig ?? snapshot.config)
       : {}
     : {};
-  // Ordinary onboard reruns must preserve existing agents.list / bindings. Only
-  // explicit reset or import flows are allowed to shrink the config — see issue
-  // openclaw#84692.
-  let configResetPerformed = false;
-  let pendingPluginInstallMigrationBaseConfig: OpenClawConfig | undefined = baseConfig;
-  const writeSetupConfigFile = async (
-    config: OpenClawConfig,
-    optsLocal: { allowConfigSizeDrop?: boolean } = {},
-  ) =>
-    await writeWizardConfigFile(config, {
-      ...optsLocal,
-      migrationBaseConfig: pendingPluginInstallMigrationBaseConfig,
-      onPendingPluginInstallMigration: () => {
-        pendingPluginInstallMigrationBaseConfig = undefined;
-      },
-    });
 
   if (snapshot.exists && !snapshot.valid) {
     await prompter.note(
@@ -382,8 +322,6 @@ export async function runSetupWizard(
       })) as ResetScope;
       await onboardHelpers.handleReset(resetScope, resolveUserPath(workspaceDefault), runtime);
       baseConfig = {};
-      pendingPluginInstallMigrationBaseConfig = baseConfig;
-      configResetPerformed = true;
     }
   }
 
@@ -394,7 +332,7 @@ export async function runSetupWizard(
       detections: migrationDetections,
       prompter,
       runtime,
-      commitConfigFile: (cfg) => writeWizardConfigFile(cfg, { allowConfigSizeDrop: true }),
+      commitConfigFile: writeWizardConfigFile,
     });
     return;
   }
@@ -614,7 +552,7 @@ export async function runSetupWizard(
 
   if (mode === "remote") {
     const { promptRemoteGatewayConfig } = await import("../commands/onboard-remote.js");
-    const { applySkipBootstrapConfig } = await loadOnboardConfigModule();
+    const { applySkipBootstrapConfig } = await import("../commands/onboard-config.js");
     const { logConfigUpdated } = await loadConfigLoggingModule();
     let nextConfig = await promptRemoteGatewayConfig(baseConfig, prompter, {
       secretInputMode: opts.secretInputMode,
@@ -623,9 +561,7 @@ export async function runSetupWizard(
       nextConfig = applySkipBootstrapConfig(nextConfig);
     }
     nextConfig = onboardHelpers.applyWizardMetadata(nextConfig, { command: "onboard", mode });
-    await writeSetupConfigFile(nextConfig, {
-      allowConfigSizeDrop: configResetPerformed,
-    });
+    nextConfig = await writeWizardConfigFile(nextConfig);
     logConfigUpdated(runtime);
     await prompter.outro(t("wizard.setup.remoteConfigured"));
     return;
@@ -643,7 +579,7 @@ export async function runSetupWizard(
   const workspaceDir = resolveUserPath(workspaceInput.trim() || onboardHelpers.DEFAULT_WORKSPACE);
 
   const { applyLocalSetupWorkspaceConfig, applySkipBootstrapConfig } =
-    await loadOnboardConfigModule();
+    await import("../commands/onboard-config.js");
   let nextConfig: OpenClawConfig = applyLocalSetupWorkspaceConfig(baseConfig, workspaceDir);
   if (opts.skipBootstrap) {
     nextConfig = applySkipBootstrapConfig(nextConfig);
@@ -811,9 +747,7 @@ export async function runSetupWizard(
     });
   }
 
-  nextConfig = await writeSetupConfigFile(nextConfig, {
-    allowConfigSizeDrop: configResetPerformed,
-  });
+  nextConfig = await writeWizardConfigFile(nextConfig);
   const { logConfigUpdated } = await loadConfigLoggingModule();
   logConfigUpdated(runtime);
   await onboardHelpers.ensureWorkspaceAndSessions(workspaceDir, runtime, {
@@ -862,12 +796,10 @@ export async function runSetupWizard(
   }
 
   nextConfig = onboardHelpers.applyWizardMetadata(nextConfig, { command: "onboard", mode });
-  nextConfig = await writeSetupConfigFile(nextConfig, {
-    allowConfigSizeDrop: configResetPerformed,
-  });
+  nextConfig = await writeWizardConfigFile(nextConfig);
 
   const { finalizeSetupWizard } = await import("./setup.finalize.js");
-  await finalizeSetupWizard({
+  const { launchedTui } = await finalizeSetupWizard({
     flow: wizardFlow,
     opts,
     baseConfig,
@@ -877,4 +809,7 @@ export async function runSetupWizard(
     prompter,
     runtime,
   });
+  if (launchedTui) {
+    return;
+  }
 }

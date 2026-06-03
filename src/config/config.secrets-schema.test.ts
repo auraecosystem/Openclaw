@@ -54,13 +54,13 @@ describe("config secret refs schema", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("accepts openai-chatgpt-responses as a model api value", () => {
+  it("accepts openai-codex-responses as a model api value", () => {
     const result = validateConfigObjectRaw({
       models: {
         providers: {
-          openai: {
+          "openai-codex": {
             baseUrl: "https://chatgpt.com/backend-api",
-            api: "openai-chatgpt-responses",
+            api: "openai-codex-responses",
             models: [{ id: "gpt-5.4", name: "gpt-5.4" }],
           },
         },

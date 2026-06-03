@@ -13,12 +13,6 @@ type ConfigFileSnapshot = Awaited<ReturnType<ConfigModule["readConfigFileSnapsho
 type CrestodianOverviewLoader = () => Promise<CrestodianOverview>;
 type CrestodianOverviewFormatter = (overview: CrestodianOverview) => string;
 
-const loadConfigModule = async () => await import("../config/config.js");
-const loadOverviewModule = async () => await import("./overview.js");
-const loadModelsSharedModule = async () => await import("../commands/models/shared.js");
-const loadConfigCliModule = async () => await import("../cli/config-cli.js");
-const loadDoctorModule = async () => await import("../commands/doctor.js");
-
 export type CrestodianOperation =
   | { kind: "none"; message: string }
   | { kind: "overview" }
@@ -116,8 +110,8 @@ const PLUGIN_UNINSTALL_RE =
   /^(?:(?:plugins?)\s+(?:uninstall|remove)|(?:uninstall|remove)\s+plugins?)\s+(?<pluginId>[A-Za-z0-9_.@/-]+)$/i;
 
 const OPENAI_API_DEFAULT_MODEL_REF = `${DEFAULT_PROVIDER}/${DEFAULT_MODEL}`;
-const ANTHROPIC_API_DEFAULT_MODEL_REF = "anthropic/claude-opus-4-8";
-const CLAUDE_CLI_DEFAULT_MODEL_REF = "claude-cli/claude-opus-4-8";
+const ANTHROPIC_API_DEFAULT_MODEL_REF = "anthropic/claude-opus-4-7";
+const CLAUDE_CLI_DEFAULT_MODEL_REF = "claude-cli/claude-opus-4-7";
 const CODEX_APP_SERVER_DEFAULT_MODEL_REF = "openai/gpt-5.5";
 
 export function parseCrestodianOperation(input: string): CrestodianOperation {
@@ -426,7 +420,7 @@ async function runGatewayLifecycle(operation: "start" | "stop" | "restart"): Pro
 }
 
 async function readConfigFileSnapshotLazy(): Promise<ConfigFileSnapshot> {
-  const { readConfigFileSnapshot } = await loadConfigModule();
+  const { readConfigFileSnapshot } = await import("../config/config.js");
   return await readConfigFileSnapshot();
 }
 
@@ -436,7 +430,7 @@ async function loadOverviewForOperation(
   if (deps?.loadOverview) {
     return await deps.loadOverview();
   }
-  const { loadCrestodianOverview } = await loadOverviewModule();
+  const { loadCrestodianOverview } = await import("./overview.js");
   return await loadCrestodianOverview();
 }
 
@@ -447,7 +441,7 @@ async function formatOverviewForOperation(
   if (deps?.formatOverview) {
     return deps.formatOverview(overview);
   }
-  const { formatCrestodianOverview } = await loadOverviewModule();
+  const { formatCrestodianOverview } = await import("./overview.js");
   return formatCrestodianOverview(overview);
 }
 
@@ -455,7 +449,7 @@ async function loadConfigFileMutationHelpers(): Promise<{
   mutateConfigFile: ConfigModule["mutateConfigFile"];
   readConfigFileSnapshot: ConfigModule["readConfigFileSnapshot"];
 }> {
-  const { mutateConfigFile, readConfigFileSnapshot } = await loadConfigModule();
+  const { mutateConfigFile, readConfigFileSnapshot } = await import("../config/config.js");
   return { mutateConfigFile, readConfigFileSnapshot };
 }
 
@@ -619,7 +613,7 @@ export async function executeCrestodianOperation(
     const before = await readConfigFileSnapshot();
     const workspace = resolveUserPath(operation.workspace ?? process.cwd());
     const applyDefaultModelPrimaryUpdate = setupModel.model
-      ? (await loadModelsSharedModule()).applyDefaultModelPrimaryUpdate
+      ? (await import("../commands/models/shared.js")).applyDefaultModelPrimaryUpdate
       : undefined;
     const result = await mutateConfigFile({
       base: "source",
@@ -680,12 +674,12 @@ export async function executeCrestodianOperation(
       return { applied: false, message };
     }
     logQueued(runtime, "config.set");
-    const { readConfigFileSnapshot } = await loadConfigModule();
+    const { readConfigFileSnapshot } = await import("../config/config.js");
     const before = await readConfigFileSnapshot();
     const runConfigSet =
       opts.deps?.runConfigSet ??
       (async (setOpts: { path?: string; value?: string; cliOptions: ConfigSetOptions }) => {
-        const { runConfigSet: importedRunConfigSet } = await loadConfigCliModule();
+        const { runConfigSet: importedRunConfigSet } = await import("../cli/config-cli.js");
         await importedRunConfigSet({
           ...setOpts,
           runtime: createNoExitRuntime(runtime),
@@ -718,12 +712,12 @@ export async function executeCrestodianOperation(
       return { applied: false, message };
     }
     logQueued(runtime, "config.setRef");
-    const { readConfigFileSnapshot } = await loadConfigModule();
+    const { readConfigFileSnapshot } = await import("../config/config.js");
     const before = await readConfigFileSnapshot();
     const runConfigSet =
       opts.deps?.runConfigSet ??
       (async (setOpts: { path?: string; value?: string; cliOptions: ConfigSetOptions }) => {
-        const { runConfigSet: importedRunConfigSet } = await loadConfigCliModule();
+        const { runConfigSet: importedRunConfigSet } = await import("../cli/config-cli.js");
         await importedRunConfigSet({
           ...setOpts,
           runtime: createNoExitRuntime(runtime),
@@ -829,7 +823,7 @@ export async function executeCrestodianOperation(
       return { applied: false, message };
     }
     logQueued(runtime, "agents.create");
-    const { readConfigFileSnapshot } = await loadConfigModule();
+    const { readConfigFileSnapshot } = await import("../config/config.js");
     const before = await readConfigFileSnapshot();
     const workspace = resolveUserPath(operation.workspace ?? process.cwd());
     const runAgentsAdd =
@@ -864,7 +858,7 @@ export async function executeCrestodianOperation(
   }
   if (operation.kind === "doctor") {
     logQueued(runtime, "doctor");
-    const runDoctor = opts.deps?.runDoctor ?? (await loadDoctorModule()).doctorCommand;
+    const runDoctor = opts.deps?.runDoctor ?? (await import("../commands/doctor.js")).doctorCommand;
     await runDoctor(runtime, { nonInteractive: true });
     runtime.log("[crestodian] done: doctor");
     return { applied: false };
@@ -876,9 +870,9 @@ export async function executeCrestodianOperation(
       return { applied: false, message };
     }
     logQueued(runtime, "doctor.fix");
-    const { readConfigFileSnapshot } = await loadConfigModule();
+    const { readConfigFileSnapshot } = await import("../config/config.js");
     const before = await readConfigFileSnapshot();
-    const runDoctor = opts.deps?.runDoctor ?? (await loadDoctorModule()).doctorCommand;
+    const runDoctor = opts.deps?.runDoctor ?? (await import("../commands/doctor.js")).doctorCommand;
     await runDoctor(runtime, { nonInteractive: true, repair: true, yes: true });
     const after = await readConfigFileSnapshot();
     await appendCrestodianAuditEntry({
@@ -995,7 +989,7 @@ export async function executeCrestodianOperation(
     logQueued(runtime, "config.setDefaultModel");
     const { mutateConfigFile, readConfigFileSnapshot } = await loadConfigFileMutationHelpers();
     const before = await readConfigFileSnapshot();
-    const { applyDefaultModelPrimaryUpdate } = await loadModelsSharedModule();
+    const { applyDefaultModelPrimaryUpdate } = await import("../commands/models/shared.js");
     const result = await mutateConfigFile({
       base: "source",
       mutate: (cfg) => {

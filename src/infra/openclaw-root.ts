@@ -188,11 +188,10 @@ function createPackageRootCacheKey(candidates: readonly string[]): string {
   return candidates.join("\0");
 }
 
-export const testing = {
+export const __testing = {
   clearOpenClawPackageRootCaches(): void {
     packageNameCache.clear();
     packageRootCache.clear();
     argv1CandidateCache.clear();
   },
 };
-export { testing as __testing };

@@ -1,25 +1,12 @@
 import { isDeepStrictEqual } from "node:util";
-import { parseConfigPathArrayIndex } from "../shared/path-array-index.js";
 import { isRecord } from "./shared.js";
 
-function looksLikeArrayIndexSegment(segment: string): boolean {
+function isArrayIndexSegment(segment: string): boolean {
   return /^\d+$/.test(segment);
 }
 
-function parseArrayIndexSegment(segment: string): number | undefined {
-  return parseConfigPathArrayIndex(segment);
-}
-
-function requireArrayIndexSegment(segment: string, pathLabel: string): number {
-  const index = parseArrayIndexSegment(segment);
-  if (index === undefined) {
-    throw new Error(`Invalid array index segment "${segment}" at ${pathLabel}.`);
-  }
-  return index;
-}
-
 function expectedContainer(nextSegment: string): "array" | "object" {
-  return looksLikeArrayIndexSegment(nextSegment) ? "array" : "object";
+  return isArrayIndexSegment(nextSegment) ? "array" : "object";
 }
 
 function parseArrayLeafTarget(
@@ -30,7 +17,10 @@ function parseArrayLeafTarget(
   if (!Array.isArray(cursor)) {
     return null;
   }
-  return { array: cursor, index: requireArrayIndexSegment(leaf, segments.join(".")) };
+  if (!isArrayIndexSegment(leaf)) {
+    throw new Error(`Invalid array index segment "${leaf}" at ${segments.join(".")}.`);
+  }
+  return { array: cursor, index: Number.parseInt(leaf, 10) };
 }
 
 function traverseToLeafParent(params: {
@@ -46,7 +36,12 @@ function traverseToLeafParent(params: {
   for (let index = 0; index < params.segments.length - 1; index += 1) {
     const segment = params.segments[index] ?? "";
     if (Array.isArray(cursor)) {
-      const arrayIndex = requireArrayIndexSegment(segment, params.segments.join("."));
+      if (!isArrayIndexSegment(segment)) {
+        throw new Error(
+          `Invalid array index segment "${segment}" at ${params.segments.join(".")}.`,
+        );
+      }
+      const arrayIndex = Number.parseInt(segment, 10);
       if (params.requireExistingSegment && (arrayIndex < 0 || arrayIndex >= cursor.length)) {
         throw new Error(
           `Path segment does not exist at ${params.segments.slice(0, index + 1).join(".")}.`,
@@ -61,7 +56,7 @@ function traverseToLeafParent(params: {
         `Invalid path shape at ${params.segments.slice(0, index).join(".") || "<root>"}.`,
       );
     }
-    if (params.requireExistingSegment && !Object.hasOwn(cursor, segment)) {
+    if (params.requireExistingSegment && !Object.prototype.hasOwnProperty.call(cursor, segment)) {
       throw new Error(
         `Path segment does not exist at ${params.segments.slice(0, index + 1).join(".")}.`,
       );
@@ -78,11 +73,10 @@ export function getPath(root: unknown, segments: string[]): unknown {
   let cursor: unknown = root;
   for (const segment of segments) {
     if (Array.isArray(cursor)) {
-      const arrayIndex = parseArrayIndexSegment(segment);
-      if (arrayIndex === undefined) {
+      if (!isArrayIndexSegment(segment)) {
         return undefined;
       }
-      cursor = cursor[arrayIndex];
+      cursor = cursor[Number.parseInt(segment, 10)];
       continue;
     }
     if (!isRecord(cursor)) {
@@ -110,7 +104,10 @@ export function setPathCreateStrict(
     const needs = expectedContainer(nextSegment);
 
     if (Array.isArray(cursor)) {
-      const arrayIndex = requireArrayIndexSegment(segment, segments.join("."));
+      if (!isArrayIndexSegment(segment)) {
+        throw new Error(`Invalid array index segment "${segment}" at ${segments.join(".")}.`);
+      }
+      const arrayIndex = Number.parseInt(segment, 10);
       const existing = cursor[arrayIndex];
       if (existing === undefined || existing === null) {
         cursor[arrayIndex] = needs === "array" ? [] : {};
@@ -176,7 +173,7 @@ export function setPathExistingStrict(
   if (!isRecord(cursor)) {
     throw new Error(`Invalid path shape at ${segments.slice(0, -1).join(".") || "<root>"}.`);
   }
-  if (!Object.hasOwn(cursor, leaf)) {
+  if (!Object.prototype.hasOwnProperty.call(cursor, leaf)) {
     throw new Error(`Path segment does not exist at ${segments.join(".")}.`);
   }
   if (!isDeepStrictEqual(cursor[leaf], value)) {
@@ -202,7 +199,7 @@ export function deletePathStrict(root: Record<string, unknown>, segments: string
   if (!isRecord(cursor)) {
     throw new Error(`Invalid path shape at ${segments.slice(0, -1).join(".") || "<root>"}.`);
   }
-  if (!Object.hasOwn(cursor, leaf)) {
+  if (!Object.prototype.hasOwnProperty.call(cursor, leaf)) {
     return false;
   }
   delete cursor[leaf];

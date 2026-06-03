@@ -12,7 +12,7 @@ CONTAINER_NAME="openclaw-mcp-e2e-$$"
 CLIENT_LOG="$(mktemp -t openclaw-mcp-client-log.XXXXXX)"
 
 cleanup() {
-  docker_e2e_docker_cmd rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
+  docker rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
   rm -f "$CLIENT_LOG"
 }
 trap cleanup EXIT
@@ -77,5 +77,4 @@ if [ "$status" -ne 0 ]; then
   exit "$status"
 fi
 
-cat "$CLIENT_LOG"
 echo "OK"

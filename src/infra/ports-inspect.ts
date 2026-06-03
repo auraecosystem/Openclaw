@@ -1,8 +1,7 @@
 import os from "node:os";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { runCommandWithTimeout } from "../process/exec.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { isErrno } from "./errors.js";
-import { parseStrictPositiveInteger } from "./parse-finite-number.js";
 import { buildPortHints } from "./ports-format.js";
 import { resolveLsofCommand } from "./ports-lsof.js";
 import { tryListenOnPort } from "./ports-probe.js";
@@ -43,32 +42,28 @@ async function runCommandSafe(argv: string[], timeoutMs = 5_000): Promise<Comman
 function parseLsofFieldOutput(output: string): PortListener[] {
   const lines = output.split(/\r?\n/).filter(Boolean);
   const listeners: PortListener[] = [];
-  let processFields: Pick<PortListener, "pid" | "command"> = {};
+  let current: PortListener = {};
   for (const line of lines) {
     if (line.startsWith("p")) {
+      if (current.pid || current.command) {
+        listeners.push(current);
+      }
       const pid = Number.parseInt(line.slice(1), 10);
-      processFields = Number.isFinite(pid) ? { pid } : {};
+      current = Number.isFinite(pid) ? { pid } : {};
     } else if (line.startsWith("c")) {
-      processFields.command = line.slice(1);
+      current.command = line.slice(1);
     } else if (line.startsWith("n")) {
       // TCP 127.0.0.1:18789 (LISTEN)
       // TCP *:18789 (LISTEN)
-      listeners.push({ ...processFields, address: line.slice(1) });
+      if (!current.address) {
+        current.address = line.slice(1);
+      }
     }
   }
+  if (current.pid || current.command) {
+    listeners.push(current);
+  }
   return listeners;
-}
-
-function dedupePortListeners(listeners: PortListener[]): PortListener[] {
-  const seen = new Set<string>();
-  return listeners.filter((listener) => {
-    const key = `${listener.pid ?? ""}\0${listener.command ?? ""}\0${listener.address ?? ""}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
 }
 
 function normalizeTcpHost(host: string): string {
@@ -76,27 +71,19 @@ function normalizeTcpHost(host: string): string {
   return normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
 }
 
-function parseTcpPort(raw: string | undefined): number | null {
-  if (!raw || !/^\d+$/.test(raw)) {
-    return null;
-  }
-  const port = Number(raw);
-  return Number.isSafeInteger(port) && port >= 0 && port <= 65_535 ? port : null;
-}
-
 function parseTcpEndpoint(raw: string): { host: string; port: number } | null {
   const endpoint = raw.trim();
   const bracketMatch = endpoint.match(/^\[([^\]]+)\]:(\d+)$/);
   if (bracketMatch) {
-    const port = parseTcpPort(bracketMatch[2]);
-    return port === null ? null : { host: normalizeTcpHost(bracketMatch[1]), port };
+    const port = Number.parseInt(bracketMatch[2], 10);
+    return Number.isFinite(port) ? { host: normalizeTcpHost(bracketMatch[1]), port } : null;
   }
   const lastColon = endpoint.lastIndexOf(":");
   if (lastColon <= 0 || lastColon >= endpoint.length - 1) {
     return null;
   }
-  const port = parseTcpPort(endpoint.slice(lastColon + 1));
-  if (port === null) {
+  const port = Number.parseInt(endpoint.slice(lastColon + 1), 10);
+  if (!Number.isFinite(port)) {
     return null;
   }
   return { host: normalizeTcpHost(endpoint.slice(0, lastColon)), port };
@@ -399,7 +386,7 @@ async function readUnixListeners(
   const lsof = await resolveLsofCommand();
   const res = await runCommandSafe([lsof, "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-FpFcn"]);
   if (res.code === 0) {
-    const listeners = dedupePortListeners(parseLsofFieldOutput(res.stdout));
+    const listeners = parseLsofFieldOutput(res.stdout);
     await enrichUnixListenerProcessInfo(listeners);
     return { listeners, detail: res.stdout.trim() || undefined, errors: [] };
   }
@@ -430,6 +417,7 @@ async function readUnixListeners(
 
 function parseNetstatListeners(output: string, port: number): PortListener[] {
   const listeners: PortListener[] = [];
+  const portToken = `:${port}`;
   for (const rawLine of output.split(/\r?\n/)) {
     const line = rawLine.trim();
     if (!line) {
@@ -438,21 +426,23 @@ function parseNetstatListeners(output: string, port: number): PortListener[] {
     if (!normalizeLowercaseStringOrEmpty(line).includes("listen")) {
       continue;
     }
+    if (!line.includes(portToken)) {
+      continue;
+    }
     const parts = line.split(/\s+/);
     if (parts.length < 4) {
       continue;
     }
-    const localAddr = parts[1];
-    if (!localAddr || parseTcpEndpoint(localAddr)?.port !== port) {
-      continue;
-    }
     const pidRaw = parts.at(-1);
-    const pid = parseStrictPositiveInteger(pidRaw);
+    const pid = pidRaw ? Number.parseInt(pidRaw, 10) : Number.NaN;
+    const localAddr = parts[1];
     const listener: PortListener = {};
-    if (pid !== undefined) {
+    if (Number.isFinite(pid)) {
       listener.pid = pid;
     }
-    listener.address = localAddr;
+    if (localAddr?.includes(portToken)) {
+      listener.address = localAddr;
+    }
     listeners.push(listener);
   }
   return listeners;
@@ -484,8 +474,8 @@ function parseNetstatConnections(output: string, port: number): PortConnection[]
       address,
       direction: resolveLsofTcpDirection(address, port),
     };
-    const pid = parseStrictPositiveInteger(pidRaw);
-    if (pid !== undefined) {
+    const pid = Number.parseInt(pidRaw, 10);
+    if (Number.isFinite(pid)) {
       connection.pid = pid;
     }
     connections.push(connection);

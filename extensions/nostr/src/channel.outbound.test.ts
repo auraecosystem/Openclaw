@@ -1,4 +1,4 @@
-import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-outbound";
+import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-message";
 import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-helpers";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -57,23 +57,12 @@ async function startOutboundAccount(accountId?: string) {
     getProfileState: vi.fn(async () => null),
   };
   mocks.startNostrBus.mockResolvedValueOnce(bus as unknown);
-  const abort = new AbortController();
 
-  const task = startNostrGatewayAccount(
+  const cleanup = (await startNostrGatewayAccount(
     createStartAccountContext({
       account: buildResolvedNostrAccount(accountId ? { accountId } : undefined),
-      abortSignal: abort.signal,
     }),
-  );
-  await vi.waitFor(() => {
-    expect(mocks.startNostrBus).toHaveBeenCalledTimes(1);
-  });
-  const cleanup = {
-    stop: async () => {
-      abort.abort();
-      await task;
-    },
-  };
+  )) as { stop: () => void };
 
   return { cleanup, sendDm };
 }
@@ -107,7 +96,7 @@ describe("nostr outbound cfg threading", () => {
     expect(mocks.normalizePubkey).toHaveBeenCalledWith("NPUB123");
     expect(sendDm).toHaveBeenCalledWith("normalized-npub123", "converted:|a|b|");
 
-    await cleanup.stop();
+    cleanup.stop();
   });
 
   it("uses the configured defaultAccount when accountId is omitted", async () => {
@@ -136,7 +125,7 @@ describe("nostr outbound cfg threading", () => {
     });
     expect(sendDm).toHaveBeenCalledWith("normalized-npub123", "hello");
 
-    await cleanup.stop();
+    cleanup.stop();
   });
 
   it("backs declared message adapter capabilities with outbound sends", async () => {
@@ -169,6 +158,6 @@ describe("nostr outbound cfg threading", () => {
       },
     });
 
-    await cleanup.stop();
+    cleanup.stop();
   });
 });

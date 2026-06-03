@@ -1,5 +1,4 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import {
   fetchWithSsrFGuard,
   ssrfPolicyFromPrivateNetworkOptIn,
@@ -25,11 +24,10 @@ export async function probeMattermost(
   }
   const url = `${normalized}/api/v4/users/me`;
   const start = Date.now();
-  const resolvedTimeoutMs = timeoutMs > 0 ? resolveTimerTimeoutMs(timeoutMs, 2500) : 0;
-  const controller = resolvedTimeoutMs > 0 ? new AbortController() : undefined;
+  const controller = timeoutMs > 0 ? new AbortController() : undefined;
   let timer: NodeJS.Timeout | null = null;
   if (controller) {
-    timer = setTimeout(() => controller.abort(), resolvedTimeoutMs);
+    timer = setTimeout(() => controller.abort(), timeoutMs);
   }
   try {
     const { response: res, release } = await fetchWithSsrFGuard({

@@ -27,14 +27,8 @@ export function createCodexCommand(options: CodexCommandOptions): OpenClawPlugin
     description: "Inspect and control the Codex app-server harness",
     ownership: "reserved",
     agentPromptGuidance: [
-      {
-        text: "Native Codex app-server plugin is available (`/codex ...`). For Codex bind/control/thread/resume/steer/stop requests, prefer `/codex bind`, `/codex threads`, `/codex resume`, `/codex steer`, and `/codex stop` over ACP. When OpenClaw sandboxing is active, native Codex execution modes are unavailable; use normal Codex harness turns.",
-        surfaces: ["openclaw_main"],
-      },
-      {
-        text: "Use ACP for Codex only when the user explicitly asks for ACP/acpx or wants to test the ACP path.",
-        surfaces: ["openclaw_main"],
-      },
+      "Native Codex app-server plugin is available (`/codex ...`). For Codex bind/control/thread/resume/steer/stop requests, prefer `/codex bind`, `/codex threads`, `/codex resume`, `/codex steer`, and `/codex stop` over ACP.",
+      "Use ACP for Codex only when the user explicitly asks for ACP/acpx or wants to test the ACP path.",
     ],
     acceptsArgs: true,
     requireAuth: true,

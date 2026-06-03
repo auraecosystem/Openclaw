@@ -1,4 +1,3 @@
-import { asBoolean } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { asOptionalObjectRecord as asRecord } from "../utils/string-normalize.js";
 import { resolveAccountBase } from "./resolve.js";
 
@@ -46,7 +45,8 @@ function readGroupsMap(
 }
 
 function readBoolean(obj: Record<string, unknown>, key: string): boolean | undefined {
-  return asBoolean(obj[key]);
+  const v = obj[key];
+  return typeof v === "boolean" ? v : undefined;
 }
 
 function readString(obj: Record<string, unknown>, key: string): string | undefined {

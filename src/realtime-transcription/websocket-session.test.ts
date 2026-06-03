@@ -1,18 +1,13 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type WebSocket from "ws";
 import { WebSocketServer } from "ws";
 import { createRealtimeTranscriptionWebSocketSession } from "./websocket-session.js";
 
 let cleanup: (() => Promise<void>) | undefined;
 
-beforeEach(() => {
-  vi.useRealTimers();
-});
-
 afterEach(async () => {
-  vi.useRealTimers();
   await cleanup?.();
   cleanup = undefined;
 });
@@ -26,7 +21,7 @@ async function createRealtimeServer(params?: {
   onText?: (payload: unknown) => void;
 }) {
   const server = createServer();
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
+  const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<WebSocket>();
 
   server.on("upgrade", (request, socket, head) => {
@@ -59,19 +54,13 @@ async function createRealtimeServer(params?: {
     });
   });
 
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", resolve);
-  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   cleanup = async () => {
     for (const ws of clients) {
       ws.terminate();
     }
-    await new Promise<void>((resolve) => {
-      wss.close(() => resolve());
-    });
-    await new Promise<void>((resolve) => {
-      server.close(() => resolve());
-    });
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   };
   const port = (server.address() as AddressInfo).port;
   return { url: `ws://127.0.0.1:${port}` };
@@ -190,7 +179,6 @@ describe("createRealtimeTranscriptionWebSocketSession", () => {
   });
 
   it("applies the connect timeout while resolving async connection details", async () => {
-    vi.useFakeTimers();
     const onError = vi.fn();
     const session = createRealtimeTranscriptionWebSocketSession({
       providerId: "test",
@@ -204,23 +192,14 @@ describe("createRealtimeTranscriptionWebSocketSession", () => {
       },
     });
 
-    try {
-      const connecting = session.connect();
-      const timeoutAssertion = expect(connecting).rejects.toThrow(
-        "test realtime transcription connection timeout",
-      );
-      await vi.advanceTimersByTimeAsync(10);
-
-      await timeoutAssertion;
-      expect(session.isConnected()).toBe(false);
-      expect(onError).toHaveBeenCalledTimes(1);
-      const timeoutError = requireFirstMockArg(onError, "connect timeout error");
-      expect(timeoutError).toBeInstanceOf(Error);
-      expect(timeoutError.message).toBe("test realtime transcription connection timeout");
-    } finally {
-      session.close();
-      vi.useRealTimers();
-    }
+    await expect(session.connect()).rejects.toThrow(
+      "test realtime transcription connection timeout",
+    );
+    expect(session.isConnected()).toBe(false);
+    expect(onError).toHaveBeenCalledTimes(1);
+    const timeoutError = requireFirstMockArg(onError, "connect timeout error");
+    expect(timeoutError).toBeInstanceOf(Error);
+    expect(timeoutError.message).toBe("test realtime transcription connection timeout");
   });
 
   it("does not open a socket when closed while async connection resolves", async () => {

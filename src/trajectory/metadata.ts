@@ -1,3 +1,4 @@
+import type { SkillSnapshot } from "../agents/skills.js";
 import { resolveStateDir } from "../config/paths.js";
 import { redactConfigObject } from "../config/redact-snapshot.js";
 import type { SessionSystemPromptReport } from "../config/sessions/types.js";
@@ -11,7 +12,6 @@ import {
 } from "../logging/diagnostic-support-redaction.js";
 import { loadPluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import { getActivePluginRegistry, listImportedRuntimePluginIds } from "../plugins/runtime.js";
-import type { SkillSnapshot } from "../skills/types.js";
 import { VERSION } from "../version.js";
 
 type BuildTrajectoryRunMetadataParams = {
@@ -60,7 +60,7 @@ type BuildTrajectoryArtifactsParams = {
     completedCount: number;
     activeCount: number;
   };
-  toolMetas: Array<{ toolName: string; meta?: string; asyncStarted?: boolean }>;
+  toolMetas: Array<{ toolName: string; meta?: string }>;
   didSendViaMessagingTool: boolean;
   successfulCronAdds: number;
   messagingToolSentTexts: string[];
@@ -177,13 +177,9 @@ function buildSkillsCapture(
   if (!skillsSnapshot) {
     return undefined;
   }
-  const filteredResolvedSkills =
-    skillsSnapshot.resolvedSkills?.filter(
-      (skill) => typeof skill.name === "string" && skill.name.length > 0,
-    ) ?? [];
   const entries =
-    filteredResolvedSkills.length > 0
-      ? filteredResolvedSkills.map((skill) => ({
+    skillsSnapshot.resolvedSkills && skillsSnapshot.resolvedSkills.length > 0
+      ? skillsSnapshot.resolvedSkills.map((skill) => ({
           id: skill.name,
           name: skill.name,
           description: skill.description,
@@ -194,19 +190,17 @@ function buildSkillsCapture(
           disableModelInvocation: skill.disableModelInvocation,
           available: true,
         }))
-      : skillsSnapshot.skills
-          .filter((skill) => typeof skill.name === "string" && skill.name.length > 0)
-          .map((skill) => ({
-            id: skill.name,
-            name: skill.name,
-            primaryEnv: skill.primaryEnv,
-            requiredEnv: skill.requiredEnv,
-            available: true,
-          }));
+      : skillsSnapshot.skills.map((skill) => ({
+          id: skill.name,
+          name: skill.name,
+          primaryEnv: skill.primaryEnv,
+          requiredEnv: skill.requiredEnv,
+          available: true,
+        }));
   return {
     snapshotVersion: skillsSnapshot.version,
     skillFilter: toSortedUniqueStrings(skillsSnapshot.skillFilter),
-    entries: entries.toSorted((left, right) => (left.name ?? "").localeCompare(right.name ?? "")),
+    entries: entries.toSorted((left, right) => left.name.localeCompare(right.name)),
   };
 }
 

@@ -18,6 +18,7 @@ function createOverviewProps(overrides: Partial<OverviewProps> = {}): OverviewPr
       lastActiveSessionKey: "main",
       theme: "claw",
       themeMode: "system",
+      chatFocusMode: false,
       chatShowThinking: true,
       chatShowToolCalls: true,
       splitRatio: 0.6,
@@ -191,7 +192,7 @@ describe("overview view rendering", () => {
         ts: Date.now(),
         providers: [
           {
-            provider: "openai",
+            provider: "openai-codex",
             displayName: "Codex",
             status: "ok",
             profiles: [{ profileId: "codex", type: "oauth", status: "ok" }],

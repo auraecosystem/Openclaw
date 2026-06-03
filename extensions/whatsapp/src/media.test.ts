@@ -5,12 +5,9 @@ import { resolveStateDir } from "openclaw/plugin-sdk/state-paths";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import { captureEnv } from "openclaw/plugin-sdk/test-env";
 import { mockPinnedHostnameResolution } from "openclaw/plugin-sdk/test-env";
-import {
-  createGrayscaleAlphaPngBuffer,
-  createSolidPngBuffer,
-} from "openclaw/plugin-sdk/test-fixtures";
 import { withMockedWindowsPlatform, withRestoredMocks } from "openclaw/plugin-sdk/test-node-mocks";
 import { optimizeImageToPng } from "openclaw/plugin-sdk/web-media";
+import sharp from "sharp";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   LocalMediaAccessError,
@@ -28,6 +25,7 @@ let tinyPngFile = "";
 let tinyPngWrongExtFile = "";
 let alphaPngBuffer: Buffer;
 let alphaPngFile = "";
+let fallbackPngBuffer: Buffer;
 let fallbackPngFile = "";
 let fallbackPngCap = 0;
 let stateDirSnapshot: ReturnType<typeof captureEnv>;
@@ -36,6 +34,16 @@ async function writeTempFile(buffer: Buffer, ext: string): Promise<string> {
   const file = path.join(fixtureRoot, `media-${fixtureFileCount++}${ext}`);
   await fs.writeFile(file, buffer);
   return file;
+}
+
+function buildDeterministicBytes(length: number): Buffer {
+  const buffer = Buffer.allocUnsafe(length);
+  let seed = 0x12345678;
+  for (let i = 0; i < length; i++) {
+    seed = (1103515245 * seed + 12345) & 0x7fffffff;
+    buffer[i] = seed & 0xff;
+  }
+  return buffer;
 }
 
 async function createLargeTestJpeg(): Promise<{ buffer: Buffer; file: string }> {
@@ -61,26 +69,49 @@ beforeAll(async () => {
   fixtureRoot = await fs.mkdtemp(
     path.join(resolvePreferredOpenClawTmpDir(), "openclaw-media-test-"),
   );
-  largeJpegBuffer = await fs.readFile("docs/assets/showcase/roof-camera-sky.jpg");
+  largeJpegBuffer = await sharp({
+    create: {
+      width: 400,
+      height: 400,
+      channels: 3,
+      background: "#ff0000",
+    },
+  })
+    .jpeg({ quality: 95 })
+    .toBuffer();
   largeJpegFile = await writeTempFile(largeJpegBuffer, ".jpg");
-  tinyPngBuffer = createSolidPngBuffer(10, 10, { r: 0, g: 255, b: 0 });
+  tinyPngBuffer = await sharp({
+    create: { width: 10, height: 10, channels: 3, background: "#00ff00" },
+  })
+    .png()
+    .toBuffer();
   tinyPngFile = await writeTempFile(tinyPngBuffer, ".png");
   tinyPngWrongExtFile = await writeTempFile(tinyPngBuffer, ".bin");
-  alphaPngBuffer = createSolidPngBuffer(64, 64, { r: 255, g: 0, b: 0, a: 128 });
+  alphaPngBuffer = await sharp({
+    create: {
+      width: 64,
+      height: 64,
+      channels: 4,
+      background: { r: 255, g: 0, b: 0, alpha: 0.5 },
+    },
+  })
+    .png()
+    .toBuffer();
   alphaPngFile = await writeTempFile(alphaPngBuffer, ".png");
-  for (const size of [24, 32, 40, 48, 64]) {
-    const buffer = createGrayscaleAlphaPngBuffer(size, size);
-    const smallestPng = await optimizeImageToPng(buffer, 1);
-    const cap = Math.max(1, Math.min(buffer.length, smallestPng.optimizedSize) - 1);
-    const jpegOptimized = await optimizeImageToJpeg(buffer, cap);
-    if (jpegOptimized.buffer.length <= cap) {
-      fallbackPngFile = await writeTempFile(buffer, ".png");
-      fallbackPngCap = cap;
-      break;
-    }
-  }
-  if (!fallbackPngFile) {
-    throw new Error("No PNG alpha fallback fixture could fit the JPEG cap");
+  // Keep this small so the alpha-fallback test stays deterministic but fast.
+  const size = 24;
+  const raw = buildDeterministicBytes(size * size * 4);
+  fallbackPngBuffer = await sharp(raw, { raw: { width: size, height: size, channels: 4 } })
+    .png()
+    .toBuffer();
+  fallbackPngFile = await writeTempFile(fallbackPngBuffer, ".png");
+  const smallestPng = await optimizeImageToPng(fallbackPngBuffer, 1);
+  fallbackPngCap = Math.max(1, smallestPng.optimizedSize - 1);
+  const jpegOptimized = await optimizeImageToJpeg(fallbackPngBuffer, fallbackPngCap);
+  if (jpegOptimized.buffer.length >= smallestPng.optimizedSize) {
+    throw new Error(
+      `JPEG fallback did not shrink below PNG (jpeg=${jpegOptimized.buffer.length}, png=${smallestPng.optimizedSize})`,
+    );
   }
 });
 
@@ -155,7 +186,7 @@ describe("web media loading", () => {
     const result = await loadWebMedia(tinyPngWrongExtFile, 1024 * 1024);
 
     expect(result.kind).toBe("image");
-    expect(result.contentType).toBe("image/png");
+    expect(result.contentType).toBe("image/jpeg");
   });
 
   it("includes URL + status in fetch errors", async () => {
@@ -205,9 +236,7 @@ describe("web media loading", () => {
       ok: true,
       body: true,
       arrayBuffer: async () => Buffer.alloc(2048).buffer,
-      headers: {
-        get: (name: string) => (name === "content-type" ? "image/png" : null),
-      },
+      headers: { get: () => "image/png" },
       status: 200,
     } as unknown as Response);
 
@@ -270,9 +299,7 @@ describe("web media loading", () => {
       body: true,
       arrayBuffer: async () =>
         gifBytes.buffer.slice(gifBytes.byteOffset, gifBytes.byteOffset + gifBytes.byteLength),
-      headers: {
-        get: (name: string) => (name === "content-type" ? "image/gif" : null),
-      },
+      headers: { get: () => "image/gif" },
       status: 200,
     } as unknown as Response);
 
@@ -290,7 +317,8 @@ describe("web media loading", () => {
 
     expect(result.kind).toBe("image");
     expect(result.contentType).toBe("image/png");
-    expect(result.buffer[25]).toBe(6);
+    const meta = await sharp(result.buffer).metadata();
+    expect(meta.hasAlpha).toBe(true);
   });
 
   it("falls back to JPEG when PNG alpha cannot fit under cap", async () => {
@@ -360,15 +388,13 @@ describe("local media root guard", () => {
   });
 
   it("rejects Windows network paths before filesystem checks", async () => {
-    const realTmpRoot = resolvePreferredOpenClawTmpDir();
-
     await withMockedWindowsPlatform(async () => {
       const realpathSpy = vi.spyOn(fs, "realpath");
 
       await withRestoredMocks([realpathSpy], async () => {
         await expectLocalMediaAccessCode(
           loadWebMedia("\\\\attacker\\share\\evil.png", 1024 * 1024, {
-            localRoots: [realTmpRoot],
+            localRoots: [resolvePreferredOpenClawTmpDir()],
           }),
           "network-path-not-allowed",
         );

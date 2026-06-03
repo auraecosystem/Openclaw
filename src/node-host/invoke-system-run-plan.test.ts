@@ -335,16 +335,6 @@ const unsafeRuntimeInvocationCases: UnsafeRuntimeInvocationCase[] = [
     },
   },
   {
-    name: "rejects node inline import values that contain equals signs",
-    binName: "node",
-    tmpPrefix: "openclaw-node-import-inline-equals-",
-    command: ["node", "--import=./pre=load.mjs", "./main.mjs"],
-    setup: (tmp) => {
-      fs.writeFileSync(path.join(tmp, "main.mjs"), 'console.log("SAFE")\n');
-      fs.writeFileSync(path.join(tmp, "pre=load.mjs"), 'console.log("SAFE")\n');
-    },
-  },
-  {
     name: "rejects ruby require preloads that approval cannot bind completely",
     binName: "ruby",
     tmpPrefix: "openclaw-ruby-require-",
@@ -913,7 +903,7 @@ describe("hardenApprovedExecutionPaths", () => {
     withFakeRuntimeBins({
       binNames: ["pnpm", "eslint"],
       run: () => {
-        const casesResult = [
+        const cases = [
           {
             prefix: "openclaw-pnpm-dlx-package-bin-",
             command: ["pnpm", "dlx", "cowsay", "hello"],
@@ -942,7 +932,7 @@ describe("hardenApprovedExecutionPaths", () => {
             },
           },
         ];
-        for (const testCase of casesResult) {
+        for (const testCase of cases) {
           const tmp = createFixtureDir(testCase.prefix);
           testCase.setup?.(tmp);
           expectApprovalPlanWithoutMutableOperand(testCase.command, tmp);
@@ -975,7 +965,7 @@ describe("hardenApprovedExecutionPaths", () => {
   });
 
   it("captures the real shell script operand after value-taking shell flags", () => {
-    const casesValue = [
+    const cases = [
       {
         name: "separate set option",
         argv: ["/bin/bash", "-o", "errexit", "./run.sh"],
@@ -1020,7 +1010,7 @@ describe("hardenApprovedExecutionPaths", () => {
       },
     ];
 
-    for (const testCase of casesValue) {
+    for (const testCase of cases) {
       runNamedCase(testCase.name, () => {
         const tmp = createFixtureDir("openclaw-shell-option-value-");
         const scriptPath = path.join(tmp, "run.sh");
@@ -1055,7 +1045,7 @@ describe("hardenApprovedExecutionPaths", () => {
   });
 
   it("captures fish script operands with plus-prefixed filenames", () => {
-    const casesLocal = [
+    const cases = [
       {
         name: "plus-prefixed fish script",
         argv: ["fish", "+setup.fish"],
@@ -1066,7 +1056,7 @@ describe("hardenApprovedExecutionPaths", () => {
       },
     ];
 
-    for (const testCase of casesLocal) {
+    for (const testCase of cases) {
       runNamedCase(testCase.name, () => {
         const tmp = createFixtureDir("openclaw-fish-plus-script-");
         const scriptPath = path.join(tmp, "+setup.fish");

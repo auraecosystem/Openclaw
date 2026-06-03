@@ -1,12 +1,11 @@
 import { html, svg, nothing } from "lit";
 import { formatDurationCompact } from "../../../../src/infra/format-time/format-duration.ts";
 import { t } from "../../i18n/index.ts";
-import { formatDateTimeMs, formatMs, formatTimeMs } from "../format.ts";
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import { parseToolSummary } from "../usage-helpers.ts";
 import { charsToTokens, formatCost, formatTokens } from "./usage-metrics.ts";
 import { renderInsightList } from "./usage-render-overview.ts";
-import type {
+import {
   SessionLogEntry,
   SessionLogRole,
   TimeSeriesPoint,
@@ -60,7 +59,8 @@ function renderSessionSummary(
     return html` <div class="usage-empty-block">${t("usage.details.noUsageData")}</div> `;
   }
 
-  const formatTs = (ts?: number): string => (ts ? formatMs(ts) : t("usage.common.emptyValue"));
+  const formatTs = (ts?: number): string =>
+    ts ? new Date(ts).toLocaleString() : t("usage.common.emptyValue");
 
   const badges: string[] = [];
   if (session.channel) {
@@ -577,8 +577,8 @@ function renderTimeSeriesCompact(
           <!-- X axis labels (first and last) -->
           ${points.length > 0
             ? svg`
-            <text x="${padding.left}" y="${padding.top + chartHeight + 10}" text-anchor="start" class="ts-axis-label">${formatTimeMs(points[0].timestamp, { hour: "2-digit", minute: "2-digit" }, "")}</text>
-            <text x="${width - padding.right}" y="${padding.top + chartHeight + 10}" text-anchor="end" class="ts-axis-label">${formatTimeMs(points[points.length - 1].timestamp, { hour: "2-digit", minute: "2-digit" }, "")}</text>
+            <text x="${padding.left}" y="${padding.top + chartHeight + 10}" text-anchor="start" class="ts-axis-label">${new Date(points[0].timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</text>
+            <text x="${width - padding.right}" y="${padding.top + chartHeight + 10}" text-anchor="end" class="ts-axis-label">${new Date(points[points.length - 1].timestamp).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</text>
           `
             : nothing}
           <!-- Bars -->
@@ -587,17 +587,14 @@ function renderTimeSeriesCompact(
             const x = padding.left + i * (barWidth + barGap);
             const bh = (val / maxValue) * chartHeight;
             const y = padding.top + chartHeight - bh;
+            const date = new Date(p.timestamp);
             const tooltipLines = [
-              formatDateTimeMs(
-                p.timestamp,
-                {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                },
-                "",
-              ),
+              date.toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              }),
               `${formatTokens(val)} ${normalizeLowercaseStringOrEmpty(t("usage.metrics.tokens"))}`,
             ];
             if (breakdownByType) {
@@ -747,11 +744,13 @@ function renderTimeSeriesCompact(
                 })}
               </span>
               ·
-              ${formatTimeMs(
-                rangeStartTs,
-                { hour: "2-digit", minute: "2-digit" },
-                "",
-              )}–${formatTimeMs(rangeEndTs, { hour: "2-digit", minute: "2-digit" }, "")}
+              ${new Date(rangeStartTs).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}–${new Date(rangeEndTs).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
               ·
               ${formatTokens(
                 filteredOutput + filteredInput + filteredCacheRead + filteredCacheWrite,
@@ -928,7 +927,7 @@ function renderContextPanel(
                     ${skillsTop.map(
                       (s) => html`
                         <div class="context-breakdown-item">
-                          <span class="mono" title=${s.name}>${s.name}</span>
+                          <span class="mono">${s.name}</span>
                           <span class="muted">~${formatTokens(charsToTokens(s.blockChars))}</span>
                         </div>
                       `,
@@ -955,13 +954,11 @@ function renderContextPanel(
                   </div>
                   <div class="context-breakdown-list">
                     ${toolsTop.map(
-                      (tLocal) => html`
+                      (t) => html`
                         <div class="context-breakdown-item">
-                          <span class="mono" title=${tLocal.name}>${tLocal.name}</span>
+                          <span class="mono">${t.name}</span>
                           <span class="muted"
-                            >~${formatTokens(
-                              charsToTokens(tLocal.summaryChars + tLocal.schemaChars),
-                            )}</span
+                            >~${formatTokens(charsToTokens(t.summaryChars + t.schemaChars))}</span
                           >
                         </div>
                       `,
@@ -990,7 +987,7 @@ function renderContextPanel(
                     ${filesTop.map(
                       (f) => html`
                         <div class="context-breakdown-item">
-                          <span class="mono" title=${f.name}>${f.name}</span>
+                          <span class="mono">${f.name}</span>
                           <span class="muted"
                             >~${formatTokens(charsToTokens(f.injectedChars))}</span
                           >
@@ -1189,7 +1186,7 @@ function renderSessionLogsCompact(
             <div class="session-log-entry ${roleClass}">
               <div class="session-log-meta">
                 <span class="session-log-role">${roleLabel}</span>
-                <span>${formatMs(log.timestamp)}</span>
+                <span>${new Date(log.timestamp).toLocaleString()}</span>
                 ${log.tokens ? html`<span>${formatTokens(log.tokens)}</span>` : nothing}
               </div>
               <div class="session-log-content">${cleanContent}</div>

@@ -350,7 +350,7 @@ describe("manifest model catalog suppression planner", () => {
         plugins: [
           {
             id: "openai",
-            providers: ["openai", "openai"],
+            providers: ["openai", "openai-codex"],
             modelCatalog: {
               aliases: {
                 "azure-openai-responses": {

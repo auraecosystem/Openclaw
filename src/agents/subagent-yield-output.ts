@@ -1,7 +1,11 @@
-import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
 
 function readToolName(value: unknown): string | undefined {
-  const record = asOptionalRecord(value);
+  const record = asRecord(value);
   if (!record) {
     return undefined;
   }
@@ -15,7 +19,7 @@ function readToolName(value: unknown): string | undefined {
 }
 
 function isToolCallBlock(value: unknown): boolean {
-  const record = asOptionalRecord(value);
+  const record = asRecord(value);
   if (!record) {
     return false;
   }
@@ -29,7 +33,7 @@ function isToolCallBlock(value: unknown): boolean {
 }
 
 export function assistantCallsSessionsYield(message: unknown): boolean {
-  const record = asOptionalRecord(message);
+  const record = asRecord(message);
   if (!record || record.role !== "assistant" || !Array.isArray(record.content)) {
     return false;
   }
@@ -44,14 +48,14 @@ function parseJsonObject(text: string): Record<string, unknown> | undefined {
     return undefined;
   }
   try {
-    return asOptionalRecord(JSON.parse(trimmed));
+    return asRecord(JSON.parse(trimmed));
   } catch {
     return undefined;
   }
 }
 
 function readStructuredToolPayload(content: unknown): Record<string, unknown> | undefined {
-  const record = asOptionalRecord(content);
+  const record = asRecord(content);
   if (record) {
     return record;
   }
@@ -62,7 +66,7 @@ function readStructuredToolPayload(content: unknown): Record<string, unknown> | 
     return undefined;
   }
   for (const block of content) {
-    const blockRecord = asOptionalRecord(block);
+    const blockRecord = asRecord(block);
     if (!blockRecord) {
       continue;
     }
@@ -82,7 +86,7 @@ export function isSessionsYieldToolResult(
   message: unknown,
   previousAssistantCalledYield: boolean,
 ): boolean {
-  const record = asOptionalRecord(message);
+  const record = asRecord(message);
   if (!record || (record.role !== "toolResult" && record.role !== "tool")) {
     return false;
   }
@@ -93,7 +97,7 @@ export function isSessionsYieldToolResult(
   if (!previousAssistantCalledYield) {
     return false;
   }
-  const details = asOptionalRecord(record.details);
+  const details = asRecord(record.details);
   if (details?.status === "yielded") {
     return true;
   }

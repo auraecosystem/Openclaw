@@ -4,10 +4,6 @@ import {
   formatHelpExamples,
   theme,
 } from "openclaw/plugin-sdk/memory-core-host-runtime-cli";
-import {
-  parseStrictNonNegativeInteger,
-  parseStrictPositiveInteger,
-} from "openclaw/plugin-sdk/number-runtime";
 import type {
   MemoryCommandOptions,
   MemoryPromoteCommandOptions,
@@ -30,8 +26,6 @@ async function loadMemoryCliRuntime(): Promise<MemoryCliRuntime> {
   memoryCliRuntimePromise ??= import("./cli.runtime.js");
   return await memoryCliRuntimePromise;
 }
-
-const DECIMAL_NUMBER_RE = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
 
 export async function runMemoryStatus(opts: MemoryCommandOptions) {
   const runtime = await loadMemoryCliRuntime();
@@ -69,40 +63,6 @@ async function runMemoryRemHarness(opts: MemoryRemHarnessOptions) {
 async function runMemoryRemBackfill(opts: MemoryRemBackfillOptions) {
   const runtime = await loadMemoryCliRuntime();
   await runtime.runMemoryRemBackfill(opts);
-}
-
-function invalidCliArgument(message: string): Error & { code: string; exitCode: number } {
-  const error = new Error(message) as Error & { code: string; exitCode: number };
-  error.name = "InvalidArgumentError";
-  // Commander recognizes parser failures by code; keep the import type-only for bundled plugin deps.
-  error.code = "commander.invalidArgument";
-  error.exitCode = 1;
-  return error;
-}
-
-function parseMemoryCliNumberOption(value: string, flag: string): number {
-  const trimmed = value.trim();
-  const parsed = DECIMAL_NUMBER_RE.test(trimmed) ? Number(trimmed) : Number.NaN;
-  if (!Number.isFinite(parsed)) {
-    throw invalidCliArgument(`${flag} must be a finite number.`);
-  }
-  return parsed;
-}
-
-function parseMemoryCliPositiveIntegerOption(value: string, flag: string): number {
-  const parsed = parseStrictPositiveInteger(value);
-  if (parsed === undefined) {
-    throw invalidCliArgument(`${flag} must be a positive integer.`);
-  }
-  return parsed;
-}
-
-function parseMemoryCliNonNegativeIntegerOption(value: string, flag: string): number {
-  const parsed = parseStrictNonNegativeInteger(value);
-  if (parsed === undefined) {
-    throw invalidCliArgument(`${flag} must be a non-negative integer.`);
-  }
-  return parsed;
 }
 
 export function registerMemoryCli(program: Command) {
@@ -182,12 +142,8 @@ export function registerMemoryCli(program: Command) {
     .argument("[query]", "Search query")
     .option("--query <text>", "Search query (alternative to positional argument)")
     .option("--agent <id>", "Agent id (default: default agent)")
-    .option("--max-results <n>", "Max results", (value: string) =>
-      parseMemoryCliPositiveIntegerOption(value, "--max-results"),
-    )
-    .option("--min-score <n>", "Minimum score", (value: string) =>
-      parseMemoryCliNumberOption(value, "--min-score"),
-    )
+    .option("--max-results <n>", "Max results", (value: string) => Number(value))
+    .option("--min-score <n>", "Minimum score", (value: string) => Number(value))
     .option("--json", "Print JSON")
     .action(async (queryArg: string | undefined, opts: MemorySearchCommandOptions) => {
       await runMemorySearch(queryArg, opts);
@@ -199,23 +155,21 @@ export function registerMemoryCli(program: Command) {
       "Rank short-term recalls and optionally archive top entries outside compact MEMORY.md",
     )
     .option("--agent <id>", "Agent id (default: default agent)")
-    .option("--limit <n>", "Max candidates", (value: string) =>
-      parseMemoryCliPositiveIntegerOption(value, "--limit"),
-    )
+    .option("--limit <n>", "Max candidates", (value: string) => Number(value))
     .option(
       "--min-score <n>",
       `Minimum weighted score (default: ${DEFAULT_PROMOTION_MIN_SCORE})`,
-      (value: string) => parseMemoryCliNumberOption(value, "--min-score"),
+      (value: string) => Number(value),
     )
     .option(
       "--min-recall-count <n>",
       `Minimum recall count (default: ${DEFAULT_PROMOTION_MIN_RECALL_COUNT})`,
-      (value: string) => parseMemoryCliNonNegativeIntegerOption(value, "--min-recall-count"),
+      (value: string) => Number(value),
     )
     .option(
       "--min-unique-queries <n>",
       `Minimum distinct query count (default: ${DEFAULT_PROMOTION_MIN_UNIQUE_QUERIES})`,
-      (value: string) => parseMemoryCliNonNegativeIntegerOption(value, "--min-unique-queries"),
+      (value: string) => Number(value),
     )
     .option("--apply", "Archive selected candidates and keep MEMORY.md compact", false)
     .option("--include-promoted", "Include already promoted candidates", false)

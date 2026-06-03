@@ -8,7 +8,6 @@ import type {
   DiagnosticMemoryUsage,
 } from "../infra/diagnostic-events.js";
 import { registerFatalErrorHook } from "../infra/fatal-error-hooks.js";
-import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
 import { replaceFileAtomicSync } from "../infra/replace-file.js";
 import {
   getDiagnosticStabilitySnapshot,
@@ -741,42 +740,10 @@ function readStabilityEventRecord(
   assignOptionalNumber(sanitized, "ageMs", record.ageMs, `${label}.ageMs`);
   assignOptionalNumber(sanitized, "queueDepth", record.queueDepth, `${label}.queueDepth`);
   assignOptionalNumber(sanitized, "queueSize", record.queueSize, `${label}.queueSize`);
-  assignOptionalNumber(sanitized, "queueLength", record.queueLength, `${label}.queueLength`);
   assignOptionalNumber(sanitized, "waitMs", record.waitMs, `${label}.waitMs`);
   assignOptionalNumber(sanitized, "active", record.active, `${label}.active`);
   assignOptionalNumber(sanitized, "waiting", record.waiting, `${label}.waiting`);
   assignOptionalNumber(sanitized, "queued", record.queued, `${label}.queued`);
-  assignOptionalNumber(sanitized, "droppedEvents", record.droppedEvents, `${label}.droppedEvents`);
-  assignOptionalNumber(
-    sanitized,
-    "droppedTrustedEvents",
-    record.droppedTrustedEvents,
-    `${label}.droppedTrustedEvents`,
-  );
-  assignOptionalNumber(
-    sanitized,
-    "droppedUntrustedEvents",
-    record.droppedUntrustedEvents,
-    `${label}.droppedUntrustedEvents`,
-  );
-  assignOptionalNumber(
-    sanitized,
-    "droppedPriorityEvents",
-    record.droppedPriorityEvents,
-    `${label}.droppedPriorityEvents`,
-  );
-  assignOptionalNumber(
-    sanitized,
-    "maxQueueLength",
-    record.maxQueueLength,
-    `${label}.maxQueueLength`,
-  );
-  assignOptionalNumber(
-    sanitized,
-    "drainBatchSize",
-    record.drainBatchSize,
-    `${label}.drainBatchSize`,
-  );
 
   if (record.webhooks !== undefined) {
     const webhooks = readObject(record.webhooks, `${label}.webhooks`);
@@ -897,7 +864,8 @@ function readPositiveMemoryFile(file: string): number | "max" | undefined {
     if (raw === "max") {
       return "max";
     }
-    return parseStrictNonNegativeInteger(raw);
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -911,8 +879,8 @@ function readCgroupEventFile(file: string): Record<string, number> {
       if (!key || !SAFE_REASON_CODE.test(key)) {
         continue;
       }
-      const value = parseStrictNonNegativeInteger(raw ?? "");
-      if (value !== undefined) {
+      const value = Number.parseInt(raw ?? "", 10);
+      if (Number.isFinite(value) && value >= 0) {
         events[key] = value;
       }
     }

@@ -167,20 +167,20 @@ export async function startWhatsAppQaDriverSession(params: {
         messageId: result.messageId,
       };
     },
-    async waitForMessage(paramsLocal) {
-      const existing = observedMessages.find(paramsLocal.match);
+    async waitForMessage(params) {
+      const existing = observedMessages.find(params.match);
       if (existing) {
         return existing;
       }
       return await new Promise<WhatsAppQaDriverObservedMessage>((resolve, reject) => {
         const waiter: Waiter = {
-          predicate: paramsLocal.match,
+          predicate: params.match,
           resolve,
           reject,
           timeout: setTimeout(() => {
             removeWaiter(waiter);
             reject(new Error("timed out waiting for WhatsApp QA driver message"));
-          }, paramsLocal.timeoutMs),
+          }, params.timeoutMs),
         };
         waiters.push(waiter);
       });

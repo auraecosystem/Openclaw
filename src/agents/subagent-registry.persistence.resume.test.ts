@@ -110,7 +110,7 @@ describe("subagent registry persistence resume", () => {
       startedAt: 111,
       endedAt: 222,
     });
-    mod.testing.setDepsForTest({
+    mod.__testing.setDepsForTest({
       ...createSubagentRegistryTestDeps({
         callGateway: vi.mocked(callGatewayModule.callGateway),
         captureSubagentCompletionReply: vi.fn(async () => undefined),
@@ -123,7 +123,7 @@ describe("subagent registry persistence resume", () => {
 
   afterEach(async () => {
     announceSpy.mockClear();
-    mod.testing.setDepsForTest();
+    mod.__testing.setDepsForTest();
     mod.resetSubagentRegistryForTests({ persist: false });
     await drainSessionStoreWriterQueuesForTest();
     clearSessionStoreCacheForTest();

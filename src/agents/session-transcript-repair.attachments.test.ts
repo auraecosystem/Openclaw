@@ -1,4 +1,4 @@
-import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { describe, it, expect } from "vitest";
 import { sanitizeToolCallInputs } from "./session-transcript-repair.js";
 import { castAgentMessage, castAgentMessages } from "./test-helpers/agent-message-fixtures.js";
@@ -27,18 +27,39 @@ function mkSessionsSpawnToolCall(content: string): AgentMessage {
   });
 }
 
-describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
-  it("keeps attachment content in transcript-owned tool calls", () => {
-    const content = "LOCAL_ATTACHMENT_CONTENT";
-    const input = [mkSessionsSpawnToolCall(content)];
+describe("sanitizeToolCallInputs redacts sessions_spawn attachments", () => {
+  it("replaces attachments[].content with __OPENCLAW_REDACTED__", () => {
+    const secret = "SUPER_SECRET_SHOULD_NOT_PERSIST"; // pragma: allowlist secret
+    const input = [mkSessionsSpawnToolCall(secret)];
     const out = sanitizeToolCallInputs(input);
-
-    expect(out).toStrictEqual(input);
-    expect(JSON.stringify(out)).toContain(content);
+    expect(out).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call_1",
+            name: "sessions_spawn",
+            arguments: {
+              task: "do thing",
+              attachments: [
+                {
+                  name: "README.md",
+                  encoding: "utf8",
+                  content: "__OPENCLAW_REDACTED__",
+                },
+              ],
+            },
+          },
+        ],
+        timestamp: 0,
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain(secret);
   });
 
-  it("keeps attachment content from tool input payloads too", () => {
-    const content = "INPUT_ATTACHMENT_CONTENT";
+  it("redacts attachments content from tool input payloads too", () => {
+    const secret = "INPUT_SECRET_SHOULD_NOT_PERSIST"; // pragma: allowlist secret
     const input = castAgentMessages([
       {
         role: "assistant",
@@ -49,7 +70,7 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
             name: "sessions_spawn",
             input: {
               task: "do thing",
-              attachments: [{ name: "x.txt", content }],
+              attachments: [{ name: "x.txt", content: secret }],
             },
           },
         ],
@@ -57,12 +78,32 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
     ]);
 
     const out = sanitizeToolCallInputs(input);
-    expect(out).toStrictEqual(input);
-    expect(JSON.stringify(out)).toContain(content);
+    expect(out).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolUse",
+            id: "call_2",
+            name: "sessions_spawn",
+            input: {
+              task: "do thing",
+              attachments: [
+                {
+                  name: "x.txt",
+                  content: "__OPENCLAW_REDACTED__",
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain(secret);
   });
 
-  it("keeps non-content attachment payload fields unchanged", () => {
-    const nestedValue = "NESTED_ATTACHMENT_VALUE";
+  it("replaces non-content attachment payload fields with a minimal redacted stub", () => {
+    const secret = "NESTED_ATTACHMENT_SECRET"; // pragma: allowlist secret
     const input = castAgentMessages([
       {
         role: "assistant",
@@ -78,8 +119,8 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
                   name: "payload.json",
                   mimeType: "application/json",
                   encoding: "utf8",
-                  data: nestedValue,
-                  nested: { value: nestedValue },
+                  data: secret,
+                  nested: { secret },
                 },
               ],
             },
@@ -89,11 +130,26 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
     ]);
 
     const out = sanitizeToolCallInputs(input);
-    expect(out).toStrictEqual(input);
-    expect(JSON.stringify(out)).toContain(nestedValue);
+    const msg = out[0] as { content?: unknown[] };
+    const tool = (msg.content?.[0] ?? null) as {
+      input?: { attachments?: unknown[] };
+      arguments?: { attachments?: unknown[] };
+    } | null;
+    const attachment = (tool?.input?.attachments?.[0] ??
+      tool?.arguments?.attachments?.[0] ??
+      null) as Record<string, unknown> | null;
+    expect(attachment).toEqual({
+      name: "payload.json",
+      mimeType: "application/json",
+      encoding: "utf8",
+      content: "__OPENCLAW_REDACTED__",
+    });
+    expect(JSON.stringify(out)).not.toContain(secret);
   });
 
-  it("keeps ACP routing fields unchanged", () => {
+  it("redacts ACP-only routing fields from arguments and input payloads", () => {
+    const argumentResumeSessionId = "ACP_ARGUMENT_SESSION_ID_SHOULD_NOT_PERSIST"; // pragma: allowlist secret
+    const inputResumeSessionId = "ACP_INPUT_SESSION_ID_SHOULD_NOT_PERSIST"; // pragma: allowlist secret
     const input = castAgentMessages([
       {
         role: "assistant",
@@ -104,7 +160,7 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
             name: "sessions_spawn",
             arguments: {
               task: "do thing",
-              resumeSessionId: "argument-session",
+              resumeSessionId: argumentResumeSessionId,
               streamTo: "parent",
             },
           },
@@ -114,7 +170,7 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
             name: "sessions_spawn",
             input: {
               task: "do other thing",
-              resumeSessionId: "input-session",
+              resumeSessionId: inputResumeSessionId,
               streamTo: "parent",
             },
           },
@@ -123,6 +179,75 @@ describe("sanitizeToolCallInputs preserves sessions_spawn payloads", () => {
     ]);
 
     const out = sanitizeToolCallInputs(input);
-    expect(out).toStrictEqual(input);
+    expect(out).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolCall",
+            id: "call_4",
+            name: "sessions_spawn",
+            arguments: {
+              task: "do thing",
+              resumeSessionId: "__OPENCLAW_REDACTED__",
+              streamTo: "__OPENCLAW_REDACTED__",
+            },
+          },
+          {
+            type: "toolUse",
+            id: "call_5",
+            name: "sessions_spawn",
+            input: {
+              task: "do other thing",
+              resumeSessionId: "__OPENCLAW_REDACTED__",
+              streamTo: "__OPENCLAW_REDACTED__",
+            },
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain(argumentResumeSessionId);
+    expect(JSON.stringify(out)).not.toContain(inputResumeSessionId);
+  });
+
+  it("redacts ACP-only routing fields with non-string payloads", () => {
+    const nestedResumeSessionId = "ACP_NESTED_SESSION_ID_SHOULD_NOT_PERSIST"; // pragma: allowlist secret
+    const input = castAgentMessages([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolUse",
+            id: "call_6",
+            name: "sessions_spawn",
+            input: {
+              task: "do nested thing",
+              resumeSessionId: { value: nestedResumeSessionId },
+              streamTo: ["parent"],
+            },
+          },
+        ],
+      },
+    ]);
+
+    const out = sanitizeToolCallInputs(input);
+    expect(out).toStrictEqual([
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "toolUse",
+            id: "call_6",
+            name: "sessions_spawn",
+            input: {
+              task: "do nested thing",
+              resumeSessionId: "__OPENCLAW_REDACTED__",
+              streamTo: "__OPENCLAW_REDACTED__",
+            },
+          },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(out)).not.toContain(nestedResumeSessionId);
   });
 });

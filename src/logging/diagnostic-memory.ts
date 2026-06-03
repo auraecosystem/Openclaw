@@ -1,5 +1,5 @@
 import {
-  emitInternalDiagnosticEvent as emitDiagnosticEvent,
+  emitDiagnosticEvent,
   type DiagnosticMemoryPressureEvent,
   type DiagnosticMemoryUsage,
 } from "../infra/diagnostic-events.js";

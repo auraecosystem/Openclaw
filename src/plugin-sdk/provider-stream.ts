@@ -1,6 +1,6 @@
-import { createGoogleThinkingPayloadWrapper } from "../llm/providers/stream-wrappers/google.js";
-import { createMinimaxFastModeWrapper } from "../llm/providers/stream-wrappers/minimax.js";
-import { resolveMoonshotThinkingKeep } from "../llm/providers/stream-wrappers/moonshot-thinking.js";
+import { createGoogleThinkingPayloadWrapper } from "../agents/pi-embedded-runner/google-stream-wrappers.js";
+import { createMinimaxFastModeWrapper } from "../agents/pi-embedded-runner/minimax-stream-wrappers.js";
+import { resolveMoonshotThinkingKeep } from "../agents/pi-embedded-runner/moonshot-thinking-stream-wrappers.js";
 import {
   createCodexNativeWebSearchWrapper,
   createOpenAIAttributionHeadersWrapper,
@@ -14,12 +14,12 @@ import {
   resolveOpenAIFastMode,
   resolveOpenAIServiceTier,
   resolveOpenAITextVerbosity,
-} from "../llm/providers/stream-wrappers/openai.js";
+} from "../agents/pi-embedded-runner/openai-stream-wrappers.js";
 import {
   createKilocodeWrapper,
   createOpenRouterWrapper,
   isProxyReasoningUnsupported,
-} from "../llm/providers/stream-wrappers/proxy.js";
+} from "../agents/pi-embedded-runner/proxy-stream-wrappers.js";
 import type { ProviderPlugin } from "../plugins/types.js";
 import type { ProviderWrapStreamFnContext } from "./plugin-entry.js";
 import {
@@ -33,7 +33,6 @@ export {
   composeProviderStreamWrappers,
   createAnthropicThinkingPrefillPayloadWrapper,
   createMoonshotThinkingWrapper,
-  createPlainTextToolCallCompatWrapper,
   createToolStreamWrapper,
   createZaiToolStreamWrapper,
   defaultToolStreamExtraParams,
@@ -168,18 +167,18 @@ export const TOOL_STREAM_DEFAULT_ON_HOOKS =
 export {
   createAnthropicToolPayloadCompatibilityWrapper,
   createOpenAIAnthropicToolPayloadCompatibilityWrapper,
-} from "../llm/providers/stream-wrappers/anthropic-family-tool-payload-compat.js";
+} from "../agents/pi-embedded-runner/anthropic-family-tool-payload-compat.js";
 export {
   createGoogleThinkingPayloadWrapper,
   sanitizeGoogleThinkingPayload,
-} from "../llm/providers/stream-wrappers/google.js";
+} from "../agents/pi-embedded-runner/google-stream-wrappers.js";
 export {
   createKilocodeWrapper,
   createOpenRouterSystemCacheWrapper,
   createOpenRouterWrapper,
   isProxyReasoningUnsupported,
-} from "../llm/providers/stream-wrappers/proxy.js";
-export { createMinimaxFastModeWrapper } from "../llm/providers/stream-wrappers/minimax.js";
+} from "../agents/pi-embedded-runner/proxy-stream-wrappers.js";
+export { createMinimaxFastModeWrapper } from "../agents/pi-embedded-runner/minimax-stream-wrappers.js";
 export {
   createOpenAIAttributionHeadersWrapper,
   createCodexNativeWebSearchWrapper,
@@ -192,8 +191,8 @@ export {
   resolveOpenAIFastMode,
   resolveOpenAIServiceTier,
   resolveOpenAITextVerbosity,
-} from "../llm/providers/stream-wrappers/openai.js";
+} from "../agents/pi-embedded-runner/openai-stream-wrappers.js";
 export {
   getOpenRouterModelCapabilities,
   loadOpenRouterModelCapabilities,
-} from "../agents/embedded-agent-runner/openrouter-model-capabilities.js";
+} from "../agents/pi-embedded-runner/openrouter-model-capabilities.js";

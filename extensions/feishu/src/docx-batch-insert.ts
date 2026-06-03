@@ -90,7 +90,7 @@ async function insertBatch(
   blocks: FeishuDocxBlock[],
   firstLevelBlockIds: string[],
   parentBlockId: string = docToken,
-  index = -1,
+  index: number = -1,
 ): Promise<FeishuDocxBlockChild[]> {
   const descendants = cleanBlocksForDescendant(blocks);
 
@@ -137,7 +137,7 @@ export async function insertBlocksInBatches(
   firstLevelBlockIds: string[],
   logger?: Logger,
   parentBlockId: string = docToken,
-  startIndex = -1,
+  startIndex: number = -1,
 ): Promise<{ children: FeishuDocxBlockChild[]; skipped: string[] }> {
   const allChildren: FeishuDocxBlockChild[] = [];
 

@@ -9,7 +9,7 @@ vi.mock("../../actions.js", () => ({
 }));
 
 let finalizeSlackPreviewEdit: typeof import("./preview-finalize.js").finalizeSlackPreviewEdit;
-let testing: typeof import("./preview-finalize.js").testing;
+let __testing: typeof import("./preview-finalize.js").__testing;
 
 function createClient(overrides?: {
   historyMessages?: Array<Record<string, unknown>>;
@@ -25,7 +25,7 @@ function createClient(overrides?: {
 
 describe("finalizeSlackPreviewEdit", () => {
   beforeAll(async () => {
-    ({ finalizeSlackPreviewEdit, testing } = await import("./preview-finalize.js"));
+    ({ finalizeSlackPreviewEdit, __testing } = await import("./preview-finalize.js"));
   });
 
   beforeEach(() => {
@@ -101,10 +101,10 @@ describe("finalizeSlackPreviewEdit", () => {
     const blocks = [{ type: "section", text: { type: "mrkdwn", text: "*Done*" } }] as const;
 
     expect(
-      testing.buildExpectedSlackEditText({
+      __testing.buildExpectedSlackEditText({
         text: "",
         blocks: blocks as unknown as Parameters<
-          typeof testing.buildExpectedSlackEditText
+          typeof __testing.buildExpectedSlackEditText
         >[0]["blocks"],
       }),
     ).toBe("*Done*");
@@ -122,10 +122,10 @@ describe("finalizeSlackPreviewEdit", () => {
         ],
       },
     ] as const;
-    const expectedText = testing.buildExpectedSlackEditText({
+    const expectedText = __testing.buildExpectedSlackEditText({
       text: "",
       blocks: blocks as unknown as Parameters<
-        typeof testing.buildExpectedSlackEditText
+        typeof __testing.buildExpectedSlackEditText
       >[0]["blocks"],
     });
     const client = createClient({
@@ -134,14 +134,14 @@ describe("finalizeSlackPreviewEdit", () => {
 
     expect(expectedText).toHaveLength(8000);
     await expect(
-      testing.didSlackPreviewEditApplyAfterError({
+      __testing.didSlackPreviewEditApplyAfterError({
         client,
         token: "xoxb-test",
         channelId: "C123",
         messageId: "171234.567",
         text: "",
         blocks: blocks as unknown as Parameters<
-          typeof testing.didSlackPreviewEditApplyAfterError
+          typeof __testing.didSlackPreviewEditApplyAfterError
         >[0]["blocks"],
       }),
     ).resolves.toBe(true);

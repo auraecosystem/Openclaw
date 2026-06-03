@@ -1,6 +1,5 @@
-import { basenameFromAnyPath } from "@openclaw/media-core/file-name";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { basenameFromAnyPath } from "../media/file-name.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 export type AgentGeneratedAttachment = {
   type?: "image" | "audio" | "video" | "file";
@@ -23,9 +22,20 @@ export function generatedAttachmentReference(
 export function mediaUrlsFromGeneratedAttachments(
   attachments: readonly AgentGeneratedAttachment[] | undefined,
 ): string[] {
-  return uniqueStrings(
-    attachments?.flatMap((attachment) => generatedAttachmentReference(attachment) ?? []) ?? [],
-  );
+  if (!attachments?.length) {
+    return [];
+  }
+  const urls: string[] = [];
+  const seen = new Set<string>();
+  for (const attachment of attachments) {
+    const url = generatedAttachmentReference(attachment);
+    if (!url || seen.has(url)) {
+      continue;
+    }
+    seen.add(url);
+    urls.push(url);
+  }
+  return urls;
 }
 
 export function nameFromGeneratedAttachment(

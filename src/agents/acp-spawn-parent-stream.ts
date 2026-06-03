@@ -1,19 +1,14 @@
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { readAcpSessionEntry } from "../acp/runtime/session-meta.js";
 import { resolveSessionFilePath, resolveSessionFilePathOptions } from "../config/sessions/paths.js";
 import { onAgentEvent } from "../infra/agent-events.js";
-import {
-  type EventSessionRoutingPolicy,
-  resolveEventSessionKeyForPolicy,
-  scopedHeartbeatWakeOptionsForPolicy,
-} from "../infra/event-session-routing.js";
 import { requestHeartbeat } from "../infra/heartbeat-wake.js";
 import { appendRegularFile } from "../infra/regular-file.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
+import { resolveEventSessionKey, scopedHeartbeatWakeOptions } from "../routing/session-key.js";
 import { normalizeAssistantPhase } from "../shared/chat-message-content.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { recordTaskRunProgressByRunId } from "../tasks/detached-task-runtime.js";
 import type { DeliveryContext } from "../utils/delivery-context.types.js";
 
@@ -38,18 +33,8 @@ function truncate(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars - 1)}…`;
 }
 
-function normalizeStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  return value.filter((item): item is string => typeof item === "string" && item.length > 0);
-}
-
-function formatProxyEnvSummary(keys: string[]): string {
-  if (keys.length === 0) {
-    return "proxy env: none";
-  }
-  return `proxy env: ${keys.join(", ")}`;
+function toFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function resolveAcpStreamLogPathFromSessionFile(sessionFile: string, sessionId: string): string {
@@ -105,7 +90,6 @@ export function startAcpSpawnParentStreamRelay(params: {
    * Snapshotted with `mainKey` for the same start-time routing reason.
    */
   sessionScope?: "per-sender" | "global";
-  eventRouting?: EventSessionRoutingPolicy;
   logPath?: string;
   deliveryContext?: DeliveryContext;
   surfaceUpdates?: boolean;
@@ -206,23 +190,20 @@ export function startAcpSpawnParentStreamRelay(params: {
     });
   };
   const shouldSurfaceUpdates = params.surfaceUpdates !== false;
-  const eventRouting = params.eventRouting ?? {
-    mainKey: params.mainKey,
-    sessionScope: params.sessionScope,
-  };
   const wake = () => {
     if (!shouldSurfaceUpdates) {
       return;
     }
     requestHeartbeat(
-      scopedHeartbeatWakeOptionsForPolicy(
+      scopedHeartbeatWakeOptions(
         parentSessionKey,
         {
           source: "acp-spawn",
           intent: "event",
           reason: "acp:spawn:stream",
         },
-        eventRouting,
+        params.mainKey,
+        params.sessionScope,
       ),
     );
   };
@@ -236,9 +217,11 @@ export function startAcpSpawnParentStreamRelay(params: {
       return;
     }
     enqueueSystemEvent(cleaned, {
-      sessionKey: resolveEventSessionKeyForPolicy(parentSessionKey, eventRouting),
+      sessionKey: resolveEventSessionKey(parentSessionKey, params.mainKey, params.sessionScope),
       contextKey,
       deliveryContext: params.deliveryContext,
+      forceSenderIsOwnerFalse: true,
+      trusted: false,
     });
     wake();
   };
@@ -260,11 +243,6 @@ export function startAcpSpawnParentStreamRelay(params: {
   let pendingText = "";
   let lastProgressAt = Date.now();
   let stallNotified = false;
-  let promptSubmittedAt: number | undefined;
-  let firstRuntimeEventAt: number | undefined;
-  let firstVisibleOutputAt: number | undefined;
-  let lastRuntimeEventType: string | undefined;
-  let proxyEnvKeysAtPrompt: string[] = [];
   let flushTimer: NodeJS.Timeout | undefined;
   let relayLifetimeTimer: NodeJS.Timeout | undefined;
 
@@ -306,34 +284,6 @@ export function startAcpSpawnParentStreamRelay(params: {
     flushTimer.unref?.();
   };
 
-  const buildNoOutputNotice = () => {
-    const seconds = Math.round(noOutputNoticeMs / 1000);
-    if (!promptSubmittedAt) {
-      return {
-        summary: `No prompt submission observed for ${seconds}s after child start.`,
-        text: `${relayLabel} session started but no prompt submission was observed for ${seconds}s.`,
-      };
-    }
-    if (!firstRuntimeEventAt) {
-      const proxySummary = formatProxyEnvSummary(proxyEnvKeysAtPrompt);
-      return {
-        summary: `Prompt submitted but no ACP runtime event for ${seconds}s (${proxySummary}).`,
-        text: `${relayLabel} prompt was submitted but no ACP runtime event arrived for ${seconds}s (${proxySummary}). Check upstream connectivity, auth, or proxy/network access in the gateway child environment.`,
-      };
-    }
-    if (!firstVisibleOutputAt) {
-      const lastEvent = lastRuntimeEventType ? ` Last ACP event: ${lastRuntimeEventType}.` : "";
-      return {
-        summary: `ACP runtime active but no visible assistant output for ${seconds}s.${lastEvent}`,
-        text: `${relayLabel} has ACP runtime activity but no visible assistant output for ${seconds}s.${lastEvent} It may be working, blocked on a tool, or failing before visible output.`,
-      };
-    }
-    return {
-      summary: `No visible output for ${seconds}s. It may be waiting for input.`,
-      text: `${relayLabel} has produced no visible output for ${seconds}s. It may be waiting for interactive input.`,
-    };
-  };
-
   const noOutputWatcherTimer = setInterval(() => {
     if (disposed || noOutputNoticeMs <= 0) {
       return;
@@ -345,15 +295,17 @@ export function startAcpSpawnParentStreamRelay(params: {
       return;
     }
     stallNotified = true;
-    const notice = buildNoOutputNotice();
     recordTaskRunProgressByRunId({
       runId,
       runtime: "acp",
       sessionKey: params.childSessionKey,
       lastEventAt: Date.now(),
-      eventSummary: notice.summary,
+      eventSummary: `No output for ${Math.round(noOutputNoticeMs / 1000)}s. It may be waiting for input.`,
     });
-    emit(notice.text, `${contextPrefix}:stall`);
+    emit(
+      `${relayLabel} has produced no output for ${Math.round(noOutputNoticeMs / 1000)}s. It may be waiting for interactive input.`,
+      `${contextPrefix}:stall`,
+    );
   }, noOutputPollMs);
   noOutputWatcherTimer.unref?.();
 
@@ -413,7 +365,6 @@ export function startAcpSpawnParentStreamRelay(params: {
       }
 
       lastProgressAt = Date.now();
-      firstVisibleOutputAt ??= lastProgressAt;
       pendingText += delta;
       if (pendingText.length > STREAM_BUFFER_MAX_CHARS) {
         pendingText = pendingText.slice(-STREAM_BUFFER_MAX_CHARS);
@@ -426,34 +377,6 @@ export function startAcpSpawnParentStreamRelay(params: {
       return;
     }
 
-    if (event.stream === "acp") {
-      const data = event.data as
-        | {
-            phase?: unknown;
-            at?: unknown;
-            eventType?: unknown;
-            proxyEnvKeys?: unknown;
-          }
-        | undefined;
-      const phase = normalizeOptionalString(data?.phase);
-      logEvent("acp", { phase: phase ?? "unknown", data: event.data });
-      if (phase === "prompt_submitted") {
-        const at = asFiniteNumber(data?.at) ?? Date.now();
-        promptSubmittedAt ??= at;
-        proxyEnvKeysAtPrompt = normalizeStringArray(data?.proxyEnvKeys);
-        lastProgressAt = Date.now();
-        return;
-      }
-      if (phase === "runtime_event") {
-        const eventType = normalizeOptionalString(data?.eventType);
-        firstRuntimeEventAt ??= Date.now();
-        lastRuntimeEventType = eventType;
-        lastProgressAt = Date.now();
-        return;
-      }
-      return;
-    }
-
     if (event.stream !== "lifecycle") {
       return;
     }
@@ -462,10 +385,10 @@ export function startAcpSpawnParentStreamRelay(params: {
     logEvent("lifecycle", { phase: phase ?? "unknown", data: event.data });
     if (phase === "end") {
       flushPending();
-      const startedAt = asFiniteNumber(
+      const startedAt = toFiniteNumber(
         (event.data as { startedAt?: unknown } | undefined)?.startedAt,
       );
-      const endedAt = asFiniteNumber((event.data as { endedAt?: unknown } | undefined)?.endedAt);
+      const endedAt = toFiniteNumber((event.data as { endedAt?: unknown } | undefined)?.endedAt);
       const durationMs =
         startedAt != null && endedAt != null && endedAt >= startedAt
           ? endedAt - startedAt

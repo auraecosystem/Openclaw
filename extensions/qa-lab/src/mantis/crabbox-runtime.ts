@@ -114,12 +114,10 @@ export async function warmupCrabbox(params: {
   env: NodeJS.ProcessEnv;
   idleTimeout: string;
   machineClass: string;
-  market?: string;
   provider: string;
   runner: CommandRunner;
   ttl: string;
 }) {
-  const marketArgs = params.market ? ["--market", params.market] : [];
   const result = await runCommand({
     command: params.crabboxBin,
     args: [
@@ -130,7 +128,6 @@ export async function warmupCrabbox(params: {
       "--browser",
       "--class",
       params.machineClass,
-      ...marketArgs,
       "--idle-timeout",
       params.idleTimeout,
       "--ttl",

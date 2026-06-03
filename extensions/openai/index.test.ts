@@ -1,6 +1,9 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
-import { requireRegisteredProvider } from "openclaw/plugin-sdk/plugin-test-runtime";
+import {
+  registerProviderPlugin,
+  requireRegisteredProvider,
+} from "openclaw/plugin-sdk/plugin-test-runtime";
 import * as providerAuth from "openclaw/plugin-sdk/provider-auth-runtime";
 import * as providerHttp from "openclaw/plugin-sdk/provider-http";
 import type { ProviderPlugin } from "openclaw/plugin-sdk/provider-model-shared";
@@ -29,11 +32,22 @@ vi.mock("openclaw/plugin-sdk/runtime-env", async () => {
   };
 });
 
-vi.mock("./openai-chatgpt-oauth-flow.runtime.js", () => ({
-  refreshOpenAICodexToken: runtimeMocks.refreshOpenAICodexToken,
+vi.mock("@earendil-works/pi-ai/oauth", () => ({
+  getOAuthApiKey: vi.fn(),
+  getOAuthProviders: () => [],
+  loginOpenAICodex: vi.fn(),
+  refreshOpenAICodexToken: vi.fn(),
 }));
 
-import { createOpenAICodexProviderRuntime } from "./openai-chatgpt-provider.runtime.js";
+import { createOpenAICodexProviderRuntime } from "./openai-codex-provider.runtime.js";
+
+const _registerOpenAIPlugin = async () =>
+  registerProviderPlugin({
+    plugin,
+    id: "openai",
+    name: "OpenAI Provider",
+  });
+
 async function registerOpenAIPluginWithHook(params?: { pluginConfig?: Record<string, unknown> }) {
   const on = vi.fn();
   const providers: ProviderPlugin[] = [];
@@ -318,9 +332,10 @@ describe("openai plugin", () => {
     ).toBeLessThan(runtimeMocks.refreshOpenAICodexToken.mock.invocationCallOrder[0]);
   });
 
-  it("registers provider-owned OpenAI tool compat hooks for API and Codex transports", async () => {
+  it("registers provider-owned OpenAI tool compat hooks for openai and codex", async () => {
     const { providers } = await registerOpenAIPluginWithHook();
     const openaiProvider = requireRegisteredProvider(providers, "openai");
+    const codexProvider = requireRegisteredProvider(providers, "openai-codex");
     const noParamsTool = {
       name: "ping",
       description: "",
@@ -340,13 +355,13 @@ describe("openai plugin", () => {
       } as never,
       tools: [noParamsTool],
     } as never);
-    const normalizedCodex = openaiProvider.normalizeToolSchemas?.({
-      provider: "openai",
+    const normalizedCodex = codexProvider.normalizeToolSchemas?.({
+      provider: "openai-codex",
       modelId: "gpt-5.4",
-      modelApi: "openai-chatgpt-responses",
+      modelApi: "openai-codex-responses",
       model: {
-        provider: "openai",
-        api: "openai-chatgpt-responses",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
         baseUrl: "https://chatgpt.com/backend-api",
         id: "gpt-5.4",
       } as never,
@@ -380,13 +395,13 @@ describe("openai plugin", () => {
       } as never),
     ).toStrictEqual([]);
     expect(
-      openaiProvider.inspectToolSchemas?.({
-        provider: "openai",
+      codexProvider.inspectToolSchemas?.({
+        provider: "openai-codex",
         modelId: "gpt-5.4",
-        modelApi: "openai-chatgpt-responses",
+        modelApi: "openai-codex-responses",
         model: {
-          provider: "openai",
-          api: "openai-chatgpt-responses",
+          provider: "openai-codex",
+          api: "openai-codex-responses",
           baseUrl: "https://chatgpt.com/backend-api",
           id: "gpt-5.4",
         } as never,
@@ -403,6 +418,7 @@ describe("openai plugin", () => {
     expectNoBeforePromptBuildHook(on);
 
     const openaiProvider = requireRegisteredProvider(providers, "openai");
+    const codexProvider = requireRegisteredProvider(providers, "openai-codex");
     const contributionContext: Parameters<
       NonNullable<ProviderPlugin["resolveSystemPromptContribution"]>
     >[0] = {
@@ -431,6 +447,12 @@ describe("openai plugin", () => {
     expect(OPENAI_FRIENDLY_PROMPT_OVERLAY).toContain(
       "Occasional emoji are fine when they fit naturally, especially for warmth or brief celebration; keep them sparse.",
     );
+    expect(codexProvider.resolveSystemPromptContribution?.(contributionContext)).toEqual({
+      stablePrefix: OPENAI_GPT5_BEHAVIOR_CONTRACT,
+      sectionOverrides: {
+        interaction_style: OPENAI_FRIENDLY_PROMPT_OVERLAY,
+      },
+    });
     expect(
       openaiProvider.resolveSystemPromptContribution?.({
         ...contributionContext,

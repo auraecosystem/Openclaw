@@ -6,7 +6,6 @@ import {
   acquireLocalHeavyCheckLockSync,
   applyLocalOxlintPolicy,
 } from "./local-heavy-check-runtime.mjs";
-import { createManagedCommandInvocation } from "./managed-child-process.mjs";
 
 export function runExtensionOxlint(params) {
   const repoRoot = process.cwd();
@@ -40,16 +39,10 @@ export function runExtensionOxlint(params) {
 
     const baseArgs = ["-c", tempConfigPath, ...process.argv.slice(2), ...extensionFiles];
     const { args: finalArgs, env } = applyLocalOxlintPolicy(baseArgs, process.env);
-    const oxlint = createManagedCommandInvocation({
-      args: finalArgs,
-      bin: oxlintPath,
-      env,
-    });
-    const result = spawnSync(oxlint.command, oxlint.args, {
+    const result = spawnSync(oxlintPath, finalArgs, {
       stdio: "inherit",
       env,
-      shell: oxlint.shell,
-      windowsVerbatimArguments: oxlint.windowsVerbatimArguments,
+      shell: process.platform === "win32",
     });
 
     if (result.error) {

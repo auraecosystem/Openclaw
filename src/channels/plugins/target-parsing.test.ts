@@ -7,10 +7,12 @@ import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import {
   comparableChannelTargetsMatch,
+  parseExplicitTargetForChannel,
   parseExplicitTargetForLoadedChannel,
-  resolveComparableTargetForLoadedChannel,
+  resolveComparableTargetForChannel,
+  resolveRouteTargetForChannel,
   resolveRouteTargetForLoadedChannel,
-} from "./target-parsing-loaded.js";
+} from "./target-parsing.js";
 
 function parseThreadedTargetForTest(raw: string): {
   to: string;
@@ -97,27 +99,27 @@ function setMinimalTargetParsingRegistry(): void {
   );
 }
 
-describe("parseExplicitTargetForLoadedChannel", () => {
+describe("parseExplicitTargetForChannel", () => {
   beforeEach(() => {
     setMinimalTargetParsingRegistry();
   });
 
   it("parses threaded targets via the registered channel plugin contract", () => {
     expect(
-      parseExplicitTargetForLoadedChannel("mock-threaded", "threaded:group:room-a:topic:77"),
+      parseExplicitTargetForChannel("mock-threaded", "threaded:group:room-a:topic:77"),
     ).toEqual({
       to: "room-a",
       threadId: 77,
       chatType: "group",
     });
-    expect(parseExplicitTargetForLoadedChannel("mock-threaded", "room-a")).toEqual({
+    expect(parseExplicitTargetForChannel("mock-threaded", "room-a")).toEqual({
       to: "room-a",
       chatType: undefined,
     });
   });
 
   it("parses registered non-bundled channel targets via the active plugin contract", () => {
-    expect(parseExplicitTargetForLoadedChannel("demo-target", "team-room")).toEqual({
+    expect(parseExplicitTargetForChannel("demo-target", "team-room")).toEqual({
       to: "TEAM-ROOM",
       chatType: "direct",
     });
@@ -129,7 +131,7 @@ describe("parseExplicitTargetForLoadedChannel", () => {
 
   it("builds route targets from plugin-owned grammar", () => {
     expect(
-      resolveRouteTargetForLoadedChannel({
+      resolveRouteTargetForChannel({
         channel: "mock-threaded",
         rawTarget: "threaded:group:room-a:topic:77",
       }),
@@ -155,11 +157,11 @@ describe("parseExplicitTargetForLoadedChannel", () => {
   });
 
   it("matches route targets when only the plugin grammar differs", () => {
-    const topicTarget = resolveRouteTargetForLoadedChannel({
+    const topicTarget = resolveRouteTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "threaded:room-a:topic:77",
     });
-    const bareTarget = resolveRouteTargetForLoadedChannel({
+    const bareTarget = resolveRouteTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "room-a",
     });
@@ -179,11 +181,11 @@ describe("parseExplicitTargetForLoadedChannel", () => {
   });
 
   it("compares numeric and string thread ids through the shared route contract", () => {
-    const numericThread = resolveRouteTargetForLoadedChannel({
+    const numericThread = resolveRouteTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "threaded:room-a:topic:77",
     });
-    const stringThread = resolveRouteTargetForLoadedChannel({
+    const stringThread = resolveRouteTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "room-a",
       fallbackThreadId: "77",
@@ -198,11 +200,11 @@ describe("parseExplicitTargetForLoadedChannel", () => {
   });
 
   it("keeps deprecated comparable target helpers as route wrappers", () => {
-    const numericThread = resolveComparableTargetForLoadedChannel({
+    const numericThread = resolveComparableTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "threaded:room-a:topic:77",
     });
-    const stringThread = resolveRouteTargetForLoadedChannel({
+    const stringThread = resolveRouteTargetForChannel({
       channel: "mock-threaded",
       rawTarget: "room-a",
       fallbackThreadId: "77",

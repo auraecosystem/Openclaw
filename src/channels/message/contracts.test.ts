@@ -13,7 +13,6 @@ import {
   verifyDurableFinalCapabilityProofs,
   verifyLivePreviewFinalizerCapabilityProofs,
 } from "./contracts.js";
-import { durableFinalDeliveryCapabilities } from "./types.js";
 
 function verifiedEntries<T extends { status: string }>(results: readonly T[]): T[] {
   return results.filter((result) => result.status === "verified");
@@ -58,7 +57,7 @@ describe("durable final capability contracts", () => {
       { capability: "text", status: "verified" },
       { capability: "silent", status: "verified" },
     ]);
-    expect(results).toHaveLength(durableFinalDeliveryCapabilities.length);
+    expect(results).toHaveLength(12);
     expectOnlyVerifiedOrNotDeclared(results);
     expect(text).toHaveBeenCalledTimes(1);
     expect(silent).toHaveBeenCalledTimes(1);
@@ -104,7 +103,7 @@ describe("durable final capability contracts", () => {
       { capability: "text", status: "verified" },
       { capability: "media", status: "verified" },
     ]);
-    expect(results).toHaveLength(durableFinalDeliveryCapabilities.length);
+    expect(results).toHaveLength(12);
     expectOnlyVerifiedOrNotDeclared(results);
     expect(text).toHaveBeenCalledTimes(1);
     expect(media).toHaveBeenCalledTimes(1);

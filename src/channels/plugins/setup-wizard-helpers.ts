@@ -1,13 +1,10 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import {
-  normalizeStringEntries,
-  uniqueStrings,
-} from "@openclaw/normalization-core/string-normalization";
 import type { DmPolicy, GroupPolicy } from "../../config/types.base.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { SecretInput } from "../../config/types.secrets.js";
 import { resolveSecretInputModeForEnvSelection } from "../../plugins/provider-auth-mode.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import type { WizardPrompter } from "../../wizard/prompts.js";
 import { resolveChannelDmAllowFrom, resolveChannelDmPolicy } from "./dm-access.js";
 import {
@@ -30,20 +27,6 @@ let providerAuthInputPromise:
 function loadProviderAuthInput() {
   providerAuthInputPromise ??= import("../../plugins/provider-auth-ref.js");
   return providerAuthInputPromise;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value != null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function asAllowFromList(value: unknown): ReadonlyArray<string | number> | undefined {
-  return Array.isArray(value)
-    ? value.filter(
-        (entry): entry is string | number => typeof entry === "string" || typeof entry === "number",
-      )
-    : undefined;
 }
 
 export const promptAccountId: PromptAccountId = async (params: PromptAccountIdParams) => {
@@ -92,11 +75,14 @@ export function mergeAllowFromEntries(
   additions: Array<string | number>,
 ): string[] {
   const merged = normalizeStringEntries([...(current ?? []), ...additions]);
-  return uniqueStrings(merged);
+  return [...new Set(merged)];
 }
 
 export function splitSetupEntries(raw: string): string[] {
-  return normalizeStringEntries(raw.split(/[\n,;]+/g));
+  return raw
+    .split(/[\n,;]+/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 type ParsedSetupEntry = { value: string } | { error: string };
@@ -169,7 +155,7 @@ export function normalizeAllowFromEntries(
       return normalizeOptionalString(normalizeEntry(entry)) ?? "";
     })
     .filter(Boolean);
-  return uniqueStrings(normalized);
+  return [...new Set(normalized)];
 }
 
 export function createStandardChannelSetupStatus(params: {
@@ -551,17 +537,14 @@ export function setChannelDmPolicyWithAllowFrom(params: {
   dmPolicy: DmPolicy;
 }): OpenClawConfig {
   const { cfg, channel, dmPolicy } = params;
-  const channelConfig = asRecord(cfg.channels?.[channel]);
   const allowFrom =
-    dmPolicy === "open"
-      ? addWildcardAllowFrom(asAllowFromList(channelConfig?.allowFrom))
-      : undefined;
+    dmPolicy === "open" ? addWildcardAllowFrom(cfg.channels?.[channel]?.allowFrom) : undefined;
   return {
     ...cfg,
     channels: {
       ...cfg.channels,
       [channel]: {
-        ...channelConfig,
+        ...cfg.channels?.[channel],
         dmPolicy,
         ...(allowFrom ? { allowFrom } : {}),
       },

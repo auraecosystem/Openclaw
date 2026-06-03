@@ -1,5 +1,5 @@
 ---
-summary: "OpenClaw voice-call plugin for Twilio, Telnyx, and Plivo phone calls."
+summary: "Adds agent-callable tools."
 read_when:
   - You are installing, configuring, or auditing the voice-call plugin
 title: "Voice Call plugin"
@@ -7,7 +7,7 @@ title: "Voice Call plugin"
 
 # Voice Call plugin
 
-OpenClaw voice-call plugin for Twilio, Telnyx, and Plivo phone calls.
+Adds agent-callable tools.
 
 ## Distribution
 

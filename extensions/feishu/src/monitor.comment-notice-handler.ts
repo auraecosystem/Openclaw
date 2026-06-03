@@ -35,7 +35,7 @@ export function createFeishuDriveCommentNoticeHandler(params: {
   const getBotOpenId = params.getBotOpenId ?? ((id) => botOpenIds.get(id));
 
   const runFeishuHandler = async (task: () => Promise<void>) => {
-    const promise = task().catch((err: unknown) => {
+    const promise = task().catch((err) => {
       error(`feishu[${accountId}]: error handling drive comment notice: ${String(err)}`);
     });
     if (!fireAndForget) {

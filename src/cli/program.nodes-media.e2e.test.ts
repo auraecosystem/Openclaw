@@ -20,7 +20,7 @@ async function expectLoggedSingleMediaFile(params?: {
   expectedPathPattern?: RegExp;
 }): Promise<string> {
   const out = getFirstRuntimeLogLine();
-  const mediaPath = out.trim();
+  const mediaPath = out.replace(/^MEDIA:/, "").trim();
   if (params?.expectedPathPattern) {
     expect(mediaPath).toMatch(params.expectedPathPattern);
   }
@@ -141,10 +141,10 @@ describe("cli program (nodes media)", () => {
     const out = getFirstRuntimeLogLine();
     const mediaPaths: string[] = [];
     for (const line of out.split("\n")) {
-      const mediaPath = line.trim();
-      if (!mediaPath) {
+      if (!line.startsWith("MEDIA:")) {
         continue;
       }
+      const mediaPath = line.replace(/^MEDIA:/, "");
       if (mediaPath.length > 0) {
         mediaPaths.push(mediaPath);
       }

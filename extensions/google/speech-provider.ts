@@ -541,7 +541,6 @@ export function buildGoogleSpeechProvider(): SpeechProviderPlugin {
     id: "google",
     label: "Google",
     autoSelectOrder: 50,
-    defaultModel: DEFAULT_GOOGLE_TTS_MODEL,
     models: GOOGLE_TTS_MODELS,
     voices: GOOGLE_TTS_VOICES,
     resolveConfig: ({ rawConfig }) => normalizeGoogleTtsProviderConfig(rawConfig),
@@ -671,7 +670,7 @@ export function buildGoogleSpeechProvider(): SpeechProviderPlugin {
   };
 }
 
-export const testing = {
+export const __testing = {
   DEFAULT_GOOGLE_TTS_MODEL,
   DEFAULT_GOOGLE_TTS_VOICE,
   GOOGLE_AUDIO_PROFILE_PROMPT_TEMPLATE,
@@ -681,4 +680,3 @@ export const testing = {
   renderGoogleAudioProfilePrompt,
   wrapPcm16MonoToWav,
 };
-export { testing as __testing };

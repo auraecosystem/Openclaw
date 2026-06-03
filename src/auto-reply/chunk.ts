@@ -2,18 +2,14 @@
 // unintentionally breaking on newlines. Using [\s\S] keeps newlines inside
 // the chunk so messages are only split when they truly exceed the limit.
 
-import {
-  findFenceSpanAt,
-  isSafeFenceBreak,
-  parseFenceSpans,
-} from "../../packages/markdown-core/src/fences.js";
 import type { ChannelId } from "../channels/plugins/types.core.js";
-import { resolveChannelStreamingChunkMode } from "../channels/streaming.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { findFenceSpanAt, isSafeFenceBreak, parseFenceSpans } from "../markdown/fences.js";
+import { resolveChannelStreamingChunkMode } from "../plugin-sdk/channel-streaming.js";
 import { resolveAccountEntry } from "../routing/account-lookup.js";
 import { normalizeAccountId } from "../routing/session-key.js";
 import { chunkTextByBreakResolver } from "../shared/text-chunking.js";
-import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel-constants.js";
+import { INTERNAL_MESSAGE_CHANNEL } from "../utils/message-channel.js";
 
 export type TextChunkProvider = ChannelId;
 
@@ -218,7 +214,6 @@ export function chunkByParagraph(
   const spans = parseFenceSpans(normalized);
 
   const parts: string[] = [];
-  const separators: string[] = [];
   const re = /\n[\t ]*\n+/g; // paragraph break: blank line(s), allowing whitespace
   let lastIndex = 0;
   for (const match of normalized.matchAll(re)) {
@@ -230,49 +225,23 @@ export function chunkByParagraph(
     }
 
     parts.push(normalized.slice(lastIndex, idx));
-    separators.push(match[0]);
     lastIndex = idx + match[0].length;
   }
   parts.push(normalized.slice(lastIndex));
 
   const chunks: string[] = [];
-  let currentChunk = "";
-
-  const pushParagraph = (paragraph: string, separatorBefore?: string) => {
-    if (!currentChunk) {
-      if (paragraph.length <= limit) {
-        currentChunk = paragraph;
-        return;
-      }
-      if (!splitLongParagraphs) {
-        chunks.push(paragraph);
-        return;
-      }
-      chunks.push(...chunkText(paragraph, limit));
-      return;
-    }
-
-    const candidate = `${currentChunk}${separatorBefore ?? "\n\n"}${paragraph}`;
-    if (candidate.length <= limit) {
-      currentChunk = candidate;
-      return;
-    }
-
-    chunks.push(currentChunk);
-    currentChunk = "";
-    pushParagraph(paragraph);
-  };
-
-  for (const [index, part] of parts.entries()) {
+  for (const part of parts) {
     const paragraph = part.replace(/\s+$/g, "");
     if (!paragraph.trim()) {
       continue;
     }
-    pushParagraph(paragraph, separators[index - 1]);
-  }
-
-  if (currentChunk) {
-    chunks.push(currentChunk);
+    if (paragraph.length <= limit) {
+      chunks.push(paragraph);
+    } else if (!splitLongParagraphs) {
+      chunks.push(paragraph);
+    } else {
+      chunks.push(...chunkText(paragraph, limit));
+    }
   }
 
   return chunks;
@@ -294,12 +263,13 @@ export function chunkMarkdownTextWithMode(text: string, limit: number, mode: Chu
     // If a paragraph must be split by length, defer to the markdown-aware chunker.
     const paragraphChunks = chunkByParagraph(text, limit, { splitLongParagraphs: false });
     const out: string[] = [];
-    for (const chunk of paragraphChunks.flatMap((paragraphChunk) =>
-      paragraphChunk.length > limit
-        ? splitPackedFenceParagraphChunk(paragraphChunk)
-        : paragraphChunk,
-    )) {
-      out.push(...chunkMarkdownText(chunk, limit));
+    for (const chunk of paragraphChunks) {
+      const nested = chunkMarkdownText(chunk, limit);
+      if (!nested.length && chunk) {
+        out.push(chunk);
+      } else {
+        out.push(...nested);
+      }
     }
     return out;
   }
@@ -320,34 +290,6 @@ function splitByNewline(
   }
   lines.push(text.slice(start));
   return lines;
-}
-
-function splitPackedFenceParagraphChunk(chunk: string): string[] {
-  const chunks: string[] = [];
-  let start = 0;
-  for (const span of parseFenceSpans(chunk)) {
-    if (span.end <= start) {
-      continue;
-    }
-    const separator = chunk.slice(span.end).match(/^\n[\t ]*\n+/)?.[0];
-    if (!separator) {
-      continue;
-    }
-    const tail = chunk.slice(span.end + separator.length);
-    if (!tail.trim()) {
-      continue;
-    }
-    chunks.push(chunk.slice(start, span.end));
-    start = span.end + separator.length;
-  }
-  if (chunks.length === 0) {
-    return [chunk];
-  }
-  const tail = chunk.slice(start);
-  if (tail) {
-    chunks.push(tail);
-  }
-  return chunks;
 }
 
 function resolveChunkEarlyReturn(text: string, limit: number): string[] | undefined {
@@ -412,6 +354,7 @@ export function chunkMarkdownText(text: string, limit: number): string[] {
       const maxIdxIfNeedNewline = start + (contentLimit - (closeLine.length + 1));
 
       if (maxIdxIfNeedNewline <= start) {
+        fenceToSplit = undefined;
         breakIdx = windowEnd;
       } else {
         const minProgressIdx = Math.min(
@@ -438,6 +381,7 @@ export function chunkMarkdownText(text: string, limit: number): string[] {
 
         if (!pickedNewline) {
           if (minProgressIdx > maxIdxIfAlreadyNewline) {
+            fenceToSplit = undefined;
             breakIdx = windowEnd;
           } else {
             breakIdx = Math.max(minProgressIdx, maxIdxIfNeedNewline);

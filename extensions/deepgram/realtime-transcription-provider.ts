@@ -6,12 +6,7 @@ import {
   type RealtimeTranscriptionSessionCreateRequest,
 } from "openclaw/plugin-sdk/realtime-transcription";
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input";
-import {
-  asOptionalRecord as readRecord,
-  normalizeOptionalString,
-  parseBooleanValue as readBoolean,
-  parseFiniteNumber as readFiniteNumber,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { DEFAULT_DEEPGRAM_AUDIO_BASE_URL, DEFAULT_DEEPGRAM_AUDIO_MODEL } from "./audio.js";
 
 type DeepgramRealtimeTranscriptionEncoding = "linear16" | "mulaw" | "alaw";
@@ -60,10 +55,43 @@ const DEEPGRAM_REALTIME_MAX_RECONNECT_ATTEMPTS = 5;
 const DEEPGRAM_REALTIME_RECONNECT_DELAY_MS = 1000;
 const DEEPGRAM_REALTIME_MAX_QUEUED_BYTES = 2 * 1024 * 1024;
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function readNestedDeepgramConfig(rawConfig: RealtimeTranscriptionProviderConfig) {
   const raw = readRecord(rawConfig);
   const providers = readRecord(raw?.providers);
   return readRecord(providers?.deepgram ?? raw?.deepgram ?? raw) ?? {};
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  const next =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : undefined;
+  return Number.isFinite(next) ? next : undefined;
+}
+
+function readBoolean(value: unknown): boolean | undefined {
+  if (typeof value === "boolean") {
+    return value;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+  return undefined;
 }
 
 function normalizeDeepgramEncoding(
@@ -186,8 +214,9 @@ function createDeepgramRealtimeTranscriptionSession(
       case "Error":
       case "error":
         config.onError?.(new Error(readErrorDetail(event.error ?? event.message)));
-
+        return;
       default:
+        return;
     }
   };
 
@@ -247,8 +276,7 @@ export function buildDeepgramRealtimeTranscriptionProvider(): RealtimeTranscript
   };
 }
 
-export const testing = {
+export const __testing = {
   normalizeProviderConfig,
   toDeepgramRealtimeWsUrl,
 };
-export { testing as __testing };

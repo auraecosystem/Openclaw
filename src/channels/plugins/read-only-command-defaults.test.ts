@@ -4,7 +4,6 @@ const loadPluginMetadataSnapshot = vi.hoisted(() => vi.fn());
 
 vi.mock("../../plugins/plugin-metadata-snapshot.js", () => ({
   loadPluginMetadataSnapshot,
-  resolvePluginMetadataSnapshot: loadPluginMetadataSnapshot,
 }));
 
 import { resolveReadOnlyChannelCommandDefaults } from "./read-only-command-defaults.js";
@@ -60,7 +59,6 @@ describe("resolveReadOnlyChannelCommandDefaults", () => {
       nativeSkillsAutoEnabled: false,
     });
     expect(loadPluginMetadataSnapshot).toHaveBeenCalledWith({
-      allowWorkspaceScopedCurrent: true,
       config: {},
       env,
       stateDir: "/state",

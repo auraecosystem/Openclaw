@@ -18,15 +18,7 @@ import {
   splitShellArgs,
 } from "./config-utils.js";
 import { isPathInside } from "./fs-utils.js";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeStringEntries,
-  uniqueStrings,
-} from "./string-utils.js";
-
-function escapeQmdExactFilePattern(fileName: string): string {
-  return fileName.replace(/[\\*?[\]{}()!+@]/g, "\\$&");
-}
+import { normalizeLowercaseStringOrEmpty } from "./string-utils.js";
 
 export type ResolvedMemoryBackendConfig = {
   backend: MemoryBackend;
@@ -159,7 +151,7 @@ function isPathInsideRoot(candidatePath: string, rootPath: string): boolean {
 }
 
 function ensureUniqueName(base: string, existing: Set<string>): string {
-  const name = sanitizeName(base);
+  let name = sanitizeName(base);
   if (!existing.has(name)) {
     existing.add(name);
     return name;
@@ -216,19 +208,10 @@ function resolveDebounceMs(raw: number | undefined): number {
 }
 
 function resolveTimeoutMs(raw: number | undefined, fallback: number): number {
-  return resolvePositiveIntegerConfig(raw, fallback);
-}
-
-function resolvePositiveIntegerConfig(raw: number | undefined, fallback: number): number;
-function resolvePositiveIntegerConfig(raw: number | undefined): number | undefined;
-function resolvePositiveIntegerConfig(
-  raw: number | undefined,
-  fallback?: number,
-): number | undefined {
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) {
-    return fallback;
+  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) {
+    return Math.floor(raw);
   }
-  return Math.max(1, Math.floor(raw));
+  return fallback;
 }
 
 function resolveStartupMode(raw: MemoryQmdConfig["update"]): MemoryQmdStartupMode {
@@ -247,18 +230,20 @@ function resolveStartupDelayMs(raw: number | undefined): number {
 }
 
 function resolveLimits(raw?: MemoryQmdConfig["limits"]): ResolvedQmdLimitsConfig {
-  return {
-    maxResults: resolvePositiveIntegerConfig(raw?.maxResults, DEFAULT_QMD_LIMITS.maxResults),
-    maxSnippetChars: resolvePositiveIntegerConfig(
-      raw?.maxSnippetChars,
-      DEFAULT_QMD_LIMITS.maxSnippetChars,
-    ),
-    maxInjectedChars: resolvePositiveIntegerConfig(
-      raw?.maxInjectedChars,
-      DEFAULT_QMD_LIMITS.maxInjectedChars,
-    ),
-    timeoutMs: resolvePositiveIntegerConfig(raw?.timeoutMs, DEFAULT_QMD_LIMITS.timeoutMs),
-  };
+  const parsed: ResolvedQmdLimitsConfig = { ...DEFAULT_QMD_LIMITS };
+  if (raw?.maxResults && raw.maxResults > 0) {
+    parsed.maxResults = Math.floor(raw.maxResults);
+  }
+  if (raw?.maxSnippetChars && raw.maxSnippetChars > 0) {
+    parsed.maxSnippetChars = Math.floor(raw.maxSnippetChars);
+  }
+  if (raw?.maxInjectedChars && raw.maxInjectedChars > 0) {
+    parsed.maxInjectedChars = Math.floor(raw.maxInjectedChars);
+  }
+  if (raw?.timeoutMs && raw.timeoutMs > 0) {
+    parsed.timeoutMs = Math.floor(raw.timeoutMs);
+  }
+  return parsed;
 }
 
 function resolveSearchMode(raw?: MemoryQmdConfig["searchMode"]): MemoryQmdSearchMode {
@@ -280,7 +265,8 @@ function resolveSessionConfig(
   const enabled = Boolean(cfg?.enabled);
   const exportDirRaw = cfg?.exportDir?.trim();
   const exportDir = exportDirRaw ? resolvePath(exportDirRaw, workspaceDir) : undefined;
-  const retentionDays = resolvePositiveIntegerConfig(cfg?.retentionDays);
+  const retentionDays =
+    cfg?.retentionDays && cfg.retentionDays > 0 ? Math.floor(cfg.retentionDays) : undefined;
   return {
     enabled,
     exportDir,
@@ -305,40 +291,26 @@ function resolveCustomPaths(
       return;
     }
     let resolved: string;
-    let collectionPath: string;
     try {
       resolved = resolvePath(trimmedPath, workspaceDir);
     } catch {
       return;
     }
-    collectionPath = resolved;
-    let pattern = entry.pattern?.trim() || "**/*.md";
-    try {
-      const stat = fs.statSync(resolved);
-      if (stat.isFile()) {
-        // When the configured path points directly to a file, normalize into a
-        // parent-directory collection with an exact-filename pattern, regardless
-        // of any user-supplied glob (a glob does not apply to a single file).
-        collectionPath = path.dirname(resolved);
-        pattern = escapeQmdExactFilePattern(path.basename(resolved));
-      }
-    } catch {
-      // not a file or can't stat, use as-is
-    }
-    const dedupeKey = `${collectionPath}\u0000${pattern}`;
+    const pattern = entry.pattern?.trim() || "**/*.md";
+    const dedupeKey = `${resolved}\u0000${pattern}`;
     if (seenRoots.has(dedupeKey)) {
       return;
     }
     seenRoots.add(dedupeKey);
     const explicitName = entry.name?.trim();
     const baseName =
-      explicitName && !isPathInsideRoot(collectionPath, workspaceDir)
+      explicitName && !isPathInsideRoot(resolved, workspaceDir)
         ? explicitName
         : scopeCollectionBase(explicitName || `custom-${index + 1}`, agentId);
     const name = ensureUniqueName(baseName, existing);
     collections.push({
       name,
-      path: collectionPath,
+      path: resolved,
       pattern,
       kind: "custom",
     });
@@ -406,13 +378,14 @@ export function resolveMemoryBackendConfig(params: {
   const agentEntry = params.cfg.agents?.list?.find(
     (entry) => normalizeAgentId(entry?.id) === normalizedAgentId,
   );
-  const mergedExtraPaths = normalizeStringEntries(
-    [
-      ...(params.cfg.agents?.defaults?.memorySearch?.extraPaths ?? []),
-      ...(agentEntry?.memorySearch?.extraPaths ?? []),
-    ].filter((value): value is string => typeof value === "string"),
-  );
-  const dedupedExtraPaths = uniqueStrings(mergedExtraPaths);
+  const mergedExtraPaths = [
+    ...(params.cfg.agents?.defaults?.memorySearch?.extraPaths ?? []),
+    ...(agentEntry?.memorySearch?.extraPaths ?? []),
+  ]
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const dedupedExtraPaths = Array.from(new Set(mergedExtraPaths));
   const searchExtraPaths = dedupedExtraPaths.map(
     (pathValue): { path: string; pattern?: string; name?: string } => ({ path: pathValue }),
   );

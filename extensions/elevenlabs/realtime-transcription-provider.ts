@@ -7,11 +7,7 @@ import {
   type RealtimeTranscriptionWebSocketTransport,
 } from "openclaw/plugin-sdk/realtime-transcription";
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input";
-import {
-  asOptionalRecord as readRecord,
-  normalizeOptionalString,
-  parseFiniteNumber as readFiniteNumber,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveElevenLabsApiKeyWithProfileFallback } from "./config-api.js";
 import { normalizeElevenLabsBaseUrl } from "./shared.js";
 
@@ -61,10 +57,26 @@ const ELEVENLABS_REALTIME_MAX_RECONNECT_ATTEMPTS = 5;
 const ELEVENLABS_REALTIME_RECONNECT_DELAY_MS = 1000;
 const ELEVENLABS_REALTIME_MAX_QUEUED_BYTES = 2 * 1024 * 1024;
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function readNestedElevenLabsConfig(rawConfig: RealtimeTranscriptionProviderConfig) {
   const raw = readRecord(rawConfig);
   const providers = readRecord(raw?.providers);
   return readRecord(providers?.elevenlabs ?? raw?.elevenlabs ?? raw) ?? {};
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  const next =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : undefined;
+  return Number.isFinite(next) ? next : undefined;
 }
 
 function normalizeCommitStrategy(value: unknown): "manual" | "vad" | undefined {
@@ -76,23 +88,6 @@ function normalizeCommitStrategy(value: unknown): "manual" | "vad" | undefined {
     return normalized;
   }
   throw new Error(`Invalid ElevenLabs realtime transcription commit strategy: ${normalized}`);
-}
-
-function normalizePositiveSafeInteger(value: unknown): number | undefined {
-  const parsed = readFiniteNumber(value);
-  return parsed !== undefined && Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
-}
-
-function normalizeFiniteRange(value: unknown, min: number, max: number): number | undefined {
-  const parsed = readFiniteNumber(value);
-  return parsed !== undefined && parsed >= min && parsed <= max ? parsed : undefined;
-}
-
-function normalizeIntegerRange(value: unknown, min: number, max: number): number | undefined {
-  const parsed = readFiniteNumber(value);
-  return parsed !== undefined && Number.isSafeInteger(parsed) && parsed >= min && parsed <= max
-    ? parsed
-    : undefined;
 }
 
 function normalizeProviderConfig(
@@ -107,25 +102,15 @@ function normalizeProviderConfig(
     baseUrl: normalizeOptionalString(raw.baseUrl),
     modelId: normalizeOptionalString(raw.modelId ?? raw.model ?? raw.sttModel),
     audioFormat: normalizeOptionalString(raw.audioFormat ?? raw.audio_format ?? raw.encoding),
-    sampleRate: normalizePositiveSafeInteger(raw.sampleRate ?? raw.sample_rate),
+    sampleRate: readFiniteNumber(raw.sampleRate ?? raw.sample_rate),
     languageCode: normalizeOptionalString(raw.languageCode ?? raw.language),
     commitStrategy: normalizeCommitStrategy(raw.commitStrategy ?? raw.commit_strategy),
-    vadSilenceThresholdSecs: normalizeFiniteRange(
+    vadSilenceThresholdSecs: readFiniteNumber(
       raw.vadSilenceThresholdSecs ?? raw.vad_silence_threshold_secs,
-      0.3,
-      3,
     ),
-    vadThreshold: normalizeFiniteRange(raw.vadThreshold ?? raw.vad_threshold, 0.1, 0.9),
-    minSpeechDurationMs: normalizeIntegerRange(
-      raw.minSpeechDurationMs ?? raw.min_speech_duration_ms,
-      50,
-      2_000,
-    ),
-    minSilenceDurationMs: normalizeIntegerRange(
-      raw.minSilenceDurationMs ?? raw.min_silence_duration_ms,
-      50,
-      2_000,
-    ),
+    vadThreshold: readFiniteNumber(raw.vadThreshold ?? raw.vad_threshold),
+    minSpeechDurationMs: readFiniteNumber(raw.minSpeechDurationMs ?? raw.min_speech_duration_ms),
+    minSilenceDurationMs: readFiniteNumber(raw.minSilenceDurationMs ?? raw.min_silence_duration_ms),
   };
 }
 
@@ -224,6 +209,7 @@ function createElevenLabsRealtimeTranscriptionSession(
         if (event.message_type?.includes("error")) {
           config.onError?.(new Error(readErrorDetail(event)));
         }
+        return;
     }
   };
 
@@ -291,8 +277,7 @@ export function buildElevenLabsRealtimeTranscriptionProvider(): RealtimeTranscri
   };
 }
 
-export const testing = {
+export const __testing = {
   normalizeProviderConfig,
   toElevenLabsRealtimeWsUrl,
 };
-export { testing as __testing };

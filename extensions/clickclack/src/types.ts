@@ -13,6 +13,7 @@ export type ClickClackAccountConfig = {
   systemPrompt?: string;
   timeoutSeconds?: number;
   toolsAllow?: string[];
+  senderIsOwner?: boolean;
   defaultTo?: string;
   allowFrom?: string[];
   reconnectMs?: number;
@@ -44,6 +45,7 @@ export type ResolvedClickClackAccount = {
   systemPrompt?: string;
   timeoutSeconds?: number;
   toolsAllow?: string[];
+  senderIsOwner: boolean;
   defaultTo: string;
   allowFrom: string[];
   reconnectMs: number;

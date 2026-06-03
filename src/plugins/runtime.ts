@@ -4,7 +4,6 @@ import {
   clearPluginHostRuntimeState,
   dispatchPluginAgentEventSubscriptions,
 } from "./host-hook-runtime.js";
-import { clearPluginMetadataLifecycleCaches } from "./plugin-metadata-lifecycle.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import { markPluginRegistryActive, markPluginRegistryRetired } from "./registry-lifecycle.js";
 import type { PluginRegistry } from "./registry-types.js";
@@ -103,7 +102,7 @@ function cleanupRetiredPluginHostRegistry(previousRegistry: PluginRegistry): voi
   }
   void cleanupPreviousPluginHostRegistry({
     previousRegistry,
-  }).catch((error: unknown) => {
+  }).catch((error) => {
     log.warn(`plugin host registry cleanup failed: ${String(error)}`);
   });
 }
@@ -309,30 +308,6 @@ export function getActivePluginChannelRegistryVersion(): number {
   return getActivePluginChannelRegistrySnapshotFromState().version;
 }
 
-function countCommandChannelSurface(registry: PluginRegistry | null): number {
-  return (registry?.commands.length ?? 0) + (registry?.channels.length ?? 0);
-}
-
-export function getActivePluginGatewayCommandRegistry(): PluginRegistry | null {
-  const pinnedChannelRegistry = state.channel.pinned
-    ? asPluginRegistry(state.channel.registry)
-    : null;
-  const pinnedHttpRouteRegistry = state.httpRoute.pinned
-    ? asPluginRegistry(state.httpRoute.registry)
-    : null;
-  const activeRegistry = asPluginRegistry(state.activeRegistry);
-  const pinnedRegistry =
-    (countCommandChannelSurface(pinnedChannelRegistry) > 0 ? pinnedChannelRegistry : null) ??
-    (countCommandChannelSurface(pinnedHttpRouteRegistry) > 0 ? pinnedHttpRouteRegistry : null);
-  if (pinnedRegistry) {
-    return pinnedRegistry;
-  }
-  if (activeRegistry && countCommandChannelSurface(activeRegistry) > 0) {
-    return activeRegistry;
-  }
-  return pinnedChannelRegistry ?? pinnedHttpRouteRegistry ?? activeRegistry;
-}
-
 export function requireActivePluginChannelRegistry(): PluginRegistry {
   const existing = getActivePluginChannelRegistry();
   if (existing) {
@@ -403,5 +378,4 @@ export function resetPluginRuntimeStateForTest(): void {
   // Otherwise per-test bleed-over of those globals can cause flaky behavior
   // since this helper is widely used across plugin/agent tests.
   clearPluginHostRuntimeState();
-  clearPluginMetadataLifecycleCaches();
 }

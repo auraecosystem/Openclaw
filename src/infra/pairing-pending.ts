@@ -2,7 +2,6 @@ type PendingState<TPending> = {
   pendingById: Record<string, TPending>;
 };
 
-/** Reject one pending pairing request and return the caller-selected id field. */
 export async function rejectPendingPairingRequest<
   TPending,
   TState extends PendingState<TPending>,

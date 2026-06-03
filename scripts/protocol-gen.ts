@@ -1,10 +1,10 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ProtocolSchemas } from "../packages/gateway-protocol/src/schema.js";
+import { ProtocolSchemas } from "../src/gateway/protocol/schema.js";
 
-const scriptDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(scriptDir, "..");
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(__dirname, "..");
 
 async function writeJsonSchema() {
   const definitions: Record<string, unknown> = {};
@@ -45,7 +45,7 @@ async function main() {
   await writeJsonSchema();
 }
 
-main().catch((err: unknown) => {
+main().catch((err) => {
   console.error(err);
   process.exit(1);
 });

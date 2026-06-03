@@ -136,7 +136,6 @@ function createTestRegistryForSetup(
       enabled: true,
     })),
     providers: [],
-    embeddingProviders: [],
     speechProviders: [],
     realtimeTranscriptionProviders: [],
     realtimeVoiceProviders: [],
@@ -204,7 +203,8 @@ const createStubOutbound = (
   sendText: async ({ deps, to, text }) => {
     const send = pickSendFn(id, deps);
     if (send) {
-      const result = (await send(to, text, { verbose: false })) as {
+      // oxlint-disable-next-line typescript/no-explicit-any
+      const result = (await send(to, text, { verbose: false } as any)) as {
         messageId: string;
       };
       return { channel: id, ...result };
@@ -214,7 +214,8 @@ const createStubOutbound = (
   sendMedia: async ({ deps, to, text, mediaUrl }) => {
     const send = pickSendFn(id, deps);
     if (send) {
-      const result = (await send(to, text, { verbose: false, mediaUrl })) as {
+      // oxlint-disable-next-line typescript/no-explicit-any
+      const result = (await send(to, text, { verbose: false, mediaUrl } as any)) as {
         messageId: string;
       };
       return { channel: id, ...result };

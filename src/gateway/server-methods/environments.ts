@@ -1,15 +1,14 @@
-import { normalizeSortedUniqueTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
+import { listDevicePairing } from "../../infra/device-pairing.js";
+import { listNodePairing } from "../../infra/node-pairing.js";
+import type { NodeListNode } from "../../shared/node-list-types.js";
+import { createKnownNodeCatalog, listKnownNodes } from "../node-catalog.js";
 import {
   type EnvironmentSummary,
   ErrorCodes,
   errorShape,
   validateEnvironmentsListParams,
   validateEnvironmentsStatusParams,
-} from "../../../packages/gateway-protocol/src/index.js";
-import { listDevicePairing } from "../../infra/device-pairing.js";
-import { listNodePairing } from "../../infra/node-pairing.js";
-import type { NodeListNode } from "../../shared/node-list-types.js";
-import { createKnownNodeCatalog, listKnownNodes } from "../node-catalog.js";
+} from "../protocol/index.js";
 import { respondInvalidParams, respondUnavailableOnThrow } from "./nodes.helpers.js";
 import type { GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
 
@@ -22,13 +21,19 @@ const GATEWAY_ENVIRONMENT: EnvironmentSummary = {
 };
 
 function uniqueSortedStrings(...items: Array<readonly string[] | undefined>): string[] {
-  return normalizeSortedUniqueTrimmedStringList(items.flatMap((item) => item ?? []));
+  const values = new Set<string>();
+  for (const item of items) {
+    for (const value of item ?? []) {
+      const trimmed = value.trim();
+      if (trimmed) {
+        values.add(trimmed);
+      }
+    }
+  }
+  return [...values].toSorted((left, right) => left.localeCompare(right));
 }
 
-/** Converts a known node entry into the public environment summary shape. */
 function summarizeNodeEnvironment(node: NodeListNode): EnvironmentSummary {
-  // Expose both declared capabilities and command names so older node
-  // runtimes still advertise useful execution surfaces in one stable list.
   const capabilities = uniqueSortedStrings(node.caps, node.commands);
   return {
     id: `node:${node.nodeId}`,
@@ -43,7 +48,6 @@ function listEnvironmentSummaries(nodes: readonly NodeListNode[]): EnvironmentSu
   return [GATEWAY_ENVIRONMENT, ...nodes.map(summarizeNodeEnvironment)];
 }
 
-/** Lists the local Gateway plus paired/connected node environments. */
 async function listEnvironments(context: GatewayRequestContext) {
   const [devicePairing, nodePairing] = await Promise.all([listDevicePairing(), listNodePairing()]);
   const catalog = createKnownNodeCatalog({
@@ -54,7 +58,6 @@ async function listEnvironments(context: GatewayRequestContext) {
   return listEnvironmentSummaries(listKnownNodes(catalog));
 }
 
-/** Gateway handlers for querying local and node execution environments. */
 export const environmentsHandlers: GatewayRequestHandlers = {
   "environments.list": async ({ params, respond, context }) => {
     if (!validateEnvironmentsListParams(params)) {

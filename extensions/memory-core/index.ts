@@ -62,7 +62,7 @@ const MemorySearchSchema = {
   type: "object",
   properties: {
     query: { type: "string" },
-    maxResults: { type: "integer", minimum: 1 },
+    maxResults: { type: "number" },
     minScore: { type: "number" },
     corpus: { type: "string", enum: ["memory", "wiki", "all", "sessions"] },
   },
@@ -74,8 +74,8 @@ const MemoryGetSchema = {
   type: "object",
   properties: {
     path: { type: "string" },
-    from: { type: "integer", minimum: 1 },
-    lines: { type: "integer", minimum: 1 },
+    from: { type: "number" },
+    lines: { type: "number" },
     corpus: { type: "string", enum: ["memory", "wiki", "all"] },
   },
   required: ["path"],
@@ -166,10 +166,6 @@ const memoryRuntime: MemoryPluginRuntime = {
     const { memoryRuntime: runtime } = await loadRuntimeProviderModule();
     await runtime.closeAllMemorySearchManagers?.();
   },
-  async closeMemorySearchManager(params) {
-    const { memoryRuntime: runtime } = await loadRuntimeProviderModule();
-    await runtime.closeMemorySearchManager?.(params);
-  },
 };
 export default definePluginEntry({
   id: "memory-core",
@@ -211,7 +207,7 @@ export default definePluginEntry({
 
     api.registerCli(
       async ({ program }) => {
-        const { registerMemoryCli } = await import("./cli.js");
+        const { registerMemoryCli } = await import("./src/cli.js");
         registerMemoryCli(program);
       },
       {

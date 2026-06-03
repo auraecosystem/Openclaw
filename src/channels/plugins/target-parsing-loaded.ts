@@ -1,51 +1,20 @@
 import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalString,
-  normalizeOptionalThreadValue,
-} from "@openclaw/normalization-core/string-coerce";
-import {
   channelRouteTargetsMatchExact,
   channelRouteTargetsShareConversation,
+  resolveChannelRouteTargetWithParser,
+  type ChannelRouteExplicitTarget,
   type ChannelRouteParsedTarget,
 } from "../../plugin-sdk/channel-route.js";
-import { getChannelPlugin, normalizeChannelId } from "./index.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { getLoadedChannelPluginForRead } from "./registry-loaded-read.js";
 
 export type { ChannelRouteParsedTarget } from "../../plugin-sdk/channel-route.js";
 
-/** @deprecated Use `ChannelRouteParsedTarget`; provider-specific target grammar should live in `messaging.resolveOutboundSessionRoute`. */
-export type ParsedChannelExplicitTarget = {
-  to: string;
-  threadId?: string | number;
-  chatType?: "direct" | "group" | "channel";
-};
-
-export function resolveCompatParsedRouteTarget(params: {
-  channel: string;
-  rawTarget?: string | null;
-  fallbackThreadId?: string | number | null;
-  parseTarget: (channel: string, rawTarget: string) => ParsedChannelExplicitTarget | null;
-}): ChannelRouteParsedTarget | null {
-  const channel = normalizeLowercaseStringOrEmpty(params.channel);
-  const rawTo = normalizeOptionalString(params.rawTarget);
-  if (!channel || !rawTo) {
-    return null;
-  }
-  const parsed = params.parseTarget(channel, rawTo);
-  const fallbackThreadId = normalizeOptionalThreadValue(params.fallbackThreadId);
-  return {
-    channel,
-    rawTo,
-    to: parsed?.to ?? rawTo,
-    threadId: normalizeOptionalThreadValue(parsed?.threadId ?? fallbackThreadId),
-    chatType: parsed?.chatType,
-  };
-}
+export type ParsedChannelExplicitTarget = ChannelRouteExplicitTarget;
 
 /** @deprecated Use `ChannelRouteParsedTarget`. */
 export type ComparableChannelTarget = ChannelRouteParsedTarget;
 
-/** @deprecated Use `messaging.targetResolver` and `messaging.resolveOutboundSessionRoute`. */
 export function parseExplicitTargetForLoadedChannel(
   channel: string,
   rawTarget: string,
@@ -54,39 +23,25 @@ export function parseExplicitTargetForLoadedChannel(
   if (!resolvedChannel) {
     return null;
   }
-  const normalizedChannel = normalizeChannelId(resolvedChannel) ?? resolvedChannel;
   return (
-    getLoadedChannelPluginForRead(normalizedChannel)?.messaging?.parseExplicitTarget?.({
+    getLoadedChannelPluginForRead(resolvedChannel)?.messaging?.parseExplicitTarget?.({
       raw: rawTarget,
-    }) ??
-    getChannelPlugin(normalizedChannel)?.messaging?.parseExplicitTarget?.({
-      raw: rawTarget,
-    }) ??
-    null
+    }) ?? null
   );
 }
 
-/** @deprecated Use `messaging.resolveOutboundSessionRoute` for provider-specific target grammar. */
 export function resolveRouteTargetForLoadedChannel(params: {
   channel: string;
   rawTarget?: string | null;
   fallbackThreadId?: string | number | null;
 }): ChannelRouteParsedTarget | null {
-  return resolveCompatParsedRouteTarget({
+  return resolveChannelRouteTargetWithParser({
     ...params,
-    parseTarget: parseExplicitTargetForLoadedChannel,
+    parseExplicitTarget: parseExplicitTargetForLoadedChannel,
   });
 }
 
-export function resolveExplicitDeliveryTargetCompat(params: {
-  channel: string;
-  rawTarget?: string | null;
-  fallbackThreadId?: string | number | null;
-}): ChannelRouteParsedTarget | null {
-  return resolveRouteTargetForLoadedChannel(params);
-}
-
-/** @deprecated Use `messaging.resolveOutboundSessionRoute` for provider-specific target grammar. */
+/** @deprecated Use `resolveRouteTargetForLoadedChannel`. */
 export function resolveComparableTargetForLoadedChannel(params: {
   channel: string;
   rawTarget?: string | null;

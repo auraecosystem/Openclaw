@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import type {
   SandboxBackendCommandResult,
   SandboxFsBridgeContext,
@@ -13,7 +13,6 @@ import {
 } from "./fs-bridge-mutation-helper.js";
 import { SandboxFsPathGuard } from "./fs-bridge-path-safety.js";
 import { buildStatPlan, type SandboxFsCommandPlan } from "./fs-bridge-shell-command-plans.js";
-import { parseSandboxStatMtimeMs, parseSandboxStatSize } from "./fs-bridge-stat-parse.js";
 import type { SandboxFsBridge, SandboxFsStat, SandboxResolvedPath } from "./fs-bridge.types.js";
 import {
   buildSandboxFsMounts,
@@ -208,10 +207,12 @@ class SandboxFsBridgeImpl implements SandboxFsBridge {
     }
     const text = result.stdout.toString("utf8").trim();
     const [typeRaw, sizeRaw, mtimeRaw] = text.split("|");
+    const size = Number.parseInt(sizeRaw ?? "0", 10);
+    const mtime = Number.parseInt(mtimeRaw ?? "0", 10) * 1000;
     return {
       type: coerceStatType(typeRaw),
-      size: parseSandboxStatSize(sizeRaw),
-      mtimeMs: parseSandboxStatMtimeMs(mtimeRaw),
+      size: Number.isFinite(size) ? size : 0,
+      mtimeMs: Number.isFinite(mtime) ? mtime : 0,
     };
   }
 

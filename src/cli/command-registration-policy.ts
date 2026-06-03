@@ -22,9 +22,7 @@ export function shouldSkipPluginCommandRegistration(params: {
     return invocation.hasHelpOrVersion && invocation.commandPath.length <= 1;
   }
   if (invocation.hasHelpOrVersion) {
-    return (
-      !params.primary || params.hasBuiltinPrimary || isReservedNonPluginCommandRoot(params.primary)
-    );
+    return true;
   }
   if (params.hasBuiltinPrimary) {
     return true;

@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../config/config.js";
 import { makeTempWorkspace } from "../test-helpers/workspace.js";
 import { captureEnv } from "../test-utils/env.js";
-import { mockProcessPlatform } from "../test-utils/vitest-spies.js";
 import type { GatewayService } from "./service.js";
 import {
   describeGatewayServiceRestart,
@@ -15,12 +14,24 @@ import {
 } from "./service.js";
 import { createMockGatewayService } from "./service.test-helpers.js";
 
-function setPlatform(value: NodeJS.Platform) {
-  mockProcessPlatform(value);
+const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
+function setPlatform(value: NodeJS.Platform | "aix") {
+  if (!originalPlatformDescriptor) {
+    throw new Error("missing process.platform descriptor");
+  }
+  Object.defineProperty(process, "platform", {
+    configurable: true,
+    enumerable: originalPlatformDescriptor.enumerable ?? false,
+    value,
+  });
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  if (!originalPlatformDescriptor) {
+    return;
+  }
+  Object.defineProperty(process, "platform", originalPlatformDescriptor);
 });
 
 function createService(overrides: Partial<GatewayService> = {}): GatewayService {
@@ -111,32 +122,6 @@ describe("readGatewayServiceState", () => {
     expect(state.loaded).toBe(true);
     expect(state.running).toBe(true);
     expect(state.env.OPENCLAW_GATEWAY_PORT).toBe("18789");
-  });
-
-  it("keeps the caller-selected service identity when merging persisted env", async () => {
-    const readRuntime = vi.fn(async () => ({ status: "running" }));
-    const service = createService({
-      isLoaded: vi.fn(async () => true),
-      readCommand: vi.fn(async () => ({
-        programArguments: ["openclaw", "gateway", "run"],
-        environment: {
-          OPENCLAW_GATEWAY_PORT: "18789",
-          OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway.service",
-        },
-      })),
-      readRuntime,
-    });
-
-    const state = await readGatewayServiceState(service, {
-      env: { OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway-maintenance.service" },
-    });
-
-    expect(state.env.OPENCLAW_SYSTEMD_UNIT).toBe("openclaw-gateway-maintenance.service");
-    expect(readRuntime).toHaveBeenCalledWith(
-      expect.objectContaining({
-        OPENCLAW_SYSTEMD_UNIT: "openclaw-gateway-maintenance.service",
-      }),
-    );
   });
 });
 

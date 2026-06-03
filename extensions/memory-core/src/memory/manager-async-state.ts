@@ -8,7 +8,7 @@ export function startAsyncSearchSync(params: {
   if (!params.enabled || (!params.dirty && !params.sessionsDirty)) {
     return;
   }
-  void params.sync({ reason: "search" }).catch((err: unknown) => {
+  void params.sync({ reason: "search" }).catch((err) => {
     params.onError(err);
   });
 }

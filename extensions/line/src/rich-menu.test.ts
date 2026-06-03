@@ -14,14 +14,11 @@ import {
 } from "./rich-menu.js";
 
 const { setRichMenuImageMock, MessagingApiBlobClientMock } = vi.hoisted(() => {
-  const setRichMenuImageMockLocal = vi.fn();
-  const MessagingApiBlobClientMockLocal = vi.fn(function () {
-    return { setRichMenuImage: setRichMenuImageMockLocal };
+  const setRichMenuImageMock = vi.fn();
+  const MessagingApiBlobClientMock = vi.fn(function () {
+    return { setRichMenuImage: setRichMenuImageMock };
   });
-  return {
-    setRichMenuImageMock: setRichMenuImageMockLocal,
-    MessagingApiBlobClientMock: MessagingApiBlobClientMockLocal,
-  };
+  return { setRichMenuImageMock, MessagingApiBlobClientMock };
 });
 
 vi.mock("@line/bot-sdk", () => ({

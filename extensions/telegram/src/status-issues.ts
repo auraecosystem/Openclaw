@@ -70,11 +70,7 @@ function appendTelegramRuntimeError(message: string, lastError: unknown): string
 }
 
 function isTelegramPollingBacklogStallError(lastError: unknown): boolean {
-  const error = asString(lastError);
-  return Boolean(
-    error?.includes("isolated polling spool backlog stalled") ||
-    error?.includes("isolated polling spool handler timed out"),
-  );
+  return Boolean(asString(lastError)?.includes("isolated polling spool backlog stalled"));
 }
 
 function collectTelegramPollingRuntimeIssues(params: {

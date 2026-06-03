@@ -3,14 +3,14 @@
  */
 export function normalizeRoleForGrouping(role: string): string {
   const lower = role.toLowerCase();
-  // Core roles drive grouping and layout; casing variants should not split groups.
-  if (lower === "user") {
-    return "user";
+  // Preserve original casing when it's already a core role.
+  if (role === "user" || role === "User") {
+    return role;
   }
-  if (lower === "assistant") {
+  if (role === "assistant") {
     return "assistant";
   }
-  if (lower === "system") {
+  if (role === "system") {
     return "system";
   }
   // Keep tool-related roles distinct so the UI can style/toggle them.

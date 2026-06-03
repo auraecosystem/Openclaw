@@ -1,9 +1,6 @@
-import { stripUrlUserInfo } from "@openclaw/net-policy/url-userinfo";
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
+import { stripUrlUserInfo } from "../shared/net/url-userinfo.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
-import { asBoolean } from "../utils/boolean.js";
 import type { ChannelAccountSnapshot } from "./plugins/types.core.js";
 
 // Read-only status commands project a safe subset of account fields into snapshots
@@ -21,12 +18,12 @@ const CREDENTIAL_STATUS_KEYS = [
 type CredentialStatusKey = (typeof CREDENTIAL_STATUS_KEYS)[number];
 
 function readBoolean(record: Record<string, unknown>, key: string): boolean | undefined {
-  return asBoolean(record[key]);
+  return typeof record[key] === "boolean" ? record[key] : undefined;
 }
 
 function readNumber(record: Record<string, unknown>, key: string): number | undefined {
   const value = record[key];
-  return asFiniteNumber(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function readNullableNumber(
@@ -44,9 +41,10 @@ function readStringArray(record: Record<string, unknown>, key: string): string[]
   if (!Array.isArray(value)) {
     return undefined;
   }
-  const normalized = normalizeStringEntries(
-    value.map((entry) => (typeof entry === "string" || typeof entry === "number" ? entry : "")),
-  );
+  const normalized = value
+    .map((entry) => (typeof entry === "string" || typeof entry === "number" ? String(entry) : ""))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
   return normalized.length > 0 ? normalized : undefined;
 }
 

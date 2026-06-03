@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  resetSlackChannelTypeCacheForTest,
+  __resetSlackChannelTypeCacheForTest,
   resolveSlackChannelType,
   resolveSlackConversationInfo,
 } from "./channel-type.js";
@@ -21,7 +21,7 @@ describe("resolveSlackChannelType", () => {
   beforeEach(() => {
     conversationsInfoMock.mockReset();
     conversationsOpenMock.mockReset();
-    resetSlackChannelTypeCacheForTest();
+    __resetSlackChannelTypeCacheForTest();
   });
 
   it("uses configured defaultAccount for omitted-account cache keys", async () => {

@@ -6,7 +6,6 @@ import {
   type SecretProviderConfig,
   type SecretRef,
 } from "../config/types.secrets.js";
-import { parseConfigPathArrayIndex } from "../shared/path-array-index.js";
 import type { SecretsApplyPlan } from "./plan.js";
 import { isRecord } from "./shared.js";
 import {
@@ -161,8 +160,11 @@ function hasPath(root: unknown, segments: string[]): boolean {
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index] ?? "";
     if (Array.isArray(cursor)) {
-      const parsedIndex = parseConfigPathArrayIndex(segment);
-      if (parsedIndex === undefined || parsedIndex >= cursor.length) {
+      if (!/^\d+$/.test(segment)) {
+        return false;
+      }
+      const parsedIndex = Number.parseInt(segment, 10);
+      if (!Number.isFinite(parsedIndex) || parsedIndex < 0 || parsedIndex >= cursor.length) {
         return false;
       }
       if (index === segments.length - 1) {
@@ -174,7 +176,7 @@ function hasPath(root: unknown, segments: string[]): boolean {
     if (!isRecord(cursor)) {
       return false;
     }
-    if (!Object.hasOwn(cursor, segment)) {
+    if (!Object.prototype.hasOwnProperty.call(cursor, segment)) {
       return false;
     }
     if (index === segments.length - 1) {
@@ -204,7 +206,7 @@ export function collectConfigureProviderChanges(params: {
   }
 
   for (const providerAlias of Object.keys(originalProviders)) {
-    if (!Object.hasOwn(nextProviders, providerAlias)) {
+    if (!Object.prototype.hasOwnProperty.call(nextProviders, providerAlias)) {
       deletes.push(providerAlias);
     }
   }

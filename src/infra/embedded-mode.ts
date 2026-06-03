@@ -1,9 +1,9 @@
-let embeddedModeValue = false;
+let _embeddedMode = false;
 
 export function setEmbeddedMode(value: boolean): void {
-  embeddedModeValue = value;
+  _embeddedMode = value;
 }
 
 export function isEmbeddedMode(): boolean {
-  return embeddedModeValue;
+  return _embeddedMode;
 }

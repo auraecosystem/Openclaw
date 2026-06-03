@@ -1,26 +1,22 @@
 import {
-  loadSubagentRegistryFromSqlite,
-  saveSubagentRegistryToSqlite,
-} from "./subagent-registry.store.sqlite.js";
+  loadSubagentRegistryFromDisk,
+  saveSubagentRegistryToDisk,
+} from "./subagent-registry.store.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 export function persistSubagentRunsToDisk(runs: Map<string, SubagentRunRecord>) {
   try {
-    saveSubagentRegistryToSqlite(runs);
+    saveSubagentRegistryToDisk(runs);
   } catch {
     // ignore persistence failures
   }
-}
-
-export function persistSubagentRunsToDiskOrThrow(runs: Map<string, SubagentRunRecord>) {
-  saveSubagentRegistryToSqlite(runs);
 }
 
 export function restoreSubagentRunsFromDisk(params: {
   runs: Map<string, SubagentRunRecord>;
   mergeOnly?: boolean;
 }) {
-  const restored = loadSubagentRegistryFromSqlite();
+  const restored = loadSubagentRegistryFromDisk();
   if (restored.size === 0) {
     return 0;
   }
@@ -48,7 +44,7 @@ export function getSubagentRunsSnapshotForRead(
   if (shouldReadDisk) {
     try {
       // Persisted state lets other worker processes observe active runs.
-      for (const [runId, entry] of loadSubagentRegistryFromSqlite().entries()) {
+      for (const [runId, entry] of loadSubagentRegistryFromDisk().entries()) {
         merged.set(runId, entry);
       }
     } catch {

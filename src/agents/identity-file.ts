@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { DEFAULT_IDENTITY_FILENAME } from "./workspace.js";
 
 export type AgentIdentityFile = {
@@ -31,16 +31,12 @@ const IDENTITY_PLACEHOLDER_VALUES = new Set([
 
 function normalizeIdentityValue(value: string): string {
   let normalized = value.trim();
-  normalized = normalized.replace(/^[*_`\s]+|[*_`\s]+$/g, "").trim();
+  normalized = normalized.replace(/^[*_]+|[*_]+$/g, "").trim();
   if (normalized.startsWith("(") && normalized.endsWith(")")) {
     normalized = normalized.slice(1, -1).trim();
   }
   normalized = normalized.replace(/[\u2013\u2014]/g, "-");
   return normalizeLowercaseStringOrEmpty(normalized.replace(/\s+/g, " "));
-}
-
-function normalizeIdentityLabel(label: string): string {
-  return normalizeLowercaseStringOrEmpty(label.replace(/[*_`]/g, ""));
 }
 
 function isIdentityPlaceholder(value: string): boolean {
@@ -57,10 +53,12 @@ export function parseIdentityMarkdown(content: string): AgentIdentityFile {
     if (colonIndex === -1) {
       continue;
     }
-    const label = normalizeIdentityLabel(cleaned.slice(0, colonIndex));
+    const label = normalizeLowercaseStringOrEmpty(
+      cleaned.slice(0, colonIndex).replace(/[*_]/g, ""),
+    );
     const value = cleaned
       .slice(colonIndex + 1)
-      .replace(/^[*_`\s]+|[*_`\s]+$/g, "")
+      .replace(/^[*_]+|[*_]+$/g, "")
       .trim();
     if (!value) {
       continue;
@@ -106,16 +104,8 @@ function buildIdentityLine(label: string, value: string): string {
 }
 
 function matchesIdentityLabel(line: string, label: string): boolean {
-  const trimmed = line.trim();
-  if (!trimmed.startsWith("-")) {
-    return false;
-  }
-  const cleaned = trimmed.replace(/^\s*-\s*/, "");
-  const colonIndex = cleaned.indexOf(":");
-  if (colonIndex === -1) {
-    return false;
-  }
-  return normalizeIdentityLabel(cleaned.slice(0, colonIndex)) === normalizeIdentityLabel(label);
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^\\s*-\\s*(?:\\*\\*)?${escaped}(?:\\*\\*)?\\s*:`, "i").test(line.trim());
 }
 
 function normalizeIdentityContent(content: string | undefined): string[] {
@@ -133,7 +123,9 @@ function resolveIdentityInsertIndex(lines: string[]): number {
     if (colonIndex === -1) {
       continue;
     }
-    const label = normalizeIdentityLabel(cleaned.slice(0, colonIndex));
+    const label = normalizeLowercaseStringOrEmpty(
+      cleaned.slice(0, colonIndex).replace(/[*_]/g, ""),
+    );
     if (RICH_IDENTITY_LABELS.has(label)) {
       lastIdentityIndex = index;
     }

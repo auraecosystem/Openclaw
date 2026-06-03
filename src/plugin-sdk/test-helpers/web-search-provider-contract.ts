@@ -63,9 +63,7 @@ export function describeWebSearchProviderContracts(pluginId: string) {
     describe(`${pluginId}:${providerId} web search contract`, () => {
       installWebSearchProviderContractSuite({
         provider: () => {
-          const entry = resolveProviders().find(
-            (entryValue) => entryValue.provider.id === providerId,
-          );
+          const entry = resolveProviders().find((entry) => entry.provider.id === providerId);
           if (!entry) {
             throw new Error(
               `web search provider contract entry missing for ${pluginId}:${providerId}`,
@@ -74,9 +72,7 @@ export function describeWebSearchProviderContracts(pluginId: string) {
           return entry.provider;
         },
         credentialValue: () => {
-          const entry = resolveProviders().find(
-            (entryLocal) => entryLocal.provider.id === providerId,
-          );
+          const entry = resolveProviders().find((entry) => entry.provider.id === providerId);
           if (!entry) {
             throw new Error(
               `web search provider contract entry missing for ${pluginId}:${providerId}`,

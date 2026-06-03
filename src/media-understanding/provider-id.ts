@@ -1,1 +1,9 @@
-export * from "../../packages/media-understanding-common/src/provider-id.js";
+import { normalizeProviderId } from "../agents/provider-id.js";
+
+export function normalizeMediaProviderId(id: string): string {
+  const normalized = normalizeProviderId(id);
+  if (normalized === "gemini") {
+    return "google";
+  }
+  return normalized;
+}

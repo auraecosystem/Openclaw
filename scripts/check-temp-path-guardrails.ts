@@ -101,7 +101,8 @@ function splitTopLevelArguments(source: string): string[] {
   let bracketDepth = 0;
   let braceDepth = 0;
   const quoteState: QuoteScanState = { quote: null, escaped: false };
-  for (const ch of source) {
+  for (let i = 0; i < source.length; i += 1) {
+    const ch = source[i];
     if (quoteState.quote) {
       current += ch;
       consumeQuotedChar(quoteState, ch);

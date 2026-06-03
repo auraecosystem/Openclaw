@@ -1,17 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parsePositiveInt, readPositiveIntEnv } from "./env-limits.ts";
 import { die, run } from "./host-command.ts";
 import type { Mode, Platform, Provider, ProviderAuth } from "./types.ts";
-
-type ResolveLatestVersionDeps = {
-  createTempDir?: typeof mkdtempSync;
-  removeDir?: typeof rmSync;
-  runCommand?: typeof run;
-  tempDir?: typeof tmpdir;
-  writeFile?: typeof writeFileSync;
-};
 
 export function parseBoolEnv(value: string | undefined): boolean {
   return /^(1|true|yes|on)$/i.test(value ?? "");
@@ -87,23 +78,18 @@ export function providerIdFromModelId(modelId: string): string {
 }
 
 export function resolveParallelsModelTimeoutSeconds(platform?: Platform): number {
-  const platformEnvName =
+  const platformEnv =
     platform === undefined
       ? undefined
-      : `OPENCLAW_PARALLELS_${platform.toUpperCase()}_MODEL_TIMEOUT_S`;
-  const platformEnv = platformEnvName === undefined ? undefined : process.env[platformEnvName];
+      : process.env[`OPENCLAW_PARALLELS_${platform.toUpperCase()}_MODEL_TIMEOUT_S`];
   const defaultSeconds = platform === "macos" || platform === "windows" ? 1800 : 900;
-  if (platformEnvName && platformEnv?.trim()) {
-    return parsePositiveInt(platformEnv, platformEnvName);
-  }
-  return readPositiveIntEnv("OPENCLAW_PARALLELS_MODEL_TIMEOUT_S", defaultSeconds);
+  const raw = Number(
+    platformEnv || process.env.OPENCLAW_PARALLELS_MODEL_TIMEOUT_S || defaultSeconds,
+  );
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : defaultSeconds;
 }
 
-export function providerTimeoutConfigJson(
-  modelId: string,
-  platform: Platform,
-  timeoutSeconds = resolveParallelsModelTimeoutSeconds(platform),
-): string {
+export function providerTimeoutConfigJson(modelId: string, platform: Platform): string {
   const providerId = providerIdFromModelId(modelId);
   if (providerId !== "openai") {
     return "";
@@ -123,7 +109,7 @@ export function providerTimeoutConfigJson(
         name: modelName,
       },
     ],
-    timeoutSeconds,
+    timeoutSeconds: resolveParallelsModelTimeoutSeconds(platform),
   });
 }
 
@@ -143,14 +129,10 @@ export function configPathMapKey(key: string): string {
   return `[${JSON.stringify(key)}]`;
 }
 
-export function modelProviderConfigBatchJson(
-  modelId: string,
-  platform: Platform,
-  timeoutSeconds = resolveParallelsModelTimeoutSeconds(platform),
-): string {
+export function modelProviderConfigBatchJson(modelId: string, platform: Platform): string {
   const commands: Array<{ path: string; value: unknown }> = [];
   const providerId = providerIdFromModelId(modelId);
-  const providerConfig = providerTimeoutConfigJson(modelId, platform, timeoutSeconds);
+  const providerConfig = providerTimeoutConfigJson(modelId, platform);
   if (providerId && providerConfig) {
     commands.push({
       path: `models.providers.${providerId}`,
@@ -200,26 +182,21 @@ export function parsePlatformList(value: string): Set<Platform> {
   return result;
 }
 
-export function resolveLatestVersion(
-  versionOverride = "",
-  deps: ResolveLatestVersionDeps = {},
-): string {
+export function resolveLatestVersion(versionOverride = ""): string {
   if (versionOverride) {
     return versionOverride;
   }
-  const createTempDir = deps.createTempDir ?? mkdtempSync;
-  const removeDir = deps.removeDir ?? rmSync;
-  const runCommand = deps.runCommand ?? run;
-  const resolveTempDir = deps.tempDir ?? tmpdir;
-  const writeFile = deps.writeFile ?? writeFileSync;
-  const userConfigDir = createTempDir(path.join(resolveTempDir(), "openclaw-npm-"));
-  const userConfigPath = path.join(userConfigDir, "npmrc");
-  try {
-    writeFile(userConfigPath, "", "utf8");
-    return runCommand("npm", ["view", "openclaw", "version", "--userconfig", userConfigPath], {
+  return run(
+    "npm",
+    [
+      "view",
+      "openclaw",
+      "version",
+      "--userconfig",
+      mkdtempSync(path.join(tmpdir(), "openclaw-npm-")),
+    ],
+    {
       quiet: true,
-    }).stdout.trim();
-  } finally {
-    removeDir(userConfigDir, { force: true, recursive: true });
-  }
+    },
+  ).stdout.trim();
 }

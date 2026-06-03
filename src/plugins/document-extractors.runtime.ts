@@ -1,7 +1,3 @@
-import {
-  normalizeStringEntries,
-  sortUniqueStrings,
-} from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveEnabledBundledManifestContractPlugins } from "./bundled-manifest-contract-plugins.js";
 import { loadBundledDocumentExtractorEntriesFromDir } from "./document-extractor-public-artifacts.js";
@@ -31,12 +27,16 @@ function resolveExplicitAllowedDocumentExtractorPluginIds(params: {
     params.onlyPluginIds && params.onlyPluginIds.length > 0 ? new Set(params.onlyPluginIds) : null;
   const deniedPluginIds = new Set(params.config?.plugins?.deny ?? []);
   const entries = params.config?.plugins?.entries ?? {};
-  return sortUniqueStrings(
-    normalizeStringEntries(allow)
-      .filter((pluginId) => !onlyPluginIdSet || onlyPluginIdSet.has(pluginId))
-      .filter((pluginId) => !deniedPluginIds.has(pluginId))
-      .filter((pluginId) => entries[pluginId]?.enabled !== false),
-  );
+  return [
+    ...new Set(
+      allow
+        .map((pluginId) => pluginId.trim())
+        .filter(Boolean)
+        .filter((pluginId) => !onlyPluginIdSet || onlyPluginIdSet.has(pluginId))
+        .filter((pluginId) => !deniedPluginIds.has(pluginId))
+        .filter((pluginId) => entries[pluginId]?.enabled !== false),
+    ),
+  ].toSorted((left, right) => left.localeCompare(right));
 }
 
 export function resolvePluginDocumentExtractors(params?: {
@@ -60,7 +60,8 @@ export function resolvePluginDocumentExtractors(params?: {
       onlyPluginIds: params?.onlyPluginIds,
       contract: "documentExtractors",
       compatMode: {
-        enablement: "always",
+        allowlist: false,
+        enablement: "allowlist",
         vitest: true,
       },
     }).map((plugin) => plugin.id);

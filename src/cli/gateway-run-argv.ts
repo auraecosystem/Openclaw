@@ -4,7 +4,6 @@ const GATEWAY_RUN_VALUE_FLAGS = new Set([
   "--port",
   "--bind",
   "--token",
-  "--token-file",
   "--auth",
   "--password",
   "--password-file",

@@ -1,9 +1,8 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { TSchema } from "typebox";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { defaultRuntime } from "../../runtime.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { normalizeAnyChannelId } from "../registry.js";
 import { getChannelPlugin, getLoadedChannelPlugin, listChannelPlugins } from "./index.js";
 import type { ChannelMessageCapability } from "./message-capabilities.js";
@@ -383,7 +382,7 @@ export function resolveChannelMessageToolMediaSourceParamKeys(
     action: params.action,
     includeSchema: false,
   });
-  return uniqueStrings(described.mediaSourceParams);
+  return Array.from(new Set(described.mediaSourceParams));
 }
 
 export function channelSupportsMessageCapability(
@@ -400,9 +399,8 @@ export function channelSupportsMessageCapabilityForChannel(
   return listChannelMessageCapabilitiesForChannel(params).includes(capability);
 }
 
-export const testing = {
+export const __testing = {
   resetLoggedMessageActionErrors() {
     loggedMessageActionErrors.clear();
   },
 };
-export { testing as __testing };

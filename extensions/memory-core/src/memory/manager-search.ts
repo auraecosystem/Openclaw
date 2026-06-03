@@ -4,29 +4,12 @@ import {
   cosineSimilarity,
   parseEmbedding,
 } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
-import {
-  normalizeStringEntries,
-  normalizeStringEntriesLower,
-  uniqueStrings,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
 
 const vectorToBlob = (embedding: number[]): Buffer =>
   Buffer.from(new Float32Array(embedding).buffer);
 const FTS_QUERY_TOKEN_RE = /[\p{L}\p{N}_]+/gu;
 const SHORT_CJK_TRIGRAM_RE = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\u3131-\u3163]/u;
 const VECTOR_KNN_OVERSAMPLE_FACTOR = 8;
-
-// Scan fallback vector rows in bounded batches so large chunk tables (no usable
-// vec0 index) cannot pin the main thread for multi-second windows and starve
-// channel I/O / liveness signals. Matches the session-indexing yield pattern
-// introduced in #76978 for the same class of bug. Issue #81172.
-const FALLBACK_VECTOR_BATCH_SIZE = 256;
-
-function yieldToEventLoop(): Promise<void> {
-  return new Promise<void>((resolve) => {
-    setImmediate(resolve);
-  });
-}
 
 type SearchSource = string;
 
@@ -41,7 +24,12 @@ type SearchRowResult = {
 };
 
 function normalizeSearchTokens(raw: string): string[] {
-  return normalizeStringEntriesLower(raw.match(FTS_QUERY_TOKEN_RE) ?? []);
+  return (
+    raw
+      .match(FTS_QUERY_TOKEN_RE)
+      ?.map((token) => token.trim().toLowerCase())
+      .filter(Boolean) ?? []
+  );
 }
 
 function scoreFallbackKeywordResult(params: {
@@ -50,7 +38,7 @@ function scoreFallbackKeywordResult(params: {
   text: string;
   ftsScore: number;
 }): number {
-  const queryTokens = uniqueStrings(normalizeSearchTokens(params.query));
+  const queryTokens = [...new Set(normalizeSearchTokens(params.query))];
   if (queryTokens.length === 0) {
     return params.ftsScore;
   }
@@ -105,7 +93,11 @@ function planKeywordSearch(params: {
     };
   }
 
-  const tokens = normalizeStringEntries(params.query.match(FTS_QUERY_TOKEN_RE) ?? []);
+  const tokens =
+    params.query
+      .match(FTS_QUERY_TOKEN_RE)
+      ?.map((token) => token.trim())
+      .filter(Boolean) ?? [];
   if (tokens.length === 0) {
     return { matchQuery: null, substringTerms: [] };
   }
@@ -213,7 +205,7 @@ export async function searchVector(params: {
     }));
   }
 
-  return await searchChunksByEmbedding({
+  return searchChunksByEmbedding({
     db: params.db,
     providerModel: params.providerModel,
     sourceFilter: params.sourceFilterChunks,
@@ -223,29 +215,24 @@ export async function searchVector(params: {
   });
 }
 
-async function searchChunksByEmbedding(params: {
+function searchChunksByEmbedding(params: {
   db: DatabaseSync;
   providerModel: string;
   sourceFilter: { sql: string; params: SearchSource[] };
   queryVec: number[];
   limit: number;
   snippetMaxChars: number;
-}): Promise<SearchRowResult[]> {
+}): SearchRowResult[] {
   if (params.limit <= 0) {
     return [];
   }
-  // Keep batches bounded instead of calling `.all()` across the entire chunks
-  // table, and do not hold a sqlite iterator open across the setImmediate yield
-  // below. The rowid cursor keeps memory bounded without OFFSET rescans.
-  const stmt = params.db.prepare(
-    `SELECT rowid, id, path, start_line, end_line, text, embedding, source\n` +
-      `  FROM chunks\n` +
-      ` WHERE model = ? AND rowid > ?${params.sourceFilter.sql}\n` +
-      ` ORDER BY rowid ASC\n` +
-      ` LIMIT ?`,
-  );
-  type ChunkEmbeddingRow = {
-    rowid: number | bigint;
+  const rows = params.db
+    .prepare(
+      `SELECT id, path, start_line, end_line, text, embedding, source\n` +
+        `  FROM chunks\n` +
+        ` WHERE model = ?${params.sourceFilter.sql}`,
+    )
+    .iterate(params.providerModel, ...params.sourceFilter.params) as IterableIterator<{
     id: string;
     path: string;
     start_line: number;
@@ -253,52 +240,35 @@ async function searchChunksByEmbedding(params: {
     text: string;
     embedding: string;
     source: SearchSource;
-  };
+  }>;
 
   const topResults: SearchRowResult[] = [];
-  let lastRowid = 0;
-  while (true) {
-    const batch = stmt.all(
-      params.providerModel,
-      lastRowid,
-      ...params.sourceFilter.params,
-      FALLBACK_VECTOR_BATCH_SIZE,
-    ) as ChunkEmbeddingRow[];
-    if (batch.length === 0) {
-      break;
+  for (const row of rows) {
+    const score = cosineSimilarity(params.queryVec, parseEmbedding(row.embedding));
+    if (!Number.isFinite(score)) {
+      continue;
     }
-    for (const row of batch) {
-      const score = cosineSimilarity(params.queryVec, parseEmbedding(row.embedding));
-      if (Number.isFinite(score)) {
-        const result: SearchRowResult = {
-          id: row.id,
-          path: row.path,
-          startLine: row.start_line,
-          endLine: row.end_line,
-          score,
-          snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
-          source: row.source,
-        };
-        if (topResults.length < params.limit) {
-          topResults.push(result);
-          if (topResults.length === params.limit) {
-            topResults.sort((a, b) => b.score - a.score);
-          }
-        } else {
-          const lowest = topResults.at(-1);
-          if (lowest && result.score > lowest.score) {
-            topResults[topResults.length - 1] = result;
-            topResults.sort((a, b) => b.score - a.score);
-          }
-        }
+    const result: SearchRowResult = {
+      id: row.id,
+      path: row.path,
+      startLine: row.start_line,
+      endLine: row.end_line,
+      score,
+      snippet: truncateUtf16Safe(row.text, params.snippetMaxChars),
+      source: row.source,
+    };
+    if (topResults.length < params.limit) {
+      topResults.push(result);
+      if (topResults.length === params.limit) {
+        topResults.sort((a, b) => b.score - a.score);
       }
+      continue;
     }
-    const nextRowid = batch.at(-1)?.rowid;
-    lastRowid = typeof nextRowid === "bigint" ? Number(nextRowid) : (nextRowid ?? lastRowid);
-    if (batch.length < FALLBACK_VECTOR_BATCH_SIZE) {
-      break;
+    const lowest = topResults.at(-1);
+    if (lowest && result.score > lowest.score) {
+      topResults[topResults.length - 1] = result;
+      topResults.sort((a, b) => b.score - a.score);
     }
-    await yieldToEventLoop();
   }
   topResults.sort((a, b) => b.score - a.score);
   return topResults;
@@ -371,8 +341,12 @@ export async function searchKeyword(params: {
       // Log the root cause, then fall back to per-token LIKE-based substring
       // search so results are still returned instead of being silently dropped.
       console.warn(`memory search: FTS5 MATCH failed, falling back to LIKE: ${String(matchErr)}`);
-      const queryTokens = normalizeStringEntries(params.query.match(FTS_QUERY_TOKEN_RE) ?? []);
-      const allTerms = uniqueStrings([...queryTokens, ...plan.substringTerms]);
+      const queryTokens =
+        params.query
+          .match(FTS_QUERY_TOKEN_RE)
+          ?.map((t) => t.trim())
+          .filter(Boolean) ?? [];
+      const allTerms = [...new Set([...queryTokens, ...plan.substringTerms])];
       const fallbackLikeClause = allTerms.map(() => " AND text LIKE ? ESCAPE '\\'").join("");
       const fallbackLikeParams = allTerms.map((term) => `%${escapeLikePattern(term)}%`);
       rows = params.db

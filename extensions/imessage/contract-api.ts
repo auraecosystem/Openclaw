@@ -6,6 +6,6 @@ export {
   resolveIMessageRemoteAttachmentRoots,
 } from "./media-contract-api.js";
 export {
-  testing as imessageConversationBindingTesting,
+  __testing as imessageConversationBindingTesting,
   createIMessageConversationBindingManager,
 } from "./src/conversation-bindings.js";

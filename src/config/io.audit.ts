@@ -86,7 +86,8 @@ function parseFlagName(arg: string): string | null {
 export function redactConfigAuditArgv(argv: readonly string[]): string[] {
   const result: string[] = [];
   let redactNext = false;
-  for (const current of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const current = argv[i];
     if (typeof current !== "string") {
       result.push(current);
       redactNext = false;

@@ -1,5 +1,3 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
-
 export type PluginIdScope = readonly string[] | undefined;
 
 export function normalizePluginIdScope(ids?: readonly unknown[]): string[] | undefined {
@@ -7,7 +5,12 @@ export function normalizePluginIdScope(ids?: readonly unknown[]): string[] | und
     return undefined;
   }
   return Array.from(
-    new Set(normalizeStringEntries(ids.filter((id): id is string => typeof id === "string"))),
+    new Set(
+      ids
+        .filter((id): id is string => typeof id === "string")
+        .map((id) => id.trim())
+        .filter(Boolean),
+    ),
   ).toSorted();
 }
 

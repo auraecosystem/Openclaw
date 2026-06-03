@@ -84,7 +84,7 @@ export async function downloadInboundMedia(
       "inbound",
       maxBytes,
       fileName,
-    ).catch((err: unknown) => {
+    ).catch((err) => {
       if (err instanceof Error && /Media exceeds/i.test(err.message)) {
         throw new WhatsAppInboundMediaLimitExceededError(maxBytes);
       }

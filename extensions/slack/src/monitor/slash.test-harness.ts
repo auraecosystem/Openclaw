@@ -1,7 +1,5 @@
 import { vi } from "vitest";
 
-type AsyncMock = ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
-
 const mocks = vi.hoisted(() => ({
   dispatchMock: vi.fn(),
   readAllowFromStoreMock: vi.fn(),
@@ -9,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   resolveAgentRouteMock: vi.fn(),
   finalizeInboundContextMock: vi.fn(),
   resolveConversationLabelMock: vi.fn(),
-  recordSessionMetaFromInboundMock: vi.fn<(...args: unknown[]) => Promise<unknown>>(),
+  recordSessionMetaFromInboundMock: vi.fn(),
   resolveStorePathMock: vi.fn(),
 }));
 
@@ -34,7 +32,7 @@ type SlashHarnessMocks = {
   resolveAgentRouteMock: ReturnType<typeof vi.fn>;
   finalizeInboundContextMock: ReturnType<typeof vi.fn>;
   resolveConversationLabelMock: ReturnType<typeof vi.fn>;
-  recordSessionMetaFromInboundMock: AsyncMock;
+  recordSessionMetaFromInboundMock: ReturnType<typeof vi.fn>;
   resolveStorePathMock: ReturnType<typeof vi.fn>;
 };
 

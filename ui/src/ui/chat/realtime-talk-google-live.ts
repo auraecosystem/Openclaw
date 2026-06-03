@@ -1,13 +1,8 @@
-import { base64ToBytes, bytesToBase64, floatToPcm16 } from "./realtime-talk-audio.ts";
-import { RealtimeTalkPcmOutputQueue } from "./realtime-talk-pcm-output.ts";
+import { base64ToBytes, bytesToBase64, floatToPcm16, pcm16ToFloat } from "./realtime-talk-audio.ts";
 import type { RealtimeTalkJsonPcmWebSocketSessionResult } from "./realtime-talk-shared.ts";
 import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
-  REALTIME_VOICE_AGENT_CONTROL_TOOL_NAME,
   createRealtimeTalkEventEmitter,
-  steerRealtimeTalkActiveConsult,
-  shouldAutoControlRealtimeVoiceAgentText,
-  submitRealtimeTalkAgentControl,
   submitRealtimeTalkConsult,
   type RealtimeTalkTransport,
   type RealtimeTalkTransportContext,
@@ -77,10 +72,11 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
   private outputContext: AudioContext | null = null;
   private inputSource: MediaStreamAudioSourceNode | null = null;
   private inputProcessor: ScriptProcessorNode | null = null;
+  private playhead = 0;
   private closed = false;
   private pendingCalls = new Map<string, PendingFunctionCall>();
   private readonly consultAbortControllers = new Set<AbortController>();
-  private readonly outputQueue = new RealtimeTalkPcmOutputQueue();
+  private readonly sources = new Set<AudioBufferSourceNode>();
   private readonly emitTalkEvent: ReturnType<typeof createRealtimeTalkEventEmitter>;
 
   constructor(
@@ -218,20 +214,6 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
         final: content.inputTranscription.finished ?? false,
         payload: { role: "user", text: content.inputTranscription.text },
       });
-      if (
-        content.inputTranscription.finished &&
-        this.consultAbortControllers.size > 0 &&
-        shouldAutoControlRealtimeVoiceAgentText(content.inputTranscription.text)
-      ) {
-        void steerRealtimeTalkActiveConsult({
-          ctx: this.ctx,
-          text: content.inputTranscription.text,
-          emitTalkEvent: this.emitTalkEvent,
-          onControlResult: (result) => this.stopOutputForSuppressedControl(result),
-          speakControlResult: (messageLocal) => this.sendControlSpeechMessage(messageLocal),
-          suppressSpeechForModes: ["cancel"],
-        });
-      }
     }
     if (content?.outputTranscription?.text) {
       this.ctx.callbacks.onTranscript?.({
@@ -277,11 +259,37 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
   }
 
   private playPcm16(base64: string): void {
-    this.outputQueue.play(base64, this.outputContext, this.session.audio.outputSampleRateHz);
+    if (!this.outputContext) {
+      return;
+    }
+    const samples = pcm16ToFloat(base64ToBytes(base64));
+    if (samples.length === 0) {
+      return;
+    }
+    const buffer = this.outputContext.createBuffer(
+      1,
+      samples.length,
+      this.session.audio.outputSampleRateHz,
+    );
+    buffer.getChannelData(0).set(samples);
+    const source = this.outputContext.createBufferSource();
+    this.sources.add(source);
+    source.addEventListener("ended", () => this.sources.delete(source));
+    source.buffer = buffer;
+    source.connect(this.outputContext.destination);
+    const startAt = Math.max(this.outputContext.currentTime, this.playhead);
+    source.start(startAt);
+    this.playhead = startAt + buffer.duration;
   }
 
   private stopOutput(): void {
-    this.outputQueue.stop(this.outputContext);
+    for (const source of this.sources) {
+      try {
+        source.stop();
+      } catch {}
+    }
+    this.sources.clear();
+    this.playhead = this.outputContext?.currentTime ?? 0;
   }
 
   private async handleToolCall(call: {
@@ -300,16 +308,6 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
       callId,
       payload: { name, args: call.args ?? {} },
     });
-    if (name === REALTIME_VOICE_AGENT_CONTROL_TOOL_NAME) {
-      await submitRealtimeTalkAgentControl({
-        ctx: this.createActiveContext(),
-        callId,
-        args: call.args ?? {},
-        emitTalkEvent: this.emitTalkEvent,
-        submit: (toolCallId, result) => this.submitToolResult(toolCallId, result),
-      });
-      return;
-    }
     if (name !== REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME) {
       return;
     }
@@ -321,7 +319,6 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
         callId,
         args: call.args ?? {},
         signal: abortController.signal,
-        emitTalkEvent: this.emitTalkEvent,
         submit: (toolCallId, result) => this.submitToolResult(toolCallId, result),
       });
     } finally {
@@ -341,11 +338,6 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
         onTranscript: (entry) => {
           if (!this.closed) {
             this.ctx.callbacks.onTranscript?.(entry);
-          }
-        },
-        onTalkEvent: (event) => {
-          if (!this.closed) {
-            this.ctx.callbacks.onTalkEvent?.(event);
           }
         },
       },
@@ -374,38 +366,9 @@ export class GoogleLiveRealtimeTalkTransport implements RealtimeTalkTransport {
       },
     });
   }
-
-  private sendControlSpeechMessage(message: string): void {
-    this.stopOutput();
-    this.send({
-      clientContent: {
-        turns: [
-          {
-            role: "user",
-            parts: [{ text: message }],
-          },
-        ],
-        turnComplete: true,
-      },
-    });
-  }
-
-  private stopOutputForSuppressedControl(result: unknown): void {
-    if (!result || typeof result !== "object") {
-      return;
-    }
-    const record = result as Record<string, unknown>;
-    if (
-      record.ok === true &&
-      (record.mode === "cancel" || (record.suppress === true && record.mode !== "steer"))
-    ) {
-      this.stopOutput();
-    }
-  }
 }
 
-async function decodeGoogleLiveMessageData(dataInput: unknown): Promise<string> {
-  let data = dataInput;
+async function decodeGoogleLiveMessageData(data: unknown): Promise<string> {
   if (typeof data === "string") {
     return data;
   }

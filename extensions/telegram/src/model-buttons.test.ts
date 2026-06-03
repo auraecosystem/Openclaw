@@ -46,7 +46,6 @@ describe("parseModelCallbackData", () => {
       "",
       "mdl_invalid",
       "mdl_list_",
-      "mdl_list_openai_9007199254740993",
       "mdl_sel_noslash",
       "mdl_sel/",
     ];
@@ -313,7 +312,7 @@ describe("buildModelsKeyboard", () => {
 
   it("does not mark same-id models from other providers as current", () => {
     const result = buildModelsKeyboard({
-      provider: "openai",
+      provider: "openai-codex",
       models: ["gpt-5.4", "gpt-5.3-codex-spark"],
       currentModel: "github-copilot/gpt-5.4",
       currentPage: 1,

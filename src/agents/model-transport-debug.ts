@@ -57,6 +57,10 @@ export function isModelTransportDebugEnabled(env: ModelTransportDebugEnv = proce
   );
 }
 
+export function isCodeModeDebugEnabled(env: ModelTransportDebugEnv = process.env): boolean {
+  return isTruthyEnv(env.OPENCLAW_DEBUG_CODE_MODE) || isModelTransportDebugEnabled(env);
+}
+
 export function emitModelTransportDebug(log: SubsystemLogger, message: string): void {
   if (isModelTransportDebugEnabled()) {
     log.info(message);

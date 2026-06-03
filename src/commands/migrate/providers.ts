@@ -28,13 +28,12 @@ export function resolveMigrationProvider(
 
 export function buildMigrationProviderOptions(
   opts: MigrateCommonOptions,
-  providerId = opts.provider,
 ): Record<string, unknown> | undefined {
   const options: Record<string, unknown> = {};
-  if (providerId === "codex" && opts.verifyPluginApps === true) {
+  if (opts.provider === "codex" && opts.verifyPluginApps === true) {
     options.verifyPluginApps = true;
   }
-  if (providerId === "codex" && opts.configPatchMode) {
+  if (opts.provider === "codex" && opts.configPatchMode) {
     options.configPatchMode = opts.configPatchMode;
   }
   return Object.keys(options).length > 0 ? options : undefined;

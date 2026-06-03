@@ -1,10 +1,6 @@
 import type { WebClient as SlackWebClient } from "@slack/web-api";
 import { pruneMapToMaxSize } from "openclaw/plugin-sdk/collection-runtime";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { formatSlackFileReferenceList } from "../file-reference.js";
 import type { SlackFile } from "../types.js";
 import { logVerbose } from "./thread.runtime.js";
@@ -19,7 +15,7 @@ export type SlackThreadStarter = {
 
 type SlackThreadStarterCacheEntry = {
   value: SlackThreadStarter;
-  expiresAt: number;
+  cachedAt: number;
 };
 
 const THREAD_STARTER_CACHE = new Map<string, SlackThreadStarterCacheEntry>();
@@ -27,13 +23,9 @@ const THREAD_STARTER_CACHE_TTL_MS = 6 * 60 * 60_000;
 const THREAD_STARTER_CACHE_MAX = 2000;
 
 function evictThreadStarterCache(): void {
-  const now = asDateTimestampMs(Date.now());
-  if (now === undefined) {
-    THREAD_STARTER_CACHE.clear();
-    return;
-  }
+  const now = Date.now();
   for (const [cacheKey, entry] of THREAD_STARTER_CACHE.entries()) {
-    if (asDateTimestampMs(entry.expiresAt) === undefined || entry.expiresAt <= now) {
+    if (now - entry.cachedAt > THREAD_STARTER_CACHE_TTL_MS) {
       THREAD_STARTER_CACHE.delete(cacheKey);
     }
   }
@@ -52,11 +44,10 @@ export async function resolveSlackThreadStarter(params: {
   evictThreadStarterCache();
   const cacheKey = `${params.channelId}:${params.threadTs}`;
   const cached = THREAD_STARTER_CACHE.get(cacheKey);
+  if (cached && Date.now() - cached.cachedAt <= THREAD_STARTER_CACHE_TTL_MS) {
+    return cached.value;
+  }
   if (cached) {
-    const now = asDateTimestampMs(Date.now());
-    if (now !== undefined && cached.expiresAt > now) {
-      return cached.value;
-    }
     THREAD_STARTER_CACHE.delete(cacheKey);
   }
   try {
@@ -87,17 +78,14 @@ export async function resolveSlackThreadStarter(params: {
       ts: message.ts,
       files,
     };
-    const expiresAt = resolveExpiresAtMsFromDurationMs(THREAD_STARTER_CACHE_TTL_MS);
-    if (expiresAt !== undefined) {
-      if (THREAD_STARTER_CACHE.has(cacheKey)) {
-        THREAD_STARTER_CACHE.delete(cacheKey);
-      }
-      THREAD_STARTER_CACHE.set(cacheKey, {
-        value: starter,
-        expiresAt,
-      });
-      evictThreadStarterCache();
+    if (THREAD_STARTER_CACHE.has(cacheKey)) {
+      THREAD_STARTER_CACHE.delete(cacheKey);
     }
+    THREAD_STARTER_CACHE.set(cacheKey, {
+      value: starter,
+      cachedAt: Date.now(),
+    });
+    evictThreadStarterCache();
     return starter;
   } catch (err) {
     logVerbose(

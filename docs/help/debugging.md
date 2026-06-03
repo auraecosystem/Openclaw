@@ -278,24 +278,27 @@ Default file:
 
 `~/.openclaw/logs/raw-stream.jsonl`
 
-## Raw OpenAI-compatible chunk logging
+## Raw chunk logging (pi-mono)
 
 To capture **raw OpenAI-compat chunks** before they are parsed into blocks,
-enable the transport logger:
+pi-mono exposes a separate logger:
 
 ```bash
-OPENCLAW_RAW_STREAM=1
+PI_RAW_STREAM=1
 ```
 
 Optional path:
 
 ```bash
-OPENCLAW_RAW_STREAM_PATH=~/.openclaw/logs/raw-openai-completions.jsonl
+PI_RAW_STREAM_PATH=~/.pi-mono/logs/raw-openai-completions.jsonl
 ```
 
 Default file:
 
-`~/.openclaw/logs/raw-openai-completions.jsonl`
+`~/.pi-mono/logs/raw-openai-completions.jsonl`
+
+> Note: this is only emitted by processes using pi-mono's
+> `openai-completions` provider.
 
 ## Safety notes
 

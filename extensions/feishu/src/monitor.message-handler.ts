@@ -1,4 +1,3 @@
-import { isRecord, readStringValue as readString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ClawdbotConfig, HistoryEntry, PluginRuntime, RuntimeEnv } from "../runtime-api.js";
 import { resolveFeishuMessageDedupeKey } from "./dedupe-key.js";
 import type { FeishuMessageEvent } from "./event-types.js";
@@ -10,9 +9,17 @@ import {
 import { createSequentialQueue } from "./sequential-queue.js";
 import type { FeishuChatType } from "./types.js";
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 type FeishuMessageReceiveHandlerContext = {
   cfg: ClawdbotConfig;
-  channelRuntime: PluginRuntime["channel"];
+  core: PluginRuntime;
   accountId: string;
   runtime?: RuntimeEnv;
   chatHistories: Map<string, HistoryEntry[]>;
@@ -23,7 +30,6 @@ type FeishuMessageReceiveHandlerContext = {
     botOpenId?: string;
     botName?: string;
     runtime?: RuntimeEnv;
-    channelRuntime?: PluginRuntime["channel"];
     chatHistories?: Map<string, HistoryEntry[]>;
     accountId?: string;
     processingClaimHeld?: boolean;
@@ -155,7 +161,7 @@ function resolveFeishuDebounceMentions(params: {
 
 export function createFeishuMessageReceiveHandler({
   cfg,
-  channelRuntime,
+  core,
   accountId,
   runtime,
   chatHistories,
@@ -166,10 +172,10 @@ export function createFeishuMessageReceiveHandler({
   recordProcessedMessage,
   getBotOpenId = () => undefined,
   getBotName = () => undefined,
-  resolveSequentialKey = ({ accountId: accountIdLocal, event }) =>
-    `feishu:${accountIdLocal}:${event.message.chat_id?.trim() || "unknown"}`,
+  resolveSequentialKey = ({ accountId, event }) =>
+    `feishu:${accountId}:${event.message.chat_id?.trim() || "unknown"}`,
 }: FeishuMessageReceiveHandlerContext): (data: unknown) => Promise<void> {
-  const inboundDebounceMs = channelRuntime.debounce.resolveInboundDebounceMs({
+  const inboundDebounceMs = core.channel.debounce.resolveInboundDebounceMs({
     cfg,
     channel: "feishu",
   });
@@ -197,7 +203,6 @@ export function createFeishuMessageReceiveHandler({
         botOpenId: getBotOpenId(accountId),
         botName: getBotName(accountId),
         runtime,
-        channelRuntime,
         chatHistories,
         accountId,
         processingClaimHeld: true,
@@ -240,7 +245,7 @@ export function createFeishuMessageReceiveHandler({
     }
   };
 
-  const inboundDebouncer = channelRuntime.debounce.createInboundDebouncer<FeishuMessageEvent>({
+  const inboundDebouncer = core.channel.debounce.createInboundDebouncer<FeishuMessageEvent>({
     debounceMs: inboundDebounceMs,
     buildKey: (event) => {
       const chatId = event.message.chat_id?.trim();
@@ -257,7 +262,7 @@ export function createFeishuMessageReceiveHandler({
         return false;
       }
       const text = resolveDebounceText(event);
-      return Boolean(text) && !channelRuntime.commands.isControlCommandMessage(text, cfg);
+      return Boolean(text) && !core.channel.text.hasControlCommand(text, cfg);
     },
     onFlush: async (entries) => {
       const last = entries.at(-1);
@@ -329,7 +334,7 @@ export function createFeishuMessageReceiveHandler({
       await inboundDebouncer.enqueue(event);
     };
     if (fireAndForget) {
-      void processMessage().catch((err: unknown) => {
+      void processMessage().catch((err) => {
         releaseFeishuMessageProcessing(messageDedupeKey, accountId);
         error(`feishu[${accountId}]: error handling message: ${String(err)}`);
       });

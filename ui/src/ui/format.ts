@@ -1,4 +1,3 @@
-import { asDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import { formatDurationHuman } from "../../../src/infra/format-time/format-duration.ts";
 import { formatRelativeTimestamp } from "../../../src/infra/format-time/format-relative.ts";
 import { t } from "../i18n/index.ts";
@@ -38,42 +37,10 @@ export function formatUnknownText(
 }
 
 export function formatMs(ms?: number | null): string {
-  const timestampMs = asDateTimestampMs(ms);
-  if (timestampMs === undefined) {
+  if (!ms && ms !== 0) {
     return t("common.na");
   }
-  return new Date(timestampMs).toLocaleString();
-}
-
-export function formatDateMs(
-  ms?: number | null,
-  options?: Intl.DateTimeFormatOptions,
-  fallback = t("common.na"),
-): string {
-  const timestampMs = asDateTimestampMs(ms);
-  return timestampMs === undefined
-    ? fallback
-    : new Date(timestampMs).toLocaleDateString([], options);
-}
-
-export function formatTimeMs(
-  ms?: number | null,
-  options?: Intl.DateTimeFormatOptions,
-  fallback = t("common.na"),
-): string {
-  const timestampMs = asDateTimestampMs(ms);
-  return timestampMs === undefined
-    ? fallback
-    : new Date(timestampMs).toLocaleTimeString([], options);
-}
-
-export function formatDateTimeMs(
-  ms?: number | null,
-  options?: Intl.DateTimeFormatOptions,
-  fallback = t("common.na"),
-): string {
-  const timestampMs = asDateTimestampMs(ms);
-  return timestampMs === undefined ? fallback : new Date(timestampMs).toLocaleString([], options);
+  return new Date(ms).toLocaleString();
 }
 
 export function formatList(values?: Array<string | null | undefined>): string {

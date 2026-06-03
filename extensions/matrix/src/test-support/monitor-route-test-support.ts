@@ -1,6 +1,6 @@
 export {
   registerSessionBindingAdapter,
-  testing,
+  __testing,
 } from "openclaw/plugin-sdk/session-binding-runtime";
 export { resolveAgentRoute } from "openclaw/plugin-sdk/routing";
 export {

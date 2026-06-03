@@ -4,17 +4,12 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { ensureExtensionMemoryBuild } from "./ensure-extension-memory-build.mjs";
-import { stripLeadingPackageManagerSeparator } from "./lib/arg-utils.mjs";
 import { formatErrorMessage } from "./lib/error-format.mjs";
 
 const DEFAULT_CONCURRENCY = 6;
 const DEFAULT_TIMEOUT_MS = 90_000;
 const DEFAULT_COMBINED_TIMEOUT_MS = 180_000;
 const DEFAULT_TOP = 10;
-const OUTPUT_CAPTURE_MAX_CHARS = 128 * 1024;
-const STDERR_PREVIEW_MAX_CHARS = 8 * 1024;
 const RSS_MARKER = "__OPENCLAW_MAX_RSS_KB__=";
 
 function printHelp() {
@@ -42,19 +37,14 @@ Examples:
 }
 
 function parsePositiveInt(raw, flagName) {
-  const text = String(raw ?? "").trim();
-  if (!/^\d+$/u.test(text)) {
-    throw new Error(`${flagName} must be a positive integer`);
-  }
-  const parsed = Number(text);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
     throw new Error(`${flagName} must be a positive integer`);
   }
   return parsed;
 }
 
-export function parseArgs(argv) {
-  const args = stripLeadingPackageManagerSeparator(argv);
+function parseArgs(argv) {
   const options = {
     extensions: [],
     concurrency: DEFAULT_CONCURRENCY,
@@ -65,14 +55,14 @@ export function parseArgs(argv) {
     skipCombined: false,
   };
 
-  parseArgv: for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
     switch (arg) {
       case "--":
-        break parseArgv;
+        break;
       case "--extension":
       case "-e": {
-        const next = args[index + 1];
+        const next = argv[index + 1];
         if (!next) {
           throw new Error(`${arg} requires a value`);
         }
@@ -81,23 +71,23 @@ export function parseArgs(argv) {
         break;
       }
       case "--concurrency":
-        options.concurrency = parsePositiveInt(args[index + 1], arg);
+        options.concurrency = parsePositiveInt(argv[index + 1], arg);
         index += 1;
         break;
       case "--timeout-ms":
-        options.timeoutMs = parsePositiveInt(args[index + 1], arg);
+        options.timeoutMs = parsePositiveInt(argv[index + 1], arg);
         index += 1;
         break;
       case "--combined-timeout-ms":
-        options.combinedTimeoutMs = parsePositiveInt(args[index + 1], arg);
+        options.combinedTimeoutMs = parsePositiveInt(argv[index + 1], arg);
         index += 1;
         break;
       case "--top":
-        options.top = parsePositiveInt(args[index + 1], arg);
+        options.top = parsePositiveInt(argv[index + 1], arg);
         index += 1;
         break;
       case "--json": {
-        const next = args[index + 1];
+        const next = argv[index + 1];
         if (!next) {
           throw new Error(`${arg} requires a value`);
         }
@@ -126,62 +116,13 @@ function parseMaxRssMb(stderr) {
   return last ? Number(last[1]) / 1024 : null;
 }
 
-function createOutputCapture() {
-  return { text: "", truncatedChars: 0 };
+function summarizeStderr(stderr, lines = 8) {
+  return stderr.trim().split("\n").filter(Boolean).slice(0, lines).join("\n");
 }
 
-function appendBoundedOutput(capture, chunk, maxChars = OUTPUT_CAPTURE_MAX_CHARS) {
-  const nextText = capture.text + String(chunk);
-  if (nextText.length <= maxChars) {
-    return capture.truncatedChars === 0
-      ? { text: nextText, truncatedChars: 0 }
-      : { text: nextText, truncatedChars: capture.truncatedChars };
-  }
-  const truncatedChars = capture.truncatedChars + nextText.length - maxChars;
-  return { text: nextText.slice(-maxChars), truncatedChars };
-}
-
-function formatCapturedOutput(capture) {
-  if (capture.truncatedChars === 0) {
-    return capture.text;
-  }
-  return `[output truncated ${capture.truncatedChars} chars; showing tail]\n${capture.text}`;
-}
-
-function scanMaxRssMb(tail, chunk, current) {
-  const text = `${tail}${String(chunk)}`;
-  const parsed = parseMaxRssMb(text);
-  const lineBreakIndex = Math.max(text.lastIndexOf("\n"), text.lastIndexOf("\r"));
-  const openLine = lineBreakIndex === -1 ? text : text.slice(lineBreakIndex + 1);
-  return {
-    maxRssMb: parsed ?? current,
-    tail: openLine.slice(-(RSS_MARKER.length + 32)),
-  };
-}
-
-function summarizeStderr(stderr, lines = 8, maxChars = STDERR_PREVIEW_MAX_CHARS) {
-  const text = stderr.trim().split("\n").filter(Boolean).slice(0, lines).join("\n");
-  if (text.length <= maxChars) {
-    return text;
-  }
-  const firstLine = text.split("\n", 1)[0] ?? "";
-  const prefix = firstLine.startsWith("[output truncated") ? `${firstLine}\n` : "";
-  return `${prefix}[stderr preview truncated ${text.length - maxChars} chars; showing tail]\n${text.slice(
-    -maxChars,
-  )}`;
-}
-
-export async function runCase({
-  repoRoot,
-  env,
-  hookPath,
-  name,
-  body,
-  timeoutMs,
-  spawnImpl = spawn,
-}) {
+async function runCase({ repoRoot, env, hookPath, name, body, timeoutMs }) {
   return await new Promise((resolve) => {
-    const child = spawnImpl(
+    const child = spawn(
       process.execPath,
       ["--import", hookPath, "--input-type=module", "--eval", body],
       {
@@ -191,60 +132,30 @@ export async function runCase({
       },
     );
 
-    let stdout = createOutputCapture();
-    let stderr = createOutputCapture();
-    let stderrRssTail = "";
-    let maxRssMb = null;
+    let stdout = "";
+    let stderr = "";
     let timedOut = false;
-    let settled = false;
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
     }, timeoutMs);
-    timer.unref?.();
-
-    function settle(result) {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    }
 
     child.stdout.on("data", (chunk) => {
-      stdout = appendBoundedOutput(stdout, chunk);
+      stdout += String(chunk);
     });
     child.stderr.on("data", (chunk) => {
-      const rssScan = scanMaxRssMb(stderrRssTail, chunk, maxRssMb);
-      stderrRssTail = rssScan.tail;
-      maxRssMb = rssScan.maxRssMb;
-      stderr = appendBoundedOutput(stderr, chunk);
-    });
-    child.on("error", (error) => {
-      const stderrText = formatCapturedOutput(stderr);
-      settle({
-        name,
-        code: null,
-        signal: null,
-        timedOut,
-        error: formatErrorMessage(error),
-        stdout: formatCapturedOutput(stdout),
-        stderr: stderrText,
-        maxRssMb: maxRssMb ?? parseMaxRssMb(stderrText),
-      });
+      stderr += String(chunk);
     });
     child.on("close", (code, signal) => {
-      const stderrText = formatCapturedOutput(stderr);
-      settle({
+      clearTimeout(timer);
+      resolve({
         name,
         code,
         signal,
         timedOut,
-        error: null,
-        stdout: formatCapturedOutput(stdout),
-        stderr: stderrText,
-        maxRssMb: maxRssMb ?? parseMaxRssMb(stderrText),
+        stdout,
+        stderr,
+        maxRssMb: parseMaxRssMb(stderr),
       });
     });
   });
@@ -277,10 +188,6 @@ function findExtensionEntries(repoRoot) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const repoRoot = process.cwd();
-  ensureExtensionMemoryBuild({
-    rootDir: repoRoot,
-    requiredExtensionIds: options.extensions,
-  });
   const allEntries = findExtensionEntries(repoRoot);
   const selectedEntries =
     options.extensions.length === 0
@@ -302,10 +209,9 @@ async function main() {
   writeFileSync(
     hookPath,
     [
-      "import { writeSync } from 'node:fs';",
       "process.on('exit', () => {",
       "  const usage = typeof process.resourceUsage === 'function' ? process.resourceUsage() : null;",
-      `  if (usage && typeof usage.maxRSS === 'number') writeSync(2, '${RSS_MARKER}' + String(usage.maxRSS) + '\\n');`,
+      `  if (usage && typeof usage.maxRSS === 'number') console.error('${RSS_MARKER}' + String(usage.maxRSS));`,
       "});",
       "",
     ].join("\n"),
@@ -446,11 +352,9 @@ async function main() {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  try {
-    await main();
-  } catch (error) {
-    console.error(`[extension-memory] ${formatErrorMessage(error)}`);
-    process.exit(1);
-  }
+try {
+  await main();
+} catch (error) {
+  console.error(`[extension-memory] ${formatErrorMessage(error)}`);
+  process.exit(1);
 }

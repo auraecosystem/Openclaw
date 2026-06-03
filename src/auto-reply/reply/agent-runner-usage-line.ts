@@ -4,7 +4,6 @@ import {
   formatUsd,
   type ModelCostConfig,
 } from "../../utils/usage-format.js";
-import { getReplyPayloadMetadata, setReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 
 export const formatResponseUsageLine = (params: {
@@ -70,21 +69,7 @@ export const appendUsageLine = (payloads: ReplyPayload[], line: string): ReplyPa
     ...existing,
     text: `${existingText}${separator}${line}`,
   };
-  const metadata = getReplyPayloadMetadata(existing);
-  const nextWithMetadata = metadata
-    ? setReplyPayloadMetadata(next, {
-        ...metadata,
-        ...(metadata.sourceReplyTranscriptMirror
-          ? {
-              sourceReplyTranscriptMirror: {
-                ...metadata.sourceReplyTranscriptMirror,
-                text: next.text,
-              },
-            }
-          : {}),
-      })
-    : next;
   const updated = payloads.slice();
-  updated[index] = nextWithMetadata;
+  updated[index] = next;
   return updated;
 };

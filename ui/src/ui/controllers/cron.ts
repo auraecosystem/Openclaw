@@ -1,17 +1,15 @@
 import { t } from "../../i18n/index.ts";
 import { DEFAULT_CRON_FORM } from "../app-defaults.ts";
 import { getCronJobPayload, hasCronJobPayload } from "../cron-payload.ts";
-import { resolveCronJobLastRunStatus } from "../cron-status.ts";
 import { toNumber } from "../format.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
-import { normalizeLowercaseStringOrEmpty, sortUniqueStrings } from "../string-coerce.ts";
+import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import type {
   CronJob,
   CronDeliveryStatus,
   CronJobsEnabledFilter,
   CronJobsListResult,
   CronJobsSortBy,
-  CronRunStatus,
   CronRunScope,
   CronRunLogEntry,
   CronRunsResult,
@@ -44,7 +42,7 @@ export type CronFieldKey =
 export type CronFieldErrors = Partial<Record<CronFieldKey, string>>;
 
 export type CronJobsScheduleKindFilter = "all" | "at" | "every" | "cron";
-export type CronJobsLastStatusFilter = "all" | CronRunStatus | "unknown";
+export type CronJobsLastStatusFilter = "all" | "ok" | "error" | "skipped";
 export type CronRunsLoadStatus = "ok" | "error" | "skipped";
 
 export type CronState = {
@@ -55,8 +53,6 @@ export type CronState = {
   cronQuickCreateStep: import("../views/cron-quick-create.ts").CronQuickCreateStep;
   cronQuickCreateDraft: import("../views/cron-quick-create.ts").CronQuickCreateDraft | null;
   cronJobsLoadingMore: boolean;
-  cronJobsReloadPending: boolean;
-  cronJobsReloadPendingTableFilters: boolean;
   cronJobs: CronJob[];
   cronJobsTotal: number;
   cronJobsHasMore: boolean;
@@ -225,7 +221,7 @@ export async function loadCronModelSuggestions(state: CronModelSuggestionsState)
         return typeof id === "string" ? id.trim() : "";
       })
       .filter(Boolean);
-    state.cronModelSuggestions = sortUniqueStrings(ids);
+    state.cronModelSuggestions = Array.from(new Set(ids)).toSorted((a, b) => a.localeCompare(b));
   } catch {
     state.cronModelSuggestions = [];
   }
@@ -278,31 +274,14 @@ function normalizeCronPageMeta(params: {
   return { total, hasMore, nextOffset };
 }
 
-async function drainPendingCronJobsReload(state: CronState) {
-  if (!state.cronJobsReloadPending) {
-    return;
-  }
-  const tableFilters = state.cronJobsReloadPendingTableFilters;
-  state.cronJobsReloadPending = false;
-  state.cronJobsReloadPendingTableFilters = false;
-  await loadCronJobsPage(state, { tableFilters });
-}
-
-export async function loadCronJobsPage(
-  state: CronState,
-  opts?: { append?: boolean; tableFilters?: boolean },
-) {
+export async function loadCronJobsPage(state: CronState, opts?: { append?: boolean }) {
   if (!state.client || !state.connected) {
     return;
   }
-  const append = opts?.append === true;
   if (state.cronLoading || state.cronJobsLoadingMore) {
-    if (!append) {
-      state.cronJobsReloadPending = true;
-      state.cronJobsReloadPendingTableFilters = opts?.tableFilters === true;
-    }
     return;
   }
+  const append = opts?.append === true;
   if (append && !state.cronJobsHasMore) {
     return;
   }
@@ -320,12 +299,6 @@ export async function loadCronJobsPage(
       offset,
       query: state.cronJobsQuery.trim() || undefined,
       enabled: state.cronJobsEnabledFilter,
-      ...(opts?.tableFilters
-        ? {
-            scheduleKind: state.cronJobsScheduleKindFilter,
-            lastRunStatus: state.cronJobsLastStatusFilter,
-          }
-        : {}),
       sortBy: state.cronJobsSortBy,
       sortDir: state.cronJobsSortDir,
     });
@@ -356,7 +329,6 @@ export async function loadCronJobsPage(
     } else {
       state.cronLoading = false;
     }
-    await drainPendingCronJobsReload(state);
   }
 }
 
@@ -389,32 +361,20 @@ export function getVisibleCronJobs(
   state: Pick<CronState, "cronJobs" | "cronJobsScheduleKindFilter" | "cronJobsLastStatusFilter">,
 ): CronJob[] {
   return state.cronJobs.filter((job) => {
-    const scheduleKind = resolveCronJobScheduleKind(job);
-    if (!scheduleKind) {
-      return false;
-    }
     if (
       state.cronJobsScheduleKindFilter !== "all" &&
-      scheduleKind !== state.cronJobsScheduleKindFilter
+      job.schedule.kind !== state.cronJobsScheduleKindFilter
     ) {
       return false;
     }
     if (
       state.cronJobsLastStatusFilter !== "all" &&
-      resolveCronJobLastRunStatus(job) !== state.cronJobsLastStatusFilter
+      job.state?.lastStatus !== state.cronJobsLastStatusFilter
     ) {
       return false;
     }
     return true;
   });
-}
-
-function resolveCronJobScheduleKind(job: CronJob): CronJob["schedule"]["kind"] | null {
-  const scheduleKind = (job.schedule as { kind?: unknown } | null | undefined)?.kind;
-  if (scheduleKind === "at" || scheduleKind === "every" || scheduleKind === "cron") {
-    return scheduleKind;
-  }
-  return null;
 }
 
 function clearCronEditState(state: CronState) {
@@ -769,7 +729,7 @@ export async function addCronJob(state: CronState): Promise<boolean> {
       await client.request("cron.add", job);
       resetCronFormToDefaults(state);
     }
-    await loadCronJobsPage(state, { tableFilters: true });
+    await loadCronJobsPage(state);
     await loadCronStatus(state);
     saved = true;
   });
@@ -779,7 +739,7 @@ export async function addCronJob(state: CronState): Promise<boolean> {
 export async function toggleCronJob(state: CronState, job: CronJob, enabled: boolean) {
   await withCronBusy(state, async (client) => {
     await client.request("cron.update", { id: job.id, patch: { enabled } });
-    await loadCronJobsPage(state, { tableFilters: true });
+    await loadCronJobsPage(state);
     await loadCronStatus(state);
   });
 }
@@ -801,7 +761,7 @@ export async function removeCronJob(state: CronState, job: CronJob) {
       state.cronRunsJobId = null;
       clearCronRunsPage(state);
     }
-    await loadCronJobsPage(state, { tableFilters: true });
+    await loadCronJobsPage(state);
     await loadCronStatus(state);
   });
 }

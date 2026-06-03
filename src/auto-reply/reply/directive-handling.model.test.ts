@@ -1,152 +1,42 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-
-vi.hoisted(() => {
-  vi.resetModules();
-});
-
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const authProfilesStoreMock = vi.hoisted(() => ({
   profiles: {} as Record<
     string,
     | { type: "api_key"; provider: string; key: string }
     | { type: "oauth"; provider: string; access: string; refresh: string; expires: number }
-    | { type: "token"; provider: string; token: string }
   >,
 }));
-const modelsCommandMock = vi.hoisted(() => ({
-  delegateToActual: false,
-  resolveModelsCommandReply: vi.fn(),
-}));
 
-function defaultModelsCommandReply() {
-  return {
-    text: [
-      "Providers:",
-      "- anthropic (1)",
-      "",
-      "Use: /models <provider>",
-      "Switch: /model <provider/model>",
-    ].join("\n"),
-  };
-}
-
-function normalizeProviderForAuthTest(provider: string) {
-  return provider.trim().toLowerCase();
-}
-
-function hasAllowedPluginForAuthTest(cfg: unknown, pluginId: string): boolean {
-  if (!cfg || typeof cfg !== "object" || !("plugins" in cfg)) {
-    return false;
-  }
-  const plugins = (cfg as { plugins?: { allow?: unknown } }).plugins;
-  return Array.isArray(plugins?.allow) && plugins.allow.includes(pluginId);
-}
-
-vi.mock("../../agents/auth-profiles.js", () => {
-  const store = () => ({
+vi.mock("../../agents/auth-profiles.js", () => ({
+  clearRuntimeAuthProfileStoreSnapshots: () => {
+    authProfilesStoreMock.profiles = {};
+  },
+  externalCliDiscoveryForProviderAuth: () => ({
+    mode: "scoped",
+    allowKeychainPrompt: false,
+  }),
+  ensureAuthProfileStore: () => ({
     version: 1,
     profiles: authProfilesStoreMock.profiles,
-  });
-  return {
-    clearRuntimeAuthProfileStoreSnapshots: () => {
-      authProfilesStoreMock.profiles = {};
-    },
-    externalCliDiscoveryForProviderAuth: () => ({
-      mode: "scoped",
-      allowKeychainPrompt: false,
-    }),
-    ensureAuthProfileStore: store,
-    ensureAuthProfileStoreWithoutExternalProfiles: store,
-    isProfileInCooldown: () => false,
-    listProfilesForProvider: (_store: unknown, provider: string) =>
-      Object.entries(authProfilesStoreMock.profiles)
-        .filter(([, profile]) => profile.provider === provider)
-        .map(([profileId, profile]) => ({ profileId, profile })),
-    replaceRuntimeAuthProfileStoreSnapshots: (
-      snapshots: Array<{
-        store?: { profiles?: Record<string, AuthProfileForTest> };
-      }>,
-    ) => {
-      authProfilesStoreMock.profiles = snapshots[0]?.store?.profiles ?? {};
-    },
-    resolveAuthProfileDisplayLabel: ({ profileId }: { profileId: string }) => profileId,
-    resolveAuthProfileOrder: () => [],
-    resolveAuthStorePathForDisplay: () => "/tmp/auth-profiles.json",
-  };
-});
-
-vi.mock("./commands-models.js", () => ({
-  resolveModelsCommandReply: async (
-    params: Parameters<typeof import("./commands-models.js").resolveModelsCommandReply>[0],
+  }),
+  isProfileInCooldown: () => false,
+  listProfilesForProvider: (_store: unknown, provider: string) =>
+    Object.entries(authProfilesStoreMock.profiles)
+      .filter(([, profile]) => profile.provider === provider)
+      .map(([profileId, profile]) => ({ profileId, profile })),
+  replaceRuntimeAuthProfileStoreSnapshots: (
+    snapshots: Array<{
+      store?: { profiles?: Record<string, AuthProfileForTest> };
+    }>,
   ) => {
-    modelsCommandMock.resolveModelsCommandReply(params);
-    if (modelsCommandMock.delegateToActual) {
-      const actual =
-        await vi.importActual<typeof import("./commands-models.js")>("./commands-models.js");
-      return actual.resolveModelsCommandReply(params);
-    }
-    return defaultModelsCommandReply();
+    authProfilesStoreMock.profiles = snapshots[0]?.store?.profiles ?? {};
   },
-}));
-
-vi.mock("./directive-handling.auth.js", () => ({
-  formatAuthLabel: (auth: { label: string; source: string }) => {
-    if (!auth.source || auth.source === auth.label || auth.source === "missing") {
-      return auth.label;
-    }
-    return `${auth.label} (${auth.source})`;
-  },
-  resolveAuthLabel: async (
-    provider: string,
-    cfg: unknown,
-    _modelsPath: string,
-    _agentDir?: string,
-    _mode?: unknown,
-    workspaceDir?: string,
-    options?: { acceptedProfileTypes?: readonly string[] },
-  ) => {
-    const providerKey = normalizeProviderForAuthTest(provider);
-    const acceptedProfileTypes = options?.acceptedProfileTypes
-      ? new Set(options.acceptedProfileTypes)
-      : undefined;
-    const matchingProfiles = Object.entries(authProfilesStoreMock.profiles).filter(
-      ([, profile]) =>
-        normalizeProviderForAuthTest(profile.provider) === providerKey &&
-        (!acceptedProfileTypes || acceptedProfileTypes.has(profile.type)),
-    );
-    if (matchingProfiles.length > 0) {
-      return {
-        label: matchingProfiles
-          .map(([profileId, profile]) =>
-            profile.type === "oauth"
-              ? `${profileId}=OAuth`
-              : profile.type === "token"
-                ? `${profileId}=token`
-                : `${profileId}=${profile.key}`,
-          )
-          .join(", "),
-        source: `auth-profiles.json: /tmp/auth-profiles.json`,
-      };
-    }
-    if (
-      providerKey === "anthropic" &&
-      workspaceDir &&
-      ((process.env.WORKSPACE_MODEL_CREDENTIALS &&
-        hasAllowedPluginForAuthTest(cfg, "workspace-model-auth")) ||
-        (process.env.WORKSPACE_MODEL_LIST_CREDENTIALS &&
-          hasAllowedPluginForAuthTest(cfg, "workspace-model-list")))
-    ) {
-      return {
-        label: process.env.WORKSPACE_MODEL_CREDENTIALS
-          ? "workspace model credentials"
-          : "workspace model list credentials",
-        source: "",
-      };
-    }
-    return { label: "missing", source: "missing" };
-  },
+  resolveAuthProfileDisplayLabel: ({ profileId }: { profileId: string }) => profileId,
+  resolveAuthProfileOrder: () => [],
+  resolveAuthStorePathForDisplay: () => "/tmp/auth-profiles.json",
 }));
 
 vi.mock("../../agents/auth-profiles/store.js", () => {
@@ -187,14 +77,6 @@ vi.mock("../../agents/model-auth.js", () => {
   const hasWorkspaceCredential = (env: NodeJS.ProcessEnv = process.env) =>
     Boolean(env.WORKSPACE_MODEL_LIST_CREDENTIALS || env.WORKSPACE_MODEL_CREDENTIALS);
   return {
-    createRuntimeProviderAuthLookup: () => ({
-      envApiKey: {
-        aliasMap: {},
-        candidateMap: {},
-        authEvidenceMap: {},
-      },
-      syntheticAuthProviderRefs: [],
-    }),
     ensureAuthProfileStore: store,
     hasRuntimeAvailableProviderAuth: ({
       provider,
@@ -223,54 +105,6 @@ vi.mock("../../agents/model-auth.js", () => {
   };
 });
 
-vi.mock("../../agents/provider-auth-aliases.js", () => ({
-  resolveProviderIdForAuth: (provider: string) => provider,
-}));
-
-vi.mock("../../agents/harness/selection.js", () => ({
-  resolveAgentHarnessPolicy: ({
-    provider,
-    modelId,
-    config,
-  }: {
-    provider?: string;
-    modelId?: string;
-    config?: OpenClawConfig;
-  }) => {
-    const modelRuntime =
-      provider && modelId
-        ? config?.agents?.defaults?.models?.[`${provider}/${modelId}`]?.agentRuntime?.id
-        : undefined;
-    const providerRuntime = provider
-      ? config?.models?.providers?.[provider]?.agentRuntime?.id
-      : undefined;
-    const runtime =
-      modelRuntime === "default"
-        ? undefined
-        : (modelRuntime ??
-          (providerRuntime === "default" ? undefined : providerRuntime) ??
-          (provider === "openai" ? "codex" : "auto"));
-    return {
-      runtime,
-      runtimeSource: modelRuntime ? "model" : providerRuntime ? "provider" : "implicit",
-    };
-  },
-}));
-
-vi.mock("../../agents/runtime-plan/auth.js", () => ({
-  buildAgentRuntimeAuthPlan: ({
-    provider,
-    harnessRuntime,
-  }: {
-    provider: string;
-    harnessRuntime?: string;
-  }) => ({
-    providerForAuth: provider,
-    authProfileProviderForAuth: provider,
-    ...(harnessRuntime === "codex" ? { harnessAuthProvider: "openai" } : {}),
-  }),
-}));
-
 import { resolveAgentDir, resolveSessionAgentId } from "../../agents/agent-scope.js";
 import {
   clearRuntimeAuthProfileStoreSnapshots,
@@ -290,22 +124,13 @@ import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import type { ProviderPlugin } from "../../plugins/types.js";
 import { withEnvAsync } from "../../test-utils/env.js";
 import type { ElevatedLevel } from "../thinking.js";
-
-let handleDirectiveOnly: typeof import("./directive-handling.impl.js").handleDirectiveOnly;
-let cliBackendsTesting: typeof import("../../agents/cli-backends.js").testing;
-let maybeHandleModelDirectiveInfo: typeof import("./directive-handling.model.js").maybeHandleModelDirectiveInfo;
-let resolveModelSelectionFromDirective: typeof import("./directive-handling.model.js").resolveModelSelectionFromDirective;
-let parseInlineDirectives: typeof import("./directive-handling.parse.js").parseInlineDirectives;
-let persistInlineDirectives: typeof import("./directive-handling.persist.js").persistInlineDirectives;
-
-beforeAll(async () => {
-  ({ testing: cliBackendsTesting } = await import("../../agents/cli-backends.js"));
-  ({ handleDirectiveOnly } = await import("./directive-handling.impl.js"));
-  ({ maybeHandleModelDirectiveInfo, resolveModelSelectionFromDirective } =
-    await import("./directive-handling.model.js"));
-  ({ parseInlineDirectives } = await import("./directive-handling.parse.js"));
-  ({ persistInlineDirectives } = await import("./directive-handling.persist.js"));
-});
+import { handleDirectiveOnly } from "./directive-handling.impl.js";
+import {
+  maybeHandleModelDirectiveInfo,
+  resolveModelSelectionFromDirective,
+} from "./directive-handling.model.js";
+import { parseInlineDirectives } from "./directive-handling.parse.js";
+import { persistInlineDirectives } from "./directive-handling.persist.js";
 
 const liveModelSwitchMocks = vi.hoisted(() => ({
   requestLiveSessionModelSwitch: vi.fn(),
@@ -366,8 +191,7 @@ type OAuthProfileForTest = {
   refresh: string;
   expires: number;
 };
-type TokenProfileForTest = { type: "token"; provider: string; token: string };
-type AuthProfileForTest = ApiKeyProfile | OAuthProfileForTest | TokenProfileForTest;
+type AuthProfileForTest = ApiKeyProfile | OAuthProfileForTest;
 
 function baseAliasIndex(): ModelAliasIndex {
   return { byAlias: new Map(), byKey: new Map() };
@@ -411,22 +235,7 @@ function setDirectiveTestProviders(providers: ProviderPlugin[]): void {
 }
 
 beforeEach(() => {
-  vi.useRealTimers();
-  cliBackendsTesting.setDepsForTest({
-    resolvePluginSetupRegistry: () => ({
-      providers: [],
-      cliBackends: [],
-      configMigrations: [],
-      autoEnableProbes: [],
-      diagnostics: [],
-    }),
-    resolveRuntimeCliBackends: () => [],
-  });
   setDirectiveTestProviders([]);
-  modelsCommandMock.resolveModelsCommandReply
-    .mockReset()
-    .mockResolvedValue(defaultModelsCommandReply());
-  modelsCommandMock.delegateToActual = false;
   clearRuntimeAuthProfileStoreSnapshots();
   replaceRuntimeAuthProfileStoreSnapshots([
     {
@@ -443,7 +252,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cliBackendsTesting.resetDepsForTest();
   setDirectiveTestProviders([]);
   clearRuntimeAuthProfileStoreSnapshots();
   clearInternalHooks();
@@ -622,7 +430,7 @@ describe("/model chat UX", () => {
     expect(reply?.text).toContain("Switch: /model <provider/model>");
   });
 
-  it("passes workspace scope through the /model list browser alias", async () => {
+  it("uses workspace-scoped auth evidence in /model list provider visibility", async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-model-list-auth-label-"));
     const workspaceDir = path.join(tempRoot, "workspace");
     const pluginDir = path.join(workspaceDir, ".openclaw", "extensions", "workspace-model-list");
@@ -666,7 +474,6 @@ describe("/model chat UX", () => {
           WORKSPACE_MODEL_LIST_CREDENTIALS: credentialPath,
         },
         async () => {
-          modelsCommandMock.delegateToActual = true;
           const reply = await resolveModelInfoReply({
             directives: parseInlineDirectives("/model list"),
             workspaceDir,
@@ -677,15 +484,6 @@ describe("/model chat UX", () => {
           });
 
           expect(reply?.text).toContain("- anthropic");
-          expect(modelsCommandMock.resolveModelsCommandReply).toHaveBeenCalledWith(
-            expect.objectContaining({
-              commandBodyNormalized: "/models",
-              workspaceDir,
-              cfg: expect.objectContaining({
-                plugins: { allow: ["workspace-model-list"] },
-              }),
-            }),
-          );
         },
       );
     } finally {
@@ -810,19 +608,14 @@ describe("/model chat UX", () => {
     expect(reply?.text).toContain("openrouter/google/gemini-3-flash-preview");
   });
 
-  it("reports unified OpenAI OAuth auth for OpenAI status rows", async () => {
+  it("reports Codex runtime auth for OpenAI status rows", async () => {
     setAuthProfiles({
-      "openai:patrick@example.test": {
+      "openai-codex:patrick@example.test": {
         type: "oauth",
-        provider: "openai",
+        provider: "openai-codex",
         access: "access-token",
         refresh: "refresh-token",
         expires: Date.now() + 60_000,
-      },
-      "openai:runtime-token": {
-        type: "token",
-        provider: "openai",
-        token: "token",
       },
     });
 
@@ -836,6 +629,7 @@ describe("/model chat UX", () => {
         commands: { text: true },
         agents: {
           defaults: {
+            agentRuntime: { id: "codex" },
             model: { primary: "openai/gpt-5.5" },
             models: {
               "codex/gpt-5.5": {},
@@ -849,9 +643,9 @@ describe("/model chat UX", () => {
 
     expect(reply?.text).toContain("[openai] endpoint: default auth:");
     expect(reply?.text).not.toContain("[openai] endpoint: default auth: missing");
-    expect(reply?.text).not.toContain("via codex runtime");
-    expect(reply?.text).toContain("openai:patrick@example.test=OAuth");
-  }, 240_000);
+    expect(reply?.text).toContain("via codex runtime / openai-codex");
+    expect(reply?.text).toContain("openai-codex:patrick@example.test=OAuth");
+  });
 
   it("keeps direct provider auth labels when OpenAI API key auth exists", async () => {
     setAuthProfiles({
@@ -860,9 +654,9 @@ describe("/model chat UX", () => {
         provider: "openai",
         key: "sk-openai-direct",
       },
-      "openai:patrick@example.test": {
+      "openai-codex:patrick@example.test": {
         type: "oauth",
-        provider: "openai",
+        provider: "openai-codex",
         access: "access-token",
         refresh: "refresh-token",
         expires: Date.now() + 60_000,
@@ -879,6 +673,7 @@ describe("/model chat UX", () => {
         commands: { text: true },
         agents: {
           defaults: {
+            agentRuntime: { id: "codex" },
             model: { primary: "openai/gpt-5.5" },
             models: {
               "openai/gpt-5.5": {},
@@ -894,11 +689,11 @@ describe("/model chat UX", () => {
     expect(reply?.text).not.toContain("via codex runtime");
   });
 
-  it("does not borrow Codex auth when OpenAI model policy pins OpenClaw runtime", async () => {
+  it("does not borrow Codex auth when OpenAI model policy pins PI runtime", async () => {
     setAuthProfiles({
-      "openai:patrick@example.test": {
+      "openai-codex:patrick@example.test": {
         type: "oauth",
-        provider: "openai",
+        provider: "openai-codex",
         access: "access-token",
         refresh: "refresh-token",
         expires: Date.now() + 60_000,
@@ -918,7 +713,7 @@ describe("/model chat UX", () => {
             model: { primary: "openai/gpt-5.5" },
             models: {
               "openai/gpt-5.5": {
-                agentRuntime: { id: "openclaw" },
+                agentRuntime: { id: "pi" },
               },
             },
           },
@@ -929,49 +724,7 @@ describe("/model chat UX", () => {
 
     expect(reply?.text).toContain("[openai] endpoint: default auth: missing");
     expect(reply?.text).not.toContain("via codex runtime");
-    expect(reply?.text).not.toContain("openai:patrick@example.test=OAuth");
-    expect(reply?.text).not.toContain("openai:runtime-token=token");
-  });
-
-  it("honors Codex session runtime overrides when labeling OpenAI status auth", async () => {
-    setAuthProfiles({
-      "openai:patrick@example.test": {
-        type: "oauth",
-        provider: "openai",
-        access: "access-token",
-        refresh: "refresh-token",
-        expires: Date.now() + 60_000,
-      },
-    });
-
-    const reply = await resolveModelInfoReply({
-      directives: parseInlineDirectives("/model status"),
-      provider: "openai",
-      model: "gpt-5.5",
-      defaultProvider: "openai",
-      defaultModel: "gpt-5.5",
-      sessionEntry: {
-        agentRuntimeOverride: "codex",
-      },
-      cfg: {
-        commands: { text: true },
-        agents: {
-          defaults: {
-            model: { primary: "openai/gpt-5.5" },
-            models: {
-              "openai/gpt-5.5": {
-                agentRuntime: { id: "openclaw" },
-              },
-            },
-          },
-        },
-      } as unknown as OpenClawConfig,
-      allowedModelCatalog: [{ provider: "openai", id: "gpt-5.5", name: "GPT-5.5" }],
-    });
-
-    expect(reply?.text).toContain("[openai] endpoint: default auth:");
-    expect(reply?.text).not.toContain("[openai] endpoint: default auth: missing");
-    expect(reply?.text).toContain("openai:patrick@example.test=OAuth");
+    expect(reply?.text).not.toContain("openai-codex:patrick@example.test=OAuth");
   });
 
   it("uses workspace-scoped auth evidence in /model status labels", async () => {
@@ -1278,7 +1031,7 @@ describe("/model chat UX", () => {
         ...baseConfig(),
         models: {
           providers: {
-            openai: {
+            "openai-codex": {
               baseUrl: "https://chatgpt.com/backend-api/codex",
               models: [
                 {
@@ -1321,7 +1074,7 @@ describe("/model chat UX", () => {
     const { sessionEntry } = await persistModelDirectiveForTest({
       command: "/model openai/gpt-4o --runtime claude-cli hello",
       allowedModelKeys: ["openai/gpt-4o"],
-      sessionEntry: createSessionEntry({ agentRuntimeOverride: "openclaw" }),
+      sessionEntry: createSessionEntry({ agentRuntimeOverride: "pi" }),
       provider: "openai",
       model: "gpt-4o",
       initialModelLabel: "openai/gpt-4o",
@@ -1793,7 +1546,7 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
 
   it.each([
     ["openai", "gpt-5.5"],
-    ["openai", "gpt-5.5"],
+    ["openai-codex", "gpt-5.5"],
   ])("accepts xhigh for %s/%s when catalog marks reasoning support", async (provider, model) => {
     setDirectiveTestProviders([
       {
@@ -2073,7 +1826,7 @@ describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {
   });
 });
 
-describe("persistInlineDirectives session directive persistence policy", () => {
+describe("persistInlineDirectives internal exec scope gate", () => {
   it("skips exec persistence for internal operator.write callers", async () => {
     const sessionEntry = await persistInternalOperatorWriteDirective(
       "/exec host=node security=allowlist ask=always node=worker-1",
@@ -2091,173 +1844,10 @@ describe("persistInlineDirectives session directive persistence policy", () => {
     expect(sessionEntry.verboseLevel).toBeUndefined();
   });
 
-  it("skips exec persistence for unauthorized external callers even when gateway scopes are empty", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: "telegram",
-        surface: "telegram",
-        gatewayClientScopes: [],
-      },
-    );
-
-    expect(sessionEntry.execHost).toBeUndefined();
-    expect(sessionEntry.execSecurity).toBeUndefined();
-    expect(sessionEntry.execAsk).toBeUndefined();
-    expect(sessionEntry.execNode).toBeUndefined();
-  });
-
-  it("skips verbose persistence for unauthorized external callers even when gateway scopes are empty", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "telegram",
-      surface: "telegram",
-      gatewayClientScopes: [],
-    });
-
-    expect(sessionEntry.verboseLevel).toBeUndefined();
-  });
-
-  it("allows authorized external callers with empty gateway scopes to persist exec defaults", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: "telegram",
-        surface: "telegram",
-        gatewayClientScopes: [],
-        commandAuthorized: true,
-      },
-    );
-
-    expect(sessionEntry.execHost).toBe("node");
-    expect(sessionEntry.execSecurity).toBe("allowlist");
-    expect(sessionEntry.execAsk).toBe("always");
-    expect(sessionEntry.execNode).toBe("worker-1");
-  });
-
-  it("allows authorized external callers with empty gateway scopes to persist verbose defaults", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "telegram",
-      surface: "telegram",
-      gatewayClientScopes: [],
-      commandAuthorized: true,
-    });
-
-    expect(sessionEntry.verboseLevel).toBe("full");
-  });
-
-  it("skips exec persistence for non-webchat channel callers without gateway scopes", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: "telegram",
-        surface: "telegram",
-        gatewayClientScopes: undefined,
-      },
-    );
-
-    expect(sessionEntry.execHost).toBeUndefined();
-    expect(sessionEntry.execSecurity).toBeUndefined();
-    expect(sessionEntry.execAsk).toBeUndefined();
-    expect(sessionEntry.execNode).toBeUndefined();
-  });
-
-  it("skips verbose persistence for non-webchat channel callers without gateway scopes", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "telegram",
-      surface: "telegram",
-      gatewayClientScopes: undefined,
-    });
-
-    expect(sessionEntry.verboseLevel).toBeUndefined();
-  });
-
-  it("allows exec persistence for authorized non-webchat channel callers without gateway scopes", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: "telegram",
-        surface: "telegram",
-        gatewayClientScopes: undefined,
-        commandAuthorized: true,
-      },
-    );
-
-    expect(sessionEntry.execHost).toBe("node");
-    expect(sessionEntry.execSecurity).toBe("allowlist");
-    expect(sessionEntry.execAsk).toBe("always");
-    expect(sessionEntry.execNode).toBe("worker-1");
-  });
-
-  it("allows verbose persistence for authorized non-webchat channel callers without gateway scopes", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "telegram",
-      surface: "telegram",
-      gatewayClientScopes: undefined,
-      commandAuthorized: true,
-    });
-
-    expect(sessionEntry.verboseLevel).toBe("full");
-  });
-
-  it("allows authorized external provider callers when surface carries webchat metadata", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: "telegram",
-        surface: "webchat",
-        gatewayClientScopes: ["operator.write"],
-        commandAuthorized: true,
-      },
-    );
-
-    expect(sessionEntry.execHost).toBe("node");
-    expect(sessionEntry.execSecurity).toBe("allowlist");
-    expect(sessionEntry.execAsk).toBe("always");
-    expect(sessionEntry.execNode).toBe("worker-1");
-  });
-
-  it("allows authorized external provider verbose callers when surface carries webchat metadata", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "telegram",
-      surface: "webchat",
-      gatewayClientScopes: ["operator.write"],
-      commandAuthorized: true,
-    });
-
-    expect(sessionEntry.verboseLevel).toBe("full");
-  });
-
-  it("allows exec persistence for local callers without channel context", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective(
-      "/exec host=node security=allowlist ask=always node=worker-1",
-      {
-        messageProvider: undefined,
-        surface: undefined,
-        gatewayClientScopes: undefined,
-      },
-    );
-
-    expect(sessionEntry.execHost).toBe("node");
-    expect(sessionEntry.execSecurity).toBe("allowlist");
-    expect(sessionEntry.execAsk).toBe("always");
-    expect(sessionEntry.execNode).toBe("worker-1");
-  });
-
   it("treats internal provider context as authoritative over external surface metadata", async () => {
     const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
       messageProvider: "webchat",
       surface: "forum",
-    });
-
-    expect(sessionEntry.verboseLevel).toBeUndefined();
-  });
-
-  it("keeps internal provider authoritative over authorized external surface metadata", async () => {
-    const sessionEntry = await persistInternalOperatorWriteDirective("/verbose full", {
-      messageProvider: "webchat",
-      surface: "telegram",
-      gatewayClientScopes: ["operator.write"],
-      commandAuthorized: true,
     });
 
     expect(sessionEntry.verboseLevel).toBeUndefined();

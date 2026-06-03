@@ -1,7 +1,3 @@
-import {
-  MIN_CLIENT_PROTOCOL_VERSION,
-  PROTOCOL_VERSION,
-} from "../../packages/gateway-protocol/src/version.js";
 import { createArgReader, createGatewayWsClient, resolveGatewayUrl } from "./gateway-ws-client.ts";
 
 function writeStdoutLine(message = ""): void {
@@ -101,8 +97,8 @@ async function main() {
   await waitOpen();
 
   const connectRes = await request("connect", {
-    minProtocol: MIN_CLIENT_PROTOCOL_VERSION,
-    maxProtocol: PROTOCOL_VERSION,
+    minProtocol: 3,
+    maxProtocol: 3,
     client: {
       id: "cli",
       displayName: "openclaw ios node e2e",
@@ -145,9 +141,7 @@ async function main() {
     const waitSeconds = Number.parseInt(getArg("--wait-seconds") ?? "25", 10);
     const deadline = Date.now() + Math.max(1, waitSeconds) * 1000;
     while (!node && Date.now() < deadline) {
-      await new Promise((r) => {
-        setTimeout(r, 1000);
-      });
+      await new Promise((r) => setTimeout(r, 1000));
       const res = await request("node.list").catch(() => null);
       if (!res?.ok) {
         continue;
@@ -230,7 +224,7 @@ async function main() {
         idempotencyKey: randomUUID(),
       },
       (t.timeoutMs ?? 12_000) + 2_000,
-    ).catch((err: unknown) => {
+    ).catch((err) => {
       results.push({ id: t.id, ok: false, error: formatErr(err) });
       return null;
     });

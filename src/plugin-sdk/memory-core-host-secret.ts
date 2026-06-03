@@ -1,4 +1,4 @@
 export {
   hasConfiguredMemorySecretInput,
   resolveMemorySecretInputString,
-} from "../memory-host-sdk/secret.js";
+} from "../../packages/memory-host-sdk/src/secret.js";

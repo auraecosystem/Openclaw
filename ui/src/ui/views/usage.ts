@@ -31,7 +31,7 @@ import {
   renderSessionsCard,
   renderUsageInsights,
 } from "./usage-render-overview.ts";
-import type {
+import {
   SessionLogEntry,
   SessionLogRole,
   UsageColumnId,
@@ -155,16 +155,10 @@ export function renderUsage(props: UsageProps) {
     return valB - valA;
   });
 
-  const agentScopedSessions = filters.agentId
-    ? sortedSessions.filter(
-        (s) => normalizeQueryText(s.agentId ?? "") === normalizeQueryText(filters.agentId ?? ""),
-      )
-    : sortedSessions;
-
   // Filter sessions by selected days
   const dayFilteredSessions =
     filters.selectedDays.length > 0
-      ? agentScopedSessions.filter((s) => {
+      ? sortedSessions.filter((s) => {
           if (s.usage?.activityDates?.length) {
             return s.usage.activityDates.some((d) => filters.selectedDays.includes(d));
           }
@@ -175,7 +169,7 @@ export function renderUsage(props: UsageProps) {
           const sessionDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
           return filters.selectedDays.includes(sessionDate);
         })
-      : agentScopedSessions;
+      : sortedSessions;
 
   const hourFilteredSessions =
     filters.selectedHours.length > 0
@@ -190,7 +184,7 @@ export function renderUsage(props: UsageProps) {
   const queryWarnings = queryResult.warnings;
   const querySuggestions = buildQuerySuggestions(
     filters.queryDraft,
-    agentScopedSessions,
+    sortedSessions,
     data.aggregates,
   );
   const queryTerms = extractQueryTerms(filters.query);
@@ -210,18 +204,15 @@ export function renderUsage(props: UsageProps) {
     }
     return Array.from(set);
   };
-  const agentOptions = unique([...data.agents, ...sortedSessions.map((s) => s.agentId)]).slice(
-    0,
-    12,
-  );
-  const channelOptions = unique(agentScopedSessions.map((s) => s.channel)).slice(0, 12);
+  const agentOptions = unique(sortedSessions.map((s) => s.agentId)).slice(0, 12);
+  const channelOptions = unique(sortedSessions.map((s) => s.channel)).slice(0, 12);
   const providerOptions = unique([
-    ...agentScopedSessions.map((s) => s.modelProvider),
-    ...agentScopedSessions.map((s) => s.providerOverride),
+    ...sortedSessions.map((s) => s.modelProvider),
+    ...sortedSessions.map((s) => s.providerOverride),
     ...(data.aggregates?.byProvider.map((entry) => entry.provider) ?? []),
   ]).slice(0, 12);
   const modelOptions = unique([
-    ...agentScopedSessions.map((s) => s.model),
+    ...sortedSessions.map((s) => s.model),
     ...(data.aggregates?.byModel.map((entry) => entry.model) ?? []),
   ]).slice(0, 12);
   const toolOptions = unique(data.aggregates?.tools.tools.map((tool) => tool.name) ?? []).slice(
@@ -253,7 +244,7 @@ export function renderUsage(props: UsageProps) {
   // Compute display totals and count based on filters
   let displayTotals: UsageTotals | null;
   let displaySessionCount: number;
-  const totalSessions = agentScopedSessions.length;
+  const totalSessions = sortedSessions.length;
 
   if (filters.selectedSessions.length > 0) {
     // Sessions selected - compute totals from selected sessions
@@ -272,9 +263,6 @@ export function renderUsage(props: UsageProps) {
   } else if (hasQuery) {
     displayTotals = computeSessionTotals(filteredSessions);
     displaySessionCount = filteredSessions.length;
-  } else if (filters.agentId) {
-    displayTotals = computeSessionTotals(agentScopedSessions);
-    displaySessionCount = totalSessions;
   } else {
     // No filters - show all
     displayTotals = data.totals;
@@ -421,35 +409,6 @@ export function renderUsage(props: UsageProps) {
                     }}
                   />
                   <span>${value}</span>
-                </label>
-              `;
-            })}
-          </div>
-        </div>
-      </details>
-    `;
-  };
-  const renderAgentScopeSelect = () => {
-    const selected = filters.agentId ?? "";
-    return html`
-      <details class="usage-filter-select">
-        <summary>
-          <span>${t("usage.filters.agent")}</span>
-          <span class="usage-filter-badge">${selected || t("usage.filters.all")}</span>
-        </summary>
-        <div class="usage-filter-popover">
-          <div class="usage-filter-options">
-            ${["", ...agentOptions].map((value) => {
-              const checked = selected === value;
-              return html`
-                <label class="usage-filter-option">
-                  <input
-                    type="radio"
-                    name="usage-agent-scope"
-                    .checked=${checked}
-                    @change=${() => filterActions.onAgentChange(value || null)}
-                  />
-                  <span>${value || t("usage.filters.all")}</span>
                 </label>
               `;
             })}
@@ -710,7 +669,7 @@ export function renderUsage(props: UsageProps) {
             </div>
           </div>
           <div class="usage-filter-row">
-            ${renderAgentScopeSelect()}
+            ${renderFilterSelect("agent", t("usage.filters.agent"), agentOptions)}
             ${renderFilterSelect("channel", t("usage.filters.channel"), channelOptions)}
             ${renderFilterSelect("provider", t("usage.filters.provider"), providerOptions)}
             ${renderFilterSelect("model", t("usage.filters.model"), modelOptions)}

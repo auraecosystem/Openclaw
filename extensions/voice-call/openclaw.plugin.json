@@ -1,7 +1,5 @@
 {
   "id": "voice-call",
-  "name": "Voice Call",
-  "description": "OpenClaw voice-call plugin for Twilio, Telnyx, and Plivo phone calls.",
   "commandAliases": [{ "name": "voicecall" }],
   "activation": {
     "onStartup": true,
@@ -188,7 +186,7 @@
     },
     "realtime.agentContext.enabled": {
       "label": "Enable Agent Voice Context",
-      "help": "Injects a compact agent identity and workspace context capsule into realtime voice instructions.",
+      "help": "Injects a compact agent identity, system prompt, and workspace context capsule into realtime voice instructions.",
       "advanced": true
     },
     "realtime.agentContext.maxChars": {
@@ -197,6 +195,10 @@
     },
     "realtime.agentContext.includeIdentity": {
       "label": "Include Agent Identity",
+      "advanced": true
+    },
+    "realtime.agentContext.includeSystemPrompt": {
+      "label": "Include Agent System Prompt",
       "advanced": true
     },
     "realtime.agentContext.includeWorkspaceFiles": {
@@ -611,6 +613,9 @@
                 "minimum": 1
               },
               "includeIdentity": {
+                "type": "boolean"
+              },
+              "includeSystemPrompt": {
                 "type": "boolean"
               },
               "includeWorkspaceFiles": {

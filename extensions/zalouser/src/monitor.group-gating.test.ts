@@ -1,10 +1,10 @@
-import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-outbound";
+import { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-message";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig, PluginRuntime } from "../runtime-api.js";
 import "./monitor.send-mocks.js";
 import "./zalo-js.test-mocks.js";
 import { resolveZalouserAccountSync } from "./accounts.js";
-import { testing, monitorZalouserProvider } from "./monitor.js";
+import { __testing, monitorZalouserProvider } from "./monitor.js";
 import {
   sendDeliveredZalouserMock,
   sendMessageZalouserMock,
@@ -62,9 +62,6 @@ type DispatchReplyCallArg = {
     CommandBody?: string;
     InboundHistory?: unknown;
     OriginatingTo?: string;
-    ReplyToBody?: string;
-    ReplyToId?: string;
-    ReplyToIsQuote?: boolean;
     SessionKey?: string;
     To?: string;
     WasMentioned?: boolean;
@@ -124,7 +121,9 @@ function installRuntime(params: {
   const readSessionUpdatedAt = vi.fn(
     (_params?: { storePath: string; sessionKey: string }): number | undefined => undefined,
   );
-  type ResolvedTurn = Parameters<PluginRuntime["channel"]["inbound"]["dispatchReply"]>[0];
+  type ResolvedTurn =
+    | Parameters<PluginRuntime["channel"]["turn"]["runAssembled"]>[0]
+    | Parameters<PluginRuntime["channel"]["turn"]["runPrepared"]>[0];
   const dispatchAssembled = vi.fn(async (turn: ResolvedTurn) => {
     await turn.recordInboundSession({
       storePath: turn.storePath,
@@ -135,6 +134,16 @@ function installRuntime(params: {
       updateLastRoute: turn.record?.updateLastRoute,
       onRecordError: turn.record?.onRecordError ?? (() => undefined),
     });
+    if ("runDispatch" in turn) {
+      const dispatchResult = await turn.runDispatch();
+      return {
+        admission: { kind: "dispatch" as const },
+        dispatched: true,
+        ctxPayload: turn.ctxPayload,
+        routeSessionKey: turn.routeSessionKey,
+        dispatchResult,
+      };
+    }
     const { onModelSelected, ...replyPipeline } = createChannelMessageReplyPipeline({
       cfg: turn.cfg,
       agentId: turn.agentId,
@@ -168,30 +177,30 @@ function installRuntime(params: {
     };
   });
   const buildContext = vi.fn(
-    (paramsLocal: Parameters<PluginRuntime["channel"]["inbound"]["buildContext"]>[0]) =>
+    (params: Parameters<PluginRuntime["channel"]["turn"]["buildContext"]>[0]) =>
       ({
-        Body: paramsLocal.message.body ?? paramsLocal.message.rawBody,
-        BodyForAgent: paramsLocal.message.bodyForAgent ?? paramsLocal.message.rawBody,
-        InboundHistory: paramsLocal.message.inboundHistory,
-        RawBody: paramsLocal.message.rawBody,
-        CommandBody: paramsLocal.message.commandBody ?? paramsLocal.message.rawBody,
-        BodyForCommands: paramsLocal.message.commandBody ?? paramsLocal.message.rawBody,
-        From: paramsLocal.from,
-        To: paramsLocal.reply.to,
-        SessionKey: paramsLocal.route.dispatchSessionKey ?? paramsLocal.route.routeSessionKey,
-        AccountId: paramsLocal.route.accountId ?? paramsLocal.accountId,
-        ChatType: paramsLocal.conversation.kind,
-        ConversationLabel: paramsLocal.conversation.label,
-        SenderName: paramsLocal.sender.name,
-        SenderId: paramsLocal.sender.id,
-        Provider: paramsLocal.provider ?? paramsLocal.channel,
-        Surface: paramsLocal.surface ?? paramsLocal.provider ?? paramsLocal.channel,
-        MessageSid: paramsLocal.messageId,
-        MessageSidFull: paramsLocal.messageIdFull,
-        OriginatingChannel: paramsLocal.channel,
-        OriginatingTo: paramsLocal.reply.originatingTo,
-        ...paramsLocal.extra,
-      }) as Awaited<ReturnType<PluginRuntime["channel"]["inbound"]["buildContext"]>>,
+        Body: params.message.body ?? params.message.rawBody,
+        BodyForAgent: params.message.bodyForAgent ?? params.message.rawBody,
+        InboundHistory: params.message.inboundHistory,
+        RawBody: params.message.rawBody,
+        CommandBody: params.message.commandBody ?? params.message.rawBody,
+        BodyForCommands: params.message.commandBody ?? params.message.rawBody,
+        From: params.from,
+        To: params.reply.to,
+        SessionKey: params.route.dispatchSessionKey ?? params.route.routeSessionKey,
+        AccountId: params.route.accountId ?? params.accountId,
+        ChatType: params.conversation.kind,
+        ConversationLabel: params.conversation.label,
+        SenderName: params.sender.name,
+        SenderId: params.sender.id,
+        Provider: params.provider ?? params.channel,
+        Surface: params.surface ?? params.provider ?? params.channel,
+        MessageSid: params.messageId,
+        MessageSidFull: params.messageIdFull,
+        OriginatingChannel: params.channel,
+        OriginatingTo: params.reply.originatingTo,
+        ...params.extra,
+      }) as ReturnType<PluginRuntime["channel"]["turn"]["buildContext"]>,
   );
   const buildAgentSessionKey = vi.fn(
     (input: {
@@ -271,11 +280,10 @@ function installRuntime(params: {
         finalizeInboundContext: vi.fn((ctx) => ctx),
         dispatchReplyWithBufferedBlockDispatcher,
       },
-      inbound: {
-        dispatchReply:
-          dispatchAssembled as unknown as PluginRuntime["channel"]["inbound"]["dispatchReply"],
-        buildContext:
-          buildContext as unknown as PluginRuntime["channel"]["inbound"]["buildContext"],
+      turn: {
+        runAssembled:
+          dispatchAssembled as unknown as PluginRuntime["channel"]["turn"]["runAssembled"],
+        buildContext: buildContext as unknown as PluginRuntime["channel"]["turn"]["buildContext"],
       },
       text: {
         resolveMarkdownTableMode: vi.fn(() => "code"),
@@ -309,7 +317,7 @@ async function processGroupControlCommand(params: {
   content?: string;
   commandContent?: string;
 }) {
-  await testing.processMessage({
+  await __testing.processMessage({
     message: createGroupMessage({
       content: params.content ?? "/new",
       commandContent: params.commandContent ?? "/new",
@@ -381,7 +389,7 @@ describe("zalouser monitor group mention gating", () => {
       >;
     };
   }) {
-    await testing.processMessage({
+    await __testing.processMessage({
       message: params.message,
       account: params.account ?? createAccount(),
       config: createConfig(),
@@ -530,7 +538,7 @@ describe("zalouser monitor group mention gating", () => {
     };
     const account = resolveZalouserAccountSync({ cfg, accountId: "default" });
 
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "ping @bot",
         hasAnyMention: true,
@@ -590,7 +598,7 @@ describe("zalouser monitor group mention gating", () => {
       replyPayload: { text: replyText },
     });
 
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createDmMessage({
         content: "hello",
       }),
@@ -619,7 +627,7 @@ describe("zalouser monitor group mention gating", () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
     });
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createDmMessage({ senderId: "321" }),
       account: {
         ...createAccount(),
@@ -672,7 +680,7 @@ describe("zalouser monitor group mention gating", () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
     });
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "ping @bot",
         hasAnyMention: true,
@@ -701,7 +709,7 @@ describe("zalouser monitor group mention gating", () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
     });
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "ping @bot",
         hasAnyMention: true,
@@ -735,7 +743,7 @@ describe("zalouser monitor group mention gating", () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = installRuntime({
       commandAuthorized: false,
     });
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "ping @bot",
         hasAnyMention: true,
@@ -838,21 +846,6 @@ describe("zalouser monitor group mention gating", () => {
     expect(callArg?.ctx?.SessionKey).toBe("agent:main:zalouser:direct:321");
   });
 
-  it("surfaces quote metadata in inbound reply context", async () => {
-    const { dispatchReplyWithBufferedBlockDispatcher } = await processOpenDmMessage({
-      message: {
-        quotedGlobalMsgId: "987654321234",
-        quotedOwnerId: "555444333",
-        quotedBody: "Previous bot message content",
-      },
-    });
-
-    const callArg = dispatchReplyCall(dispatchReplyWithBufferedBlockDispatcher);
-    expect(callArg?.ctx?.ReplyToId).toBe("987654321234");
-    expect(callArg?.ctx?.ReplyToBody).toBe("Previous bot message content");
-    expect(callArg?.ctx?.ReplyToIsQuote).toBe(true);
-  });
-
   it("reuses the legacy DM session key when only the old group-shaped session exists", async () => {
     const { dispatchReplyWithBufferedBlockDispatcher } = await processOpenDmMessage({
       readSessionUpdatedAt: (input?: { storePath: string; sessionKey: string }) =>
@@ -868,7 +861,7 @@ describe("zalouser monitor group mention gating", () => {
       commandAuthorized: false,
     });
     const account = createAccount();
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createDmMessage({ content: "/new", commandContent: "/new" }),
       account: {
         ...account,
@@ -889,7 +882,7 @@ describe("zalouser monitor group mention gating", () => {
       commandAuthorized: false,
     });
     const account = createAccount();
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createDmMessage({ content: "hello there" }),
       account: {
         ...account,
@@ -918,7 +911,7 @@ describe("zalouser monitor group mention gating", () => {
     };
     const account = createAccount();
     const config = createConfig();
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "first unmentioned line",
         msgId: "history-1",
@@ -933,7 +926,7 @@ describe("zalouser monitor group mention gating", () => {
     });
     expect(dispatchReplyWithBufferedBlockDispatcher).not.toHaveBeenCalled();
 
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "second line @bot",
         hasAnyMention: true,
@@ -956,7 +949,7 @@ describe("zalouser monitor group mention gating", () => {
     ]);
     expect(firstDispatch?.ctx?.Body ?? "").toContain("first unmentioned line");
 
-    await testing.processMessage({
+    await __testing.processMessage({
       message: createGroupMessage({
         content: "third line @bot",
         hasAnyMention: true,

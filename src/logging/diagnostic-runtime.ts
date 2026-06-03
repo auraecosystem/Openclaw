@@ -1,6 +1,6 @@
 import {
   areDiagnosticsEnabledForProcess,
-  emitInternalDiagnosticEvent as emitDiagnosticEvent,
+  emitDiagnosticEvent,
 } from "../infra/diagnostic-events.js";
 import { createSubsystemLogger } from "./subsystem.js";
 

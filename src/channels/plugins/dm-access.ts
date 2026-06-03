@@ -1,4 +1,4 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
 
 export type ChannelDmAllowFromMode = "topOnly" | "topOrNested" | "nestedOnly";
 export type ChannelDmPolicy = "pairing" | "allowlist" | "open" | "disabled";

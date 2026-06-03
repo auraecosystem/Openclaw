@@ -72,7 +72,7 @@ describe("update cli option collisions", () => {
     },
     {
       name: "forwards parent-captured --json/--timeout to hidden `update finalize`",
-      argv: ["update", "finalize", "--json", "--timeout", "17"],
+      argv: ["update", "finalize", "--json", "--timeout", "17", "--no-restart"],
       assert: () => {
         expect(updateFinalizeCommand).toHaveBeenCalledTimes(1);
         const opts = firstCallOptions(updateFinalizeCommand);
@@ -82,17 +82,6 @@ describe("update cli option collisions", () => {
         expect(
           (opts as { json?: boolean; timeout?: string; restart?: boolean } | undefined)?.timeout,
         ).toBe("17");
-        expect(
-          (opts as { json?: boolean; timeout?: string; restart?: boolean } | undefined)?.restart,
-        ).toBe(false);
-      },
-    },
-    {
-      name: "keeps hidden `update finalize --no-restart` as a no-op parity flag",
-      argv: ["update", "finalize", "--no-restart"],
-      assert: () => {
-        expect(updateFinalizeCommand).toHaveBeenCalledTimes(1);
-        const opts = firstCallOptions(updateFinalizeCommand);
         expect(
           (opts as { json?: boolean; timeout?: string; restart?: boolean } | undefined)?.restart,
         ).toBe(false);

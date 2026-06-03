@@ -7,10 +7,7 @@ import {
   resolveLocalHeavyCheckEnv,
   shouldAcquireLocalHeavyCheckLockForOxlint,
 } from "./lib/local-heavy-check-runtime.mjs";
-import {
-  createManagedCommandInvocation,
-  runManagedCommand,
-} from "./lib/managed-child-process.mjs";
+import { runManagedCommand } from "./lib/managed-child-process.mjs";
 
 const oxlintPath = path.resolve("node_modules", ".bin", "oxlint");
 const PREPARE_EXTENSION_BOUNDARY_ARGS = [
@@ -141,32 +138,22 @@ export function filterSparseMissingOxlintTargets(
 }
 
 function getSparseCheckoutEnabled({ cwd }) {
-  const git = createManagedCommandInvocation({
-    args: ["config", "--get", "--bool", "core.sparseCheckout"],
-    bin: "git",
-  });
-  const result = spawnSync(git.command, git.args, {
+  const result = spawnSync("git", ["config", "--get", "--bool", "core.sparseCheckout"], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    shell: git.shell,
-    windowsVerbatimArguments: git.windowsVerbatimArguments,
+    shell: process.platform === "win32",
   });
 
   return result.status === 0 && result.stdout.trim() === "true";
 }
 
 function hasTrackedPath({ cwd, target }) {
-  const git = createManagedCommandInvocation({
-    args: ["ls-files", "--", target],
-    bin: "git",
-  });
-  const result = spawnSync(git.command, git.args, {
+  const result = spawnSync("git", ["ls-files", "--", target], {
     cwd,
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
-    shell: git.shell,
-    windowsVerbatimArguments: git.windowsVerbatimArguments,
+    shell: process.platform === "win32",
   });
 
   return result.status === 0 && result.stdout.trim().length > 0;

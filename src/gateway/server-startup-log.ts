@@ -1,18 +1,17 @@
-import { normalizeSortedUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
 import chalk from "chalk";
 import { resolveDefaultAgentId, resolveAgentConfig } from "../agents/agent-scope.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { resolveFastModeState } from "../agents/fast-mode.js";
-import type { ModelCatalogEntry } from "../agents/model-catalog.types.js";
-import { legacyModelKey, modelKey } from "../agents/model-selection-normalize.js";
 import {
   buildConfiguredModelCatalog,
   resolveConfiguredModelRef,
-} from "../agents/model-selection-shared.js";
-import { resolveThinkingDefault } from "../agents/model-thinking-default.js";
+  resolveThinkingDefault,
+  legacyModelKey,
+  modelKey,
+} from "../agents/model-selection.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getResolvedLoggerSettings } from "../logging.js";
-import { collectEnabledInsecureOrDangerousFlagsFromCurrentSnapshot } from "../security/dangerous-config-flags-current.js";
+import { collectEnabledInsecureOrDangerousFlags } from "../security/dangerous-config-flags.js";
 
 type StartupThinkLevel =
   | "off"
@@ -24,8 +23,7 @@ type StartupThinkLevel =
   | "adaptive"
   | "max";
 
-/** Emit startup summary lines after Gateway bind and plugin loading complete. */
-export async function logGatewayStartup(params: {
+export function logGatewayStartup(params: {
   cfg: OpenClawConfig;
   bindHost: string;
   bindHosts?: string[];
@@ -62,11 +60,7 @@ export async function logGatewayStartup(params: {
     params.log.info("gateway: running in Nix mode (config managed externally)");
   }
 
-  const enabledDangerousFlags =
-    collectEnabledInsecureOrDangerousFlagsFromCurrentSnapshot(params.cfg) ??
-    (await import("../security/dangerous-config-flags.js")).collectEnabledInsecureOrDangerousFlags(
-      params.cfg,
-    );
+  const enabledDangerousFlags = collectEnabledInsecureOrDangerousFlags(params.cfg);
   if (enabledDangerousFlags.length > 0) {
     const warning =
       `security warning: dangerous config flags enabled: ${enabledDangerousFlags.join(", ")}. ` +
@@ -75,7 +69,6 @@ export async function logGatewayStartup(params: {
   }
 }
 
-/** Normalize model thinking values that are useful in the compact startup log. */
 function normalizeStartupThinkLevel(value: unknown): StartupThinkLevel | undefined {
   return value === "off" ||
     value === "minimal" ||
@@ -89,7 +82,6 @@ function normalizeStartupThinkLevel(value: unknown): StartupThinkLevel | undefin
     : undefined;
 }
 
-/** Resolve explicit thinking overrides from agent defaults and per-model config. */
 function resolveExplicitStartupThinking(params: {
   cfg: OpenClawConfig;
   provider: string;
@@ -107,25 +99,22 @@ function resolveExplicitStartupThinking(params: {
   );
 }
 
-/** True when a configured catalog entry disables reasoning for the startup model. */
 function isConfiguredReasoningDisabled(params: {
-  catalog: readonly ModelCatalogEntry[];
+  cfg: OpenClawConfig;
   provider: string;
   model: string;
 }): boolean {
-  return params.catalog.some(
+  return buildConfiguredModelCatalog({ cfg: params.cfg }).some(
     (entry) =>
       entry.provider === params.provider && entry.id === params.model && entry.reasoning === false,
   );
 }
 
-/** Format model thinking and fast-mode details for the Gateway startup banner. */
 export function formatAgentModelStartupDetails(params: {
   cfg: OpenClawConfig;
   provider: string;
   model: string;
 }): string {
-  const configuredCatalog = buildConfiguredModelCatalog({ cfg: params.cfg });
   const defaultAgentId = resolveDefaultAgentId(params.cfg);
   const defaultAgentConfig = resolveAgentConfig(params.cfg, defaultAgentId);
   const explicitThinking = resolveExplicitStartupThinking({
@@ -140,15 +129,10 @@ export function formatAgentModelStartupDetails(params: {
       cfg: params.cfg,
       provider: params.provider,
       model: params.model,
-      catalog: configuredCatalog,
     });
   const thinking =
     explicitThinking ??
-    (isConfiguredReasoningDisabled({
-      catalog: configuredCatalog,
-      provider: params.provider,
-      model: params.model,
-    })
+    (isConfiguredReasoningDisabled(params)
       ? "off"
       : resolvedThinking === "off"
         ? "medium"
@@ -163,12 +147,13 @@ export function formatAgentModelStartupDetails(params: {
   return `thinking=${thinking}, fast=${fast.enabled ? "on" : "off"}`;
 }
 
-/** Format plugin count/list and optional startup duration for the ready log line. */
 function formatReadyDetails(
   loadedPluginIds: readonly string[],
   startupDurationLabel: string | null,
 ) {
-  const pluginIds = normalizeSortedUniqueStringEntries(loadedPluginIds);
+  const pluginIds = [...new Set(loadedPluginIds.map((id) => id.trim()).filter(Boolean))].toSorted(
+    (a, b) => a.localeCompare(b),
+  );
   const pluginSummary =
     pluginIds.length === 0
       ? "0 plugins"

@@ -1,7 +1,6 @@
-import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
-  readNonNegativeIntegerParam,
-  readPositiveIntegerParam,
+  readNumberParam,
   readStringArrayParam,
   readStringParam,
 } from "openclaw/plugin-sdk/agent-runtime";
@@ -25,20 +24,9 @@ type Ctx = Pick<
   | "cfg"
   | "accountId"
   | "requesterSenderId"
-  | "toolContext"
   | "mediaLocalRoots"
   | "mediaReadFile"
 >;
-
-function readDiscordRequesterSenderId(ctx: Ctx): string | undefined {
-  return ctx.toolContext?.currentChannelProvider?.trim().toLowerCase() === "discord"
-    ? normalizeOptionalString(ctx.requesterSenderId)
-    : undefined;
-}
-
-function senderParam(senderUserId: string | undefined) {
-  return senderUserId ? { senderUserId } : {};
-}
 
 export async function tryHandleDiscordMessageActionGuildAdmin(params: {
   ctx: Ctx;
@@ -47,7 +35,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
   const { ctx, resolveChannelId } = params;
   const { action, params: actionParams, cfg } = ctx;
   const accountId = ctx.accountId ?? readStringParam(actionParams, "accountId");
-  const senderUserId = readDiscordRequesterSenderId(ctx);
 
   if (action === "member-info") {
     const userId = readStringParam(actionParams, "userId", { required: true });
@@ -98,7 +85,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         name,
         mediaUrl,
         roleIds,
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -130,7 +116,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         description,
         tags,
         mediaUrl,
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -149,7 +134,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         guildId,
         userId,
         roleId,
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -184,7 +168,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         action: "channelCreate",
         accountId: accountId ?? undefined,
         ...readDiscordChannelCreateParams({ ...actionParams, guildId }),
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -199,7 +182,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         action: "channelEdit",
         accountId: accountId ?? undefined,
         ...readDiscordChannelEditParams({ ...actionParams, channelId }),
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -210,12 +192,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
       required: true,
     });
     return await handleDiscordAction(
-      {
-        action: "channelDelete",
-        accountId: accountId ?? undefined,
-        channelId,
-        ...senderParam(senderUserId),
-      },
+      { action: "channelDelete", accountId: accountId ?? undefined, channelId },
       cfg,
     );
   }
@@ -232,7 +209,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         action: "channelMove",
         accountId: accountId ?? undefined,
         ...readDiscordChannelMoveParams({ ...actionParams, guildId, channelId }),
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -243,7 +219,9 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
       required: true,
     });
     const name = readStringParam(actionParams, "name", { required: true });
-    const position = readNonNegativeIntegerParam(actionParams, "position");
+    const position = readNumberParam(actionParams, "position", {
+      integer: true,
+    });
     return await handleDiscordAction(
       {
         action: "categoryCreate",
@@ -251,7 +229,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         guildId,
         name,
         position: position ?? undefined,
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -262,7 +239,9 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
       required: true,
     });
     const name = readStringParam(actionParams, "name");
-    const position = readNonNegativeIntegerParam(actionParams, "position");
+    const position = readNumberParam(actionParams, "position", {
+      integer: true,
+    });
     return await handleDiscordAction(
       {
         action: "categoryEdit",
@@ -270,7 +249,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         categoryId,
         name: name ?? undefined,
         position: position ?? undefined,
-        ...senderParam(senderUserId),
       },
       cfg,
     );
@@ -281,12 +259,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
       required: true,
     });
     return await handleDiscordAction(
-      {
-        action: "categoryDelete",
-        accountId: accountId ?? undefined,
-        categoryId,
-        ...senderParam(senderUserId),
-      },
+      { action: "categoryDelete", accountId: accountId ?? undefined, categoryId },
       cfg,
     );
   }
@@ -339,7 +312,6 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         location,
         entityType,
         image,
-        ...senderParam(senderUserId),
       },
       cfg,
       { mediaLocalRoots: ctx.mediaLocalRoots },
@@ -349,13 +321,12 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
   if (isDiscordModerationAction(action)) {
     const moderation = readDiscordModerationCommand(action, {
       ...actionParams,
-      durationMinutes: readNonNegativeIntegerParam(actionParams, "durationMin"),
-      deleteMessageDays: readNonNegativeIntegerParam(actionParams, "deleteDays", {
-        max: 7,
-        message: "deleteDays must be an integer from 0 to 7",
+      durationMinutes: readNumberParam(actionParams, "durationMin", { integer: true }),
+      deleteMessageDays: readNumberParam(actionParams, "deleteDays", {
+        integer: true,
       }),
     });
-    const senderUserIdLocal = normalizeOptionalString(ctx.requesterSenderId);
+    const senderUserId = normalizeOptionalString(ctx.requesterSenderId);
     return await handleDiscordAction(
       {
         action: moderation.action,
@@ -366,7 +337,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         until: moderation.until,
         reason: moderation.reason,
         deleteMessageDays: moderation.deleteMessageDays,
-        senderUserId: senderUserIdLocal,
+        senderUserId,
       },
       cfg,
     );
@@ -381,7 +352,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
     const includeArchived =
       typeof actionParams.includeArchived === "boolean" ? actionParams.includeArchived : undefined;
     const before = readStringParam(actionParams, "before");
-    const limit = readPositiveIntegerParam(actionParams, "limit");
+    const limit = readNumberParam(actionParams, "limit", { integer: true });
     return await handleDiscordAction(
       {
         action: "threadList",
@@ -440,7 +411,7 @@ export async function tryHandleDiscordMessageActionGuildAdmin(params: {
         channelIds: readStringArrayParam(actionParams, "channelIds"),
         authorId: readStringParam(actionParams, "authorId"),
         authorIds: readStringArrayParam(actionParams, "authorIds"),
-        limit: readPositiveIntegerParam(actionParams, "limit"),
+        limit: readNumberParam(actionParams, "limit", { integer: true }),
       },
       cfg,
     );

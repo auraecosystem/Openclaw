@@ -26,17 +26,11 @@ export function buildMicrosoftFoundryProvider(): ProviderPlugin {
     auth: [entraIdAuthMethod, apiKeyAuthMethod],
     onModelSelected: async (ctx) => {
       const providerConfig = ctx.config.models?.providers?.[PROVIDER_ID];
-      if (
-        !providerConfig ||
-        !providerConfig.baseUrl?.trim() ||
-        !Array.isArray(providerConfig.models) ||
-        !ctx.model.startsWith(`${PROVIDER_ID}/`)
-      ) {
+      if (!providerConfig || !ctx.model.startsWith(`${PROVIDER_ID}/`)) {
         return;
       }
       const selectedModelId = ctx.model.slice(`${PROVIDER_ID}/`.length);
-      const configuredModels = providerConfig.models ?? [];
-      const existingModel = configuredModels.find(
+      const existingModel = providerConfig.models.find(
         (model: { id: string }) => model.id === selectedModelId,
       );
       const selectedModelCapabilities = resolveFoundryModelCapabilities(
@@ -51,54 +45,25 @@ export function buildMicrosoftFoundryProvider(): ProviderPlugin {
       const selectedModelApi = isFoundryProviderApi(existingModel?.api)
         ? existingModel.api
         : providerConfig.api;
-      const nextModels = configuredModels.map((model) => {
-        if (model.id !== selectedModelId) {
-          return model;
-        }
-        const nextModel = Object.assign({}, model, {
-          name: selectedModelCapabilities.modelName,
-          api: selectedModelCapabilities.api,
-          reasoning: selectedModelCapabilities.reasoning || model.reasoning,
-          thinkingLevelMap: selectedModelCapabilities.thinkingLevelMap ?? model.thinkingLevelMap,
-          input: selectedModelCapabilities.input,
-        });
-        if (selectedModelCapabilities.compat) {
-          const explicitSupportsReasoningEffort =
-            typeof model.compat?.supportsReasoningEffort === "boolean"
-              ? model.compat.supportsReasoningEffort
-              : undefined;
-          const preserveExplicitReasoningEffort =
-            !selectedModelCapabilities.reasoning &&
-            model.reasoning &&
-            explicitSupportsReasoningEffort !== false;
-          const explicitMaxTokensField =
-            typeof model.compat?.maxTokensField === "string"
-              ? model.compat.maxTokensField
-              : preserveExplicitReasoningEffort
-                ? "max_completion_tokens"
-                : undefined;
-          nextModel.compat = {
-            ...model.compat,
-            ...selectedModelCapabilities.compat,
-            ...(explicitSupportsReasoningEffort !== undefined
-              ? { supportsReasoningEffort: explicitSupportsReasoningEffort }
-              : preserveExplicitReasoningEffort
-                ? { supportsReasoningEffort: true }
-                : undefined),
-            ...(explicitMaxTokensField ? { maxTokensField: explicitMaxTokensField } : {}),
-          };
-        }
-        return nextModel;
-      });
+      const nextModels = providerConfig.models.map((model) =>
+        model.id === selectedModelId
+          ? {
+              ...model,
+              name: selectedModelCapabilities.modelName,
+              api: selectedModelCapabilities.api,
+              input: selectedModelCapabilities.input,
+              ...(selectedModelCapabilities.compat
+                ? { compat: selectedModelCapabilities.compat }
+                : {}),
+            }
+          : model,
+      );
       if (!nextModels.some((model) => model.id === selectedModelId)) {
         nextModels.push({
           id: selectedModelId,
           name: selectedModelCapabilities.modelName,
           api: selectedModelCapabilities.api,
-          reasoning: selectedModelCapabilities.reasoning,
-          ...(selectedModelCapabilities.thinkingLevelMap
-            ? { thinkingLevelMap: selectedModelCapabilities.thinkingLevelMap }
-            : {}),
+          reasoning: false,
           input: selectedModelCapabilities.input,
           cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
           contextWindow: 128_000,
@@ -134,35 +99,10 @@ export function buildMicrosoftFoundryProvider(): ProviderPlugin {
         isFoundryProviderApi(model.api) ? model.api : undefined,
         model.input,
       );
-      const explicitSupportsReasoningEffort =
-        typeof model.compat?.supportsReasoningEffort === "boolean"
-          ? model.compat.supportsReasoningEffort
-          : undefined;
-      const preserveExplicitReasoningEffort = !capabilities.reasoning && model.reasoning;
-      const explicitMaxTokensField =
-        typeof model.compat?.maxTokensField === "string"
-          ? model.compat.maxTokensField
-          : preserveExplicitReasoningEffort
-            ? "max_completion_tokens"
-            : undefined;
-      const compat = capabilities.compat
-        ? {
-            ...model.compat,
-            ...capabilities.compat,
-            ...(explicitSupportsReasoningEffort !== undefined
-              ? { supportsReasoningEffort: explicitSupportsReasoningEffort }
-              : preserveExplicitReasoningEffort
-                ? { supportsReasoningEffort: true }
-                : undefined),
-            ...(explicitMaxTokensField ? { maxTokensField: explicitMaxTokensField } : {}),
-          }
-        : undefined;
       return {
         ...model,
         name: capabilities.modelName,
         api: capabilities.api,
-        reasoning: capabilities.reasoning || model.reasoning,
-        thinkingLevelMap: capabilities.thinkingLevelMap ?? model.thinkingLevelMap,
         input: capabilities.input,
         baseUrl: buildFoundryProviderBaseUrl(
           endpoint,
@@ -170,7 +110,7 @@ export function buildMicrosoftFoundryProvider(): ProviderPlugin {
           capabilities.modelName,
           capabilities.api,
         ),
-        ...(compat ? { compat } : {}),
+        ...(capabilities.compat ? { compat: capabilities.compat } : {}),
       };
     },
     prepareRuntimeAuth: prepareFoundryRuntimeAuth,

@@ -52,7 +52,6 @@ private data class ChatBubbleStyle(
   val roleColor: Color,
 )
 
-/** Renders one persisted chat message as text and image parts. */
 @Composable
 fun ChatMessageBubble(message: ChatMessage) {
   val role = message.role.trim().lowercase(Locale.US)
@@ -63,8 +62,7 @@ fun ChatMessageBubble(message: ChatMessage) {
     message.content.filter { part ->
       when (part.type) {
         "text" -> !part.text.isNullOrBlank()
-        "image" -> !part.base64.isNullOrBlank()
-        else -> false
+        else -> part.base64 != null
       }
     }
 
@@ -130,7 +128,6 @@ private fun ChatMessageBody(
   }
 }
 
-/** Assistant placeholder shown while a run is active but no text has streamed yet. */
 @Composable
 fun ChatTypingIndicatorBubble() {
   ChatBubbleContainer(
@@ -147,7 +144,6 @@ fun ChatTypingIndicatorBubble() {
   }
 }
 
-/** Tool progress bubble resolved through Android's tool display registry. */
 @Composable
 fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
   val context = LocalContext.current
@@ -191,7 +187,6 @@ fun ChatPendingToolsBubble(toolCalls: List<ChatPendingToolCall>) {
   }
 }
 
-/** Live assistant stream bubble shown before the final message is committed. */
 @Composable
 fun ChatStreamingAssistantBubble(text: String) {
   ChatBubbleContainer(
@@ -285,7 +280,6 @@ private fun PulseDot(
   ) {}
 }
 
-/** Shared code block renderer used by chat Markdown. */
 @Composable
 fun ChatCodeBlock(
   code: String,

@@ -1,15 +1,13 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
-import {
-  GATEWAY_CLIENT_IDS,
-  GATEWAY_CLIENT_MODES,
-} from "../../../packages/gateway-protocol/src/client-info.js";
-import { PROTOCOL_VERSION } from "../../../packages/gateway-protocol/src/index.js";
 import type { createSubsystemLogger } from "../../logging/subsystem.js";
-import type { PluginHttpRouteRegistration, PluginRegistry } from "../../plugins/registry.js";
+import type { PluginRegistry } from "../../plugins/registry.js";
+import { resolveActivePluginHttpRouteRegistry } from "../../plugins/runtime.js";
 import { withPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
 import type { AuthorizedGatewayHttpRequest } from "../http-utils.js";
-import type { GatewayRequestContext, GatewayRequestOptions } from "../server-methods/types.js";
+import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../protocol/client-info.js";
+import { PROTOCOL_VERSION } from "../protocol/index.js";
+import type { GatewayRequestOptions } from "../server-methods/types.js";
 import { resolvePluginRouteRuntimeOperatorScopes } from "./plugin-route-runtime-scopes.js";
 import {
   resolvePluginRoutePathContext,
@@ -30,18 +28,6 @@ export {
 export { shouldEnforceGatewayAuthForPluginPath } from "./plugins-http/route-auth.js";
 
 type SubsystemLogger = ReturnType<typeof createSubsystemLogger>;
-type PluginRouteRuntimeScope = Parameters<typeof withPluginRuntimeGatewayRequestScope>[0];
-
-function resolvePluginRoutePathContextForRequest(
-  req: IncomingMessage,
-  providedPathContext: PluginRoutePathContext | undefined,
-): PluginRoutePathContext {
-  if (providedPathContext) {
-    return providedPathContext;
-  }
-  const url = new URL(req.url ?? "/", "http://localhost");
-  return resolvePluginRoutePathContext(url.pathname);
-}
 
 function createPluginRouteRuntimeClient(
   scopes: readonly string[],
@@ -67,54 +53,6 @@ function writeUpgradeUnauthorized(socket: Duplex) {
   socket.destroy();
 }
 
-type PluginRouteRuntimeDispatchContext = {
-  gatewayRequestAuth?: AuthorizedGatewayHttpRequest;
-  gatewayRequestOperatorScopes?: readonly string[];
-};
-
-function getMissingPluginRouteRuntimeContext(
-  route: PluginHttpRouteRegistration,
-  context: PluginRouteRuntimeDispatchContext,
-): "caller auth context" | "caller scope context" | undefined {
-  if (route.auth !== "gateway") {
-    return undefined;
-  }
-  if (route.gatewayRuntimeScopeSurface === "trusted-operator") {
-    return context.gatewayRequestAuth ? undefined : "caller auth context";
-  }
-  return context.gatewayRequestOperatorScopes === undefined ? "caller scope context" : undefined;
-}
-
-function createPluginRouteRuntimeScope(params: {
-  route: PluginHttpRouteRegistration;
-  req: IncomingMessage;
-  gatewayRequestContext?: GatewayRequestContext;
-  gatewayRequestAuth?: AuthorizedGatewayHttpRequest;
-  gatewayRequestOperatorScopes?: readonly string[];
-}): PluginRouteRuntimeScope {
-  const runtimeScopes =
-    params.route.auth !== "gateway"
-      ? []
-      : params.route.gatewayRuntimeScopeSurface === "trusted-operator"
-        ? resolvePluginRouteRuntimeOperatorScopes(
-            params.req,
-            params.gatewayRequestAuth!,
-            "trusted-operator",
-          )
-        : params.gatewayRequestOperatorScopes!;
-  const runtimeClient = createPluginRouteRuntimeClient(runtimeScopes);
-  return {
-    ...(params.gatewayRequestContext ? { context: params.gatewayRequestContext } : {}),
-    client: runtimeClient,
-    isWebchatConnect: () => false,
-    ...(params.route.pluginId ? { pluginId: params.route.pluginId } : {}),
-    ...(params.route.source ? { pluginSource: params.route.source } : {}),
-    ...(params.route.gatewayMethodDispatchAllowed === true
-      ? { gatewayMethodDispatchAllowed: true }
-      : {}),
-  };
-}
-
 export type PluginRouteDispatchContext = {
   gatewayAuthSatisfied?: boolean;
   gatewayRequestAuth?: AuthorizedGatewayHttpRequest;
@@ -138,20 +76,22 @@ export type PluginHttpUpgradeHandler = (
 
 export function createGatewayPluginRequestHandler(params: {
   registry: PluginRegistry;
-  getRouteRegistry?: () => PluginRegistry;
   log: SubsystemLogger;
-  getGatewayRequestContext?: () => GatewayRequestContext | undefined;
 }): PluginHttpRequestHandler {
   const { log } = params;
   return async (req, res, providedPathContext, dispatchContext) => {
-    const registry = params.getRouteRegistry?.() ?? params.registry;
-    const gatewayRequestContext = params.getGatewayRequestContext?.();
+    const registry = resolveActivePluginHttpRouteRegistry(params.registry);
     const routes = registry.httpRoutes ?? [];
     if (routes.length === 0) {
       return false;
     }
 
-    const pathContext = resolvePluginRoutePathContextForRequest(req, providedPathContext);
+    const pathContext =
+      providedPathContext ??
+      (() => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        return resolvePluginRoutePathContext(url.pathname);
+      })();
     const matchedRoutes = findMatchingPluginHttpRoutes(registry, pathContext);
     if (matchedRoutes.length === 0) {
       return false;
@@ -167,28 +107,52 @@ export function createGatewayPluginRequestHandler(params: {
     // Fail closed before invoking any handlers when matched gateway routes are
     // missing the runtime auth/scope context they require.
     for (const route of matchedRoutes) {
-      const missingRuntimeContext = getMissingPluginRouteRuntimeContext(route, {
-        gatewayRequestAuth,
-        gatewayRequestOperatorScopes,
-      });
-      if (missingRuntimeContext) {
+      if (route.auth !== "gateway") {
+        continue;
+      }
+      if (route.gatewayRuntimeScopeSurface === "trusted-operator") {
+        if (!gatewayRequestAuth) {
+          log.warn(
+            `plugin http route blocked without caller auth context (${pathContext.canonicalPath})`,
+          );
+          return false;
+        }
+        continue;
+      }
+      if (gatewayRequestOperatorScopes === undefined) {
         log.warn(
-          `plugin http route blocked without ${missingRuntimeContext} (${pathContext.canonicalPath})`,
+          `plugin http route blocked without caller scope context (${pathContext.canonicalPath})`,
         );
         return false;
       }
     }
 
     for (const route of matchedRoutes) {
+      let runtimeScopes: readonly string[] = [];
+      if (route.auth === "gateway") {
+        if (route.gatewayRuntimeScopeSurface === "trusted-operator") {
+          runtimeScopes = resolvePluginRouteRuntimeOperatorScopes(
+            req,
+            gatewayRequestAuth!,
+            "trusted-operator",
+          );
+        } else {
+          runtimeScopes = gatewayRequestOperatorScopes!;
+        }
+      }
+
+      const runtimeClient = createPluginRouteRuntimeClient(runtimeScopes);
       try {
         const handled = await withPluginRuntimeGatewayRequestScope(
-          createPluginRouteRuntimeScope({
-            route,
-            req,
-            gatewayRequestContext,
-            gatewayRequestAuth,
-            gatewayRequestOperatorScopes,
-          }),
+          {
+            client: runtimeClient,
+            isWebchatConnect: () => false,
+            ...(route.pluginId ? { pluginId: route.pluginId } : {}),
+            ...(route.source ? { pluginSource: route.source } : {}),
+            ...(route.gatewayMethodDispatchAllowed === true
+              ? { gatewayMethodDispatchAllowed: true }
+              : {}),
+          },
           async () => route.handler(req, res),
         );
         if (handled !== false) {
@@ -210,20 +174,22 @@ export function createGatewayPluginRequestHandler(params: {
 
 export function createGatewayPluginUpgradeHandler(params: {
   registry: PluginRegistry;
-  getRouteRegistry?: () => PluginRegistry;
   log: SubsystemLogger;
-  getGatewayRequestContext?: () => GatewayRequestContext | undefined;
 }): PluginHttpUpgradeHandler {
   const { log } = params;
   return async (req, socket, head, providedPathContext, dispatchContext) => {
-    const registry = params.getRouteRegistry?.() ?? params.registry;
-    const gatewayRequestContext = params.getGatewayRequestContext?.();
+    const registry = resolveActivePluginHttpRouteRegistry(params.registry);
     const routes = registry.httpRoutes ?? [];
     if (routes.length === 0) {
       return false;
     }
 
-    const pathContext = resolvePluginRoutePathContextForRequest(req, providedPathContext);
+    const pathContext =
+      providedPathContext ??
+      (() => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        return resolvePluginRoutePathContext(url.pathname);
+      })();
     const matchedRoutes = findMatchingPluginHttpRoutes(registry, pathContext).filter(
       (route) => typeof route.handleUpgrade === "function",
     );
@@ -240,13 +206,22 @@ export function createGatewayPluginUpgradeHandler(params: {
     const gatewayRequestOperatorScopes = dispatchContext?.gatewayRequestOperatorScopes;
 
     for (const route of matchedRoutes) {
-      const missingRuntimeContext = getMissingPluginRouteRuntimeContext(route, {
-        gatewayRequestAuth,
-        gatewayRequestOperatorScopes,
-      });
-      if (missingRuntimeContext) {
+      if (route.auth !== "gateway") {
+        continue;
+      }
+      if (route.gatewayRuntimeScopeSurface === "trusted-operator") {
+        if (!gatewayRequestAuth) {
+          log.warn(
+            `plugin http upgrade blocked without caller auth context (${pathContext.canonicalPath})`,
+          );
+          writeUpgradeUnauthorized(socket);
+          return true;
+        }
+        continue;
+      }
+      if (gatewayRequestOperatorScopes === undefined) {
         log.warn(
-          `plugin http upgrade blocked without ${missingRuntimeContext} (${pathContext.canonicalPath})`,
+          `plugin http upgrade blocked without caller scope context (${pathContext.canonicalPath})`,
         );
         writeUpgradeUnauthorized(socket);
         return true;
@@ -254,15 +229,31 @@ export function createGatewayPluginUpgradeHandler(params: {
     }
 
     for (const route of matchedRoutes) {
+      let runtimeScopes: readonly string[] = [];
+      if (route.auth === "gateway") {
+        if (route.gatewayRuntimeScopeSurface === "trusted-operator") {
+          runtimeScopes = resolvePluginRouteRuntimeOperatorScopes(
+            req,
+            gatewayRequestAuth!,
+            "trusted-operator",
+          );
+        } else {
+          runtimeScopes = gatewayRequestOperatorScopes!;
+        }
+      }
+
+      const runtimeClient = createPluginRouteRuntimeClient(runtimeScopes);
       try {
         const handled = await withPluginRuntimeGatewayRequestScope(
-          createPluginRouteRuntimeScope({
-            route,
-            req,
-            gatewayRequestContext,
-            gatewayRequestAuth,
-            gatewayRequestOperatorScopes,
-          }),
+          {
+            client: runtimeClient,
+            isWebchatConnect: () => false,
+            ...(route.pluginId ? { pluginId: route.pluginId } : {}),
+            ...(route.source ? { pluginSource: route.source } : {}),
+            ...(route.gatewayMethodDispatchAllowed === true
+              ? { gatewayMethodDispatchAllowed: true }
+              : {}),
+          },
           async () => route.handleUpgrade?.(req, socket, head),
         );
         if (handled !== false) {

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   parseRelativeTime,
   isCronExpression,
@@ -12,10 +12,6 @@ import {
 } from "./remind-logic.js";
 
 describe("engine/tools/remind-logic", () => {
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   describe("parseRelativeTime", () => {
     it("parses minutes shorthand", () => {
       expect(parseRelativeTime("5m")).toBe(5 * 60_000);
@@ -27,10 +23,6 @@ describe("engine/tools/remind-logic", () => {
 
     it("parses combined hours and minutes", () => {
       expect(parseRelativeTime("1h30m")).toBe(90 * 60_000);
-    });
-
-    it("parses separated relative time tokens", () => {
-      expect(parseRelativeTime("1h 30m")).toBe(90 * 60_000);
     });
 
     it("parses days", () => {
@@ -47,8 +39,6 @@ describe("engine/tools/remind-logic", () => {
 
     it("returns null for unparseable input", () => {
       expect(parseRelativeTime("never")).toBeNull();
-      expect(parseRelativeTime("5m later")).toBeNull();
-      expect(parseRelativeTime("about 5m")).toBeNull();
     });
 
     it("is case insensitive", () => {
@@ -120,7 +110,7 @@ describe("engine/tools/remind-logic", () => {
         action: "list",
         summary: undefined,
       });
-      expect((result.details as { _instruction: string })["_instruction"]).not.toContain(
+      expect((result.details as { _instruction: string })._instruction).not.toContain(
         "Use the cron tool",
       );
       expect(result.details).not.toHaveProperty("cronParams");
@@ -301,21 +291,6 @@ describe("engine/tools/remind-logic", () => {
       expect(result.details).toEqual({
         error: "Failed to run Gateway cron action: gateway unavailable",
         action: "remove",
-      });
-    });
-
-    it("rejects relative reminders whose scheduled time exceeds the Date range", () => {
-      vi.useFakeTimers();
-      vi.setSystemTime(new Date(8_640_000_000_000_000));
-
-      const plan = prepareRemindCronAction(
-        { action: "add", content: "test reminder", to: "qqbot:c2c:123", time: "5m" },
-        {},
-      );
-
-      expect(plan).toEqual({
-        ok: false,
-        error: "Reminder time is outside the supported Date range",
       });
     });
   });

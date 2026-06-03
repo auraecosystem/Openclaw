@@ -1,10 +1,9 @@
 import path from "node:path";
-import { note } from "../../packages/terminal-core/src/note.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { CONFIG_PATH } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { callGateway } from "../gateway/call.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { note } from "../terminal/note.js";
 import {
   noteImplicitFallbackClobberWarnings,
   noteOpencodeProviderOverrides,
@@ -81,28 +80,6 @@ function emitDoctorChangesPanel(
   note(message, title);
 }
 
-async function refreshGatewayAuthStateAfterAuthProfileRepair(): Promise<void> {
-  try {
-    await callGateway({
-      method: "secrets.reload",
-      params: {},
-      timeoutMs: 3000,
-    });
-  } catch {
-    // Best-effort only: doctor --fix must still succeed when no gateway is running
-    // or the live gateway cannot reload unrelated secret-backed channels.
-  }
-  try {
-    await callGateway({
-      method: "models.authStatus",
-      params: { refresh: true },
-      timeoutMs: 3000,
-    });
-  } catch {
-    // Best-effort only: doctor --fix must still succeed when no gateway is running.
-  }
-}
-
 export async function loadAndMaybeMigrateDoctorConfig(params: {
   options: DoctorOptions;
   confirm: (p: { message: string; initialValue: boolean }) => Promise<boolean>;
@@ -110,11 +87,8 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   prompter?: DoctorPrompter;
 }) {
   const shouldRepair = params.options.repair === true || params.options.yes === true;
-  const preflight = await runDoctorConfigPreflight({
-    repairPrefixedConfig: shouldRepair,
-    recoverCorruptTargetStore: shouldRepair,
-  });
-  const snapshot = preflight.snapshot;
+  const preflight = await runDoctorConfigPreflight({ repairPrefixedConfig: shouldRepair });
+  let snapshot = preflight.snapshot;
   const baseCfg = preflight.baseConfig;
   let cfg: OpenClawConfig = baseCfg;
   let candidate = structuredClone(baseCfg);
@@ -131,10 +105,7 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     shouldRepair,
     doctorFixCommand,
   });
-  cfg = legacyStep.state.cfg;
-  candidate = legacyStep.state.candidate;
-  pendingChanges = pendingChanges || legacyStep.state.pendingChanges;
-  fixHints = legacyStep.state.fixHints;
+  ({ cfg, candidate, pendingChanges, fixHints } = legacyStep.state);
   const legacyMigrationPartiallyValid = legacyStep.partiallyValid === true;
   const pluginLegacyIssues = await (async () => {
     if (snapshot.parsed === snapshot.sourceConfig) {
@@ -163,7 +134,7 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     !shouldRepair &&
     !fixHints.includes(`Run "${doctorFixCommand}" to migrate legacy config keys.`)
   ) {
-    fixHints.push(`Run "${doctorFixCommand}" to migrate legacy config keys.`);
+    fixHints = [...fixHints, `Run "${doctorFixCommand}" to migrate legacy config keys.`];
   }
   if (legacyIssueLines.length > 0) {
     note(legacyIssueLines.join("\n"), "Legacy config keys detected");
@@ -207,12 +178,15 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     }));
   }
 
-  const { collectPluginToolAllowlistWarnings } =
+  const { collectBundledProviderAllowlistPolicyWarnings, collectPluginToolAllowlistWarnings } =
     await import("./doctor/shared/plugin-tool-allowlist-warnings.js");
-  const pluginToolAllowlistWarnings = collectPluginToolAllowlistWarnings({
-    cfg: candidate,
-    env: process.env,
-  });
+  const pluginToolAllowlistWarnings = [
+    ...collectPluginToolAllowlistWarnings({
+      cfg: candidate,
+      env: process.env,
+    }),
+    ...collectBundledProviderAllowlistPolicyWarnings({ cfg: candidate }),
+  ];
   if (pluginToolAllowlistWarnings.length > 0) {
     note(sanitizeDoctorNote(pluginToolAllowlistWarnings.join("\n")), "Doctor warnings");
   }
@@ -262,17 +236,6 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
     note(missingExplicitDefaultWarnings.join("\n"), "Doctor warnings");
   }
 
-  const { repairHooksTokenReuseGatewayAuth } =
-    await import("./doctor/shared/hooks-token-reuse-repair.js");
-  const hooksTokenReuseRepair = await repairHooksTokenReuseGatewayAuth(candidate, process.env);
-  emitDoctorChangesPanel(hooksTokenReuseRepair.changes, shouldRepair);
-  ({ cfg, candidate, pendingChanges, fixHints } = applyDoctorConfigMutation({
-    state: { cfg, candidate, pendingChanges, fixHints },
-    mutation: hooksTokenReuseRepair,
-    shouldRepair,
-    fixHint: `Run "${doctorFixCommand}" to rotate hooks.token away from Gateway auth.`,
-  }));
-
   if (shouldRepair) {
     const { runDoctorRepairSequence } = await import("./doctor/repair-sequencing.js");
     const repairSequence = await runDoctorRepairSequence({
@@ -281,25 +244,20 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
       env: process.env,
     });
     ({ cfg, candidate, pendingChanges, fixHints } = repairSequence.state);
-    if (repairSequence.authProfilesRepaired) {
-      await refreshGatewayAuthStateAfterAuthProfileRepair();
-    }
     emitDoctorNotes({
       note,
       changeNotes: repairSequence.changeNotes,
       warningNotes: repairSequence.warningNotes,
     });
   } else {
-    const { collectDoctorPreviewNotes } = await import("./doctor/shared/preview-warnings.js");
-    const previewNotes = await collectDoctorPreviewNotes({
-      cfg: candidate,
-      doctorFixCommand,
-      env: process.env,
-    });
+    const { collectDoctorPreviewWarnings } = await import("./doctor/shared/preview-warnings.js");
     emitDoctorNotes({
       note,
-      infoNotes: previewNotes.infoNotes,
-      warningNotes: previewNotes.warningNotes,
+      warningNotes: await collectDoctorPreviewWarnings({
+        cfg: candidate,
+        doctorFixCommand,
+        env: process.env,
+      }),
     });
   }
 
@@ -321,7 +279,7 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   ({ cfg, candidate, pendingChanges, fixHints } = unknownStep.state);
   if (unknownStep.removed.length > 0 || unknownStep.repairs.length > 0) {
     const lines = [
-      ...unknownStep.removed.map((pathLocal) => `- ${pathLocal}`),
+      ...unknownStep.removed.map((path) => `- ${path}`),
       ...unknownStep.repairs.map((change) => `- ${change}`),
     ].join("\n");
     note(lines, shouldRepair ? "Doctor changes" : "Unknown config keys");

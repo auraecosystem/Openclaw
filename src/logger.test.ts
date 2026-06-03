@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { theme } from "../packages/terminal-core/src/theme.js";
 import { isVerbose, isYes, logVerbose, setVerbose, setYes } from "./globals.js";
 import { logDebug, logError, logInfo, logSuccess, logWarn } from "./logger.js";
 import {
@@ -10,6 +9,7 @@ import {
   stripRedundantSubsystemPrefixForConsole,
 } from "./logging.js";
 import type { RuntimeEnv } from "./runtime.js";
+import { theme } from "./terminal/theme.js";
 import { withTempDirSync } from "./test-helpers/temp-dir.js";
 
 describe("logger helpers", () => {
@@ -35,16 +35,16 @@ describe("logger helpers", () => {
   });
 
   it("only logs debug when verbose is enabled", () => {
-    const logVerboseLocal = vi.spyOn(console, "log").mockImplementation(() => {});
+    const logVerbose = vi.spyOn(console, "log").mockImplementation(() => {});
     setVerbose(false);
     logDebug("quiet");
-    expect(logVerboseLocal).not.toHaveBeenCalled();
+    expect(logVerbose).not.toHaveBeenCalled();
 
     setVerbose(true);
-    logVerboseLocal.mockClear();
+    logVerbose.mockClear();
     logDebug("loud");
-    expect(logVerboseLocal).toHaveBeenCalled();
-    logVerboseLocal.mockRestore();
+    expect(logVerbose).toHaveBeenCalled();
+    logVerbose.mockRestore();
   });
 
   it("writes to configured log file at configured level", () => {

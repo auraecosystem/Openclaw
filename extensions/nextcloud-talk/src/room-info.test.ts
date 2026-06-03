@@ -1,29 +1,32 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { resolveNextcloudTalkRoomKind, testing } from "./room-info.js";
+import { resolveNextcloudTalkRoomKind, __testing } from "./room-info.js";
 
 const fetchWithSsrFGuard = vi.hoisted(() => vi.fn());
-const tempDirs: string[] = [];
+const readFileSync = vi.hoisted(() => vi.fn());
 
 vi.mock("../runtime-api.js", () => {
-  return { fetchWithSsrFGuard };
+  return vi
+    .importActual<typeof import("../runtime-api.js")>("../runtime-api.js")
+    .then((actual) => ({
+      ...actual,
+      fetchWithSsrFGuard,
+    }));
+});
+
+vi.mock("node:fs", () => {
+  return vi.importActual<typeof import("node:fs")>("node:fs").then((actual) => ({
+    ...actual,
+    readFileSync,
+  }));
 });
 
 afterEach(() => {
   fetchWithSsrFGuard.mockReset();
-  testing.resetRoomCache();
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { force: true, recursive: true });
-  }
+  readFileSync.mockReset();
+  __testing.resetRoomCache();
 });
 
-function requireFirstFetchParams(): {
-  auditContext?: string;
-  init?: { headers?: { Authorization?: string } };
-  url?: string;
-} {
+function requireFirstFetchParams(): { auditContext?: string; url?: string } {
   const [call] = fetchWithSsrFGuard.mock.calls;
   if (!call) {
     throw new Error("expected Nextcloud Talk room info fetch call");
@@ -73,105 +76,12 @@ describe("nextcloud talk room info", () => {
     expect(release).toHaveBeenCalledTimes(1);
   });
 
-  it("normalizes signed decimal room type strings through the shared parser", async () => {
-    fetchWithSsrFGuard.mockResolvedValue({
-      response: {
-        ok: true,
-        json: async () => ({
-          ocs: {
-            data: {
-              type: "+01",
-            },
-          },
-        }),
-      },
-      release: vi.fn(async () => {}),
-    });
-
-    await expect(
-      resolveNextcloudTalkRoomKind({
-        account: {
-          accountId: "acct-direct-string",
-          baseUrl: "https://nc.example.com",
-          config: {
-            apiUser: "bot",
-            apiPassword: "secret",
-          },
-        } as never,
-        roomToken: "room-direct-string",
-      }),
-    ).resolves.toBe("direct");
-  });
-
-  it("does not coerce partial room type strings", async () => {
-    fetchWithSsrFGuard.mockResolvedValue({
-      response: {
-        ok: true,
-        json: async () => ({
-          ocs: {
-            data: {
-              type: "1direct",
-            },
-          },
-        }),
-      },
-      release: vi.fn(async () => {}),
-    });
-
-    await expect(
-      resolveNextcloudTalkRoomKind({
-        account: {
-          accountId: "acct-partial",
-          baseUrl: "https://nc.example.com",
-          config: {
-            apiUser: "bot",
-            apiPassword: "secret",
-          },
-        } as never,
-        roomToken: "room-partial",
-      }),
-    ).resolves.toBeUndefined();
-  });
-
-  it("does not classify negative room types as group rooms", async () => {
-    fetchWithSsrFGuard.mockResolvedValue({
-      response: {
-        ok: true,
-        json: async () => ({
-          ocs: {
-            data: {
-              type: -1,
-            },
-          },
-        }),
-      },
-      release: vi.fn(async () => {}),
-    });
-
-    await expect(
-      resolveNextcloudTalkRoomKind({
-        account: {
-          accountId: "acct-negative",
-          baseUrl: "https://nc.example.com",
-          config: {
-            apiUser: "bot",
-            apiPassword: "secret",
-          },
-        } as never,
-        roomToken: "room-negative",
-      }),
-    ).resolves.toBeUndefined();
-  });
-
   it("reads the api password from a file and logs non-ok room info responses", async () => {
     const release = vi.fn(async () => {});
     const log = vi.fn();
     const error = vi.fn();
     const exit = vi.fn();
-    const tempDir = mkdtempSync(path.join(tmpdir(), "nextcloud-talk-room-info-"));
-    tempDirs.push(tempDir);
-    const passwordFile = path.join(tempDir, "secret");
-    writeFileSync(passwordFile, "file-secret\n", "utf-8");
+    readFileSync.mockReturnValue("file-secret\n");
     fetchWithSsrFGuard.mockResolvedValue({
       response: {
         ok: false,
@@ -187,7 +97,7 @@ describe("nextcloud talk room info", () => {
         baseUrl: "https://nc.example.com",
         config: {
           apiUser: "bot",
-          apiPasswordFile: passwordFile,
+          apiPasswordFile: "/tmp/nextcloud-secret",
         },
       } as never,
       roomToken: "room-group",
@@ -195,9 +105,7 @@ describe("nextcloud talk room info", () => {
     });
 
     expect(kind).toBeUndefined();
-    expect(requireFirstFetchParams().init?.headers?.Authorization).toBe(
-      "Basic Ym90OmZpbGUtc2VjcmV0",
-    );
+    expect(readFileSync).toHaveBeenCalledWith("/tmp/nextcloud-secret", "utf-8");
     expect(log).toHaveBeenCalledWith("nextcloud-talk: room lookup failed (403) token=room-group");
     expect(release).toHaveBeenCalledTimes(1);
   });

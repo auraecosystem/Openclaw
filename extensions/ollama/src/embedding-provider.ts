@@ -11,11 +11,11 @@ import {
   normalizeResolvedSecretInputString,
 } from "openclaw/plugin-sdk/secret-input";
 import {
+  fetchWithSsrFGuard,
   formatErrorMessage,
-  ssrfPolicyFromHttpBaseUrlAllowedOrigin,
+  ssrfPolicyFromHttpBaseUrlAllowedHostname,
   type SsrFPolicy,
 } from "openclaw/plugin-sdk/ssrf-runtime";
-import { fetchConfiguredLocalOriginWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime-internal";
 import { OLLAMA_CLOUD_BASE_URL } from "./defaults.js";
 import { normalizeOllamaWireModelId } from "./model-id.js";
 import { readProviderBaseUrl } from "./provider-base-url.js";
@@ -92,16 +92,14 @@ async function withRemoteHttpResponse<T>(params: {
   init?: RequestInit;
   signal?: AbortSignal;
   ssrfPolicy?: SsrFPolicy;
-  configuredLocalOriginBaseUrl: string;
   onResponse: (response: Response) => Promise<T>;
 }): Promise<T> {
-  const { response, release } = await fetchConfiguredLocalOriginWithSsrFGuard({
+  const { response, release } = await fetchWithSsrFGuard({
     url: params.url,
     init: params.init,
     signal: params.signal,
     policy: params.ssrfPolicy,
-    configuredLocalOriginBaseUrl: params.configuredLocalOriginBaseUrl,
-    auditContext: "ollama-memory-embedding",
+    auditContext: "memory-remote",
   });
   try {
     return await params.onResponse(response);
@@ -315,7 +313,7 @@ function resolveOllamaEmbeddingClient(
   return {
     baseUrl,
     headers,
-    ssrfPolicy: ssrfPolicyFromHttpBaseUrlAllowedOrigin(baseUrl),
+    ssrfPolicy: ssrfPolicyFromHttpBaseUrlAllowedHostname(baseUrl),
     model,
   };
 }
@@ -330,7 +328,6 @@ export async function createOllamaEmbeddingProvider(
     const json = await withRemoteHttpResponse({
       url: embedUrl,
       ssrfPolicy: client.ssrfPolicy,
-      configuredLocalOriginBaseUrl: client.baseUrl,
       signal,
       init: {
         method: "POST",
@@ -369,18 +366,15 @@ export async function createOllamaEmbeddingProvider(
     return embedding;
   };
 
-  const embedQuery = async (
-    text: string,
-    optionsValue?: { signal?: AbortSignal },
-  ): Promise<number[]> =>
-    await embedOne(applyQueryInstructionTemplate(client.model, text), optionsValue?.signal);
+  const embedQuery = async (text: string, options?: { signal?: AbortSignal }): Promise<number[]> =>
+    await embedOne(applyQueryInstructionTemplate(client.model, text), options?.signal);
 
   const provider: OllamaEmbeddingProvider = {
     id: "ollama",
     model: client.model,
     embedQuery,
-    embedBatch: async (texts, optionsLocal) =>
-      texts.length === 0 ? [] : await embedMany(texts, optionsLocal?.signal),
+    embedBatch: async (texts, options) =>
+      texts.length === 0 ? [] : await embedMany(texts, options?.signal),
   };
 
   return {

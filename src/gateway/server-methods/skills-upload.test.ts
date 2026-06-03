@@ -141,11 +141,11 @@ function expectError(result: CallResult, code: string, message: string): void {
 }
 
 function firstCallArg<T>(mock: { mock: { calls: unknown[][] } }, _type?: (value: T) => T): T {
-  const callLocal = mock.mock.calls.at(0);
-  if (!callLocal) {
+  const call = mock.mock.calls.at(0);
+  if (!call) {
     throw new Error("Expected first mock call");
   }
-  return callLocal[0] as T;
+  return call[0] as T;
 }
 
 async function makeSkillArchive(params: {

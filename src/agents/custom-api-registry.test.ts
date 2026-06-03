@@ -1,15 +1,11 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearApiProviders,
+  createAssistantMessageEventStream,
   getApiProvider,
-  registerApiProvider,
-  unregisterApiProviders,
-} from "../llm/api-registry.js";
-import {
   registerBuiltInApiProviders,
-  resetApiProviders,
-} from "../llm/providers/register-builtins.js";
-import { createAssistantMessageEventStream } from "../llm/utils/event-stream.js";
+  unregisterApiProviders,
+} from "@earendil-works/pi-ai";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ensureCustomApiRegistered, getCustomApiRegistrySourceId } from "./custom-api-registry.js";
 
 function getRegisteredTestProvider() {
@@ -52,27 +48,5 @@ describe("ensureCustomApiRegistered", () => {
     expect(provider.stream(model as never, context as never, options as never)).toBe(stream);
     expect(provider.streamSimple(model as never, context as never, options as never)).toBe(stream);
     expect(streamFn).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps plugin api providers when refreshing built-ins", () => {
-    const sourceId = "plugin:test-reset-api";
-    const api = "test-reset-plugin-api";
-    const streamFn = vi.fn(() => createAssistantMessageEventStream());
-    const streamSimpleFn = vi.fn(() => createAssistantMessageEventStream());
-    registerApiProvider(
-      {
-        api,
-        stream: streamFn,
-        streamSimple: streamSimpleFn,
-      },
-      sourceId,
-    );
-
-    resetApiProviders();
-
-    expect(getApiProvider(api)).toBeDefined();
-    expect(getApiProvider("openai-responses")).toBeDefined();
-
-    unregisterApiProviders(sourceId);
   });
 });

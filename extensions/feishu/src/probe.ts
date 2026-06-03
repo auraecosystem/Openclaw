@@ -1,8 +1,4 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { raceWithTimeoutAndAbort } from "./async.js";
 import { createFeishuClient, type FeishuClientCredentials } from "./client.js";
 import type { FeishuProbeResult } from "./types.js";
@@ -42,12 +38,7 @@ function setCachedProbeResult(
   result: FeishuProbeResult,
   ttlMs: number,
 ): FeishuProbeResult {
-  const expiresAt = resolveExpiresAtMsFromDurationMs(ttlMs);
-  if (expiresAt === undefined) {
-    probeCache.delete(cacheKey);
-    return result;
-  }
-  probeCache.set(cacheKey, { result, expiresAt });
+  probeCache.set(cacheKey, { result, expiresAt: Date.now() + ttlMs });
   if (probeCache.size > MAX_PROBE_CACHE_SIZE) {
     const oldest = probeCache.keys().next().value;
     if (oldest !== undefined) {
@@ -83,13 +74,8 @@ export async function probeFeishu(
   // pollute each other's cache entry.
   const cacheKey = creds.accountId ?? `${creds.appId}:${creds.appSecret.slice(0, 8)}`;
   const cached = probeCache.get(cacheKey);
-  if (cached) {
-    const now = asDateTimestampMs(Date.now());
-    const expiresAt = asDateTimestampMs(cached.expiresAt);
-    if (now !== undefined && expiresAt !== undefined && expiresAt > now) {
-      return cached.result;
-    }
-    probeCache.delete(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
   }
 
   try {

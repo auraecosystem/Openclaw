@@ -114,6 +114,7 @@ describe("runCapability video provider wiring", () => {
           GOOGLE_API_KEY: undefined,
           MOONSHOT_API_KEY: undefined,
           OPENCLAW_AGENT_DIR: isolatedAgentDir,
+          PI_CODING_AGENT_DIR: isolatedAgentDir,
         },
         async () => {
           await withVideoFixture("openclaw-video-auto-moonshot", async ({ ctx, media, cache }) => {

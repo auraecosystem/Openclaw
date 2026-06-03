@@ -1,11 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { booleanFlag, parseFlagArgs, stringFlag } from "./lib/arg-utils.mjs";
-import { isDirectRunUrl } from "./lib/direct-run.mjs";
 
 const GIT_OUTPUT_MAX_BUFFER = 64 * 1024 * 1024;
-const IMPLAUSIBLE_NO_MERGE_BASE_DIFF_PATHS = 200;
-const RAW_SYNC_CHANGED_LANES_ENV = "OPENCLAW_CHANGED_LANES_RAW_SYNC";
 
 const DOCS_PATH_RE = /^(?:docs\/|README\.md$|AGENTS\.md$|.*\.mdx?$)/u;
 const APP_PATH_RE = /^(?:apps\/|Swabble\/|appcast\.xml$)/u;
@@ -238,38 +235,18 @@ export function listChangedPathsFromGit(params) {
   if (!base) {
     return [];
   }
-  let rangePaths;
-  let noMergeBase = false;
-  try {
-    rangePaths = runGitNameOnlyDiff([`${base}...${head}`], cwd);
-  } catch (error) {
-    if (!isGitNoMergeBaseError(error)) {
-      throw error;
-    }
-    noMergeBase = true;
-    rangePaths = runGitNameOnlyDiff([`${base}..${head}`], cwd);
-  }
+  const rangePaths = runGitNameOnlyDiff([`${base}...${head}`], cwd);
   if (params.includeWorktree === false) {
     return rangePaths;
   }
-  const worktreePaths = [
-    ...runGitNameOnlyDiff(["--cached", "--diff-filter=ACMRD"], cwd),
-    ...runGitNameOnlyDiff(["--diff-filter=ACMRD"], cwd),
-    ...runGitLsFiles(["--others", "--exclude-standard"], cwd),
-  ];
-  // Raw Crabbox syncs can have unrelated synthetic refs; prefer the synced
-  // worktree delta instead of turning that into an accidental whole-repo gate.
-  if (
-    noMergeBase &&
-    process.env[RAW_SYNC_CHANGED_LANES_ENV] === "1" &&
-    worktreePaths.length > 0 &&
-    rangePaths.length > IMPLAUSIBLE_NO_MERGE_BASE_DIFF_PATHS
-  ) {
-    rangePaths = [];
-  }
-  return [...new Set([...rangePaths, ...worktreePaths])].toSorted((left, right) =>
-    left.localeCompare(right),
-  );
+  return [
+    ...new Set([
+      ...rangePaths,
+      ...runGitNameOnlyDiff(["--cached", "--diff-filter=ACMRD"], cwd),
+      ...runGitNameOnlyDiff(["--diff-filter=ACMRD"], cwd),
+      ...runGitLsFiles(["--others", "--exclude-standard"], cwd),
+    ]),
+  ].toSorted((left, right) => left.localeCompare(right));
 }
 
 function runGitNameOnlyDiff(extraArgs, cwd = process.cwd()) {
@@ -282,17 +259,6 @@ function runGitNameOnlyDiff(extraArgs, cwd = process.cwd()) {
   return output.split("\n").map(normalizeChangedPath).filter(Boolean);
 }
 
-function isGitNoMergeBaseError(error) {
-  const text = [
-    error?.message,
-    error?.stderr?.toString?.("utf8"),
-    Array.isArray(error?.output)
-      ? error.output.map((value) => value?.toString?.("utf8")).join("\n")
-      : "",
-  ].join("\n");
-  return text.includes("no merge base");
-}
-
 function runGitLsFiles(extraArgs, cwd = process.cwd()) {
   const output = execFileSync("git", ["ls-files", ...extraArgs], {
     cwd,
@@ -303,9 +269,8 @@ function runGitLsFiles(extraArgs, cwd = process.cwd()) {
   return output.split("\n").map(normalizeChangedPath).filter(Boolean);
 }
 
-export function listStagedChangedPaths(cwd = process.cwd()) {
+export function listStagedChangedPaths() {
   const output = execFileSync("git", ["diff", "--cached", "--name-only", "--diff-filter=ACMRD"], {
-    cwd,
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
     maxBuffer: GIT_OUTPUT_MAX_BUFFER,
@@ -392,7 +357,7 @@ function extractLiveDockerPackageScripts(packageJson) {
 }
 
 function stripLiveDockerPackageScripts(packageJson) {
-  const clone = structuredClone(packageJson);
+  const clone = JSON.parse(JSON.stringify(packageJson));
   const scripts = clone.scripts;
   if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
     return clone;
@@ -411,7 +376,7 @@ function extractPackageScripts(packageJson) {
 }
 
 function stripPackageScripts(packageJson) {
-  const clone = structuredClone(packageJson);
+  const clone = JSON.parse(JSON.stringify(packageJson));
   delete clone.scripts;
   return clone;
 }
@@ -455,7 +420,6 @@ function parseArgs(argv) {
     staged: false,
     json: false,
     githubOutput: false,
-    help: false,
     paths: [],
   };
   return parseFlagArgs(
@@ -467,8 +431,6 @@ function parseArgs(argv) {
       booleanFlag("--staged", "staged"),
       booleanFlag("--json", "json"),
       booleanFlag("--github-output", "githubOutput"),
-      booleanFlag("--help", "help"),
-      booleanFlag("-h", "help"),
     ],
     {
       onUnhandledArg(arg, target) {
@@ -482,24 +444,9 @@ function parseArgs(argv) {
   );
 }
 
-function printUsage() {
-  console.log(
-    [
-      "Usage: node scripts/changed-lanes.mjs [options] [-- <paths...>]",
-      "",
-      "Options:",
-      "  --base <ref>          Base ref for changed paths (default: origin/main)",
-      "  --head <ref>          Head ref for changed paths (default: HEAD)",
-      "  --staged              Inspect staged changes",
-      "  --json                Print JSON result",
-      "  --github-output       Append GitHub output variables",
-      "  -h, --help            Show this help",
-    ].join("\n"),
-  );
-}
-
 function isDirectRun() {
-  return isDirectRunUrl(process.argv[1], import.meta.url);
+  const direct = process.argv[1];
+  return Boolean(direct && import.meta.url.endsWith(direct));
 }
 
 function printHuman(result) {
@@ -529,10 +476,6 @@ function printHuman(result) {
 
 if (isDirectRun()) {
   const args = parseArgs(process.argv.slice(2));
-  if (args.help) {
-    printUsage();
-    process.exit(0);
-  }
   const paths =
     args.paths.length > 0
       ? args.paths

@@ -19,8 +19,7 @@ import type {
 import {
   listMessageReceiptPlatformIds,
   resolveMessageReceiptPrimaryId,
-} from "openclaw/plugin-sdk/channel-outbound";
-import { normalizeUniqueStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/channel-message";
 import {
   buildMatrixApprovalReactionHint,
   listMatrixApprovalReactionBindings,
@@ -156,7 +155,9 @@ function resolveHandlerContext(params: ChannelApprovalCapabilityHandlerContext):
 }
 
 function normalizePendingMessageIds(entry: PendingMessage): string[] {
-  return normalizeUniqueStringEntries(entry.platformMessageIds);
+  return Array.from(
+    new Set(entry.platformMessageIds.map((messageId) => messageId.trim()).filter(Boolean)),
+  );
 }
 
 function normalizeReactionTargetRef(params: ReactionTargetRef): ReactionTargetRef | null {

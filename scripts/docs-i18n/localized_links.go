@@ -325,22 +325,15 @@ func (ri *routeIndex) localizeURL(raw string) string {
 
 func hasURLScheme(raw string) bool {
 	switch {
-	case hasSchemePrefix(raw, "http://"), hasSchemePrefix(raw, "https://"):
+	case strings.HasPrefix(raw, "http://"), strings.HasPrefix(raw, "https://"):
 		return true
-	case hasSchemePrefix(raw, "mailto:"), hasSchemePrefix(raw, "tel:"):
+	case strings.HasPrefix(raw, "mailto:"), strings.HasPrefix(raw, "tel:"):
 		return true
-	case hasSchemePrefix(raw, "data:"), hasSchemePrefix(raw, "javascript:"), hasSchemePrefix(raw, "vbscript:"):
+	case strings.HasPrefix(raw, "data:"), strings.HasPrefix(raw, "javascript:"):
 		return true
 	default:
 		return false
 	}
-}
-
-func hasSchemePrefix(raw, prefix string) bool {
-	if len(raw) < len(prefix) {
-		return false
-	}
-	return strings.EqualFold(raw[:len(prefix)], prefix)
 }
 
 func splitURLSuffix(raw string) (string, string) {

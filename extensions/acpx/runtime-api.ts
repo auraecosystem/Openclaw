@@ -14,11 +14,8 @@ export type {
   AcpRuntimeEvent,
   AcpRuntimeHandle,
   AcpRuntimeStatus,
-  AcpRuntimeTurn,
   AcpRuntimeTurnAttachment,
   AcpRuntimeTurnInput,
-  AcpRuntimeTurnResult,
-  AcpRuntimeTurnResultError,
   AcpSessionUpdateTag,
 } from "openclaw/plugin-sdk/acp-runtime-backend";
 export type {

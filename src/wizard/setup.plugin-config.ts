@@ -1,4 +1,3 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import type { PluginConfigUiHint } from "../plugins/types.js";
@@ -252,7 +251,10 @@ async function promptPluginFields(params: {
       const trimmed = input.trim();
       if (trimmed !== currentStr) {
         if (trimmed) {
-          const values = normalizeStringEntries(trimmed.split(","));
+          const values = trimmed
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
           setPathCreateStrict(updatedConfig, pathSegments, values);
         } else {
           setPathCreateStrict(updatedConfig, pathSegments, undefined);

@@ -82,9 +82,8 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
     expect(manifest.artifacts.map((artifact) => artifact.targetPath)).toContain(
       "candidate/telegram-desktop-proof.gif",
     );
-    const artifactUrl = "https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2";
     const body = renderEvidenceComment({
-      artifactUrl,
+      artifactUrl: "https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2",
       manifest,
       marker: "<!-- mantis-telegram-desktop-proof -->",
       rawBase: "https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1",
@@ -93,13 +92,9 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
       treeUrl: "https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1/index.json",
     });
 
-    expect(body).toContain("<!-- mantis-telegram-desktop-proof -->");
-    expect(body).toContain("## Mantis Telegram Desktop Proof");
-    expect(body).toContain("- Baseline: `pass` at `aaa`, expected baseline visual proof captured");
     expect(body).toContain(
-      "- Candidate: `pass` at `bbb`, expected candidate visual proof captured",
+      "- Artifact: https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2",
     );
-    expect(body).toContain(`- Artifact: ${artifactUrl}`);
     expect(body).toContain('<table width="100%">');
     expect(body).toContain(
       '<img src="https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1/baseline/telegram-desktop-proof.gif" width="100%"',

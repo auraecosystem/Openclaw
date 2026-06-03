@@ -31,7 +31,7 @@ vi.mock("openclaw/plugin-sdk/web-media", () => ({
 }));
 
 let createDiscordNativeCommand: typeof import("./native-command.js").createDiscordNativeCommand;
-let discordNativeCommandTesting: typeof import("./native-command.js").testing;
+let discordNativeCommandTesting: typeof import("./native-command.js").__testing;
 
 function createConfig(params?: { requireMention?: boolean }): OpenClawConfig {
   return {
@@ -136,7 +136,7 @@ function firstStatusCall(): {
 
 describe("discord native /status", () => {
   beforeAll(async () => {
-    ({ createDiscordNativeCommand, testing: discordNativeCommandTesting } =
+    ({ createDiscordNativeCommand, __testing: discordNativeCommandTesting } =
       await import("./native-command.js"));
   });
 

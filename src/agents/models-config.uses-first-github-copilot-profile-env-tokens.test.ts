@@ -17,14 +17,10 @@ vi.mock("./provider-auth-aliases.js", () => ({
 }));
 
 vi.mock("./model-auth-env-vars.js", () => ({
+  PROVIDER_ENV_API_KEY_CANDIDATES: {},
   listKnownProviderEnvApiKeyNames: () => [],
   resolveProviderEnvApiKeyCandidates: () => ({}),
   resolveProviderEnvAuthEvidence: () => ({}),
-  resolveProviderEnvAuthLookupMaps: () => ({
-    aliasMap: {},
-    envCandidateMap: {},
-    authEvidenceMap: {},
-  }),
 }));
 
 vi.mock("../plugins/provider-runtime.js", () => ({
@@ -133,7 +129,6 @@ describe("models-config", () => {
     expect(resolveImplicitProviders).toHaveBeenCalledOnce();
     expect(plan).toEqual({
       action: "write",
-      pluginCatalogWrites: {},
       contents: `${JSON.stringify(
         {
           providers: {
@@ -196,7 +191,7 @@ describe("models-config", () => {
       },
     );
 
-    expect(plan).toEqual({ action: "noop", pluginCatalogWrites: {} });
+    expect(plan).toEqual({ action: "noop" });
   });
 
   it("uses tokenRef env var when github-copilot profile omits plaintext token", () => {

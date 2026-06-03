@@ -1,6 +1,5 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
-/** Normalizes mutable cron job rows from old `jobId` storage into the canonical `id` field. */
 export function normalizeCronJobIdentityFields(raw: Record<string, unknown>): {
   mutated: boolean;
   legacyJobIdIssue: boolean;

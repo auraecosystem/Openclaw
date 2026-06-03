@@ -10,8 +10,7 @@ import {
   defineChannelMessageAdapter,
   type ChannelMessageSendResult,
   type MessageReceiptPartKind,
-} from "openclaw/plugin-sdk/channel-outbound";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/channel-message";
 import { resolveTwitchAccountContext } from "./config.js";
 import { sendMessageTwitchInternal } from "./send.js";
 import type {
@@ -57,7 +56,9 @@ export const twitchOutbound: ChannelOutboundAdapter = {
    */
   resolveTarget: ({ to, allowFrom, mode }) => {
     const trimmed = to?.trim() ?? "";
-    const allowListRaw = normalizeStringEntries(allowFrom ?? []);
+    const allowListRaw = (allowFrom ?? [])
+      .map((entry: unknown) => String(entry).trim())
+      .filter(Boolean);
     const hasWildcard = allowListRaw.includes("*");
     const allowList = allowListRaw
       .filter((entry: string) => entry !== "*")

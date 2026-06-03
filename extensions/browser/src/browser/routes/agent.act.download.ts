@@ -1,4 +1,3 @@
-import { formatErrorMessage } from "../../infra/errors.js";
 import { getBrowserProfileCapabilities } from "../profile-capabilities.js";
 import type { BrowserRouteContext } from "../server-context.js";
 import {
@@ -10,9 +9,8 @@ import {
 import { EXISTING_SESSION_LIMITS } from "./existing-session-limits.js";
 import { ensureOutputRootDir, resolveWritableOutputPathOrRespond } from "./output-paths.js";
 import { DEFAULT_DOWNLOAD_DIR } from "./path-output.js";
-import { readRouteTimerTimeoutMs } from "./route-numeric.js";
 import type { BrowserRouteRegistrar } from "./types.js";
-import { asyncBrowserRoute, jsonError, toStringOrEmpty } from "./utils.js";
+import { asyncBrowserRoute, jsonError, toNumber, toStringOrEmpty } from "./utils.js";
 
 function buildDownloadRequestBase(cdpUrl: string, targetId: string, timeoutMs: number | undefined) {
   return {
@@ -32,12 +30,7 @@ export function registerBrowserAgentActDownloadRoutes(
       const body = readBody(req);
       const targetId = resolveTargetIdFromBody(body);
       const out = toStringOrEmpty(body.path) || "";
-      let timeoutMs: number | undefined;
-      try {
-        timeoutMs = readRouteTimerTimeoutMs(body.timeoutMs);
-      } catch (err) {
-        return jsonError(res, 400, formatErrorMessage(err));
-      }
+      const timeoutMs = toNumber(body.timeoutMs);
 
       await withRouteTabContext({
         req,
@@ -85,12 +78,7 @@ export function registerBrowserAgentActDownloadRoutes(
       const targetId = resolveTargetIdFromBody(body);
       const ref = toStringOrEmpty(body.ref);
       const out = toStringOrEmpty(body.path);
-      let timeoutMs: number | undefined;
-      try {
-        timeoutMs = readRouteTimerTimeoutMs(body.timeoutMs);
-      } catch (err) {
-        return jsonError(res, 400, formatErrorMessage(err));
-      }
+      const timeoutMs = toNumber(body.timeoutMs);
       if (!ref) {
         return jsonError(res, 400, "ref is required");
       }

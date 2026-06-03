@@ -47,11 +47,7 @@ export {
   QA_BASE_RUNTIME_PLUGIN_IDS,
   type QaThinkingLevel,
 } from "./src/qa-gateway-config.js";
-export {
-  renderQaMarkdownReport,
-  type QaReportCheck,
-  type QaReportScenario,
-} from "openclaw/plugin-sdk/qa-runtime";
+export { type QaReportCheck, type QaReportScenario, renderQaMarkdownReport } from "./src/report.js";
 export {
   type QaScenarioDefinition,
   type QaScenarioResult,
@@ -86,8 +82,7 @@ export {
 } from "./src/self-check.js";
 export { runQaE2eSelfCheck, runQaLabSelfCheck } from "./src/self-check-runner.js";
 export {
-  testing,
-  testing as __testing,
+  __testing,
   buildQaRuntimeEnv,
   type QaCliBackendAuthMode,
   type QaGatewayChildCommand,

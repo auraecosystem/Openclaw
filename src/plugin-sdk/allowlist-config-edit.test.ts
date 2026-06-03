@@ -77,8 +77,8 @@ describe("createFlatAllowlistOverrideResolver", () => {
     },
   ])("$name", ({ account, expected }) => {
     const resolveOverrides = createFlatAllowlistOverrideResolver({
-      resolveRecord: (accountValue: { channels?: Record<string, { users: string[] }> }) =>
-        accountValue.channels,
+      resolveRecord: (account: { channels?: Record<string, { users: string[] }> }) =>
+        account.channels,
       label: (key) => key,
       resolveEntries: (value) => value.users,
     });
@@ -103,12 +103,12 @@ describe("createNestedAllowlistOverrideResolver", () => {
     },
   ])("$name", ({ account, expected }) => {
     const resolveOverrides = createNestedAllowlistOverrideResolver({
-      resolveRecord: (accountLocal: {
+      resolveRecord: (account: {
         groups?: Record<
           string,
           { allowFrom?: string[]; topics?: Record<string, { allowFrom?: string[] }> }
         >;
-      }) => accountLocal.groups,
+      }) => account.groups,
       outerLabel: (groupId) => groupId,
       resolveOuterEntries: (group) => group.allowFrom,
       resolveChildren: (group) => group.topics,
@@ -136,8 +136,8 @@ describe("createAccountScopedAllowlistNameResolver", () => {
     const resolveNames = createAccountScopedAllowlistNameResolver({
       resolveAccount: () => ({ token }),
       resolveToken: (account) => account.token,
-      resolveNames: async ({ token: tokenLocal, entries }) =>
-        entries.map((entry) => ({ input: entry, resolved: true, name: `${tokenLocal}:${entry}` })),
+      resolveNames: async ({ token, entries }) =>
+        entries.map((entry) => ({ input: entry, resolved: true, name: `${token}:${entry}` })),
     });
 
     expect(await resolveNames({ cfg: {}, accountId: "alt", scope: "dm", entries: ["a"] })).toEqual(

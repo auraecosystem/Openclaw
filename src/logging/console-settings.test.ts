@@ -74,21 +74,21 @@ function loadLogging() {
 
 describe("getConsoleSettings", () => {
   it("does not recurse when loadConfig logs during resolution", () => {
-    const { logging: loggingValue } = loadLogging();
-    loggingValue.setConsoleTimestampPrefix(true);
-    loggingValue.enableConsoleCapture();
-    const { getConsoleSettings } = loggingValue;
+    const { logging } = loadLogging();
+    logging.setConsoleTimestampPrefix(true);
+    logging.enableConsoleCapture();
+    const { getConsoleSettings } = logging;
     getConsoleSettings();
     expect(loadConfigCalls).toBe(1);
   });
 
   it("skips config fallback during re-entrant resolution", () => {
-    const { logging: loggingLocal, state: stateLocal } = loadLogging();
-    stateLocal.loggingState.resolvingConsoleSettings = true;
-    loggingLocal.setConsoleTimestampPrefix(true);
-    loggingLocal.enableConsoleCapture();
-    loggingLocal.getConsoleSettings();
+    const { logging, state } = loadLogging();
+    state.loggingState.resolvingConsoleSettings = true;
+    logging.setConsoleTimestampPrefix(true);
+    logging.enableConsoleCapture();
+    logging.getConsoleSettings();
     expect(loadConfigCalls).toBe(0);
-    stateLocal.loggingState.resolvingConsoleSettings = false;
+    state.loggingState.resolvingConsoleSettings = false;
   });
 });

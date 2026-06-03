@@ -9,11 +9,13 @@ export function resolveSlackAutoThreadId(params: {
     currentThreadTs?: string;
     replyToMode?: "off" | "first" | "all" | "batched";
     hasRepliedRef?: { value: boolean };
-    sameChannelThreadRequired?: boolean;
   };
 }): string | undefined {
   const context = params.toolContext;
-  if (!context?.currentChannelId) {
+  if (!context?.currentThreadTs || !context.currentChannelId) {
+    return undefined;
+  }
+  if (context.replyToMode !== "all" && !isSingleUseReplyToMode(context.replyToMode ?? "off")) {
     return undefined;
   }
   const parsedTarget = parseSlackTarget(params.to, { defaultKind: "channel" });
@@ -24,17 +26,6 @@ export function resolveSlackAutoThreadId(params: {
     normalizeLowercaseStringOrEmpty(parsedTarget.id) !==
     normalizeLowercaseStringOrEmpty(context.currentChannelId)
   ) {
-    return undefined;
-  }
-  if (!context.currentThreadTs) {
-    if (context.sameChannelThreadRequired) {
-      throw new Error(
-        "Slack thread context is required for same-channel replies from a threaded Slack turn. Set topLevel=true or threadId=null to post at the channel root.",
-      );
-    }
-    return undefined;
-  }
-  if (context.replyToMode !== "all" && !isSingleUseReplyToMode(context.replyToMode ?? "off")) {
     return undefined;
   }
   if (isSingleUseReplyToMode(context.replyToMode ?? "off") && context.hasRepliedRef?.value) {

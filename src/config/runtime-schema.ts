@@ -1,5 +1,6 @@
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
+import { getCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
+import { loadPluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import {
   collectChannelSchemaMetadata,
   collectPluginSchemaMetadata,
@@ -10,11 +11,14 @@ import { buildConfigSchema, type ConfigSchemaResponse } from "./schema.js";
 
 function loadManifestRegistry(config: OpenClawConfig, env?: NodeJS.ProcessEnv) {
   const workspaceDir = resolveAgentWorkspaceDir(config, resolveDefaultAgentId(config));
-  return resolvePluginMetadataSnapshot({
+  const currentSnapshot = getCurrentPluginMetadataSnapshot({ config, env, workspaceDir });
+  if (currentSnapshot) {
+    return currentSnapshot.manifestRegistry;
+  }
+  return loadPluginMetadataSnapshot({
     config,
     env: env ?? process.env,
     workspaceDir,
-    allowWorkspaceScopedCurrent: true,
   }).manifestRegistry;
 }
 

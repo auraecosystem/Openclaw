@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { statusSummaryRuntime } from "./status.summary.runtime.js";
 
 describe("statusSummaryRuntime.resolveContextTokensForModel", () => {
-  it("does not match provider context window overrides across provider id variants", () => {
+  it("matches provider context window overrides across canonical provider aliases", () => {
     const contextTokens = statusSummaryRuntime.resolveContextTokensForModel({
       cfg: {
         models: {
@@ -18,7 +18,7 @@ describe("statusSummaryRuntime.resolveContextTokensForModel", () => {
       fallbackContextTokens: 999,
     });
 
-    expect(contextTokens).toBe(999);
+    expect(contextTokens).toBe(123_456);
   });
 
   it("prefers per-model contextTokens over contextWindow", () => {
@@ -26,13 +26,13 @@ describe("statusSummaryRuntime.resolveContextTokensForModel", () => {
       cfg: {
         models: {
           providers: {
-            openai: {
+            "openai-codex": {
               models: [{ id: "gpt-5.4", contextWindow: 1_050_000, contextTokens: 272_000 }],
             },
           },
         },
       } as never,
-      provider: "openai",
+      provider: "openai-codex",
       model: "gpt-5.4",
       fallbackContextTokens: 999,
     });
@@ -96,7 +96,7 @@ describe("statusSummaryRuntime.resolveSessionRuntimeLabel", () => {
           agents: {
             defaults: {
               models: {
-                "openai/gpt-5.5": { agentRuntime: { id: "openclaw" } },
+                "openai/gpt-5.5": { agentRuntime: { id: "pi" } },
               },
             },
             list: [
@@ -177,13 +177,13 @@ describe("statusSummaryRuntime.resolveSessionModelRef", () => {
   it("prefers explicit overrides ahead of fallback runtime fields", () => {
     expect(
       statusSummaryRuntime.resolveSessionModelRef(cfg, {
-        providerOverride: "openai",
+        providerOverride: "openai-codex",
         modelOverride: "gpt-5.4",
         modelProvider: "amazon-bedrock",
         model: "minimax.minimax-m2.5",
       }),
     ).toEqual({
-      provider: "openai",
+      provider: "openai-codex",
       model: "gpt-5.4",
     });
   });

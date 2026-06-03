@@ -1,12 +1,10 @@
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { normalizeProviderId } from "../agents/model-selection.js";
 import type { ModelProviderConfig } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
 import { listManifestProviderContributionIds } from "./manifest-contribution-ids.js";
 import type { PluginMetadataRegistryView } from "./plugin-metadata-snapshot.types.js";
-import type { LoadPluginRegistryParams, PluginRegistrySnapshot } from "./plugin-registry.js";
-import { copyProviderCatalogResultProjection } from "./provider-catalog-result.js";
+import { type LoadPluginRegistryParams, type PluginRegistrySnapshot } from "./plugin-registry.js";
 import type { ProviderDiscoveryOrder, ProviderPlugin } from "./types.js";
 
 const DISCOVERY_ORDER: readonly ProviderDiscoveryOrder[] = ["simple", "profile", "paired", "late"];
@@ -39,7 +37,6 @@ export type ResolveRuntimePluginDiscoveryProvidersParams = {
   config?: OpenClawConfig;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
-  bundledProviderVitestCompat?: boolean;
   onlyPluginIds?: string[];
   includeUntrustedWorkspacePlugins?: boolean;
   requireCompleteDiscoveryEntryCoverage?: boolean;
@@ -52,6 +49,10 @@ export type ResolveInstalledPluginProviderContributionIdsParams = LoadPluginRegi
   includeDisabled?: boolean;
 };
 
+function sortedValues(values: Iterable<string>): string[] {
+  return [...new Set(values)].toSorted((left, right) => left.localeCompare(right));
+}
+
 export function resolveInstalledPluginProviderContributionIds(
   params: ResolveInstalledPluginProviderContributionIdsParams = {},
 ): string[] {
@@ -59,7 +60,7 @@ export function resolveInstalledPluginProviderContributionIds(
     params.candidates && params.preferPersisted === undefined
       ? { ...params, preferPersisted: false }
       : params;
-  return sortUniqueStrings(
+  return sortedValues(
     listManifestProviderContributionIds({
       ...registryParams,
       index: params.index,
@@ -111,8 +112,7 @@ export function normalizePluginDiscoveryResult(params: {
     return {};
   }
 
-  const projection = copyProviderCatalogResultProjection(result);
-  if (projection.kind === "provider") {
+  if ("provider" in result) {
     const normalized = createProviderConfigRecord();
     for (const providerId of [
       params.provider.id,
@@ -123,16 +123,13 @@ export function normalizePluginDiscoveryResult(params: {
       if (!isSafeProviderConfigKey(normalizedKey)) {
         continue;
       }
-      normalized[normalizedKey] = projection.provider;
+      normalized[normalizedKey] = result.provider;
     }
     return normalized;
   }
 
   const normalized = createProviderConfigRecord();
-  if (projection.kind !== "providers") {
-    return normalized;
-  }
-  for (const [key, value] of projection.providers) {
+  for (const [key, value] of Object.entries(result.providers)) {
     const normalizedKey = normalizeProviderId(key);
     if (!isSafeProviderConfigKey(normalizedKey) || !value) {
       continue;

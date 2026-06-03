@@ -4,10 +4,6 @@
  */
 
 import * as crypto from "node:crypto";
-import {
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationSeconds,
-} from "openclaw/plugin-sdk/number-runtime";
 import type { ChatScope } from "../types.js";
 import { debugLog } from "./log.js";
 
@@ -50,7 +46,7 @@ export function getCachedFileInfo(
     return null;
   }
 
-  if (!isFutureDateTimestampMs(entry.expiresAt)) {
+  if (Date.now() >= entry.expiresAt) {
     cache.delete(key);
     return null;
   }
@@ -72,7 +68,7 @@ export function setCachedFileInfo(
   if (cache.size >= MAX_CACHE_SIZE) {
     const now = Date.now();
     for (const [k, v] of cache) {
-      if (!isFutureDateTimestampMs(v.expiresAt, { nowMs: now })) {
+      if (now >= v.expiresAt) {
         cache.delete(k);
       }
     }
@@ -87,16 +83,11 @@ export function setCachedFileInfo(
   const key = buildCacheKey(contentHash, scope, targetId, fileType);
   const safetyMargin = 60;
   const effectiveTtl = Math.max(ttl - safetyMargin, 10);
-  const expiresAt = resolveExpiresAtMsFromDurationSeconds(effectiveTtl);
-  if (expiresAt === undefined) {
-    cache.delete(key);
-    return;
-  }
 
   cache.set(key, {
     fileInfo,
     fileUuid,
-    expiresAt,
+    expiresAt: Date.now() + effectiveTtl * 1000,
   });
 
   debugLog(

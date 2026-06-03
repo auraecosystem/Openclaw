@@ -10,10 +10,8 @@ import type { CronJob, CronJobCreate, CronJobPatch } from "./types.js";
 
 export type { CronEvent, CronServiceDeps } from "./service/state.js";
 
-/** Public cron service facade that owns mutable scheduler state and delegates to locked ops. */
 export class CronService implements CronServiceContract {
   private readonly state;
-
   constructor(deps: CronServiceDeps) {
     this.state = createCronServiceState(deps);
   }
@@ -57,8 +55,6 @@ export class CronService implements CronServiceContract {
   async enqueueRun(id: string, mode?: "due" | "force"): Promise<CronServiceRunResult> {
     const result = await ops.enqueueRun(this.state, id, mode);
     if (result.ok && "runnable" in result) {
-      // ops.enqueueRun resolves runnable dispositions before crossing the
-      // public facade; leaking one would expose an internal scheduler detail.
       throw new Error("cron enqueueRun returned unresolved runnable disposition");
     }
     return result;

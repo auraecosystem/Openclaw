@@ -23,10 +23,4 @@ export {
   CURRENT_MESSAGE_MARKER,
   buildMentionRegexes,
   normalizeMentionText,
-  type BuildMentionRegexesOptions,
 } from "../auto-reply/reply/mentions.js";
-export {
-  resolveMentionPatternPolicy,
-  type ResolveMentionPatternPolicyParams,
-  type ResolvedMentionPatternPolicy,
-} from "../channels/mention-pattern-policy.js";

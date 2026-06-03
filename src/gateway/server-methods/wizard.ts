@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { readStringValue } from "@openclaw/normalization-core/string-coerce";
+import { defaultRuntime } from "../../runtime.js";
+import { readStringValue } from "../../shared/string-coerce.js";
+import { WizardSession } from "../../wizard/session.js";
 import {
   ErrorCodes,
   errorShape,
@@ -7,9 +9,7 @@ import {
   validateWizardNextParams,
   validateWizardStartParams,
   validateWizardStatusParams,
-} from "../../../packages/gateway-protocol/src/index.js";
-import { defaultRuntime } from "../../runtime.js";
-import { WizardSession } from "../../wizard/session.js";
+} from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import type { GatewayRequestContext, GatewayRequestHandlers, RespondFn } from "./types.js";
 import { assertValidParams } from "./validation.js";
@@ -21,7 +21,6 @@ function readWizardStatus(session: WizardSession) {
   };
 }
 
-/** Resolves a live wizard session or sends the public not-found error. */
 function findWizardSessionOrRespond(params: {
   context: GatewayRequestContext;
   respond: RespondFn;
@@ -35,7 +34,6 @@ function findWizardSessionOrRespond(params: {
   return session;
 }
 
-/** Gateway handlers for the interactive setup wizard session lifecycle. */
 export const wizardHandlers: GatewayRequestHandlers = {
   "wizard.start": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateWizardStartParams, "wizard.start", respond)) {
@@ -57,8 +55,6 @@ export const wizardHandlers: GatewayRequestHandlers = {
     context.wizardSessions.set(sessionId, session);
     const result = await session.next();
     if (result.done) {
-      // Completed sessions cannot accept later answers; purge immediately so
-      // clients get a clean not-found response for stale session ids.
       context.purgeWizardSession(sessionId);
     }
     respond(true, { sessionId, ...result }, undefined);
@@ -87,8 +83,6 @@ export const wizardHandlers: GatewayRequestHandlers = {
     }
     const result = await session.next();
     if (result.done) {
-      // The final step may be reached after an answer, so cleanup mirrors
-      // wizard.start's immediate-completion path.
       context.purgeWizardSession(sessionId);
     }
     respond(true, result, undefined);

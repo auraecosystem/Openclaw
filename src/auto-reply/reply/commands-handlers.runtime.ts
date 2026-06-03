@@ -9,13 +9,11 @@ import { handleContextCommand } from "./commands-context-command.js";
 import { handleCrestodianCommand } from "./commands-crestodian.js";
 import { handleDiagnosticsCommand } from "./commands-diagnostics.js";
 import { handleDockCommand } from "./commands-dock.js";
-import { handleGoalCommand } from "./commands-goal.js";
 import {
   handleCommandsListCommand,
   handleExportTrajectoryCommand,
   handleExportSessionCommand,
   handleHelpCommand,
-  handleSkillCommandUsage,
   handleStatusCommand,
   handleToolsCommand,
 } from "./commands-info.js";
@@ -55,12 +53,8 @@ export function loadCommandHandlers(): CommandHandler[] {
     handleTtsCommands,
     handleHelpCommand,
     handleCommandsListCommand,
-    // Keep deterministic /skill usage on the native command path before the
-    // broader tool/status handlers can fall through to an agent run.
-    handleSkillCommandUsage,
     handleToolsCommand,
     handleStatusCommand,
-    handleGoalCommand,
     handleDiagnosticsCommand,
     handleTasksCommand,
     handleSteerCommand,

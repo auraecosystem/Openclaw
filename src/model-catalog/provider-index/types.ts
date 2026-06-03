@@ -1,4 +1,4 @@
-import type { ModelCatalogProvider } from "@openclaw/model-catalog-core/model-catalog-types";
+import type { ModelCatalogProvider } from "../types.js";
 
 export type OpenClawProviderIndexPluginInstall = {
   clawhubSpec?: string;

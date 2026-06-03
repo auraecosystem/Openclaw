@@ -1,7 +1,7 @@
 import {
   recordChannelBotPairLoopAndCheckSuppression,
   type ChannelBotLoopProtectionFacts,
-} from "openclaw/plugin-sdk/channel-inbound";
+} from "openclaw/plugin-sdk/inbound-reply-dispatch";
 import { mergePairLoopGuardConfig } from "openclaw/plugin-sdk/pair-loop-guard-runtime";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { OpenClawConfig } from "../runtime-api.js";
@@ -9,9 +9,9 @@ import {
   resolveInboundRouteEnvelopeBuilderWithRuntime,
   resolveWebhookPath,
 } from "../runtime-api.js";
-import type { ResolvedGoogleChatAccount } from "./accounts.js";
+import { type ResolvedGoogleChatAccount } from "./accounts.js";
 import { downloadGoogleChatMedia, sendGoogleChatMessage } from "./api.js";
-import type { GoogleChatAudienceType } from "./auth.js";
+import { type GoogleChatAudienceType } from "./auth.js";
 import { applyGoogleChatInboundAccessPolicy } from "./monitor-access.js";
 import { resolveGoogleChatDurableReplyOptions } from "./monitor-durable.js";
 import { deliverGoogleChatReply } from "./monitor-reply-delivery.js";
@@ -221,7 +221,7 @@ async function processMessageWithPipeline(params: {
     senderEmail,
     rawBody,
     statusSink,
-    logVerbose: (messageLocal) => logVerbose(core, runtime, messageLocal),
+    logVerbose: (message) => logVerbose(core, runtime, message),
   });
   if (!access.ok) {
     return;
@@ -272,21 +272,19 @@ async function processMessageWithPipeline(params: {
   const fromLabel = isGroup
     ? space.displayName || `space:${spaceId}`
     : senderName || `user:${senderId}`;
-  const timestampMs = resolveGoogleChatTimestampMs(event.eventTime);
   const { storePath, body } = buildEnvelope({
     channel: "Google Chat",
     from: fromLabel,
-    timestamp: timestampMs,
+    timestamp: event.eventTime ? Date.parse(event.eventTime) : undefined,
     body: rawBody,
   });
 
-  const replyThreadName = isGroup ? message.thread?.name : undefined;
-  const ctxPayload = core.channel.inbound.buildContext({
+  const ctxPayload = core.channel.turn.buildContext({
     channel: "googlechat",
     accountId: route.accountId,
     messageId: message.name,
     messageIdFull: message.name,
-    timestamp: timestampMs,
+    timestamp: event.eventTime ? Date.parse(event.eventTime) : undefined,
     from: `googlechat:${senderId}`,
     sender: {
       id: senderId,
@@ -297,6 +295,10 @@ async function processMessageWithPipeline(params: {
       kind: isGroup ? "channel" : "direct",
       id: spaceId,
       label: fromLabel,
+      routePeer: {
+        kind: isGroup ? "group" : "direct",
+        id: spaceId,
+      },
     },
     route: {
       agentId: route.agentId,
@@ -306,14 +308,15 @@ async function processMessageWithPipeline(params: {
     reply: {
       to: `googlechat:${spaceId}`,
       originatingTo: `googlechat:${spaceId}`,
-      replyToId: replyThreadName,
-      replyToIdFull: replyThreadName,
+      replyToId: message.thread?.name,
+      replyToIdFull: message.thread?.name,
     },
     message: {
       body,
       bodyForAgent: rawBody,
       rawBody,
       commandBody: rawBody,
+      envelopeFrom: fromLabel,
     },
     media:
       mediaPath || mediaType
@@ -361,7 +364,7 @@ async function processMessageWithPipeline(params: {
         account,
         space: spaceId,
         text: `_${botName} is typing..._`,
-        thread: replyThreadName,
+        thread: message.thread?.name,
       });
       typingMessageName = result?.messageName;
     } catch (err) {
@@ -369,14 +372,14 @@ async function processMessageWithPipeline(params: {
     }
   }
 
-  await core.channel.inbound.run({
+  await core.channel.turn.run({
     channel: "googlechat",
     accountId: route.accountId,
     raw: message,
     adapter: {
       ingest: () => ({
         id: message.name ?? spaceId,
-        timestamp: timestampMs,
+        timestamp: event.eventTime ? Date.parse(event.eventTime) : undefined,
         rawText: rawBody,
         textForAgent: rawBody,
         textForCommands: rawBody,
@@ -435,7 +438,7 @@ async function processMessageWithPipeline(params: {
   });
 }
 
-export const testing = {
+export const __testing = {
   processMessageWithPipeline,
   resolveGoogleChatBotLoopProtection,
   resolveGoogleChatBotLoopProtectionConfig,
@@ -521,4 +524,3 @@ export function resolveGoogleChatWebhookPath(params: {
     }) ?? "/googlechat"
   );
 }
-export { testing as __testing };

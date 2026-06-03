@@ -27,12 +27,8 @@ export function resolveInitialMemoryDirty(params: {
   hasMemorySource: boolean;
   statusOnly: boolean;
   hasIndexedMeta: boolean;
-  indexIdentityMismatched?: boolean;
 }): boolean {
-  return (
-    Boolean(params.indexIdentityMismatched) ||
-    (params.hasMemorySource && (params.statusOnly ? !params.hasIndexedMeta : true))
-  );
+  return params.hasMemorySource && (params.statusOnly ? !params.hasIndexedMeta : true);
 }
 
 export function resolveStatusProviderInfo(params: {

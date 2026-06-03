@@ -1,5 +1,4 @@
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import { parseComparableSemver } from "./semver-compare.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 export type UpdateChannel = "stable" | "beta" | "dev";
 export type UpdateChannelSource =
@@ -38,18 +37,8 @@ export function isBetaTag(tag: string): boolean {
   return /(?:^|[.-])beta(?:[.-]|$)/i.test(tag);
 }
 
-export function isPrereleaseTag(tag: string): boolean {
-  const parsed = parseComparableSemver(tag, { normalizeLegacyDotBeta: true });
-  if (parsed) {
-    return Boolean(parsed.prerelease?.some((part) => !/^[0-9]+$/.test(part)));
-  }
-  return /(?:^|[.-])(alpha|beta|rc|pre|preview|canary|dev|next|nightly|experimental)(?:[.-]|$)/i.test(
-    tag,
-  );
-}
-
 export function isStableTag(tag: string): boolean {
-  return !isPrereleaseTag(tag);
+  return !isBetaTag(tag);
 }
 
 export function resolveRegistryUpdateChannel(params: {
@@ -89,10 +78,7 @@ export function resolveEffectiveUpdateChannel(params: {
   if (params.installKind === "git") {
     const tag = params.git?.tag;
     if (tag) {
-      return {
-        channel: isBetaTag(tag) ? "beta" : isStableTag(tag) ? "stable" : "dev",
-        source: "git-tag",
-      };
+      return { channel: isBetaTag(tag) ? "beta" : "stable", source: "git-tag" };
     }
     const branch = params.git?.branch;
     if (branch && branch !== "HEAD") {

@@ -86,8 +86,6 @@ export function createGetReplyContinueDirectivesResult(params: {
   commandSource: string;
   senderIsOwner: boolean;
   resetHookTriggered: boolean;
-  provider?: string;
-  model?: string;
 }) {
   return {
     kind: "continue" as const,
@@ -124,8 +122,8 @@ export function createGetReplyContinueDirectivesResult(params: {
       blockStreamingEnabled: false,
       blockReplyChunking: undefined,
       resolvedBlockStreamingBreak: undefined,
-      provider: params.provider ?? "openai",
-      model: params.model ?? "gpt-4o-mini",
+      provider: "openai",
+      model: "gpt-4o-mini",
       modelState: {
         resolveDefaultThinkingLevel: async () => undefined,
         resolveThinkingCatalog: async () => [],

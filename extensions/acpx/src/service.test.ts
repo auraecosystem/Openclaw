@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const { runtimeRegistry } = vi.hoisted(() => ({
@@ -90,8 +89,7 @@ vi.mock("./process-reaper.js", () => ({
 }));
 
 import { getAcpRuntimeBackend } from "../runtime-api.js";
-import type { OpenClawPluginServiceContext } from "../runtime-api.js";
-import { createAcpxRuntimeService, resolveAcpxTimerTimeoutMs } from "./service.js";
+import { createAcpxRuntimeService } from "./service.js";
 
 const tempDirs: string[] = [];
 const previousEnv = {
@@ -131,7 +129,7 @@ afterEach(async () => {
   }
 });
 
-function createServiceContext(workspaceDir: string): OpenClawPluginServiceContext {
+function createServiceContext(workspaceDir: string) {
   return {
     workspaceDir,
     stateDir: path.join(workspaceDir, ".openclaw-plugin-state"),
@@ -158,27 +156,6 @@ function createMockRuntime(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createStartupTraceRecorder() {
-  const measured: string[] = [];
-  const details: Array<{
-    name: string;
-    metrics: ReadonlyArray<readonly [string, number | string]>;
-  }> = [];
-  return {
-    measured,
-    details,
-    startupTrace: {
-      measure: async <T>(name: string, run: () => T | Promise<T>): Promise<T> => {
-        measured.push(name);
-        return await run();
-      },
-      detail: (name: string, metrics: ReadonlyArray<readonly [string, number | string]>) => {
-        details.push({ name, metrics });
-      },
-    },
-  };
-}
-
 function readFirstRuntimeFactoryInput(runtimeFactory: { mock: { calls: Array<Array<unknown>> } }) {
   const [call] = runtimeFactory.mock.calls;
   if (!call) {
@@ -197,11 +174,6 @@ function readFirstRuntimeFactoryInput(runtimeFactory: { mock: { calls: Array<Arr
 }
 
 describe("createAcpxRuntimeService", () => {
-  it("caps configured timeout seconds to timer-safe milliseconds", () => {
-    expect(resolveAcpxTimerTimeoutMs(0.001)).toBe(1);
-    expect(resolveAcpxTimerTimeoutMs(Number.MAX_SAFE_INTEGER)).toBe(MAX_TIMER_TIMEOUT_MS);
-  });
-
   it("registers and unregisters the embedded backend", async () => {
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
@@ -219,9 +191,8 @@ describe("createAcpxRuntimeService", () => {
     expect(getAcpRuntimeBackend("acpx")).toBeUndefined();
   });
 
-  it("skips the startup probe and does not advertise backend health when explicitly disabled", async () => {
+  it("skips the startup probe and defers acpx backend health reporting when explicitly opted out", async () => {
     process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "0";
-    delete process.env.OPENCLAW_SKIP_ACPX_RUNTIME_PROBE;
     const workspaceDir = await makeTempDir();
     const stateDir = path.join(workspaceDir, "custom-state");
     const ctx = createServiceContext(workspaceDir);
@@ -230,7 +201,7 @@ describe("createAcpxRuntimeService", () => {
     });
     const runtime = createMockRuntime({
       doctor: async () => ({ ok: true, message: "ok" }),
-      isHealthy: () => false,
+      isHealthy: () => true,
       probeAvailability,
     });
     const service = createAcpxRuntimeService({
@@ -247,8 +218,7 @@ describe("createAcpxRuntimeService", () => {
     await service.stop?.(ctx);
   });
 
-  it("waits for the embedded runtime startup probe before resolving by default", async () => {
-    delete process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE;
+  it("waits for the embedded runtime startup probe before resolving", async () => {
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     let releaseProbe!: () => void;
@@ -285,46 +255,6 @@ describe("createAcpxRuntimeService", () => {
 
     expect(resolved).toBe(true);
     expect(ctx.logger.info).toHaveBeenCalledWith("embedded acpx runtime backend ready");
-
-    await service.stop?.(ctx);
-  });
-
-  it("emits ACPX-owned startup trace subspans", async () => {
-    delete process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE;
-    const workspaceDir = await makeTempDir();
-    const ctx = createServiceContext(workspaceDir);
-    const trace = createStartupTraceRecorder();
-    ctx.startupTrace = trace.startupTrace;
-    const runtime = createMockRuntime();
-    const service = createAcpxRuntimeService({
-      runtimeFactory: () => runtime as never,
-    });
-
-    await service.start(ctx);
-
-    expect(trace.measured).toEqual([
-      "config.resolve",
-      "config.prepare-codex-auth",
-      "filesystem.prepare",
-      "gateway-instance-id",
-      "process-leases.reap",
-      "runtime.create",
-      "backend.register",
-      "probe.availability",
-    ]);
-    expect(trace.details).toEqual([
-      {
-        name: "probe-policy",
-        metrics: [
-          ["startupProbeEnabledCount", 1],
-          ["probeAgent", "default"],
-        ],
-      },
-      {
-        name: "probe.result",
-        metrics: [["healthyCount", 1]],
-      },
-    ]);
 
     await service.stop?.(ctx);
   });
@@ -446,9 +376,8 @@ describe("createAcpxRuntimeService", () => {
     await service.stop?.(ctx);
   });
 
-  it("registers the backend lazily without importing ACPX runtime when startup probe is disabled", async () => {
+  it("registers the default backend lazily without importing ACPX runtime when startup probing is opted out", async () => {
     process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "0";
-    delete process.env.OPENCLAW_SKIP_ACPX_RUNTIME_PROBE;
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     const service = createAcpxRuntimeService();
@@ -463,7 +392,6 @@ describe("createAcpxRuntimeService", () => {
       ensureSession(input: { agent: string; mode: string; sessionKey: string }): Promise<unknown>;
     };
     expect(typeof backendRuntime.ensureSession).toBe("function");
-    expect(backend.healthy).toBeUndefined();
     expect(acpxRuntimeConstructorMock).not.toHaveBeenCalled();
 
     await backendRuntime.ensureSession({
@@ -473,151 +401,11 @@ describe("createAcpxRuntimeService", () => {
     });
 
     expect(acpxRuntimeConstructorMock).toHaveBeenCalledOnce();
-    expect(backend.healthy).toBeUndefined();
 
     await service.stop?.(ctx);
   });
 
-  it("adapts lazy runTurn-only default runtimes for startTurn callers", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "0";
-    const workspaceDir = await makeTempDir();
-    const ctx = createServiceContext(workspaceDir);
-    const runTurn = vi.fn(async function* () {
-      yield {
-        type: "text_delta" as const,
-        stream: "output" as const,
-        text: "legacy progress",
-      };
-      yield {
-        type: "done" as const,
-        stopReason: "end_turn",
-      };
-    });
-    acpxRuntimeConstructorMock.mockImplementationOnce(function AcpxRuntime(options: unknown) {
-      return {
-        ...createMockRuntime({
-          runTurn,
-        }),
-        getCapabilities: vi.fn(async () => ({ controls: [] })),
-        getStatus: vi.fn(async () => ({ summary: "ready" })),
-        prepareFreshSession: vi.fn(async () => {}),
-        setConfigOption: vi.fn(async () => {}),
-        setMode: vi.fn(async () => {}),
-        __options: options,
-      };
-    });
-    const service = createAcpxRuntimeService();
-
-    await service.start(ctx);
-
-    const backend = getAcpRuntimeBackend("acpx");
-    if (!backend) {
-      throw new Error("expected ACPX runtime backend");
-    }
-    const backendRuntime = backend.runtime as {
-      startTurn(input: {
-        handle: { sessionKey: string; backend: string; runtimeSessionName: string };
-        text: string;
-        mode: string;
-        requestId: string;
-      }): {
-        events: AsyncIterable<unknown>;
-        result: Promise<unknown>;
-      };
-    };
-    const turn = backendRuntime.startTurn({
-      handle: {
-        sessionKey: "agent:codex:acp:test",
-        backend: "acpx",
-        runtimeSessionName: "agent:codex:acp:test",
-      },
-      text: "hello",
-      mode: "prompt",
-      requestId: "turn-1",
-    });
-    await expect(turn.result).resolves.toEqual({
-      status: "completed",
-      stopReason: "end_turn",
-    });
-    const events = [];
-    for await (const event of turn.events) {
-      events.push(event);
-    }
-
-    expect(events).toEqual([
-      {
-        type: "text_delta",
-        stream: "output",
-        text: "legacy progress",
-      },
-    ]);
-    expect(runTurn).toHaveBeenCalledOnce();
-
-    await service.stop?.(ctx);
-  });
-
-  it("passes the plugin timeout to the default acpx runtime constructor", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "0";
-    const workspaceDir = await makeTempDir();
-    const ctx = createServiceContext(workspaceDir);
-    const service = createAcpxRuntimeService({
-      pluginConfig: { timeoutSeconds: 0.001 },
-    });
-
-    await service.start(ctx);
-
-    const backend = getAcpRuntimeBackend("acpx");
-    if (!backend) {
-      throw new Error("expected ACPX runtime backend");
-    }
-    const backendRuntime = backend.runtime as {
-      ensureSession(input: { agent: string; mode: string; sessionKey: string }): Promise<unknown>;
-    };
-
-    await backendRuntime.ensureSession({
-      agent: "codex",
-      mode: "oneshot",
-      sessionKey: "agent:codex:acp:test",
-    });
-
-    const [options] = acpxRuntimeConstructorMock.mock.calls[0] ?? [];
-    expect(options).toHaveProperty("timeoutMs", 1);
-
-    await service.stop?.(ctx);
-  });
-
-  it("caps oversized plugin timeouts before constructing the default acpx runtime", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "0";
-    const workspaceDir = await makeTempDir();
-    const ctx = createServiceContext(workspaceDir);
-    const service = createAcpxRuntimeService({
-      pluginConfig: { timeoutSeconds: Number.MAX_SAFE_INTEGER },
-    });
-
-    await service.start(ctx);
-
-    const backend = getAcpRuntimeBackend("acpx");
-    if (!backend) {
-      throw new Error("expected ACPX runtime backend");
-    }
-    const backendRuntime = backend.runtime as {
-      ensureSession(input: { agent: string; mode: string; sessionKey: string }): Promise<unknown>;
-    };
-
-    await backendRuntime.ensureSession({
-      agent: "codex",
-      mode: "oneshot",
-      sessionKey: "agent:codex:acp:test",
-    });
-
-    const [options] = acpxRuntimeConstructorMock.mock.calls[0] ?? [];
-    expect(options).toHaveProperty("timeoutMs", MAX_TIMER_TIMEOUT_MS);
-
-    await service.stop?.(ctx);
-  });
-
-  it("runs the embedded runtime probe at startup when explicitly enabled and reports health", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "1";
+  it("runs the embedded runtime probe at startup by default and reports health", async () => {
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     const probeAvailability = vi.fn(async () => {});
@@ -637,8 +425,7 @@ describe("createAcpxRuntimeService", () => {
     await service.stop?.(ctx);
   });
 
-  it("bounds the opt-in embedded runtime startup probe wait with the configured timeout", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "1";
+  it("bounds the embedded runtime startup probe wait with the configured timeout", async () => {
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     const probeAvailability = vi.fn(() => new Promise<void>(() => {}));
@@ -767,8 +554,7 @@ describe("createAcpxRuntimeService", () => {
     await service.stop?.(ctx);
   });
 
-  it("lets the skip env override the opt-in embedded runtime startup probe without advertising health", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "1";
+  it("can skip the embedded runtime probe via env", async () => {
     process.env.OPENCLAW_SKIP_ACPX_RUNTIME_PROBE = "1";
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
@@ -792,7 +578,6 @@ describe("createAcpxRuntimeService", () => {
   });
 
   it("formats non-string doctor details without losing object payloads", async () => {
-    process.env.OPENCLAW_ACPX_RUNTIME_STARTUP_PROBE = "1";
     const workspaceDir = await makeTempDir();
     const ctx = createServiceContext(workspaceDir);
     const runtime = createMockRuntime({

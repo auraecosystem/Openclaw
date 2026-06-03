@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  resetActiveManagedProxyStateForTests,
+  _resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
 } from "./proxy/active-proxy-state.js";
@@ -109,7 +109,7 @@ afterEach(() => {
   poolCtor.mockReset();
   proxyAgentCtor.mockReset();
   proxyConnect.mockReset();
-  resetActiveManagedProxyStateForTests();
+  _resetActiveManagedProxyStateForTests();
 });
 
 describe("createHttp1ProxyAgent", () => {

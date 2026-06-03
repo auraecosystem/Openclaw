@@ -170,6 +170,7 @@ describe("channel plugin loader", () => {
         return;
       case "missing-outbound":
         await expectOutboundAdapterMissingCase(testCase.registry);
+        return;
     }
   });
 });

@@ -1,25 +1,9 @@
-import { appendFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 import { say, warn } from "./host-command.ts";
 
-export const PHASE_LOG_TAIL_MAX_BYTES = 512 * 1024;
-
-function appendTextTail(current: string, chunk: string, maxBytes: number): string {
-  const text = chunk.endsWith("\n") ? chunk : `${chunk}\n`;
-  const combined = `${current}${text}`;
-  if (Buffer.byteLength(combined) <= maxBytes) {
-    return combined;
-  }
-  const marker = `[phase log tail truncated to last ${maxBytes} bytes]\n`;
-  const tailBytes = Math.max(0, maxBytes - Buffer.byteLength(marker));
-  const tail = Buffer.from(combined).subarray(-tailBytes).toString("utf8");
-  return `${marker}${tail}`;
-}
-
 export class PhaseRunner {
-  private logTail = "";
-  private currentLogPath: string | undefined;
+  private logText = "";
   private deadlineMs = 0;
   private timings: Array<{
     durationMs: number;
@@ -29,18 +13,13 @@ export class PhaseRunner {
     timeoutSeconds: number;
   }> = [];
 
-  constructor(
-    private runDir: string,
-    private logTailMaxBytes = PHASE_LOG_TAIL_MAX_BYTES,
-  ) {}
+  constructor(private runDir: string) {}
 
   async phase(name: string, timeoutSeconds: number, fn: () => Promise<void> | void): Promise<void> {
     const logPath = path.join(this.runDir, `${name}.log`);
     say(name);
-    this.logTail = "";
-    this.currentLogPath = logPath;
+    this.logText = "";
     this.deadlineMs = Date.now() + timeoutSeconds * 1000;
-    await writeFile(logPath, "", "utf8");
     const startedAt = Date.now();
     let status: "pass" | "fail" = "fail";
     let timer: NodeJS.Timeout | undefined;
@@ -52,11 +31,13 @@ export class PhaseRunner {
     });
     try {
       await Promise.race([Promise.resolve(fn()), timeout]);
+      await writeFile(logPath, this.logText, "utf8");
       status = "pass";
     } catch (error) {
+      await writeFile(logPath, this.logText, "utf8").catch(() => undefined);
       warn(`${name} failed`);
       warn(`log tail: ${logPath}`);
-      process.stderr.write(this.logTail.split("\n").slice(-80).join("\n"));
+      process.stderr.write(this.logText.split("\n").slice(-80).join("\n"));
       process.stderr.write("\n");
       throw error;
     } finally {
@@ -71,7 +52,6 @@ export class PhaseRunner {
       if (timer) {
         clearTimeout(timer);
       }
-      this.currentLogPath = undefined;
       this.deadlineMs = 0;
     }
   }
@@ -104,11 +84,10 @@ export class PhaseRunner {
     if (!text) {
       return;
     }
-    const line = text.endsWith("\n") ? text : `${text}\n`;
-    if (this.currentLogPath) {
-      appendFileSync(this.currentLogPath, line, "utf8");
+    this.logText += text;
+    if (!text.endsWith("\n")) {
+      this.logText += "\n";
     }
-    this.logTail = appendTextTail(this.logTail, line, this.logTailMaxBytes);
   }
 
   private async writeTimings(): Promise<void> {

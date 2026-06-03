@@ -62,12 +62,13 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
     });
 
     const loadOptions = getOnlyLoadOpenClawPluginsOptions();
-    expect(loadOptions).toMatchObject({
+    expect(loadOptions).toEqual({
       config: { plugins: {} },
       activationSourceConfig: { plugins: { allow: ["demo"] } },
       autoEnabledReasons: {},
       workspaceDir: "/workspace",
       env: { HOME: "/tmp/openclaw-home" },
+      logger: loadOptions.logger,
       throwOnLoadError: true,
       cache: false,
       activate: false,
@@ -75,7 +76,6 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
       loadModules: undefined,
       onlyPluginIds: ["demo"],
     });
-    expect(loadOptions.logger).toBeDefined();
   });
 
   it("forwards explicit manifest-only requests", () => {
@@ -85,19 +85,19 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
     });
 
     const loadOptions = getOnlyLoadOpenClawPluginsOptions();
-    expect(loadOptions).toMatchObject({
+    expect(loadOptions).toEqual({
       config: { plugins: {} },
       activationSourceConfig: { plugins: {} },
       autoEnabledReasons: {},
       workspaceDir: "/resolved-workspace",
+      env: loadOptions.env,
+      logger: loadOptions.logger,
       throwOnLoadError: true,
       cache: false,
       activate: false,
       mode: "validate",
       loadModules: false,
     });
-    expect(loadOptions.env).toBe(process.env);
-    expect(loadOptions.logger).toBeDefined();
   });
 
   it("forwards an explicit logger through metadata snapshots", () => {
@@ -113,7 +113,7 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
       workspaceDir: "/workspace",
     });
 
-    expect(getOnlyLoadOpenClawPluginsOptions()).toMatchObject({
+    expect(getOnlyLoadOpenClawPluginsOptions()).toEqual({
       config: { plugins: {} },
       activationSourceConfig: { plugins: {} },
       autoEnabledReasons: {},
@@ -179,11 +179,13 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
     });
 
     const loadOptions = getOnlyLoadOpenClawPluginsOptions();
-    expect(loadOptions).toMatchObject({
+    expect(loadOptions).toEqual({
       config: { plugins: {} },
       activationSourceConfig: { plugins: {} },
       autoEnabledReasons: {},
       workspaceDir: "/resolved-workspace",
+      env: loadOptions.env,
+      logger: loadOptions.logger,
       throwOnLoadError: true,
       cache: false,
       activate: false,
@@ -191,7 +193,5 @@ describe("loadPluginMetadataRegistrySnapshot", () => {
       loadModules: undefined,
       onlyPluginIds: [],
     });
-    expect(loadOptions.env).toBe(process.env);
-    expect(loadOptions.logger).toBeDefined();
   });
 });

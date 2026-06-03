@@ -23,8 +23,6 @@ describe("cli-session helpers", () => {
       authEpoch: "auth-epoch",
       authEpochVersion: 2,
       extraSystemPromptHash: "prompt-hash",
-      promptToolNamesHash: "prompt-tools-hash",
-      cwdHash: "cwd-hash",
       mcpConfigHash: "mcp-hash",
       mcpResumeHash: "mcp-resume-hash",
     });
@@ -38,8 +36,6 @@ describe("cli-session helpers", () => {
       authEpoch: "auth-epoch",
       authEpochVersion: 2,
       extraSystemPromptHash: "prompt-hash",
-      promptToolNamesHash: "prompt-tools-hash",
-      cwdHash: "cwd-hash",
       mcpConfigHash: "mcp-hash",
       mcpResumeHash: "mcp-resume-hash",
     });
@@ -82,7 +78,6 @@ describe("cli-session helpers", () => {
       resolveCliSessionReuse({
         binding: getCliSessionBinding(entry, "claude-cli"),
         authEpochVersion: 2,
-        cwdHash: hashCliSessionText("/work/repo"),
       }),
     ).toEqual({ sessionId: "legacy-session" });
   });
@@ -166,53 +161,9 @@ describe("cli-session helpers", () => {
         authEpoch: "auth-epoch-a",
         authEpochVersion: 2,
         extraSystemPromptHash: "prompt-a",
-        promptToolNamesHash: "prompt-tools-b",
-        mcpConfigHash: "mcp-a",
-      }),
-    ).toEqual({ invalidatedReason: "system-prompt" });
-    expect(
-      resolveCliSessionReuse({
-        binding,
-        authProfileId: "anthropic:work",
-        authEpoch: "auth-epoch-a",
-        authEpochVersion: 2,
-        extraSystemPromptHash: "prompt-a",
         mcpConfigHash: "mcp-b",
       }),
     ).toEqual({ invalidatedReason: "mcp" });
-  });
-
-  it("invalidates reuse when the task cwd changes", () => {
-    const binding = {
-      sessionId: "cli-session-1",
-      authEpochVersion: 2,
-      cwdHash: hashCliSessionText("/work/repo-a"),
-    };
-
-    expect(
-      resolveCliSessionReuse({
-        binding,
-        authEpochVersion: 2,
-        cwdHash: hashCliSessionText("/work/repo-b"),
-      }),
-    ).toEqual({ invalidatedReason: "cwd" });
-    expect(
-      resolveCliSessionReuse({
-        binding,
-        authEpochVersion: 2,
-        cwdHash: hashCliSessionText("/work/repo-a"),
-      }),
-    ).toEqual({ sessionId: "cli-session-1" });
-  });
-
-  it("does not invalidate legacy metadata before cwd hash backfill", () => {
-    expect(
-      resolveCliSessionReuse({
-        binding: { sessionId: "cli-session-1" },
-        authEpochVersion: 2,
-        cwdHash: hashCliSessionText("/work/repo-a"),
-      }),
-    ).toEqual({ sessionId: "cli-session-1" });
   });
 
   it("reuses when auth profile ids rotate but the versioned auth epoch is stable", () => {

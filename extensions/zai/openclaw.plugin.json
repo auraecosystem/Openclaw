@@ -218,14 +218,6 @@
         ]
       }
     },
-    "aliases": {
-      "z.ai": {
-        "provider": "zai"
-      },
-      "z-ai": {
-        "provider": "zai"
-      }
-    },
     "discovery": {
       "zai": "static"
     }

@@ -11,51 +11,14 @@ export type CodexAppServerClientFactory = (
   authProfileId?: string,
   agentDir?: string,
   config?: AuthProfileOrderConfig,
-  options?: {
-    onStartedClient?: (client: CodexAppServerClient) => void;
-    abandonSignal?: AbortSignal;
-  },
 ) => Promise<CodexAppServerClient>;
-
-let sharedClientModulePromise: Promise<typeof import("./shared-client.js")> | null = null;
-
-const loadSharedClientModule = async () => {
-  sharedClientModulePromise ??= import("./shared-client.js");
-  return await sharedClientModulePromise;
-};
 
 export const defaultCodexAppServerClientFactory: CodexAppServerClientFactory = (
   startOptions,
   authProfileId,
   agentDir,
   config,
-  options,
 ) =>
-  loadSharedClientModule().then(({ getSharedCodexAppServerClient }) =>
-    getSharedCodexAppServerClient({
-      startOptions,
-      authProfileId,
-      agentDir,
-      config,
-      onStartedClient: options?.onStartedClient,
-      abandonSignal: options?.abandonSignal,
-    }),
-  );
-
-export const defaultLeasedCodexAppServerClientFactory: CodexAppServerClientFactory = (
-  startOptions,
-  authProfileId,
-  agentDir,
-  config,
-  options,
-) =>
-  loadSharedClientModule().then(({ getLeasedSharedCodexAppServerClient }) =>
-    getLeasedSharedCodexAppServerClient({
-      startOptions,
-      authProfileId,
-      agentDir,
-      config,
-      onStartedClient: options?.onStartedClient,
-      abandonSignal: options?.abandonSignal,
-    }),
+  import("./shared-client.js").then(({ getSharedCodexAppServerClient }) =>
+    getSharedCodexAppServerClient({ startOptions, authProfileId, agentDir, config }),
   );

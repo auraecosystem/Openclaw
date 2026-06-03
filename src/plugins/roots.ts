@@ -1,5 +1,4 @@
 import path from "node:path";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { resolveConfigDir, resolveUserPath } from "../utils.js";
 import { resolveBundledPluginsDir } from "./bundled-dir.js";
 
@@ -38,8 +37,10 @@ export function resolvePluginCacheInputs(params: {
     env,
   });
   // Preserve caller order because load-path precedence follows input order.
-  const loadPaths = normalizeStringEntries(
-    (params.loadPaths ?? []).filter((entry): entry is string => typeof entry === "string"),
-  ).map((entry) => resolveUserPath(entry, env));
+  const loadPaths = (params.loadPaths ?? [])
+    .filter((entry): entry is string => typeof entry === "string")
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .map((entry) => resolveUserPath(entry, env));
   return { roots, loadPaths };
 }

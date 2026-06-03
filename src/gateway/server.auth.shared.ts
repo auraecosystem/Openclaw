@@ -2,13 +2,10 @@ import os from "node:os";
 import path from "node:path";
 import { expect } from "vitest";
 import { WebSocket } from "ws";
-import {
-  MIN_PROBE_PROTOCOL_VERSION,
-  PROTOCOL_VERSION,
-} from "../../packages/gateway-protocol/src/index.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";
 import { buildDeviceAuthPayload } from "./device-auth.js";
+import { MIN_PROBE_PROTOCOL_VERSION, PROTOCOL_VERSION } from "./protocol/index.js";
 import {
   createGatewaySuiteHarness,
   connectReq,
@@ -58,9 +55,7 @@ async function waitForWsClose(ws: WebSocket, timeoutMs: number): Promise<boolean
 const openWs = async (port: number, headers?: Record<string, string>) => {
   const ws = new WebSocket(`ws://127.0.0.1:${port}`, headers ? { headers } : undefined);
   trackConnectChallengeNonce(ws);
-  await new Promise<void>((resolve) => {
-    ws.once("open", resolve);
-  });
+  await new Promise<void>((resolve) => ws.once("open", resolve));
   return ws;
 };
 
@@ -91,9 +86,7 @@ const openTailscaleWs = async (port: number, headers?: Record<string, string>) =
     },
   });
   trackConnectChallengeNonce(ws);
-  await new Promise<void>((resolve) => {
-    ws.once("open", resolve);
-  });
+  await new Promise<void>((resolve) => ws.once("open", resolve));
   return ws;
 };
 
@@ -427,7 +420,7 @@ export {
   withRuntimeVersionEnv,
   writeTrustedProxyControlUiConfig,
 };
-export { ConnectErrorDetailCodes } from "../../packages/gateway-protocol/src/connect-error-details.js";
+export { ConnectErrorDetailCodes } from "./protocol/connect-error-details.js";
 export { getPreauthHandshakeTimeoutMsFromEnv } from "./handshake-timeouts.js";
-export { PROTOCOL_VERSION } from "../../packages/gateway-protocol/src/index.js";
+export { PROTOCOL_VERSION } from "./protocol/index.js";
 export { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../utils/message-channel.js";

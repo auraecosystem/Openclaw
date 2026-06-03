@@ -4,7 +4,6 @@ import android.os.Build
 import java.net.InetAddress
 import java.util.Locale
 
-/** Returns true only for loopback hosts safe to treat as local gateway origins. */
 internal fun isLoopbackGatewayHost(
   rawHost: String?,
   allowEmulatorBridgeAlias: Boolean = isAndroidEmulatorRuntime(),
@@ -19,12 +18,9 @@ internal fun isLoopbackGatewayHost(
     host = host.dropLast(1)
   }
   val zoneIndex = host.indexOf('%')
-  // Scoped IPv6 literals are not stable origin identifiers; reject them for
-  // loopback trust instead of guessing which interface the zone names.
   if (zoneIndex >= 0) return false
   if (host.isEmpty()) return false
   if (host == "localhost") return true
-  // Android emulator maps host loopback through this bridge alias.
   if (allowEmulatorBridgeAlias && host == "10.0.2.2") return true
 
   parseIpv4Address(host)?.let { ipv4 ->
@@ -48,8 +44,7 @@ internal fun isLoopbackGatewayHost(
   return isMappedIpv4 && address[12] == 127.toByte()
 }
 
-/** Allows cleartext only for loopback and private/link-local network ranges. */
-internal fun isLocalCleartextGatewayHost(
+internal fun isPrivateLanGatewayHost(
   rawHost: String?,
   allowEmulatorBridgeAlias: Boolean = isAndroidEmulatorRuntime(),
 ): Boolean {
@@ -64,8 +59,6 @@ internal fun isLocalCleartextGatewayHost(
   }
   val zoneIndex = host.indexOf('%')
   if (zoneIndex >= 0) {
-    // Link-local cleartext policy is about the address range; strip the
-    // interface zone before InetAddress parsing rejects otherwise valid hosts.
     host = host.substring(0, zoneIndex)
   }
   if (host.isEmpty()) return false
@@ -114,7 +107,6 @@ private fun isAndroidEmulatorRuntime(): Boolean {
     product.contains("simulator")
 }
 
-/** Parses strict dotted-quad IPv4, rejecting shorthand and out-of-range octets. */
 private fun parseIpv4Address(host: String): ByteArray? {
   val parts = host.split('.')
   if (parts.size != 4) return null
@@ -127,5 +119,4 @@ private fun parseIpv4Address(host: String): ByteArray? {
   return bytes
 }
 
-/** Cheap prefilter before handing potential IPv6 literals to InetAddress. */
 private fun isIpv6LiteralChar(char: Char): Boolean = char in '0'..'9' || char in 'a'..'f' || char == ':' || char == '.'

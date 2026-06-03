@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { matrixPlugin } from "../../channel.js";
 import {
-  testing as sessionBindingTesting,
+  __testing as sessionBindingTesting,
   createTestRegistry,
   registerSessionBindingAdapter,
   resolveAgentRoute,

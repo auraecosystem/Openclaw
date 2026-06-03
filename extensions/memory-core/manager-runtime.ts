@@ -1,5 +1,1 @@
-export {
-  closeAllMemoryIndexManagers,
-  closeMemoryIndexManagersForAgent,
-  MemoryIndexManager,
-} from "./src/memory/manager-runtime.js";
+export { closeAllMemoryIndexManagers, MemoryIndexManager } from "./src/memory/manager-runtime.js";

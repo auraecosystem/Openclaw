@@ -121,8 +121,8 @@ function writePluginWithCliRegistryDependency([
   writePluginManifest(path.join(dir, "openclaw.plugin.json"), id);
 }
 
-function writeClaudeBundle(args) {
-  const root = requireArg(args[0], "root");
+function writeClaudeBundle([root]) {
+  root = requireArg(root, "root");
   writeJson(path.join(root, ".claude-plugin", "plugin.json"), { name: "claude-bundle-e2e" });
   write(
     path.join(root, "commands", "office-hours.md"),
@@ -130,8 +130,8 @@ function writeClaudeBundle(args) {
   );
 }
 
-function writePluginMarketplace(args) {
-  const root = requireArg(args[0], "root");
+function writePluginMarketplace([root]) {
+  root = requireArg(root, "root");
   writeJson(path.join(root, ".claude-plugin", "marketplace.json"), {
     name: "Fixture Marketplace",
     version: "1.0.0",

@@ -300,9 +300,7 @@ describe("buildInboundUserContextPrefix", () => {
       { sourceReplyDeliveryMode: "message_tool_only" },
     );
 
-    expect(text).toContain(
-      "Delivery: Final assistant text is not automatically delivered in this run. Use the `message` tool to send user-visible output.",
-    );
+    expect(text).toContain("Delivery: to send a message, use the `message` tool.");
     expect(text.indexOf("Delivery:")).toBeLessThan(text.indexOf("Conversation info"));
     expect(text).toContain("Conversation info (untrusted metadata):");
   });
@@ -422,13 +420,13 @@ describe("buildInboundUserContextPrefix", () => {
       {
         ChatType: "group",
         MessageSid: "msg-with-ts",
-        Timestamp: Date.UTC(2026, 1, 15, 13, 35, 42),
+        Timestamp: Date.UTC(2026, 1, 15, 13, 35),
       } as TemplateContext,
       { timezone: "utc" },
     );
 
     const conversationInfo = parseConversationInfoPayload(text);
-    expect(conversationInfo["timestamp"]).toBe("Sun 2026-02-15T13:35:42Z");
+    expect(conversationInfo["timestamp"]).toBe("Sun 2026-02-15T13:35Z");
   });
 
   it("honors envelope user timezone for conversation timestamps", () => {
@@ -437,7 +435,7 @@ describe("buildInboundUserContextPrefix", () => {
         {
           ChatType: "group",
           MessageSid: "msg-with-user-tz",
-          Timestamp: Date.UTC(2026, 2, 19, 0, 0, 27),
+          Timestamp: Date.UTC(2026, 2, 19, 0, 0),
         } as TemplateContext,
         {
           timezone: "user",
@@ -446,7 +444,7 @@ describe("buildInboundUserContextPrefix", () => {
       );
 
       const conversationInfo = parseConversationInfoPayload(text);
-      expect(conversationInfo["timestamp"]).toBe("Thu 2026-03-19 09:00:27 GMT+9");
+      expect(conversationInfo["timestamp"]).toBe("Thu 2026-03-19 09:00 GMT+9");
     });
   });
 

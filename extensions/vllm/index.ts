@@ -11,7 +11,6 @@ import {
   VLLM_PROVIDER_LABEL,
 } from "./api.js";
 import { wrapVllmProviderStream } from "./stream.js";
-import { resolveThinkingProfile } from "./thinking-policy.js";
 
 const PROVIDER_ID = "vllm";
 
@@ -91,7 +90,6 @@ export default definePluginEntry({
         "vLLM requires authentication to be registered as a provider. " +
         'Set VLLM_API_KEY (any value works) or run "openclaw configure". ' +
         "See: https://docs.openclaw.ai/providers/vllm",
-      resolveThinkingProfile,
       wrapStreamFn: wrapVllmProviderStream,
     });
   },

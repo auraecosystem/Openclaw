@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { MAX_DATE_TIMESTAMP_MS } from "../../packages/normalization-core/src/number-coercion.js";
 import { buildOauthProviderAuthResult } from "./provider-auth-result.js";
 
 describe("buildOauthProviderAuthResult", () => {
@@ -91,21 +90,6 @@ describe("buildOauthProviderAuthResult", () => {
           },
         },
       },
-    });
-  });
-
-  it("omits OAuth expiry values outside the Date timestamp range", () => {
-    const result = buildOauthProviderAuthResult({
-      providerId: "google",
-      defaultModel: "google/gemini-3.1-pro-preview",
-      access: "access-token",
-      expires: MAX_DATE_TIMESTAMP_MS + 1,
-    });
-
-    expect(result.profiles[0]?.credential).toEqual({
-      type: "oauth",
-      provider: "google",
-      access: "access-token",
     });
   });
 });

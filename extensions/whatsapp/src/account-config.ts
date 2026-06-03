@@ -8,7 +8,7 @@ import {
 import {
   resolveChannelStreamingBlockEnabled,
   resolveChannelStreamingChunkMode,
-} from "openclaw/plugin-sdk/channel-outbound";
+} from "openclaw/plugin-sdk/channel-streaming";
 import type { WhatsAppAccountConfig } from "./account-types.js";
 
 function resolveWhatsAppDefaultAccountSharedConfig(
@@ -28,7 +28,7 @@ function resolveWhatsAppDefaultAccountSharedConfig(
   return sharedDefaults;
 }
 
-function resolveWhatsAppAccountConfigForTest(
+function _resolveWhatsAppAccountConfig(
   cfg: OpenClawConfig,
   accountId: string,
 ): WhatsAppAccountConfig | undefined {
@@ -40,7 +40,7 @@ function resolveMergedNamedWhatsAppAccountConfig(params: {
   accountId: string;
 }): WhatsAppAccountConfig {
   const rootCfg = params.cfg.channels?.whatsapp;
-  const accountConfig = resolveWhatsAppAccountConfigForTest(params.cfg, params.accountId);
+  const accountConfig = _resolveWhatsAppAccountConfig(params.cfg, params.accountId);
   return {
     ...mergeAccountConfig<WhatsAppAccountConfig>({
       channelConfig: rootCfg as WhatsAppAccountConfig | undefined,

@@ -2,7 +2,7 @@ import {
   createMessageReceiveContext,
   type MessageAckPolicy,
   type MessageReceiveContext,
-} from "openclaw/plugin-sdk/channel-outbound";
+} from "openclaw/plugin-sdk/channel-message";
 import {
   buildTelegramUpdateKey,
   createTelegramUpdateDedupe,
@@ -118,7 +118,7 @@ export function createTelegramUpdateTracker(options: TelegramUpdateTrackerOption
     }
     highestPersistenceRequestedUpdateId = updateId;
     persistTargetUpdateId = updateId;
-    void drainPersistQueue().catch((err: unknown) => {
+    void drainPersistQueue().catch((err) => {
       options.onPersistError?.(err);
     });
   };
@@ -174,7 +174,7 @@ export function createTelegramUpdateTracker(options: TelegramUpdateTrackerOption
     if (!receiveContext?.shouldAckAfter(stage)) {
       return;
     }
-    void receiveContext.ack().catch((err: unknown) => {
+    void receiveContext.ack().catch((err) => {
       options.onPersistError?.(err);
     });
   };
@@ -251,7 +251,7 @@ export function createTelegramUpdateTracker(options: TelegramUpdateTrackerOption
         failedUpdateIds.add(update.updateId);
         void update.receiveContext
           ?.nack(new Error("Telegram update handler did not complete"))
-          .catch((err: unknown) => {
+          .catch((err) => {
             options.onPersistError?.(err);
           });
       }

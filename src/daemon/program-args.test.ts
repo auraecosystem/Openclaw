@@ -73,6 +73,7 @@ describe("resolveGatewayProgramArguments", () => {
       if (target === indexPath || target === indexMjsPath) {
         throw new Error("missing");
       }
+      return;
     });
 
     const result = await resolveGatewayProgramArguments({ port: 18789 });

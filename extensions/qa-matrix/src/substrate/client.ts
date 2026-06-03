@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { setTimeout as sleep } from "node:timers/promises";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { uniqueStrings, uniqueValues } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { MatrixQaObservedEvent } from "./events.js";
 import { requestMatrixJson, type MatrixQaFetchLike } from "./request.js";
 import {
@@ -204,7 +203,7 @@ export function buildMatrixQaMessageContent(params: {
   threadRootEventId?: string;
 }): MatrixQaSendMessageContent {
   const body = params.body;
-  const uniqueMentionUserIds = uniqueStrings(params.mentionUserIds?.filter(Boolean) ?? []);
+  const uniqueMentionUserIds = [...new Set(params.mentionUserIds?.filter(Boolean) ?? [])];
   const formattedParts: string[] = [];
   let cursor = 0;
   let usedFormattedMention = false;
@@ -765,7 +764,7 @@ function resolveTopologyMemberAccounts(
   accounts: Record<MatrixQaParticipantRole, MatrixQaRegisteredAccount>,
   memberRoles: MatrixQaParticipantRole[],
 ) {
-  const uniqueRoles = uniqueValues(memberRoles);
+  const uniqueRoles = [...new Set(memberRoles)];
   if (uniqueRoles.length === 0) {
     throw new Error("Matrix QA room provisioning requires at least one member");
   }
@@ -902,7 +901,7 @@ export async function provisionMatrixQaRoom(params: {
   } satisfies MatrixQaProvisionResult;
 }
 
-export const testing = {
+export const __testing = {
   buildMatrixQaMessageContent,
   buildMatrixQaReplacementMessageContent,
   buildMatrixReactionRelation,
@@ -911,4 +910,3 @@ export const testing = {
   createMatrixQaRoomObserver,
   resolveNextRegistrationAuth,
 };
-export { testing as __testing };

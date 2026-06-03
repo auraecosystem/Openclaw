@@ -26,9 +26,7 @@ import { createPluginRecord } from "../status.test-helpers.js";
 import type { OpenClawPluginApi } from "../types.js";
 
 async function waitForPluginEventHandlers(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setImmediate(resolve);
-  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 function expectNoCleanupFailures(result: Awaited<ReturnType<typeof runPluginHostCleanup>>): void {
@@ -251,7 +249,7 @@ describe("plugin run context lifecycle", () => {
         api.registerAgentEventSubscription({
           id: "delayed",
           streams: ["tool"],
-          async handle(eventValue, ctx) {
+          async handle(_event, ctx) {
             ctx.setRunContext("before-terminal", { visible: true });
             await new Promise<void>((resolve) => {
               releaseToolHandler = resolve;
@@ -756,7 +754,7 @@ describe("plugin run context lifecycle", () => {
   it("rejects hung cleanup hooks with a bounded timeout", async () => {
     vi.useFakeTimers();
     const cleanup = vi.fn(async () => {
-      await new Promise(() => {});
+      await new Promise(() => undefined);
     });
     registerPluginSessionSchedulerJob({
       pluginId: "hung-cleanup-plugin",
@@ -796,17 +794,17 @@ describe("plugin run context lifecycle", () => {
         api.registerSessionExtension({
           namespace: "state",
           description: "hangs during cleanup",
-          cleanup: () => new Promise(() => {}),
+          cleanup: () => new Promise(() => undefined),
         });
         api.registerRuntimeLifecycle({
           id: "runtime-cleanup",
-          cleanup: () => new Promise(() => {}),
+          cleanup: () => new Promise(() => undefined),
         });
         api.registerSessionSchedulerJob({
           id: "scheduler-cleanup",
           sessionKey: "agent:main:main",
           kind: "monitor",
-          cleanup: () => new Promise(() => {}),
+          cleanup: () => new Promise(() => undefined),
         });
       },
     });

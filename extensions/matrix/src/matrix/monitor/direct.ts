@@ -14,7 +14,6 @@ type DirectMessageCheck = {
 
 type DirectRoomTrackerOptions = {
   log?: (message: string) => void;
-  isExplicitlyConfiguredRoom?: (roomId: string) => boolean | Promise<boolean>;
   canPromoteRecentInvite?: (roomId: string) => boolean | Promise<boolean>;
   canPromoteUnmappedStrictRoom?: (roomId: string) => boolean | Promise<boolean>;
   shouldKeepLocallyPromotedDirectRoom?:
@@ -163,15 +162,6 @@ export function createDirectRoomTracker(client: MatrixClient, opts: DirectRoomTr
     }
   };
 
-  const isExplicitlyConfiguredRoom = async (roomId: string): Promise<boolean> => {
-    try {
-      return (await opts.isExplicitlyConfiguredRoom?.(roomId)) ?? false;
-    } catch (err) {
-      log(`matrix: configured room check failed room=${roomId} (${String(err)})`);
-      return true;
-    }
-  };
-
   const hasLocallyPromotedDirectRoom = (roomId: string, remoteUserId?: string | null): boolean => {
     const normalizedRemoteUserId = remoteUserId?.trim();
     if (!normalizedRemoteUserId) {
@@ -214,10 +204,6 @@ export function createDirectRoomTracker(client: MatrixClient, opts: DirectRoomTr
     },
     isDirectMessage: async (params: DirectMessageCheck): Promise<boolean> => {
       const { roomId, senderId } = params;
-      if (await isExplicitlyConfiguredRoom(roomId)) {
-        log(`matrix: dm rejected via explicit room config room=${roomId}`);
-        return false;
-      }
       const selfUserId = params.selfUserId ?? (await ensureSelfUserId());
       const joinedMembers = await resolveJoinedMembers(roomId);
       const strictDirectMembership = isStrictDirectMembership({

@@ -347,6 +347,7 @@ describe("resolveCommandAuthorization", () => {
         OriginatingChannel: "telegram",
         From: "owner-123",
         To: "owner-123",
+        ForceSenderIsOwnerFalse: true,
       } as MsgContext,
       cfg,
       commandAuthorized: true,
@@ -1108,7 +1109,6 @@ describe("control command parsing", () => {
     expect(hasControlCommand("/commands:")).toBe(true);
     expect(hasControlCommand("commands")).toBe(false);
     expect(hasControlCommand("/status")).toBe(true);
-    expect(hasControlCommand("/STATUS")).toBe(true);
     expect(hasControlCommand("/status:")).toBe(true);
     expect(hasControlCommand("status")).toBe(false);
     expect(hasControlCommand("usage")).toBe(false);
@@ -1120,7 +1120,6 @@ describe("control command parsing", () => {
       }
     }
     expect(hasControlCommand("/compact")).toBe(true);
-    expect(hasControlCommand("/COMPACT keep CaseSensitivePath")).toBe(true);
     expect(hasControlCommand("/compact:")).toBe(true);
     expect(hasControlCommand("compact")).toBe(false);
   });

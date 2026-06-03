@@ -1,8 +1,4 @@
-import {
-  asDateTimestampMs,
-  resolveTimestampMsToIsoString,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { parseAbsoluteTimeMs } from "./parse.js";
 import type { CronSchedule } from "./types.js";
 
@@ -21,7 +17,10 @@ type TimestampValidationSuccess = {
 type TimestampValidationResult = TimestampValidationSuccess | TimestampValidationError;
 
 /**
- * Validates one-shot cron timestamps with a small past grace window and far-future cap.
+ * Validates at timestamps in cron schedules.
+ * Rejects timestamps that are:
+ * - More than 1 minute in the past
+ * - More than 10 years in the future
  */
 export function validateScheduleTimestamp(
   schedule: CronSchedule,
@@ -41,14 +40,12 @@ export function validateScheduleTimestamp(
     };
   }
 
-  const referenceNowMs = asDateTimestampMs(nowMs) ?? asDateTimestampMs(Date.now()) ?? 0;
-  const diffMs = atMs - referenceNowMs;
+  const diffMs = atMs - nowMs;
 
-  // Allow a one-minute grace window so creation and validation races do not
-  // reject freshly submitted one-shot jobs.
+  // Check if timestamp is in the past (allow 1 minute grace period)
   if (diffMs < -ONE_MINUTE_MS) {
-    const nowDate = resolveTimestampMsToIsoString(referenceNowMs);
-    const atDate = resolveTimestampMsToIsoString(atMs);
+    const nowDate = new Date(nowMs).toISOString();
+    const atDate = new Date(atMs).toISOString();
     const minutesAgo = Math.floor(-diffMs / ONE_MINUTE_MS);
     return {
       ok: false,
@@ -56,9 +53,9 @@ export function validateScheduleTimestamp(
     };
   }
 
-  // Bound far-future one-shot jobs so mistyped years do not persist forever.
+  // Check if timestamp is too far in the future
   if (diffMs > TEN_YEARS_MS) {
-    const atDate = resolveTimestampMsToIsoString(atMs);
+    const atDate = new Date(atMs).toISOString();
     const yearsAhead = Math.floor(diffMs / (365.25 * 24 * 60 * 60 * 1000));
     return {
       ok: false,

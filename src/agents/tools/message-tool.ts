@@ -1,21 +1,7 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { sortUniqueStrings, uniqueValues } from "@openclaw/normalization-core/string-normalization";
 import { Type, type TSchema } from "typebox";
-import {
-  GATEWAY_CLIENT_IDS,
-  GATEWAY_CLIENT_MODES,
-} from "../../../packages/gateway-protocol/src/client-info.js";
 import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options.types.js";
-import {
-  hasInboundMetadataSentinel,
-  stripInboundMetadata,
-} from "../../auto-reply/reply/strip-inbound-meta.js";
 import type { InboundEventKind } from "../../channels/inbound-event/kind.js";
-import {
-  getChannelPlugin,
-  getLoadedChannelPlugin,
-  listChannelPlugins,
-} from "../../channels/plugins/index.js";
+import { listChannelPlugins } from "../../channels/plugins/index.js";
 import {
   channelSupportsMessageCapability,
   channelSupportsMessageCapabilityForChannel,
@@ -31,40 +17,21 @@ import { getScopedChannelsCommandSecretTargets } from "../../cli/command-secret-
 import { resolveMessageSecretScope } from "../../cli/message-secret-scope.js";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import {
-  getBootEchoContextForSession,
-  stripBootEchoFromOutboundText,
-} from "../../gateway/boot-echo-guard.js";
-import {
-  parseInteractiveParam,
-  parseJsonMessageParam,
-} from "../../infra/outbound/message-action-params.js";
+import { GATEWAY_CLIENT_IDS, GATEWAY_CLIENT_MODES } from "../../gateway/protocol/client-info.js";
 import { getToolResult, runMessageAction } from "../../infra/outbound/message-action-runner.js";
 import { resolveAllowedMessageActions } from "../../infra/outbound/outbound-policy.js";
-import { hasReplyPayloadContent } from "../../interactive/payload.js";
 import { stringifyRouteThreadId } from "../../plugin-sdk/channel-route.js";
 import { POLL_CREATION_PARAM_DEFS, SHARED_POLL_CREATION_PARAM_NAMES } from "../../poll-params.js";
-import {
-  normalizeAccountId,
-  parseAgentSessionKey,
-  parseThreadSessionSuffix,
-} from "../../routing/session-key.js";
-import { stripFormattedReasoningMessage } from "../../shared/text/formatted-reasoning-message.js";
+import { normalizeAccountId } from "../../routing/session-key.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import { stripReasoningTagsFromText } from "../../shared/text/reasoning-tags.js";
 import { normalizeMessageChannel } from "../../utils/message-channel.js";
 import { resolveSessionAgentId } from "../agent-scope.js";
 import { listAllChannelSupportedActions, listChannelSupportedActions } from "../channel-tools.js";
-import { stripInternalRuntimeContext } from "../internal-runtime-context.js";
-import {
-  channelTargetSchema,
-  channelTargetsSchema,
-  optionalNonNegativeIntegerSchema,
-  optionalPositiveIntegerSchema,
-  stringEnum,
-} from "../schema/typebox.js";
+import { channelTargetSchema, channelTargetsSchema, stringEnum } from "../schema/typebox.js";
 import type { AnyAgentTool } from "./common.js";
-import { jsonResult, readStringArrayParam, readStringParam } from "./common.js";
-import { gatewayCallOptionSchemaProperties } from "./gateway-schema.js";
-import { readGatewayCallOptions, resolveGatewayOptions } from "./gateway.js";
+import { jsonResult, readNumberParam, readStringParam } from "./common.js";
+import { resolveGatewayOptions } from "./gateway.js";
 
 const AllMessageActions = CHANNEL_MESSAGE_ACTION_NAMES;
 const MESSAGE_TOOL_THREAD_READ_HINT =
@@ -83,107 +50,32 @@ function actionNeedsExplicitTarget(action: ChannelMessageActionName): boolean {
   return EXPLICIT_TARGET_ACTIONS.has(action);
 }
 
-function normalizeToolCallIdForIdempotencyKey(toolCallId: unknown): string | undefined {
-  const value = normalizeOptionalString(toolCallId);
-  if (!value) {
-    return undefined;
+function stripFormattedReasoningMessage(text: string): string {
+  const stripped = stripReasoningTagsFromText(text);
+  const lines = stripped.split(/\r?\n/u);
+  if (lines[0]?.trim() !== "Reasoning:") {
+    return stripped;
   }
-  return value.replace(/[^A-Za-z0-9._:-]+/gu, "_");
-}
 
-function normalizeEscapedLineBreaksForVisibleText(text: string): string {
-  if (!text.includes("\\")) {
-    return text;
-  }
-  // The send path turns literal "\n" sequences into line breaks later; match
-  // that before privacy stripping so escaped delimiter lines cannot bypass it.
-  return text.replace(/\\r\\n|\\n|\\r/g, "\n");
-}
-
-type VisibleTextSuppressionReason = "internal_runtime_context_echo" | "inbound_metadata_echo";
-
-function sanitizeUserVisibleToolTextResult(
-  text: string,
-  bootPrompt: string | undefined,
-): {
-  text: string;
-  suppressionReason?: VisibleTextSuppressionReason;
-} {
-  const normalized = normalizeEscapedLineBreaksForVisibleText(text);
-  const strippedReasoning = stripFormattedReasoningMessage(normalized);
-  const strippedInternal = stripInternalRuntimeContext(strippedReasoning);
-  const strippedBoot = stripBootEchoFromOutboundText(strippedInternal, bootPrompt);
-  const strippedInbound = hasInboundMetadataSentinel(strippedBoot)
-    ? stripInboundMetadata(strippedBoot)
-    : strippedBoot;
-  const suppressionReason =
-    strippedBoot.trim().length === 0 &&
-    strippedReasoning.trim().length > 0 &&
-    (strippedInternal !== strippedReasoning || strippedBoot !== strippedInternal)
-      ? "internal_runtime_context_echo"
-      : strippedInbound.trim().length === 0 &&
-          strippedBoot.trim().length > 0 &&
-          strippedInbound !== strippedBoot
-        ? "inbound_metadata_echo"
-        : undefined;
-  return {
-    text: strippedInbound,
-    ...(suppressionReason ? { suppressionReason } : {}),
-  };
-}
-
-function sanitizeStringParam(
-  params: Record<string, unknown>,
-  field: string,
-  bootPrompt: string | undefined,
-): VisibleTextSuppressionReason | undefined {
-  if (typeof params[field] !== "string") {
-    return undefined;
-  }
-  const sanitized = sanitizeUserVisibleToolTextResult(params[field], bootPrompt);
-  params[field] = sanitized.text;
-  return sanitized.suppressionReason;
-}
-
-function sanitizeStringArrayParam(
-  params: Record<string, unknown>,
-  field: string,
-  bootPrompt: string | undefined,
-): VisibleTextSuppressionReason | undefined {
-  const value = params[field];
-  if (typeof value === "string") {
-    const sanitized = sanitizeUserVisibleToolTextResult(value, bootPrompt);
-    params[field] = sanitized.text;
-    return sanitized.suppressionReason;
-  }
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-  let suppressionReason: VisibleTextSuppressionReason | undefined;
-  params[field] = value.map((entry) => {
-    if (typeof entry !== "string") {
-      return entry;
+  let index = 1;
+  while (index < lines.length) {
+    const trimmed = lines[index]?.trim() ?? "";
+    if (!trimmed || (trimmed.startsWith("_") && trimmed.endsWith("_") && trimmed.length >= 2)) {
+      index += 1;
+      continue;
     }
-    const sanitized = sanitizeUserVisibleToolTextResult(entry, bootPrompt);
-    suppressionReason ??= sanitized.suppressionReason;
-    return sanitized.text;
-  });
-  return suppressionReason;
+    break;
+  }
+  return lines.slice(index).join("\n").trim();
 }
 
-function sanitizePresentationTextFieldsResult(
-  value: unknown,
-  bootPrompt: string | undefined,
-): { value: unknown; suppressionReason?: VisibleTextSuppressionReason } {
+function sanitizePresentationTextFields(value: unknown): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { value };
+    return value;
   }
-  let suppressionReason: VisibleTextSuppressionReason | undefined;
   const presentation = { ...(value as Record<string, unknown>) };
   if (typeof presentation.title === "string") {
-    const sanitized = sanitizeUserVisibleToolTextResult(presentation.title, bootPrompt);
-    presentation.title = sanitized.text;
-    suppressionReason ??= sanitized.suppressionReason;
+    presentation.title = stripFormattedReasoningMessage(presentation.title);
   }
   if (Array.isArray(presentation.blocks)) {
     presentation.blocks = presentation.blocks.map((block) => {
@@ -193,9 +85,7 @@ function sanitizePresentationTextFieldsResult(
       const sanitizedBlock = { ...(block as Record<string, unknown>) };
       for (const field of ["text", "placeholder"]) {
         if (typeof sanitizedBlock[field] === "string") {
-          const sanitized = sanitizeUserVisibleToolTextResult(sanitizedBlock[field], bootPrompt);
-          sanitizedBlock[field] = sanitized.text;
-          suppressionReason ??= sanitized.suppressionReason;
+          sanitizedBlock[field] = stripFormattedReasoningMessage(sanitizedBlock[field]);
         }
       }
       if (Array.isArray(sanitizedBlock.buttons)) {
@@ -205,36 +95,7 @@ function sanitizePresentationTextFieldsResult(
           }
           const sanitizedButton = { ...(button as Record<string, unknown>) };
           if (typeof sanitizedButton.label === "string") {
-            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedButton.label, bootPrompt);
-            sanitizedButton.label = sanitized.text;
-            suppressionReason ??= sanitized.suppressionReason;
-          }
-          if (typeof sanitizedButton.url === "string") {
-            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedButton.url, bootPrompt);
-            if (sanitized.text) {
-              sanitizedButton.url = sanitized.text;
-            } else {
-              delete sanitizedButton.url;
-            }
-            suppressionReason ??= sanitized.suppressionReason;
-          }
-          for (const webAppField of ["webApp", "web_app"]) {
-            const webApp = sanitizedButton[webAppField];
-            if (!webApp || typeof webApp !== "object" || Array.isArray(webApp)) {
-              continue;
-            }
-            const sanitizedWebApp = { ...(webApp as Record<string, unknown>) };
-            if (typeof sanitizedWebApp.url !== "string") {
-              continue;
-            }
-            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedWebApp.url, bootPrompt);
-            if (sanitized.text) {
-              sanitizedWebApp.url = sanitized.text;
-              sanitizedButton[webAppField] = sanitizedWebApp;
-            } else {
-              delete sanitizedButton[webAppField];
-            }
-            suppressionReason ??= sanitized.suppressionReason;
+            sanitizedButton.label = stripFormattedReasoningMessage(sanitizedButton.label);
           }
           return sanitizedButton;
         });
@@ -246,9 +107,7 @@ function sanitizePresentationTextFieldsResult(
           }
           const sanitizedOption = { ...(option as Record<string, unknown>) };
           if (typeof sanitizedOption.label === "string") {
-            const sanitized = sanitizeUserVisibleToolTextResult(sanitizedOption.label, bootPrompt);
-            sanitizedOption.label = sanitized.text;
-            suppressionReason ??= sanitized.suppressionReason;
+            sanitizedOption.label = stripFormattedReasoningMessage(sanitizedOption.label);
           }
           return sanitizedOption;
         });
@@ -256,58 +115,7 @@ function sanitizePresentationTextFieldsResult(
       return sanitizedBlock;
     });
   }
-  return { value: presentation, ...(suppressionReason ? { suppressionReason } : {}) };
-}
-
-function readFirstStringParam(params: Record<string, unknown>, keys: readonly string[]): string {
-  for (const key of keys) {
-    const value = readStringParam(params, key);
-    if (value) {
-      return value;
-    }
-  }
-  return "";
-}
-
-function readStructuredAttachmentMediaParams(value: unknown): string[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-  const values: string[] = [];
-  for (const attachment of value) {
-    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
-      continue;
-    }
-    const record = attachment as Record<string, unknown>;
-    for (const key of ["media", "mediaUrl", "path", "filePath", "fileUrl", "url"]) {
-      const candidate = readStringParam(record, key);
-      if (candidate) {
-        values.push(candidate);
-      }
-    }
-  }
-  return values;
-}
-
-function hasSanitizedSendPayloadContent(params: Record<string, unknown>): boolean {
-  const text = ["message", "text", "content", "caption", "SendMessage"]
-    .map((field) => (typeof params[field] === "string" ? params[field] : ""))
-    .filter((value) => value.trim())
-    .join("\n");
-  const mediaUrls = [
-    ...(readStringArrayParam(params, "mediaUrls") ?? []),
-    ...readStructuredAttachmentMediaParams(params.attachments),
-  ];
-  return hasReplyPayloadContent(
-    {
-      text,
-      mediaUrl: readFirstStringParam(params, ["media", "mediaUrl", "path", "filePath", "fileUrl"]),
-      mediaUrls,
-      presentation: params.presentation,
-      interactive: params.interactive,
-    },
-    { trimText: true },
-  );
+  return presentation;
 }
 
 function buildRoutingSchema() {
@@ -320,32 +128,17 @@ function buildRoutingSchema() {
   };
 }
 
-const presentationActionSchema = Type.Union([
-  Type.Object({
-    type: Type.Literal("command"),
-    command: Type.String(),
-  }),
-  Type.Object({
-    type: Type.Literal("callback"),
-    value: Type.String(),
-  }),
-]);
-
 const presentationOptionSchema = Type.Object({
   label: Type.String(),
-  action: Type.Optional(presentationActionSchema),
-  value: Type.Optional(Type.String()),
+  value: Type.String(),
 });
 
 const presentationButtonSchema = Type.Object({
   label: Type.String(),
-  action: Type.Optional(presentationActionSchema),
   value: Type.Optional(Type.String()),
   url: Type.Optional(Type.String()),
   webApp: Type.Optional(Type.Object({ url: Type.String() })),
   web_app: Type.Optional(Type.Object({ url: Type.String() })),
-  disabled: Type.Optional(Type.Boolean()),
-  reusable: Type.Optional(Type.Boolean()),
   style: Type.Optional(stringEnum(["primary", "secondary", "success", "danger"])),
 });
 
@@ -365,47 +158,53 @@ const presentationMessageSchema = Type.Object(
   },
   {
     description:
-      "Rich message payload: text/buttons/selects/context. Unsupported blocks degrade to text.",
+      "Shared presentation payload for rich text, buttons, selects, and context. Core degrades unsupported blocks to text.",
   },
 );
 
-function buildSendSchema(options: {
-  includePresentation: boolean;
-  includeDeliveryPin: boolean;
-  includeBestEffort: boolean;
-}) {
+function buildSendSchema(options: { includePresentation: boolean; includeDeliveryPin: boolean }) {
   const props: Record<string, TSchema> = {
     message: Type.Optional(Type.String()),
     effectId: Type.Optional(
       Type.String({
-        description: "Effect id/name for sendWithEffect.",
+        description: "Message effect name/id for sendWithEffect (e.g., invisible ink).",
       }),
     ),
-    effect: Type.Optional(Type.String({ description: "Alias for effectId." })),
+    effect: Type.Optional(
+      Type.String({ description: "Alias for effectId (e.g., invisible-ink, balloons)." }),
+    ),
     media: Type.Optional(
       Type.String({
-        description: "Media URL/path. data: use buffer.",
+        description: "Media URL or local path. data: URLs are not supported here, use buffer.",
       }),
     ),
     filename: Type.Optional(Type.String()),
     buffer: Type.Optional(
       Type.String({
-        description: "Base64 attachment payload; data URL ok.",
+        description: "Base64 payload for attachments (optionally a data: URL).",
       }),
     ),
     contentType: Type.Optional(Type.String()),
     mimeType: Type.Optional(Type.String()),
     caption: Type.Optional(Type.String()),
+    path: Type.Optional(Type.String()),
+    filePath: Type.Optional(Type.String()),
     attachments: Type.Optional(
       Type.Array(
         Type.Object({
           type: Type.Optional(stringEnum(["image", "audio", "video", "file"])),
           media: Type.Optional(Type.String()),
+          mediaUrl: Type.Optional(Type.String()),
+          path: Type.Optional(Type.String()),
+          filePath: Type.Optional(Type.String()),
+          fileUrl: Type.Optional(Type.String()),
+          url: Type.Optional(Type.String()),
           name: Type.Optional(Type.String()),
           mimeType: Type.Optional(Type.String()),
         }),
         {
-          description: "Structured attachments; each entry uses media.",
+          description:
+            "Structured media attachments to send with the message. Each item needs media/mediaUrl/path/filePath/fileUrl/url.",
         },
       ),
     ),
@@ -413,29 +212,25 @@ function buildSendSchema(options: {
     threadId: Type.Optional(Type.String()),
     asVoice: Type.Optional(Type.Boolean()),
     silent: Type.Optional(Type.Boolean()),
-    quoteText: Type.Optional(Type.String({ description: "Telegram reply quote text." })),
+    quoteText: Type.Optional(
+      Type.String({ description: "Quote text for Telegram reply_parameters" }),
+    ),
+    bestEffort: Type.Optional(Type.Boolean()),
     gifPlayback: Type.Optional(Type.Boolean()),
     forceDocument: Type.Optional(
       Type.Boolean({
-        description: "Send image/GIF/video as document; avoids compression.",
+        description: "Send image/GIF/video as document to avoid channel compression.",
       }),
     ),
     asDocument: Type.Optional(
       Type.Boolean({
-        description: "Alias for forceDocument.",
+        description:
+          "Send image/GIF/video as document to avoid channel compression. Alias for forceDocument.",
       }),
     ),
   };
   if (options.includePresentation) {
     props.presentation = Type.Optional(presentationMessageSchema);
-  }
-  if (options.includeBestEffort) {
-    props.bestEffort = Type.Optional(
-      Type.Boolean({
-        description:
-          "Optional delivery mode. Omit or set true for ordinary replies. Set false only when required durable delivery is necessary.",
-      }),
-    );
   }
   if (options.includeDeliveryPin) {
     props.delivery = Type.Optional(
@@ -453,7 +248,8 @@ function buildSendSchema(options: {
           ),
         },
         {
-          description: "Delivery prefs. pin requests pin when channel supports it.",
+          description:
+            "Shared delivery preferences. pin requests that the sent message be pinned when the channel supports it.",
         },
       ),
     );
@@ -466,13 +262,14 @@ function buildReactionSchema() {
     messageId: Type.Optional(
       Type.String({
         description:
-          "Target message id for read/react/edit/delete/pin/unpin. Reaction-like defaults current inbound id when available.",
+          "Target message id for read, reaction, edit, delete, pin, or unpin. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
       }),
     ),
     message_id: Type.Optional(
       Type.String({
         // Intentional duplicate alias for tool-schema discoverability in LLMs.
-        description: "snake_case alias of messageId; same defaults.",
+        description:
+          "snake_case alias of messageId. If omitted for reaction-like actions, defaults to the current inbound message id when available.",
       }),
     ),
     emoji: Type.Optional(Type.String()),
@@ -480,7 +277,7 @@ function buildReactionSchema() {
     trackToolCalls: Type.Optional(
       Type.Boolean({
         description:
-          "For current-message reaction, make reacted message the tool-progress reaction target.",
+          "When true for a reaction to the current inbound message, use that reacted message as the status-reaction target for subsequent tool progress when the channel supports it.",
       }),
     ),
     track_tool_calls: Type.Optional(
@@ -496,8 +293,8 @@ function buildReactionSchema() {
 
 function buildFetchSchema() {
   return {
-    limit: optionalPositiveIntegerSchema(),
-    pageSize: optionalPositiveIntegerSchema(),
+    limit: Type.Optional(Type.Number()),
+    pageSize: Type.Optional(Type.Number()),
     pageToken: Type.Optional(Type.String()),
     before: Type.Optional(Type.String()),
     after: Type.Optional(Type.String()),
@@ -512,27 +309,28 @@ function buildPollSchema() {
     pollId: Type.Optional(Type.String()),
     pollOptionId: Type.Optional(
       Type.String({
-        description: "Poll answer id.",
+        description: "Poll answer id to vote for. Use when the channel exposes stable answer ids.",
       }),
     ),
     pollOptionIds: Type.Optional(
       Type.Array(
         Type.String({
-          description: "Poll answer ids for multiselect.",
+          description:
+            "Poll answer ids to vote for in a multiselect poll. Use when the channel exposes stable answer ids.",
         }),
       ),
     ),
     pollOptionIndex: Type.Optional(
-      Type.Integer({
-        minimum: 1,
-        description: "1-based poll option number.",
+      Type.Number({
+        description:
+          "1-based poll option number to vote for, matching the rendered numbered poll choices.",
       }),
     ),
     pollOptionIndexes: Type.Optional(
       Type.Array(
-        Type.Integer({
-          minimum: 1,
-          description: "1-based poll option numbers for multiselect.",
+        Type.Number({
+          description:
+            "1-based poll option numbers to vote for in a multiselect poll, matching the rendered numbered poll choices.",
         }),
       ),
     ),
@@ -546,8 +344,8 @@ function buildPollSchema() {
       case "stringArray":
         props[name] = Type.Optional(Type.Array(Type.String()));
         break;
-      case "positiveInteger":
-        props[name] = optionalPositiveIntegerSchema();
+      case "number":
+        props[name] = Type.Optional(Type.Number());
         break;
       case "boolean":
         props[name] = Type.Optional(Type.Boolean());
@@ -559,9 +357,15 @@ function buildPollSchema() {
 
 function buildChannelTargetSchema() {
   return {
-    channelId: Type.Optional(Type.String({ description: "Channel id filter." })),
-    chatId: Type.Optional(Type.String({ description: "Chat id for chat metadata." })),
-    channelIds: Type.Optional(Type.Array(Type.String({ description: "Channel id filter." }))),
+    channelId: Type.Optional(
+      Type.String({ description: "Channel id filter (search/thread list/event create)." }),
+    ),
+    chatId: Type.Optional(
+      Type.String({ description: "Chat id for chat-scoped metadata actions." }),
+    ),
+    channelIds: Type.Optional(
+      Type.Array(Type.String({ description: "Channel id filter (repeatable)." })),
+    ),
     memberId: Type.Optional(Type.String()),
     memberIdType: Type.Optional(Type.String()),
     guildId: Type.Optional(Type.String()),
@@ -594,7 +398,7 @@ function buildStickerSchema() {
 function buildThreadSchema() {
   return {
     threadName: Type.Optional(Type.String()),
-    autoArchiveMin: optionalPositiveIntegerSchema(),
+    autoArchiveMin: Type.Optional(Type.Number()),
     appliedTags: Type.Optional(Type.Array(Type.String())),
   };
 }
@@ -608,8 +412,10 @@ function buildEventSchema() {
     endTime: Type.Optional(Type.String()),
     desc: Type.Optional(Type.String()),
     location: Type.Optional(Type.String()),
-    image: Type.Optional(Type.String({ description: "Event cover image URL/path." })),
-    durationMin: optionalNonNegativeIntegerSchema(),
+    image: Type.Optional(
+      Type.String({ description: "Cover image URL or local file path for the event." }),
+    ),
+    durationMin: Type.Optional(Type.Number()),
     until: Type.Optional(Type.String()),
   };
 }
@@ -617,12 +423,16 @@ function buildEventSchema() {
 function buildModerationSchema() {
   return {
     reason: Type.Optional(Type.String()),
-    deleteDays: optionalNonNegativeIntegerSchema({ maximum: 7 }),
+    deleteDays: Type.Optional(Type.Number()),
   };
 }
 
 function buildGatewaySchema() {
-  return gatewayCallOptionSchemaProperties();
+  return {
+    gatewayUrl: Type.Optional(Type.String()),
+    gatewayToken: Type.Optional(Type.String()),
+    timeoutMs: Type.Optional(Type.Number()),
+  };
 }
 
 function buildPresenceSchema() {
@@ -634,17 +444,19 @@ function buildPresenceSchema() {
     ),
     activityName: Type.Optional(
       Type.String({
-        description: "Activity name shown in sidebar; ignored for custom.",
+        description: "Activity name shown in sidebar (e.g. 'with fire'). Ignored for custom type.",
       }),
     ),
     activityUrl: Type.Optional(
       Type.String({
-        description: "Streaming URL; streaming type only.",
+        description:
+          "Streaming URL (Twitch or YouTube). Only used with streaming type; may not render for bots.",
       }),
     ),
     activityState: Type.Optional(
       Type.String({
-        description: "State text; custom type uses as status text.",
+        description:
+          "State text. For custom type this is the status text; for others it shows in the flyout.",
       }),
     ),
     status: Type.Optional(
@@ -657,20 +469,20 @@ function buildChannelManagementSchema() {
   return {
     name: Type.Optional(Type.String()),
     channelType: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        description: "Numeric channel type, e.g. Discord. Avoids JSON Schema `type` collision.",
+      Type.Number({
+        description:
+          "Numeric channel type (e.g. Discord channel type). Renamed from `type` to avoid JSON Schema keyword collisions that break some OpenAI-compatible providers (notably NVIDIA NIM).",
       }),
     ),
     parentId: Type.Optional(Type.String()),
     topic: Type.Optional(Type.String()),
-    position: optionalNonNegativeIntegerSchema(),
+    position: Type.Optional(Type.Number()),
     nsfw: Type.Optional(Type.Boolean()),
-    rateLimitPerUser: optionalNonNegativeIntegerSchema(),
+    rateLimitPerUser: Type.Optional(Type.Number()),
     categoryId: Type.Optional(Type.String()),
     clearParent: Type.Optional(
       Type.Boolean({
-        description: "Clear parent/category when supported.",
+        description: "Clear the parent/category when supported by the provider.",
       }),
     ),
   };
@@ -679,7 +491,6 @@ function buildChannelManagementSchema() {
 function buildMessageToolSchemaProps(options: {
   includePresentation: boolean;
   includeDeliveryPin: boolean;
-  includeBestEffort: boolean;
   extraProperties?: Record<string, TSchema>;
 }) {
   return {
@@ -708,7 +519,6 @@ function isSendOnlyActions(actions: readonly string[]): boolean {
 function buildSendOnlyMessageToolSchemaProps(options: {
   includePresentation: boolean;
   includeDeliveryPin: boolean;
-  includeBestEffort: boolean;
   extraProperties?: Record<string, TSchema>;
 }) {
   return {
@@ -724,7 +534,6 @@ function buildMessageToolSchemaFromActions(
   options: {
     includePresentation: boolean;
     includeDeliveryPin: boolean;
-    includeBestEffort: boolean;
     extraProperties?: Record<string, TSchema>;
   },
 ) {
@@ -740,13 +549,11 @@ function buildMessageToolSchemaFromActions(
 const MessageToolSchema = buildMessageToolSchemaFromActions(AllMessageActions, {
   includePresentation: true,
   includeDeliveryPin: true,
-  includeBestEffort: false,
 });
 
 type MessageToolOptions = {
   agentAccountId?: string;
   agentSessionKey?: string;
-  runId?: string;
   sessionId?: string;
   agentId?: string;
   config?: OpenClawConfig;
@@ -759,10 +566,8 @@ type MessageToolOptions = {
   currentThreadTs?: string;
   agentThreadId?: string | number;
   currentMessageId?: string | number;
-  currentInboundAudio?: boolean;
   replyToMode?: "off" | "first" | "all" | "batched";
   hasRepliedRef?: { value: boolean };
-  sameChannelThreadRequired?: boolean;
   sandboxRoot?: string;
   requireExplicitTarget?: boolean;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
@@ -789,93 +594,6 @@ type MessageActionDiscoveryInput = Omit<ChannelMessageActionDiscoveryInput, "cfg
   cfg: OpenClawConfig;
   channel?: string;
 };
-
-type InferredSessionDelivery = {
-  accountId?: string;
-  channel: string;
-  threadId?: string;
-  to: string;
-};
-
-const SESSION_DELIVERY_PEER_KINDS = new Set(["channel", "direct", "dm", "group"]);
-const USER_PREFIXED_DIRECT_TARGET_CHANNELS = new Set(["discord", "mattermost", "msteams", "slack"]);
-
-function formatSessionDeliveryTarget(channel: string, peerKind: string, to: string): string {
-  return (peerKind === "direct" || peerKind === "dm") &&
-    USER_PREFIXED_DIRECT_TARGET_CHANNELS.has(channel)
-    ? `user:${to}`
-    : to;
-}
-
-function inferDeliveryFromSessionKey(
-  sessionKey: string | undefined,
-): InferredSessionDelivery | null {
-  const parsedThread = parseThreadSessionSuffix(sessionKey);
-  const baseSessionKey = parsedThread.baseSessionKey ?? sessionKey;
-  const parsed = parseAgentSessionKey(baseSessionKey);
-  if (!parsed) {
-    return null;
-  }
-  const parts = parsed.rest.split(":").filter(Boolean);
-  if (parts.length < 3) {
-    return null;
-  }
-  const channel = normalizeMessageChannel(parts[0]);
-  if (!channel) {
-    return null;
-  }
-  if (parts.length >= 4 && (parts[2] === "direct" || parts[2] === "dm")) {
-    const accountId = resolveAgentAccountId(parts[1]);
-    const to = parts.slice(3).join(":").trim();
-    return to
-      ? {
-          accountId,
-          channel,
-          threadId: parsedThread.threadId,
-          to: formatSessionDeliveryTarget(channel, parts[2], to),
-        }
-      : null;
-  }
-  const peerKind = parts[1] ?? "";
-  if (SESSION_DELIVERY_PEER_KINDS.has(peerKind)) {
-    const to = parts.slice(2).join(":").trim();
-    return to
-      ? {
-          channel,
-          threadId: parsedThread.threadId,
-          to: formatSessionDeliveryTarget(channel, peerKind, to),
-        }
-      : null;
-  }
-  return null;
-}
-
-function resolveEffectiveCurrentChannelContext(options?: MessageToolOptions): {
-  accountId?: string;
-  currentChannelId?: string;
-  currentChannelProvider?: string;
-  currentThreadTs?: string;
-} {
-  const currentChannelProvider = options?.currentChannelProvider;
-  const currentChannelId = options?.currentChannelId;
-  const sessionDelivery = inferDeliveryFromSessionKey(options?.agentSessionKey);
-  const sessionDeliveryChannel = normalizeMessageChannel(sessionDelivery?.channel);
-  const preferSessionDeliveryContext =
-    normalizeMessageChannel(currentChannelProvider) === "webchat" &&
-    sessionDeliveryChannel !== undefined &&
-    sessionDeliveryChannel !== "webchat" &&
-    Boolean(sessionDelivery?.to);
-
-  if (!preferSessionDeliveryContext) {
-    return { currentChannelProvider, currentChannelId };
-  }
-  return {
-    accountId: sessionDelivery?.accountId,
-    currentChannelProvider: sessionDeliveryChannel,
-    currentChannelId: sessionDelivery?.to,
-    currentThreadTs: sessionDelivery?.threadId,
-  };
-}
 
 function buildMessageActionDiscoveryInput(
   params: MessageToolDiscoveryParams,
@@ -936,7 +654,7 @@ function resolveMessageToolActionSchemaActions(params: MessageToolDiscoveryParam
 
 function listAllMessageToolActions(params: MessageToolDiscoveryParams): ChannelMessageActionName[] {
   const pluginActions = listAllChannelSupportedActions(buildMessageActionDiscoveryInput(params));
-  return uniqueValues<ChannelMessageActionName>(["send", "broadcast", ...pluginActions]);
+  return Array.from(new Set<ChannelMessageActionName>(["send", "broadcast", ...pluginActions]));
 }
 
 function resolveIncludeCapability(
@@ -961,27 +679,10 @@ function resolveIncludeDeliveryPin(params: MessageToolDiscoveryParams): boolean 
   return resolveIncludeCapability(params, "delivery-pin");
 }
 
-function resolveIncludeBestEffort(params: MessageToolDiscoveryParams): boolean {
-  const currentChannel = normalizeMessageChannel(params.currentChannelProvider);
-  if (!currentChannel) {
-    return false;
-  }
-  const adapter =
-    listChannelPlugins().find((plugin) => plugin.id === currentChannel)?.message ??
-    getLoadedChannelPlugin(currentChannel as Parameters<typeof getLoadedChannelPlugin>[0])
-      ?.message ??
-    getChannelPlugin(currentChannel as Parameters<typeof getChannelPlugin>[0])?.message;
-  return (
-    adapter?.durableFinal?.capabilities?.reconcileUnknownSend === true &&
-    typeof adapter.durableFinal.reconcileUnknownSend === "function"
-  );
-}
-
 function buildMessageToolSchema(params: MessageToolDiscoveryParams) {
   const actions = resolveMessageToolActionSchemaActions(params);
   const includePresentation = resolveIncludePresentation(params);
   const includeDeliveryPin = resolveIncludeDeliveryPin(params);
-  const includeBestEffort = resolveIncludeBestEffort(params);
   const extraProperties = resolveChannelMessageToolSchemaProperties(
     buildMessageActionDiscoveryInput(
       params,
@@ -991,7 +692,6 @@ function buildMessageToolSchema(params: MessageToolDiscoveryParams) {
   return buildMessageToolSchemaFromActions(actions.length > 0 ? actions : ["send"], {
     includePresentation,
     includeDeliveryPin,
-    includeBestEffort,
     extraProperties,
   });
 }
@@ -1019,7 +719,7 @@ function buildMessageToolDescription(options?: {
   requesterSenderId?: string;
   senderIsOwner?: boolean;
 }): string {
-  const baseDescription = "Send/delete/manage channel messages.";
+  const baseDescription = "Send, delete, and manage messages via channel plugins.";
   const resolvedOptions = options ?? {};
   const messageToolDiscoveryParams = resolvedOptions.config
     ? {
@@ -1040,7 +740,9 @@ function buildMessageToolDescription(options?: {
   if (messageToolDiscoveryParams) {
     const actions = resolveMessageToolActionSchemaActions(messageToolDiscoveryParams);
     if (actions.length > 0) {
-      const sortedActions = sortUniqueStrings(actions) as Array<ChannelMessageActionName | "send">;
+      const sortedActions = Array.from(new Set(actions)).toSorted() as Array<
+        ChannelMessageActionName | "send"
+      >;
       return appendMessageToolReadHint(
         appendMessageToolVisibleReplyHint(
           `${baseDescription} Supports actions: ${sortedActions.join(", ")}.`,
@@ -1069,8 +771,8 @@ function appendMessageToolVisibleReplyHint(
   }
   const targetGuidance = requireExplicitTarget
     ? "Include target when sending."
-    : "target defaults to the current source conversation; omit unless sending elsewhere.";
-  return `${description} This turn: use action="send" with message for visible replies to the current source conversation. ${targetGuidance} Normal final answers stay private.`;
+    : "The target defaults to the current source conversation, so omit target unless sending elsewhere.";
+  return `${description} For this turn, use action="send" with message for visible replies to the current source conversation. ${targetGuidance} Normal final answers stay private.`;
 }
 
 function appendMessageToolReadHint(
@@ -1092,16 +794,11 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
   const resolveSecretRefsForTool =
     options?.resolveCommandSecretRefsViaGateway ?? resolveCommandSecretRefsViaGateway;
   const runMessageActionForTool = options?.runMessageAction ?? runMessageAction;
-  let generatedIdempotencyCounter = 0;
-  const effectiveCurrentChannel = resolveEffectiveCurrentChannelContext(options);
+  const agentAccountId = resolveAgentAccountId(options?.agentAccountId);
   const currentThreadTs =
     options?.currentThreadTs ??
-    (options?.agentThreadId != null
-      ? stringifyRouteThreadId(options.agentThreadId)
-      : effectiveCurrentChannel.currentThreadTs);
+    (options?.agentThreadId != null ? stringifyRouteThreadId(options.agentThreadId) : undefined);
   const replyToMode = options?.replyToMode ?? (currentThreadTs ? "all" : undefined);
-  const agentAccountId =
-    resolveAgentAccountId(options?.agentAccountId) ?? effectiveCurrentChannel.accountId;
   const resolvedAgentId =
     options?.agentId ??
     (options?.agentSessionKey
@@ -1113,8 +810,8 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
   const schema = options?.config
     ? buildMessageToolSchema({
         cfg: options.config,
-        currentChannelProvider: effectiveCurrentChannel.currentChannelProvider,
-        currentChannelId: effectiveCurrentChannel.currentChannelId,
+        currentChannelProvider: options.currentChannelProvider,
+        currentChannelId: options.currentChannelId,
         currentThreadTs,
         currentMessageId: options.currentMessageId,
         currentAccountId: agentAccountId,
@@ -1127,8 +824,8 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
     : MessageToolSchema;
   const description = buildMessageToolDescription({
     config: options?.config,
-    currentChannel: effectiveCurrentChannel.currentChannelProvider,
-    currentChannelId: effectiveCurrentChannel.currentChannelId,
+    currentChannel: options?.currentChannelProvider,
+    currentChannelId: options?.currentChannelId,
     currentThreadTs,
     currentMessageId: options?.currentMessageId,
     currentAccountId: agentAccountId,
@@ -1147,7 +844,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
     displaySummary: "Send and manage messages across configured channels.",
     description,
     parameters: schema,
-    execute: async (toolCallId, args, signal) => {
+    execute: async (_toolCallId, args, signal) => {
       // Check if already aborted before doing any work
       if (signal?.aborted) {
         const err = new Error("Message send aborted");
@@ -1157,72 +854,18 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
       // Shallow-copy so we don't mutate the original event args (used for logging/dedup).
       const params = { ...(args as Record<string, unknown>) };
 
-      // Sanitize outbound text fields in three layers:
-      //
-      // 1. `stripFormattedReasoningMessage` — drops reasoning blocks
-      //    that some models emit into tool arguments.
-      // 2. `stripInternalRuntimeContext` — removes internal-runtime-context
-      //    delimited blocks (the same strip applied to final replies via
-      //    `sanitizeUserFacingText`). Catches wrapped BOOT.md or webchat
-      //    runtime-context echoes that preserve the marker lines.
-      // 3. `stripBootEchoFromOutboundText` — defense-in-depth check against
-      //    the active boot prompt for this session. Catches verbatim echoes
-      //    that paraphrase out the wrapper markers but reproduce a
-      //    substantial chunk of the boot prompt content. Refs #53732.
-      const bootPromptForSession = getBootEchoContextForSession(options?.agentSessionKey);
-      let suppressedVisiblePayloadReason: VisibleTextSuppressionReason | undefined;
-      parseJsonMessageParam(params, "presentation");
-      parseInteractiveParam(params);
-      for (const field of [
-        "text",
-        "content",
-        "message",
-        "caption",
-        "SendMessage",
-        "quoteText",
-        "quote_text",
-      ]) {
-        const suppressionReason = sanitizeStringParam(params, field, bootPromptForSession);
-        suppressedVisiblePayloadReason ??= suppressionReason;
+      // Strip reasoning tags from text fields — models may include <think>…</think>
+      // in tool arguments, and the messaging tool send path has no other tag filtering.
+      for (const field of ["text", "content", "message", "caption"]) {
+        if (typeof params[field] === "string") {
+          params[field] = stripFormattedReasoningMessage(params[field]);
+        }
       }
-      for (const field of ["pollQuestion", "poll_question"]) {
-        const suppressionReason = sanitizeStringParam(params, field, bootPromptForSession);
-        suppressedVisiblePayloadReason ??= suppressionReason;
-      }
-      for (const field of ["pollOption", "poll_option"]) {
-        const suppressionReason = sanitizeStringArrayParam(params, field, bootPromptForSession);
-        suppressedVisiblePayloadReason ??= suppressionReason;
-      }
-      const sanitizedPresentation = sanitizePresentationTextFieldsResult(
-        params.presentation,
-        bootPromptForSession,
-      );
-      params.presentation = sanitizedPresentation.value;
-      suppressedVisiblePayloadReason ??= sanitizedPresentation.suppressionReason;
-      const sanitizedInteractive = sanitizePresentationTextFieldsResult(
-        params.interactive,
-        bootPromptForSession,
-      );
-      params.interactive = sanitizedInteractive.value;
-      suppressedVisiblePayloadReason ??= sanitizedInteractive.suppressionReason;
+      params.presentation = sanitizePresentationTextFields(params.presentation);
 
       const action = readStringParam(params, "action", {
         required: true,
       }) as ChannelMessageActionName;
-      if (
-        suppressedVisiblePayloadReason &&
-        action === "send" &&
-        !hasSanitizedSendPayloadContent(params)
-      ) {
-        return jsonResult({
-          status: "suppressed",
-          reason: suppressedVisiblePayloadReason,
-          message:
-            suppressedVisiblePayloadReason === "inbound_metadata_echo"
-              ? "Suppressed outbound message text because it matched inbound runtime metadata."
-              : "Suppressed outbound message text because it matched internal runtime context.",
-        });
-      }
       const requireExplicitTarget = options?.requireExplicitTarget === true;
       if (requireExplicitTarget && actionNeedsExplicitTarget(action)) {
         const explicitTarget =
@@ -1243,7 +886,7 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         channel: params.channel,
         target: params.target,
         targets: params.targets,
-        fallbackChannel: effectiveCurrentChannel.currentChannelProvider,
+        fallbackChannel: options?.currentChannelProvider,
         accountId: params.accountId,
         fallbackAccountId: agentAccountId,
       });
@@ -1267,7 +910,11 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         params.accountId = accountId;
       }
 
-      const gatewayResolved = resolveGatewayOptions(readGatewayCallOptions(params));
+      const gatewayResolved = resolveGatewayOptions({
+        gatewayUrl: readStringParam(params, "gatewayUrl", { trim: false }),
+        gatewayToken: readStringParam(params, "gatewayToken", { trim: false }),
+        timeoutMs: readNumberParam(params, "timeoutMs"),
+      });
       const gateway = {
         url: gatewayResolved.url,
         token: gatewayResolved.token,
@@ -1282,42 +929,29 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
           options.currentMessageId.trim().length > 0);
 
       const toolContext =
-        effectiveCurrentChannel.currentChannelId ||
-        effectiveCurrentChannel.currentChannelProvider ||
+        options?.currentChannelId ||
+        options?.currentChannelProvider ||
         currentThreadTs ||
         hasCurrentMessageId ||
         replyToMode ||
-        options?.hasRepliedRef ||
-        options?.sameChannelThreadRequired
+        options?.hasRepliedRef
           ? {
-              currentChannelId: effectiveCurrentChannel.currentChannelId,
-              currentChannelProvider: effectiveCurrentChannel.currentChannelProvider,
+              currentChannelId: options?.currentChannelId,
+              currentChannelProvider: options?.currentChannelProvider,
               currentThreadTs,
               currentMessageId: options?.currentMessageId,
               replyToMode,
               hasRepliedRef: options?.hasRepliedRef,
-              sameChannelThreadRequired: options?.sameChannelThreadRequired,
               // Direct tool invocations should not add cross-context decoration.
               // The agent is composing a message, not forwarding from another chat.
               skipCrossContextDecoration: true,
             }
           : undefined;
 
-      const actionIdempotencyKey =
-        normalizeOptionalString(params.idempotencyKey) ??
-        (options?.runId
-          ? `${options.runId}:message-tool:${
-              normalizeToolCallIdForIdempotencyKey(toolCallId) ?? ++generatedIdempotencyCounter
-            }`
-          : undefined);
-      const actionParams = actionIdempotencyKey
-        ? { ...params, idempotencyKey: actionIdempotencyKey }
-        : params;
-
       const result = await runMessageActionForTool({
         cfg,
         action,
-        params: actionParams,
+        params,
         defaultAccountId: accountId ?? undefined,
         requesterSenderId: options?.requesterSenderId,
         senderIsOwner: options?.senderIsOwner,
@@ -1329,7 +963,6 @@ export function createMessageTool(options?: MessageToolOptions): AnyAgentTool {
         sandboxRoot: options?.sandboxRoot,
         sourceReplyDeliveryMode: options?.sourceReplyDeliveryMode,
         inboundEventKind: options?.inboundEventKind,
-        inboundAudio: options?.currentInboundAudio,
         abortSignal: signal,
       });
 

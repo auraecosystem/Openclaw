@@ -7,9 +7,10 @@ export function createMatrixMonitorTaskRunner(params: {
   const inFlight = new Set<Promise<void>>();
 
   const runDetachedTask = (label: string, task: () => Promise<void>): Promise<void> => {
-    const trackedTask: Promise<void> = Promise.resolve()
+    let trackedTask!: Promise<void>;
+    trackedTask = Promise.resolve()
       .then(task)
-      .catch((error: unknown) => {
+      .catch((error) => {
         const message = String(error);
         params.logVerboseMessage(`matrix: ${label} failed (${message})`);
         params.logger.warn("matrix background task failed", {

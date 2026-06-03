@@ -4,21 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { setTimeout as delay } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 
 const TOKEN = "bundled-plugin-runtime-smoke-token";
-const OUTPUT_CAPTURE_CHARS = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_OUTPUT_CHARS,
-  1024 * 1024,
-);
-const LOG_SCAN_BYTES = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_LOG_SCAN_BYTES,
-  256 * 1024,
-);
-const GATEWAY_LOG_CAPTURE_BYTES = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_GATEWAY_LOG_BYTES,
-  16 * 1024 * 1024,
-);
 const WATCHDOG_MS = readPositiveInt(process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_WATCHDOG_MS, 1000);
 const READY_TIMEOUT_MS = readPositiveInt(
   process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_READY_MS,
@@ -29,44 +16,9 @@ const RPC_READY_TIMEOUT_MS = readPositiveInt(
   process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_RPC_READY_MS,
   210000,
 );
-const COMMAND_TIMEOUT_MS = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_COMMAND_MS,
-  120000,
-);
-const HTTP_PROBE_TIMEOUT_MS = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_HTTP_MS,
-  5000,
-);
-const GATEWAY_TEARDOWN_GRACE_MS = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_TEARDOWN_GRACE_MS,
-  10000,
-);
-const GATEWAY_TEARDOWN_KILL_GRACE_MS = readPositiveInt(
-  process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_TEARDOWN_KILL_GRACE_MS,
-  1000,
-);
-const GATEWAY_READY_LOG_NEEDLE = Buffer.from("[gateway] ready");
-const READY_OFFSET_LOG_NEEDLES = [
-  GATEWAY_READY_LOG_NEEDLE,
-  Buffer.from("listening on ws://"),
-  Buffer.from("[gateway] http server listening"),
-];
-const GATEWAY_LOG_TRUNCATED_NEEDLE = "[gateway log truncated after ";
-const FORBIDDEN_POST_READY_DEPS_WORK = [/\b(?:npm|pnpm|yarn|corepack) install\b/iu];
-const PACKAGE_MANAGER_PROCESS_BASENAME = /^(?:npm|pnpm|yarn|corepack)(?:$|[.-])/u;
-const PROCESS_SNAPSHOT_ARGS = ["-ww", "-eo", "pid=,ppid=,args="];
-const isolatedStateRoots = new WeakMap();
-const activeCommandChildren = new Set();
-const activeGatewayChildren = new Set();
-const parentSignalHandlers = new Map();
-let parentCleanupInstalled = false;
 
 function readPositiveInt(raw, fallback) {
-  const text = String(raw ?? "").trim();
-  if (!/^\d+$/u.test(text)) {
-    return fallback;
-  }
-  const parsed = Number(text);
+  const parsed = Number.parseInt(String(raw || ""), 10);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -79,143 +31,12 @@ function writeJson(file, value) {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-function readFileChunk(file, startOffset, maxBytes) {
-  let stat;
-  try {
-    stat = fs.statSync(file);
-  } catch {
-    return { buffer: Buffer.alloc(0), startOffset: 0, size: 0 };
-  }
-  if (!stat.isFile() || stat.size <= 0) {
-    return { buffer: Buffer.alloc(0), startOffset: 0, size: stat.size };
-  }
-
-  const safeMaxBytes = Math.max(1, Math.floor(Number(maxBytes) || LOG_SCAN_BYTES));
-  const safeStartOffset = Math.min(Math.max(0, Math.floor(Number(startOffset) || 0)), stat.size);
-  const bytesToRead = Math.min(safeMaxBytes, stat.size - safeStartOffset);
-  if (bytesToRead <= 0) {
-    return { buffer: Buffer.alloc(0), startOffset: safeStartOffset, size: stat.size };
-  }
-
-  const buffer = Buffer.alloc(bytesToRead);
-  const fd = fs.openSync(file, "r");
-  try {
-    const bytesRead = fs.readSync(fd, buffer, 0, bytesToRead, safeStartOffset);
-    return { buffer: buffer.subarray(0, bytesRead), startOffset: safeStartOffset, size: stat.size };
-  } finally {
-    fs.closeSync(fd);
-  }
+function manifestPath(pluginDir) {
+  return path.join(process.cwd(), "dist", "extensions", pluginDir, "openclaw.plugin.json");
 }
 
-function readFileTailBuffer(file, maxBytes = LOG_SCAN_BYTES) {
-  let stat;
-  try {
-    stat = fs.statSync(file);
-  } catch {
-    return { buffer: Buffer.alloc(0), startOffset: 0, size: 0 };
-  }
-  const safeMaxBytes = Math.max(1, Math.floor(Number(maxBytes) || LOG_SCAN_BYTES));
-  const startOffset = Math.max(0, stat.size - safeMaxBytes);
-  return readFileChunk(file, startOffset, safeMaxBytes);
-}
-
-export function readFileTail(file, maxBytes = LOG_SCAN_BYTES) {
-  return readFileTailBuffer(file, maxBytes).buffer.toString("utf8");
-}
-
-function findFirstNeedleOffset(file, needles) {
-  let stat;
-  try {
-    stat = fs.statSync(file);
-  } catch {
-    return 0;
-  }
-  if (!stat.isFile() || stat.size <= 0) {
-    return 0;
-  }
-
-  const carryBytes = Math.max(0, ...needles.map((needle) => needle.length - 1));
-  const chunk = Buffer.alloc(Math.min(LOG_SCAN_BYTES, stat.size));
-  const fd = fs.openSync(file, "r");
-  let carry = Buffer.alloc(0);
-  let offset = 0;
-  try {
-    while (offset < stat.size) {
-      const bytesToRead = Math.min(chunk.length, stat.size - offset);
-      const bytesRead = fs.readSync(fd, chunk, 0, bytesToRead, offset);
-      if (bytesRead <= 0) {
-        break;
-      }
-      const view = chunk.subarray(0, bytesRead);
-      const combined = carry.length > 0 ? Buffer.concat([carry, view]) : view;
-      const combinedOffset = offset - carry.length;
-      const indexes = needles
-        .map((needle) => combined.indexOf(needle))
-        .filter((index) => index >= 0);
-      if (indexes.length > 0) {
-        return combinedOffset + Math.min(...indexes);
-      }
-      carry = combined.subarray(Math.max(0, combined.length - carryBytes));
-      offset += bytesRead;
-    }
-  } finally {
-    fs.closeSync(fd);
-  }
-  return 0;
-}
-
-export function createReadyLogScanner(file) {
-  const carryBytes = GATEWAY_READY_LOG_NEEDLE.length - 1;
-  let carry = Buffer.alloc(0);
-  let offset = 0;
-  let seen = false;
-
-  return () => {
-    if (seen) {
-      return true;
-    }
-    let stat;
-    try {
-      stat = fs.statSync(file);
-    } catch {
-      return false;
-    }
-    if (!stat.isFile() || stat.size <= 0) {
-      return false;
-    }
-    if (stat.size < offset) {
-      carry = Buffer.alloc(0);
-      offset = 0;
-    }
-    while (offset < stat.size) {
-      const { buffer } = readFileChunk(file, offset, LOG_SCAN_BYTES);
-      if (buffer.length === 0) {
-        break;
-      }
-      const combined = carry.length > 0 ? Buffer.concat([carry, buffer]) : buffer;
-      const matched = combined.includes(GATEWAY_READY_LOG_NEEDLE);
-      if (matched) {
-        seen = true;
-        return true;
-      }
-      carry = combined.subarray(Math.max(0, combined.length - carryBytes));
-      offset += buffer.length;
-    }
-    return false;
-  };
-}
-
-function manifestPath(pluginDir, pluginRoot) {
-  const candidates = [
-    ...(isNonEmptyString(pluginRoot) ? [path.join(pluginRoot, "openclaw.plugin.json")] : []),
-    path.join(process.cwd(), "dist", "extensions", pluginDir, "openclaw.plugin.json"),
-    path.join(process.cwd(), "dist-runtime", "extensions", pluginDir, "openclaw.plugin.json"),
-  ];
-  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
-}
-
-function loadManifest(pluginDir, pluginRoot) {
-  const file = manifestPath(pluginDir, pluginRoot);
+function loadManifest(pluginDir) {
+  const file = manifestPath(pluginDir);
   if (!fs.existsSync(file)) {
     throw new Error(`missing bundled plugin manifest: ${file}`);
   }
@@ -256,22 +77,12 @@ function ensureGatewayConfig(config, port) {
   };
 }
 
-export function activateSmokePlugin(config, pluginId, channels = []) {
+function activateSmokePlugin(config, pluginId) {
   const allow = Array.isArray(config.plugins?.allow)
     ? Array.from(new Set([...config.plugins.allow, pluginId].filter(isNonEmptyString)))
     : undefined;
-  const channelConfig = { ...config.channels };
-  for (const channel of channels) {
-    channelConfig[channel] = {
-      ...(typeof channelConfig[channel] === "object" && channelConfig[channel] !== null
-        ? channelConfig[channel]
-        : {}),
-      enabled: true,
-    };
-  }
   return {
     ...config,
-    ...(channels.length > 0 ? { channels: channelConfig } : {}),
     plugins: {
       ...config.plugins,
       enabled: true,
@@ -285,28 +96,6 @@ export function activateSmokePlugin(config, pluginId, channels = []) {
       },
     },
   };
-}
-
-function channelActivationEnvName(channel) {
-  return `${channel
-    .replace(/[^a-z0-9]+/giu, "_")
-    .replace(/^_+|_+$/gu, "")
-    .toUpperCase()}_RUNTIME_SMOKE`;
-}
-
-export function withManifestChannelActivationEnv(env, channels = []) {
-  const nextEnv = { ...env };
-  for (const channel of channels) {
-    if (!isNonEmptyString(channel)) {
-      continue;
-    }
-    const key = channelActivationEnvName(channel);
-    if (key === "_RUNTIME_SMOKE") {
-      continue;
-    }
-    nextEnv[key] ??= "1";
-  }
-  return nextEnv;
 }
 
 function buildPluginPlan(manifest) {
@@ -340,136 +129,38 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
-export function appendBoundedOutput(buffer, chunk, maxChars = OUTPUT_CAPTURE_CHARS) {
-  const nextText = buffer.text + String(chunk);
-  if (nextText.length <= maxChars) {
-    return { text: nextText, truncatedChars: buffer.truncatedChars };
-  }
-  const truncatedChars = buffer.truncatedChars + nextText.length - maxChars;
-  return { text: nextText.slice(-maxChars), truncatedChars };
-}
-
-function formatCapturedOutput(label, buffer) {
-  if (!buffer.text) {
-    return "";
-  }
-  const prefix =
-    buffer.truncatedChars > 0
-      ? `[${label} truncated ${buffer.truncatedChars} chars; showing tail]\n`
-      : "";
-  return `${prefix}${buffer.text}`;
-}
-
-function createBoundedGatewayLog(logPath) {
-  fs.mkdirSync(path.dirname(logPath), { recursive: true });
-  const fd = fs.openSync(logPath, "w");
-  let bytes = 0;
-  let closed = false;
-  let truncated = false;
-  const marker = Buffer.from(
-    `\n[gateway log truncated after ${String(GATEWAY_LOG_CAPTURE_BYTES)} bytes]\n`,
-  );
-  return {
-    append(chunk) {
-      if (closed || truncated) {
-        return;
-      }
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-      const remaining = GATEWAY_LOG_CAPTURE_BYTES - bytes;
-      if (buffer.length <= remaining) {
-        fs.writeSync(fd, buffer);
-        bytes += buffer.length;
-        return;
-      }
-      if (remaining > 0) {
-        fs.writeSync(fd, buffer.subarray(0, remaining));
-      }
-      fs.writeSync(fd, marker);
-      bytes = GATEWAY_LOG_CAPTURE_BYTES;
-      truncated = true;
-    },
-    close() {
-      if (closed) {
-        return;
-      }
-      closed = true;
-      fs.closeSync(fd);
-    },
-  };
-}
-
-export function runCommand(command, args, options = {}) {
+function runCommand(command, args, options = {}) {
   return new Promise((resolve, reject) => {
-    const { timeoutMs = COMMAND_TIMEOUT_MS, ...spawnOptions } = options;
-    const detached = spawnOptions.detached ?? process.platform !== "win32";
     const child = childProcess.spawn(command, args, {
       stdio: ["ignore", "pipe", "pipe"],
-      ...spawnOptions,
-      detached,
+      ...options,
     });
-    if (detached) {
-      trackCommandChild(child);
-    }
-    let stdout = { text: "", truncatedChars: 0 };
-    let stderr = { text: "", truncatedChars: 0 };
-    let timedOut = false;
-    let settled = false;
+    let stdout = "";
+    let stderr = "";
     child.stdout?.on("data", (chunk) => {
-      stdout = appendBoundedOutput(stdout, chunk);
+      stdout += String(chunk);
     });
     child.stderr?.on("data", (chunk) => {
-      stderr = appendBoundedOutput(stderr, chunk);
+      stderr += String(chunk);
     });
-    const clearCommandTimer = timeoutMs
-      ? setTimeout(() => {
-          timedOut = true;
-          signalChildProcessTree(child, "SIGKILL");
-        }, timeoutMs)
-      : undefined;
-    child.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (clearCommandTimer) {
-        clearTimeout(clearCommandTimer);
-      }
-      reject(toLintErrorObject(error, "Command spawn failed"));
-    });
+    child.on("error", reject);
     child.on("close", (status, signal) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (clearCommandTimer) {
-        clearTimeout(clearCommandTimer);
-      }
       if (status === 0) {
-        resolve({
-          stdout: stdout.text,
-          stderr: stderr.text,
-          stdoutTruncatedChars: stdout.truncatedChars,
-          stderrTruncatedChars: stderr.truncatedChars,
-        });
+        resolve({ stdout, stderr });
         return;
       }
-      const detail = [
-        formatCapturedOutput("stdout", stdout),
-        formatCapturedOutput("stderr", stderr),
-      ]
-        .filter(Boolean)
-        .join("\n")
-        .trim();
-      const outcome = timedOut
-        ? `timed out after ${timeoutMs}ms`
-        : `failed with ${signal || status}`;
-      reject(new Error(`${command} ${args.join(" ")} ${outcome}${detail ? `\n${detail}` : ""}`));
+      const detail = [stdout, stderr].filter(Boolean).join("\n").trim();
+      reject(
+        new Error(
+          `${command} ${args.join(" ")} failed with ${signal || status}${detail ? `\n${detail}` : ""}`,
+        ),
+      );
     });
   });
 }
 
-export function startGateway(params) {
-  const log = createBoundedGatewayLog(params.logPath);
+function startGateway(params) {
+  const log = fs.openSync(params.logPath, "w");
   const child = childProcess.spawn(
     "node",
     [
@@ -489,156 +180,37 @@ export function startGateway(params) {
         OPENCLAW_SKIP_CHANNELS: params.skipChannels ? "1" : "0",
         OPENCLAW_SKIP_PROVIDERS: "0",
       },
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
+      stdio: ["ignore", log, log],
+      detached: false,
     },
   );
-  child.stdout?.on("data", (chunk) => log.append(chunk));
-  child.stderr?.on("data", (chunk) => log.append(chunk));
-  child.once("error", () => log.close());
-  child.once("close", () => log.close());
-  trackGatewayChild(child);
+  fs.closeSync(log);
   return child;
 }
 
-export function hasChildExited(child) {
-  return child.exitCode !== null || (child.signalCode ?? null) !== null;
-}
-
-function trackGatewayChild(child) {
-  activeGatewayChildren.add(child);
-  const untrack = () => {
-    if (!processTreeIsAlive(child)) {
-      activeGatewayChildren.delete(child);
-    }
-  };
-  child.once("error", untrack);
-  child.once("close", untrack);
-  installParentCleanup();
-}
-
-function trackCommandChild(child) {
-  activeCommandChildren.add(child);
-  const untrack = () => {
-    activeCommandChildren.delete(child);
-  };
-  child.once("error", untrack);
-  child.once("close", untrack);
-  installParentCleanup();
-}
-
-function installParentCleanup() {
-  if (!parentCleanupInstalled) {
-    parentCleanupInstalled = true;
-    process.once("exit", () => {
-      cleanupActiveChildren("SIGTERM");
-    });
-  }
-  for (const signal of ["SIGHUP", "SIGINT", "SIGTERM"]) {
-    if (parentSignalHandlers.has(signal)) {
-      continue;
-    }
-    const handler = () => {
-      cleanupActiveChildren(signal);
-      for (const [registeredSignal, registeredHandler] of parentSignalHandlers) {
-        process.off(registeredSignal, registeredHandler);
-      }
-      parentSignalHandlers.clear();
-      process.kill(process.pid, signal);
-    };
-    parentSignalHandlers.set(signal, handler);
-    process.once(signal, handler);
-  }
-}
-
-function cleanupActiveChildren(signal) {
-  for (const child of activeCommandChildren) {
-    signalChildProcessTree(child, signal);
-    if (process.platform !== "win32") {
-      signalChildProcessTree(child, "SIGKILL");
-    }
-  }
-  for (const child of activeGatewayChildren) {
-    signalChildProcessTree(child, signal);
-    if (process.platform !== "win32") {
-      signalChildProcessTree(child, "SIGKILL");
-    }
-  }
-}
-
-export async function stopGateway(child) {
-  if (!child || !processTreeIsAlive(child)) {
+async function stopGateway(child) {
+  if (!child || child.exitCode !== null) {
     return;
   }
-  const waitForExit = async (ms) => {
-    const deadline = Date.now() + ms;
-    while (Date.now() < deadline) {
-      if (!processTreeIsAlive(child)) {
-        return true;
-      }
-      await delay(100);
-    }
-    return !processTreeIsAlive(child);
-  };
-
-  signalChildProcessTree(child, "SIGTERM");
-  if (await waitForExit(GATEWAY_TEARDOWN_GRACE_MS)) {
-    return;
+  child.kill("SIGTERM");
+  const started = Date.now();
+  while (child.exitCode === null && Date.now() - started < 10000) {
+    await delay(100);
   }
-  signalChildProcessTree(child, "SIGKILL");
-  await waitForExit(GATEWAY_TEARDOWN_KILL_GRACE_MS);
-}
-
-function processTreeIsAlive(child) {
-  if (!child || typeof child.pid !== "number") {
-    return !hasChildExited(child);
-  }
-  if (process.platform === "win32") {
-    return !hasChildExited(child);
-  }
-  try {
-    process.kill(-child.pid, 0);
-    return true;
-  } catch (error) {
-    if (error?.code === "EPERM") {
-      return true;
-    }
-    return false;
+  if (child.exitCode === null) {
+    child.kill("SIGKILL");
   }
 }
 
-function signalChildProcessTree(child, signal) {
-  if (process.platform !== "win32" && typeof child.pid === "number") {
-    try {
-      process.kill(-child.pid, signal);
-      return;
-    } catch {
-      // Non-detached callers may not own a process group keyed by child.pid; keep
-      // the legacy direct-child kill path as the fallback.
-    }
-  }
-  try {
-    child.kill(signal);
-  } catch (error) {
-    if (error?.code !== "ESRCH") {
-      throw error;
-    }
-  }
-}
-
-export async function waitForReady(params) {
+async function waitForReady(params) {
   const started = Date.now();
   let lastError = "";
-  const readyLogSeen = createReadyLogScanner(params.logPath);
   while (Date.now() - started < READY_TIMEOUT_MS) {
-    const remainingMs = Math.max(1, READY_TIMEOUT_MS - (Date.now() - started));
-    if (hasChildExited(params.child)) {
+    if (params.child.exitCode !== null) {
       throw new Error(`gateway exited before ready\n${tailFile(params.logPath)}`);
     }
     try {
-      const res = await fetchHttpProbeStatus(params.port, "/readyz", {
-        timeoutMs: Math.min(HTTP_PROBE_TIMEOUT_MS, remainingMs),
-      });
+      const res = await fetch(`http://127.0.0.1:${params.port}/readyz`);
       if (res.ok) {
         return;
       }
@@ -646,45 +218,22 @@ export async function waitForReady(params) {
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    const healthRemainingMs = Math.max(1, READY_TIMEOUT_MS - (Date.now() - started));
-    if (
-      readyLogSeen() &&
-      (await httpOk(params.port, "/healthz", {
-        timeoutMs: Math.min(HTTP_PROBE_TIMEOUT_MS, healthRemainingMs),
-      }))
-    ) {
+    if (logShowsGatewayReady(params.logPath) && (await httpOk(params.port, "/healthz"))) {
       return;
     }
-    await delay(Math.min(250, Math.max(1, READY_TIMEOUT_MS - (Date.now() - started))));
+    await delay(250);
   }
   throw new Error(`gateway did not become ready: ${lastError}\n${tailFile(params.logPath)}`);
 }
 
-async function fetchHttpProbeStatus(port, pathName, options = {}) {
-  const { timeoutMs = HTTP_PROBE_TIMEOUT_MS } = options;
-  const controller = new AbortController();
-  const clearProbeTimer = timeoutMs
-    ? setTimeout(() => {
-        controller.abort();
-      }, timeoutMs)
-    : undefined;
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}${pathName}`, {
-      signal: controller.signal,
-    });
-    const status = { ok: res.ok, status: res.status };
-    await res.body?.cancel().catch(() => {});
-    return status;
-  } finally {
-    if (clearProbeTimer) {
-      clearTimeout(clearProbeTimer);
-    }
-  }
+function logShowsGatewayReady(logPath) {
+  const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
+  return log.includes("[gateway] ready");
 }
 
-export async function httpOk(port, pathName, options = {}) {
+async function httpOk(port, pathName) {
   try {
-    const res = await fetchHttpProbeStatus(port, pathName, options);
+    const res = await fetch(`http://127.0.0.1:${port}${pathName}`);
     return res.ok;
   } catch {
     return false;
@@ -692,54 +241,26 @@ export async function httpOk(port, pathName, options = {}) {
 }
 
 async function assertHttpOk(port, pathName) {
-  const started = Date.now();
-  let lastError;
-  while (Date.now() - started < RPC_READY_TIMEOUT_MS) {
-    try {
-      const res = await fetchHttpProbeStatus(port, pathName);
-      if (res.ok) {
-        return;
-      }
-      lastError = new Error(`${pathName} returned HTTP ${res.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(500);
+  const res = await fetch(`http://127.0.0.1:${port}${pathName}`);
+  if (!res.ok) {
+    throw new Error(`${pathName} returned HTTP ${res.status}`);
   }
-  throw toLintErrorObject(
-    lastError ?? new Error(`${pathName} did not return HTTP 200`),
-    "Non-Error thrown",
-  );
 }
 
 async function assertReadyzProbe(options) {
-  const started = Date.now();
-  let lastError;
-  while (Date.now() - started < RPC_READY_TIMEOUT_MS) {
-    try {
-      const res = await fetchHttpProbeStatus(options.port, "/readyz");
-      if (res.ok) {
-        return;
-      }
-      if (options.allowDegradedReadyz) {
-        console.log(
-          `Runtime readyz smoke degraded for ${options.pluginId}: /readyz returned HTTP ${res.status}`,
-        );
-        return;
-      }
-      lastError = new Error(`/readyz returned HTTP ${res.status}`);
-    } catch (error) {
-      lastError = error;
-    }
-    await delay(500);
+  const res = await fetch(`http://127.0.0.1:${options.port}/readyz`);
+  if (res.ok) {
+    return;
   }
-  throw toLintErrorObject(
-    lastError ?? new Error("/readyz did not return HTTP 200"),
-    "Non-Error thrown",
+  if (!options.allowDegradedReadyz) {
+    throw new Error(`/readyz returned HTTP ${res.status}`);
+  }
+  console.log(
+    `Runtime readyz smoke degraded for ${options.pluginId}: /readyz returned HTTP ${res.status}`,
   );
 }
 
-export async function rpcCall(method, params, options) {
+async function rpcCall(method, params, options) {
   const rpcStateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-plugin-runtime-rpc-"));
   const args = [
     options.entrypoint,
@@ -756,19 +277,15 @@ export async function rpcCall(method, params, options) {
     "--params",
     JSON.stringify(params ?? {}),
   ];
-  try {
-    const { stdout } = await runCommand("node", args, {
-      env: {
-        ...process.env,
-        ...options.env,
-        OPENCLAW_NO_ONBOARD: "1",
-        OPENCLAW_STATE_DIR: rpcStateDir,
-      },
-    });
-    return unwrapRpcPayload(parseJsonOutput(stdout));
-  } finally {
-    fs.rmSync(rpcStateDir, { force: true, recursive: true });
-  }
+  const { stdout } = await runCommand("node", args, {
+    env: {
+      ...process.env,
+      ...options.env,
+      OPENCLAW_NO_ONBOARD: "1",
+      OPENCLAW_STATE_DIR: rpcStateDir,
+    },
+  });
+  return unwrapRpcPayload(parseJsonOutput(stdout));
 }
 
 async function retryRpcCall(method, params, options) {
@@ -785,10 +302,7 @@ async function retryRpcCall(method, params, options) {
       await delay(500);
     }
   }
-  throw toLintErrorObject(
-    lastError ?? new Error(`gateway RPC ${method} timed out before retry`),
-    "Non-Error thrown",
-  );
+  throw lastError ?? new Error(`gateway RPC ${method} timed out before retry`);
 }
 
 function isRetryableGatewayCallError(error) {
@@ -830,30 +344,14 @@ function parseJsonOutput(stdout) {
   }
 }
 
-function hasOwnPayloadField(raw, field) {
-  return (
-    ((typeof raw === "object" && raw !== null) || typeof raw === "function") &&
-    Object.hasOwn(raw, field)
-  );
-}
-
-export function unwrapRpcPayload(raw) {
+function unwrapRpcPayload(raw) {
   if (raw?.ok === false) {
     throw new Error(`gateway RPC failed: ${JSON.stringify(raw.error ?? raw)}`);
   }
-  if (hasOwnPayloadField(raw, "result")) {
-    return raw.result;
-  }
-  if (hasOwnPayloadField(raw, "payload")) {
-    return raw.payload;
-  }
-  if (hasOwnPayloadField(raw, "data")) {
-    return raw.data;
-  }
-  return raw;
+  return raw?.result ?? raw?.payload ?? raw?.data ?? raw;
 }
 
-async function smokePlugin(pluginId, pluginDir, requiresConfig, pluginIndex, pluginRoot) {
+async function smokePlugin(pluginId, pluginDir, requiresConfig, pluginIndex) {
   if (requiresConfig) {
     console.log(`Runtime smoke skipped for ${pluginId}: plugin requires config`);
     return;
@@ -862,15 +360,20 @@ async function smokePlugin(pluginId, pluginDir, requiresConfig, pluginIndex, plu
   if (!entrypoint) {
     throw new Error("missing OPENCLAW_ENTRY");
   }
-  const manifest = loadManifest(pluginDir, pluginRoot);
+  const manifest = loadManifest(pluginDir);
   const plan = buildPluginPlan(manifest);
   const port =
     readPositiveInt(process.env.OPENCLAW_BUNDLED_PLUGIN_RUNTIME_PORT_BASE, 19000) + pluginIndex * 3;
-  const config = ensureGatewayConfig(
-    activateSmokePlugin(readConfig(), pluginId, plan.channels),
-    port,
-  );
-  const env = withManifestChannelActivationEnv(process.env, plan.channels);
+  const config = ensureGatewayConfig(activateSmokePlugin(readConfig(), pluginId), port);
+  for (const channel of plan.channels) {
+    config.channels = {
+      ...config.channels,
+      [channel]: {
+        ...config.channels?.[channel],
+        enabled: true,
+      },
+    };
+  }
   if (plan.speechProviders[0]) {
     const provider = plan.speechProviders[0];
     config.messages = {
@@ -894,7 +397,7 @@ async function smokePlugin(pluginId, pluginDir, requiresConfig, pluginIndex, plu
     entrypoint,
     port,
     logPath,
-    env,
+    env: process.env,
     skipChannels: plan.channels.length === 0,
   });
   try {
@@ -902,12 +405,12 @@ async function smokePlugin(pluginId, pluginDir, requiresConfig, pluginIndex, plu
     await assertBaseGatewayProbes({
       entrypoint,
       port,
-      env,
+      env: process.env,
       pluginId,
       allowDegradedReadyz: plan.channels.length > 0,
     });
-    await runManifestProbes(plan, { entrypoint, port, env, pluginId });
-    await runWatchdog({ child, logPath, port, entrypoint, env, pluginId });
+    await runManifestProbes(plan, { entrypoint, port, env: process.env, pluginId });
+    await runWatchdog({ child, logPath, port, entrypoint, env: process.env, pluginId });
     console.log(`Runtime smoke passed for ${pluginId}`);
   } catch (error) {
     console.error(tailFile(logPath));
@@ -930,10 +433,21 @@ async function runManifestProbes(plan, options) {
       { probe: false, timeoutMs: 2000 },
       options,
     );
-    assertChannelVisible(status, channel, options.pluginId);
+    if (!isChannelVisible(status, channel)) {
+      console.log(
+        `Runtime channel status smoke skipped for ${options.pluginId}: ${channel} is not visible in dry channels.status`,
+      );
+    }
   }
   if (plan.runtimeSlashAliases.length > 0 && plan.activeInThisProbe) {
-    await retryCommandsListWithAliases(plan.runtimeSlashAliases, options);
+    const commands = await retryRpcCall(
+      "commands.list",
+      { scope: "both", includeArgs: true },
+      options,
+    );
+    for (const alias of plan.runtimeSlashAliases) {
+      assertCommandVisible(commands, alias);
+    }
   } else if (plan.runtimeSlashAliases.length > 0) {
     console.log(
       `Runtime slash command smoke skipped for ${options.pluginId}: plugin is lazy in this probe`,
@@ -969,19 +483,10 @@ function isChannelVisible(payload, channel) {
   return false;
 }
 
-export function assertChannelVisible(payload, channel, pluginId) {
-  if (isChannelVisible(payload, channel)) {
-    return;
-  }
-  throw new Error(
-    `Runtime channel status missing manifest channel ${channel} for ${pluginId}: channels.status did not expose the declared channel`,
-  );
-}
-
-export function isCommandVisible(payload, alias) {
+function assertCommandVisible(payload, alias) {
   const expected = alias.replace(/^\//u, "").toLowerCase();
   const commands = Array.isArray(payload.commands) ? payload.commands : [];
-  return commands.some((command) => {
+  const found = commands.some((command) => {
     const names = [
       command?.name,
       command?.nativeName,
@@ -991,32 +496,11 @@ export function isCommandVisible(payload, alias) {
       .map((value) => value.replace(/^\//u, "").toLowerCase());
     return names.includes(expected);
   });
-}
-
-function assertCommandVisible(payload, alias) {
-  const expected = alias.replace(/^\//u, "").toLowerCase();
-  if (!isCommandVisible(payload, alias)) {
+  if (!found) {
     throw new Error(
       `commands.list did not include /${expected}: ${JSON.stringify(payload).slice(0, 2000)}`,
     );
   }
-}
-
-async function retryCommandsListWithAliases(aliases, options) {
-  const started = Date.now();
-  let commands;
-  while (Date.now() - started < COMMAND_TIMEOUT_MS) {
-    commands = await retryRpcCall("commands.list", { scope: "both", includeArgs: true }, options);
-    const missing = aliases.filter((alias) => !isCommandVisible(commands, alias));
-    if (missing.length === 0) {
-      return commands;
-    }
-    await delay(500);
-  }
-  for (const alias of aliases) {
-    assertCommandVisible(commands, alias);
-  }
-  return commands;
 }
 
 function assertToolVisible(payload, tool) {
@@ -1046,148 +530,69 @@ function assertSpeechProviderVisible(payload, provider, label) {
 }
 
 async function runWatchdog(options) {
-  const readyOffset = findReadyLogOffset(options.logPath);
+  const readyIndex = findReadyLogIndex(options.logPath);
   await delay(WATCHDOG_MS);
-  if (hasChildExited(options.child)) {
+  if (options.child.exitCode !== null) {
     throw new Error(
       `gateway exited after ready for ${options.pluginId}\n${tailFile(options.logPath)}`,
     );
   }
   await retryRpcCall("health", {}, options);
-  assertGatewayLogNotTruncated(options.logPath);
-  assertNoPostReadyRuntimeDepsWork(options.logPath, readyOffset);
+  assertNoPostReadyRuntimeDepsWork(options.logPath, readyIndex);
   await assertNoPackageManagerChildren(options.child.pid);
 }
 
-export function findReadyLogOffset(logPath) {
-  return findFirstNeedleOffset(logPath, READY_OFFSET_LOG_NEEDLES);
+function findReadyLogIndex(logPath) {
+  const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
+  const candidates = ["[gateway] ready", "listening on ws://", "[gateway] http server listening"];
+  const indexes = candidates.map((needle) => log.indexOf(needle)).filter((index) => index >= 0);
+  return indexes.length > 0 ? Math.min(...indexes) : 0;
 }
 
-export function assertGatewayLogNotTruncated(logPath) {
-  if (readFileTail(logPath).includes(GATEWAY_LOG_TRUNCATED_NEEDLE)) {
-    throw new Error(
-      `gateway log exceeded ${String(
-        GATEWAY_LOG_CAPTURE_BYTES,
-      )} bytes; runtime smoke cannot validate complete post-ready output`,
-    );
-  }
-}
-
-export function assertNoPostReadyRuntimeDepsWork(logPath, readyOffset) {
-  let stat;
-  try {
-    stat = fs.statSync(logPath);
-  } catch {
-    return;
-  }
-  if (!stat.isFile() || stat.size <= 0) {
-    return;
-  }
-
-  let offset = Math.min(Math.max(0, Math.floor(Number(readyOffset) || 0)), stat.size);
-  let carry = "";
-  while (offset < stat.size) {
-    const { buffer } = readFileChunk(logPath, offset, LOG_SCAN_BYTES);
-    if (buffer.length === 0) {
-      break;
-    }
-    const text = carry + buffer.toString("utf8");
-    const match = FORBIDDEN_POST_READY_DEPS_WORK.find((pattern) => pattern.test(text));
-    if (match) {
-      throw new Error(`post-ready runtime dependency work matched ${match}: ${tailText(text)}`);
-    }
-    carry = text.slice(-256);
-    offset += buffer.length;
+function assertNoPostReadyRuntimeDepsWork(logPath, readyIndex) {
+  const log = fs.existsSync(logPath) ? fs.readFileSync(logPath, "utf8") : "";
+  const postReady = log.slice(Math.max(0, readyIndex));
+  const forbidden = [/\b(?:npm|pnpm|yarn|corepack) install\b/iu];
+  const match = forbidden.find((pattern) => pattern.test(postReady));
+  if (match) {
+    throw new Error(`post-ready runtime dependency work matched ${match}: ${tailText(postReady)}`);
   }
 }
 
-function commandIncludesPackageManager(args) {
-  return String(args ?? "")
-    .trim()
-    .split(/\s+/u)
-    .some((token) =>
-      PACKAGE_MANAGER_PROCESS_BASENAME.test(
-        path.basename(token.replace(/^['"]|['"]$/gu, "")).toLowerCase(),
-      ),
-    );
-}
-
-function parseProcessSnapshot(stdout) {
-  const processes = [];
-  for (const line of String(stdout ?? "").split("\n")) {
-    const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
-    if (!match) {
-      continue;
-    }
-    processes.push({
-      args: match[3],
-      pid: Number(match[1]),
-      ppid: Number(match[2]),
-    });
-  }
-  return processes;
-}
-
-export function findPackageManagerDescendants(psOutput, rootPid) {
-  const root = Number(rootPid);
-  if (!Number.isInteger(root) || root <= 0) {
-    return [];
-  }
-
-  const childrenByParent = new Map();
-  for (const processInfo of parseProcessSnapshot(psOutput)) {
-    const list = childrenByParent.get(processInfo.ppid) ?? [];
-    list.push(processInfo);
-    childrenByParent.set(processInfo.ppid, list);
-  }
-
-  const matches = [];
-  const pending = [...(childrenByParent.get(root) ?? [])];
-  const seen = new Set();
-  while (pending.length > 0) {
-    const current = pending.shift();
-    if (!current || seen.has(current.pid)) {
-      continue;
-    }
-    seen.add(current.pid);
-    if (commandIncludesPackageManager(current.args)) {
-      matches.push(current);
-    }
-    pending.push(...(childrenByParent.get(current.pid) ?? []));
-  }
-  return matches;
-}
-
-export async function assertNoPackageManagerChildren(pid) {
+async function assertNoPackageManagerChildren(pid) {
   if (!pid || process.platform === "win32") {
     return;
   }
   try {
-    const { stdout } = await runCommand("ps", PROCESS_SNAPSHOT_ARGS);
-    const packageManagerDescendants = findPackageManagerDescendants(stdout, pid);
-    if (packageManagerDescendants.length > 0) {
-      const formatted = packageManagerDescendants
-        .map((entry) => `${entry.pid} ${entry.args}`)
-        .join("\n");
+    const { stdout } = await runCommand("pgrep", [
+      "-P",
+      String(pid),
+      "-af",
+      "npm|pnpm|yarn|corepack",
+    ]);
+    if (stdout.trim()) {
       throw new Error(
-        `package manager descendant process still running under gateway ${pid}:\n${formatted}`,
+        `package manager child process still running under gateway ${pid}:\n${stdout}`,
       );
     }
   } catch (error) {
     if (error?.code === "ENOENT") {
-      console.log("Runtime deps child-process watchdog skipped: ps unavailable");
+      console.log("Runtime deps child-process watchdog skipped: pgrep unavailable");
+      return;
+    }
+    if (error instanceof Error && error.message.includes("failed with 1")) {
       return;
     }
     throw error;
   }
 }
 
-async function smokeTtsGlobalDisable(pluginId, pluginDir, provider, pluginIndex, pluginRoot) {
+async function smokeTtsGlobalDisable(pluginId, pluginDir, provider, pluginIndex) {
   const entrypoint = process.env.OPENCLAW_ENTRY;
   if (!entrypoint) {
     throw new Error("missing OPENCLAW_ENTRY");
   }
-  const manifest = loadManifest(pluginDir, pluginRoot);
+  const manifest = loadManifest(pluginDir);
   const plan = buildPluginPlan(manifest);
   const selectedProvider = provider || plan.speechProviders[0];
   if (!selectedProvider) {
@@ -1236,7 +641,6 @@ async function smokeTtsGlobalDisable(pluginId, pluginDir, provider, pluginIndex,
     throw error;
   } finally {
     await stopGateway(child);
-    cleanupIsolatedStateEnv(env);
   }
 }
 
@@ -1299,75 +703,45 @@ async function smokeOpenAiTts(pluginIndex) {
     throw error;
   } finally {
     await stopGateway(child);
-    cleanupIsolatedStateEnv(env);
   }
 }
 
-export function createIsolatedStateEnv(label) {
+function createIsolatedStateEnv(label) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), `openclaw-${label}-`));
   const home = path.join(root, "home");
   const stateDir = path.join(home, ".openclaw");
   const configPath = path.join(stateDir, "openclaw.json");
   fs.mkdirSync(stateDir, { recursive: true });
-  const env = {
+  return {
     ...process.env,
     HOME: home,
-    USERPROFILE: home,
-    OPENCLAW_HOME: home,
+    OPENCLAW_HOME: stateDir,
     OPENCLAW_STATE_DIR: stateDir,
     OPENCLAW_CONFIG_PATH: configPath,
   };
-  isolatedStateRoots.set(env, root);
-  return env;
-}
-
-export function cleanupIsolatedStateEnv(env) {
-  const root = isolatedStateRoots.get(env);
-  if (!root) {
-    return;
-  }
-  isolatedStateRoots.delete(env);
-  fs.rmSync(root, { force: true, recursive: true });
 }
 
 function tailFile(file) {
-  return tailText(readFileTail(file));
+  if (!fs.existsSync(file)) {
+    return "";
+  }
+  return tailText(fs.readFileSync(file, "utf8"));
 }
 
 function tailText(text) {
   return text.split(/\r?\n/u).slice(-120).join("\n");
 }
 
-export async function main(argv = process.argv.slice(2)) {
-  const [command, pluginId, pluginDir, requiresConfigRaw, pluginIndexRaw, pluginRoot, provider] =
-    argv;
-  const pluginIndex = Number.parseInt(pluginIndexRaw || "0", 10);
+const [command, pluginId, pluginDir, requiresConfigRaw, pluginIndexRaw, provider] =
+  process.argv.slice(2);
+const pluginIndex = Number.parseInt(pluginIndexRaw || "0", 10);
 
-  if (command === "plugin") {
-    await smokePlugin(pluginId, pluginDir, requiresConfigRaw === "1", pluginIndex, pluginRoot);
-  } else if (command === "tts-global-disable") {
-    await smokeTtsGlobalDisable(pluginId, pluginDir, provider, pluginIndex, pluginRoot);
-  } else if (command === "tts-openai-live") {
-    await smokeOpenAiTts(pluginIndex);
-  } else {
-    throw new Error(`Unknown runtime smoke command: ${command || "(missing)"}`);
-  }
-}
-
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await main();
-}
-
-function toLintErrorObject(value, fallbackMessage) {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
+if (command === "plugin") {
+  await smokePlugin(pluginId, pluginDir, requiresConfigRaw === "1", pluginIndex);
+} else if (command === "tts-global-disable") {
+  await smokeTtsGlobalDisable(pluginId, pluginDir, provider, pluginIndex);
+} else if (command === "tts-openai-live") {
+  await smokeOpenAiTts(pluginIndex);
+} else {
+  throw new Error(`Unknown runtime smoke command: ${command || "(missing)"}`);
 }

@@ -12,11 +12,7 @@ import {
 import { VerificationMethod } from "matrix-js-sdk/lib/types.js";
 import { KeyedAsyncQueue } from "openclaw/plugin-sdk/keyed-async-queue";
 import type { PinnedDispatcherPolicy } from "openclaw/plugin-sdk/ssrf-dispatcher";
-import {
-  normalizeNullableString,
-  normalizeStringEntries,
-  uniqueStrings,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeNullableString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { SsrFPolicy } from "../runtime-api.js";
 import { resolveMatrixRoomKeyBackupReadinessError } from "./backup-health.js";
 import { FileBackedMatrixSyncStore } from "./client/file-sync-store.js";
@@ -111,14 +107,6 @@ export type MatrixRoomKeyBackupStatus = {
 };
 
 const MATRIX_STATUS_DIAGNOSTIC_TIMEOUT_MS = 10_000;
-const DEFAULT_MATRIX_LOCAL_TIMEOUT_MS = 60_000;
-
-function resolveMatrixLocalTimeoutMs(raw: number | undefined): number {
-  if (typeof raw !== "number" || !Number.isFinite(raw)) {
-    return DEFAULT_MATRIX_LOCAL_TIMEOUT_MS;
-  }
-  return Math.max(1, Math.floor(raw));
-}
 
 function unresolvedMatrixRoomKeyBackupStatus(): MatrixRoomKeyBackupStatus {
   return {
@@ -383,7 +371,7 @@ export class MatrixClient {
       ssrfPolicy: opts.ssrfPolicy,
       dispatcherPolicy: opts.dispatcherPolicy,
     });
-    this.localTimeoutMs = resolveMatrixLocalTimeoutMs(opts.localTimeoutMs);
+    this.localTimeoutMs = Math.max(1, opts.localTimeoutMs ?? 60_000);
     this.initialSyncLimit = opts.initialSyncLimit;
     this.syncFilter = opts.syncFilter;
     this.encryptionEnabled = opts.encryption === true;
@@ -1357,7 +1345,7 @@ export class MatrixClient {
       return await fail("Matrix recovery key is required");
     }
 
-    let stagedKeyId: string | null;
+    let stagedKeyId: string | null = null;
     try {
       stagedKeyId = (await this.resolveDefaultSecretStorageKeyId(crypto)) ?? null;
       this.recoveryKeyStore.stageEncodedRecoveryKey({
@@ -1852,7 +1840,7 @@ export class MatrixClient {
   }
 
   async deleteOwnDevices(deviceIds: string[]): Promise<MatrixOwnDeviceDeleteResult> {
-    const uniqueDeviceIds = uniqueStrings(normalizeStringEntries(deviceIds));
+    const uniqueDeviceIds = [...new Set(deviceIds.map((value) => value.trim()).filter(Boolean))];
     const currentDeviceId = this.client.getDeviceId()?.trim() || null;
     const protectedDeviceIds = uniqueDeviceIds.filter((deviceId) => deviceId === currentDeviceId);
     if (protectedDeviceIds.length > 0) {
@@ -2051,8 +2039,10 @@ export class MatrixClient {
       this.emitter.emit("room.event", roomId, raw);
       if (isEncryptedEvent) {
         this.emitter.emit("room.encrypted_event", roomId, raw);
-      } else if (decryptBridge.shouldEmitUnencryptedMessage(roomId, raw.event_id)) {
-        this.emitter.emit("room.message", roomId, raw);
+      } else {
+        if (decryptBridge.shouldEmitUnencryptedMessage(roomId, raw.event_id)) {
+          this.emitter.emit("room.message", roomId, raw);
+        }
       }
 
       const stateKey = raw.state_key ?? "";

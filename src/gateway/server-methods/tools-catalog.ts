@@ -1,12 +1,5 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
-  ErrorCodes,
-  errorShape,
-  formatValidationErrors,
-  type ToolsCatalogResult,
-  validateToolsCatalogParams,
-} from "../../../packages/gateway-protocol/src/index.js";
-import {
+  listAgentIds,
   resolveAgentDir,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
@@ -25,8 +18,15 @@ import {
   getPluginToolMeta,
   resolvePluginTools,
 } from "../../plugins/tools.js";
-import { resolveAgentIdOrRespondError } from "./agent-id-shared.js";
-import type { GatewayRequestHandlers } from "./types.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import {
+  ErrorCodes,
+  errorShape,
+  formatValidationErrors,
+  type ToolsCatalogResult,
+  validateToolsCatalogParams,
+} from "../protocol/index.js";
+import type { GatewayRequestHandlers, RespondFn } from "./types.js";
 
 type ToolCatalogEntry = {
   id: string;
@@ -48,9 +48,26 @@ type ToolCatalogGroup = {
   tools: ToolCatalogEntry[];
 };
 
+function resolveAgentIdOrRespondError(
+  rawAgentId: unknown,
+  respond: RespondFn,
+  cfg: OpenClawConfig,
+) {
+  const knownAgents = listAgentIds(cfg);
+  const requestedAgentId = normalizeOptionalString(rawAgentId) ?? "";
+  const agentId = requestedAgentId || resolveDefaultAgentId(cfg);
+  if (requestedAgentId && !knownAgents.includes(agentId)) {
+    respond(
+      false,
+      undefined,
+      errorShape(ErrorCodes.INVALID_REQUEST, `unknown agent id "${requestedAgentId}"`),
+    );
+    return null;
+  }
+  return { cfg, agentId };
+}
+
 function buildCoreGroups(): ToolCatalogGroup[] {
-  // Core catalog rows come from static tool sections so profile chips remain
-  // stable even before any runtime agent session exists.
   return listCoreToolSections().map((section) => ({
     id: section.id,
     label: section.label,
@@ -83,8 +100,6 @@ function buildPluginGroups(params: {
     toolAllowlist: ["group:plugins"],
     allowGatewaySubagentBinding: true,
   });
-  // Resolve tools through the same plugin registry path used at runtime so the
-  // catalog respects conflicts, optional tools, and subagent binding rules.
   const pluginTools = resolvePluginTools({
     context: toolContext,
     existingToolNames: params.existingToolNames,
@@ -150,8 +165,6 @@ function buildPluginGroups(params: {
         continue;
       }
       const groupId = `plugin:${entry.pluginId}`;
-      // Declared-but-unresolved plugin tools still appear so operators can see
-      // optional capabilities that may need config before they bind at runtime.
       const existing =
         groups.get(groupId) ??
         ({
@@ -229,12 +242,11 @@ export const toolsCatalogHandlers: GatewayRequestHandlers = {
       );
       return;
     }
-    const resolved = resolveAgentIdOrRespondError({
-      rawAgentId: params.agentId,
+    const resolved = resolveAgentIdOrRespondError(
+      params.agentId,
       respond,
-      cfg: context.getRuntimeConfig(),
-      normalize: normalizeOptionalString,
-    });
+      context.getRuntimeConfig(),
+    );
     if (!resolved) {
       return;
     }

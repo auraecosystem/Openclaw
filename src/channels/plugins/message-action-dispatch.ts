@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "../../agents/runtime/index.js";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { getChannelPlugin } from "./index.js";
 import type { ChannelMessageActionContext } from "./types.public.js";
 

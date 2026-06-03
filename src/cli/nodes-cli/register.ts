@@ -1,8 +1,7 @@
 import type { Command } from "commander";
-import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
-import { theme } from "../../../packages/terminal-core/src/theme.js";
+import { formatDocsLink } from "../../terminal/links.js";
+import { theme } from "../../terminal/theme.js";
 import { formatHelpExamples } from "../help-format.js";
-import { withConsoleLogsRoutedToStderrForJson } from "../json-output-mode.js";
 import { registerNodesCameraCommands } from "./register.camera.js";
 import { registerNodesInvokeCommands } from "./register.invoke.js";
 import { registerNodesLocationCommands } from "./register.location.js";
@@ -12,7 +11,7 @@ import { registerNodesPushCommand } from "./register.push.js";
 import { registerNodesScreenCommands } from "./register.screen.js";
 import { registerNodesStatusCommands } from "./register.status.js";
 
-export async function registerNodesCli(program: Command, argv: readonly string[] = process.argv) {
+export async function registerNodesCli(program: Command) {
   const nodes = program
     .command("nodes")
     .description("Manage gateway-owned nodes (pairing, status, invoke, and media)")
@@ -41,12 +40,8 @@ export async function registerNodesCli(program: Command, argv: readonly string[]
   registerNodesLocationCommands(nodes);
 
   const { registerPluginCliCommandsFromValidatedConfig } = await import("../../plugins/cli.js");
-  await withConsoleLogsRoutedToStderrForJson(
-    argv,
-    async () =>
-      await registerPluginCliCommandsFromValidatedConfig(program, undefined, undefined, {
-        mode: "lazy",
-        primary: "nodes",
-      }),
-  );
+  await registerPluginCliCommandsFromValidatedConfig(program, undefined, undefined, {
+    mode: "lazy",
+    primary: "nodes",
+  });
 }

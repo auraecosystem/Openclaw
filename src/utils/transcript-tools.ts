@@ -1,7 +1,7 @@
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
+} from "../shared/string-coerce.js";
 
 type ToolResultCounts = {
   total: number;

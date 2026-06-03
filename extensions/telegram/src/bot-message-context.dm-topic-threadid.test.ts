@@ -93,8 +93,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
         },
       },
       sessionRuntime: {
-        buildChannelInboundEventContext:
-          buildChannelInboundEventContextMock as unknown as typeof buildChannelInboundEventContext,
+        buildChannelInboundEventContext: buildChannelInboundEventContextMock,
       },
     });
 
@@ -106,7 +105,7 @@ describe("buildTelegramMessageContext DM topic threadId in deliveryContext (#889
     expect(turnOptions?.message.rawBody).toBe("hello");
     expect(turnOptions?.message.bodyForAgent).toBe("hello");
     expect(turnOptions?.reply?.to).toBe("telegram:1234");
-    expect(turnOptions?.reply?.originatingTo).toBeUndefined();
+    expect(turnOptions?.reply?.originatingTo).toBe("telegram:1234");
     expect(turnOptions?.reply?.replyToId).toBe("9");
     expect(turnOptions?.supplemental?.quote?.id).toBe("9");
     expect(turnOptions?.supplemental?.quote?.body).toBe("parent");

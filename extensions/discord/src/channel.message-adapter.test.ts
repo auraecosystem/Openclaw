@@ -2,7 +2,7 @@ import {
   verifyChannelMessageAdapterCapabilityProofs,
   verifyChannelMessageLiveCapabilityAdapterProofs,
   verifyChannelMessageLiveFinalizerProofs,
-} from "openclaw/plugin-sdk/channel-outbound";
+} from "openclaw/plugin-sdk/channel-message";
 import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createDiscordOutboundHoisted,
@@ -60,16 +60,6 @@ function requirePayloadSender(
   return payload;
 }
 
-function requirePollSender(
-  adapter: DiscordMessageAdapter,
-): NonNullable<DiscordMessageSender["poll"]> {
-  const poll = adapter.send?.poll;
-  if (!poll) {
-    throw new Error("Expected discord message adapter poll sender");
-  }
-  return poll;
-}
-
 describe("discord channel message adapter", () => {
   beforeEach(() => {
     resetDiscordOutboundMocks(hoisted);
@@ -80,7 +70,6 @@ describe("discord channel message adapter", () => {
     const sendText = requireTextSender(adapter);
     const sendMedia = requireMediaSender(adapter);
     const sendPayload = requirePayloadSender(adapter);
-    const sendPoll = requirePollSender(adapter);
 
     const proveText = async () => {
       resetDiscordOutboundMocks(hoisted);
@@ -155,27 +144,6 @@ describe("discord channel message adapter", () => {
       expect(result.receipt.platformMessageIds).toEqual(["msg-1"]);
     };
 
-    const provePoll = async () => {
-      resetDiscordOutboundMocks(hoisted);
-      const result = await sendPoll({
-        cfg: {},
-        to: "channel:123456",
-        poll: { question: "Ship?", options: ["Yes", "No"] },
-        accountId: "default",
-        silent: true,
-      });
-      expect(hoisted.sendPollDiscordMock).toHaveBeenLastCalledWith(
-        "channel:123456",
-        { question: "Ship?", options: ["Yes", "No"] },
-        {
-          accountId: "default",
-          silent: true,
-          cfg: {},
-        },
-      );
-      expect(result.receipt.parts[0]?.kind).toBe("poll");
-    };
-
     const proveReplyThreadSilent = async () => {
       resetDiscordOutboundMocks(hoisted);
       const result = await sendText({
@@ -212,7 +180,6 @@ describe("discord channel message adapter", () => {
       proofs: {
         text: proveText,
         media: proveMedia,
-        poll: provePoll,
         payload: provePayload,
         silent: proveReplyThreadSilent,
         replyTo: proveReplyThreadSilent,

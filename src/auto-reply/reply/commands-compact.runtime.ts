@@ -1,9 +1,9 @@
 export {
-  abortEmbeddedAgentRun,
-  compactEmbeddedAgentSession,
-  isEmbeddedAgentRunActive,
-  waitForEmbeddedAgentRunEnd,
-} from "../../agents/embedded-agent.js";
+  abortEmbeddedPiRun,
+  compactEmbeddedPiSession,
+  isEmbeddedPiRunActive,
+  waitForEmbeddedPiRunEnd,
+} from "../../agents/pi-embedded.js";
 export {
   resolveFreshSessionTotalTokens,
   resolveSessionFilePath,

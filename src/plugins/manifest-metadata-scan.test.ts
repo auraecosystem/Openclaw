@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writePersistedInstalledPluginIndexSync } from "./installed-plugin-index-store.js";
 import { listOpenClawPluginManifestMetadata } from "./manifest-metadata-scan.js";
 
 const tempRoots: string[] = [];
@@ -39,36 +38,9 @@ describe("listOpenClawPluginManifestMetadata", () => {
       id: "openai",
       providers: ["openai"],
     });
-    writePersistedInstalledPluginIndexSync(
-      {
-        version: 1,
-        hostContractVersion: "test",
-        compatRegistryVersion: "test",
-        migrationVersion: 1,
-        policyHash: "test",
-        generatedAtMs: 1,
-        installRecords: {},
-        plugins: [
-          {
-            pluginId: "openai",
-            manifestPath: path.join(staleBundledRoot, "openai", "openclaw.plugin.json"),
-            manifestHash: "stale-openai",
-            rootDir: path.join(staleBundledRoot, "openai"),
-            origin: "bundled",
-            enabled: true,
-            startup: {
-              sidecar: false,
-              memory: false,
-              deferConfiguredChannelFullLoadUntilAfterListen: false,
-              agentHarnesses: [],
-            },
-            compat: [],
-          },
-        ],
-        diagnostics: [],
-      },
-      { stateDir: path.join(home, ".openclaw") },
-    );
+    writeJson(path.join(home, ".openclaw", "plugins", "installs.json"), {
+      plugins: [{ rootDir: path.join(staleBundledRoot, "openai"), origin: "bundled" }],
+    });
 
     const records = listOpenClawPluginManifestMetadata({
       OPENCLAW_HOME: home,

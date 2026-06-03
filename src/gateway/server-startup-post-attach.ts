@@ -1,10 +1,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { monitorEventLoopDelay, performance } from "node:perf_hooks";
 import { setTimeout as sleep } from "node:timers/promises";
 import type { CliDeps } from "../cli/deps.types.js";
-import { resolveStateDir } from "../config/paths.js";
 import type { GatewayTailscaleMode } from "../config/types.gateway.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasConfiguredInternalHooks } from "../hooks/configured.js";
@@ -25,15 +23,11 @@ import type { refreshLatestUpdateRestartSentinel } from "./server-restart-sentin
 import type { logGatewayStartup } from "./server-startup-log.js";
 import type { startGatewayTailscaleExposure } from "./server-tailscale.js";
 
+const SESSION_LOCK_STALE_MS = 30 * 60 * 1000;
 const ACP_BACKEND_READY_TIMEOUT_MS = 5_000;
 const ACP_BACKEND_READY_POLL_MS = 50;
 const PRIMARY_MODEL_PREWARM_TIMEOUT_MS = 5_000;
 const STARTUP_PROVIDER_DISCOVERY_TIMEOUT_MS = 5_000;
-const PROVIDER_AUTH_PREWARM_START_DELAY_MS = 1_000;
-const PROVIDER_AUTH_REWARM_DELAY_MS = 1_000;
-const AGENT_RUNTIME_PLUGIN_PREWARM_START_DELAY_MS = 10_000;
-const DEFERRED_SIDECAR_START_DELAY_MS = 100;
-const SESSION_LOCK_CLEANUP_CONCURRENCY = 4;
 const SKIP_STARTUP_MODEL_PREWARM_ENV = "OPENCLAW_SKIP_STARTUP_MODEL_PREWARM";
 const QMD_STARTUP_IDLE_DELAY_MS = 120_000;
 const RESTART_SENTINEL_FILENAME = "restart-sentinel.json";
@@ -51,48 +45,10 @@ type GatewayMemoryStartupPolicy =
   | { mode: "immediate" }
   | { mode: "idle"; delayMs: number };
 
-let mainSessionRestartRecoveryModulePromise: Promise<
-  typeof import("../agents/main-session-restart-recovery.js")
-> | null = null;
-let agentDefaultsModulePromise: Promise<typeof import("../agents/defaults.js")> | null = null;
-let agentModelSelectionModulePromise: Promise<
-  typeof import("../agents/model-selection.js")
-> | null = null;
-let internalHooksModulePromise: Promise<typeof import("../hooks/internal-hooks.js")> | null = null;
-let gatewayRestartSentinelModulePromise: Promise<
-  typeof import("./server-restart-sentinel.js")
-> | null = null;
-
-const loadMainSessionRestartRecoveryModule = async () => {
-  mainSessionRestartRecoveryModulePromise ??= import("../agents/main-session-restart-recovery.js");
-  return await mainSessionRestartRecoveryModulePromise;
-};
-
-const loadAgentDefaultsModule = async () => {
-  agentDefaultsModulePromise ??= import("../agents/defaults.js");
-  return await agentDefaultsModulePromise;
-};
-
-const loadAgentModelSelectionModule = async () => {
-  agentModelSelectionModulePromise ??= import("../agents/model-selection.js");
-  return await agentModelSelectionModulePromise;
-};
-
-const loadInternalHooksModule = async () => {
-  internalHooksModulePromise ??= import("../hooks/internal-hooks.js");
-  return await internalHooksModulePromise;
-};
-
-const loadGatewayRestartSentinelModule = async () => {
-  gatewayRestartSentinelModulePromise ??= import("./server-restart-sentinel.js");
-  return await gatewayRestartSentinelModulePromise;
-};
-
 export type GatewayPostReadySidecarHandle = {
-  stop: () => Awaitable<void>;
+  stop: () => void;
 };
 
-/** Stop sidecars immediately when shutdown has already started before they are reported. */
 export function stopPostReadySidecarsAfterCloseStarted(params: {
   postReadySidecars: readonly GatewayPostReadySidecarHandle[];
   closeStarted: boolean;
@@ -101,43 +57,16 @@ export function stopPostReadySidecarsAfterCloseStarted(params: {
     return;
   }
   for (const postReadySidecar of params.postReadySidecars) {
-    void postReadySidecar.stop();
+    postReadySidecar.stop();
   }
 }
 
-/** Measure a post-attach startup step when tracing is active. */
 async function measureStartup<T>(
   startupTrace: GatewayStartupTrace | undefined,
   name: string,
   run: () => Awaitable<T>,
 ): Promise<T> {
   return startupTrace ? startupTrace.measure(name, run) : await run();
-}
-
-/** Measure provider-auth warming without letting event-loop stalls hide in wall time. */
-async function measureProviderAuthWarm(run: () => Promise<void>): Promise<{
-  elapsedMs: number;
-  eventLoopMaxMs: number;
-}> {
-  const eventLoopDelay = monitorEventLoopDelay({ resolution: 10 });
-  eventLoopDelay.enable();
-  const startMs = performance.now();
-  try {
-    await run();
-  } finally {
-    eventLoopDelay.disable();
-  }
-  return {
-    elapsedMs: performance.now() - startMs,
-    eventLoopMaxMs: eventLoopDelay.max / 1_000_000,
-  };
-}
-
-function formatProviderAuthWarmMetrics(metrics: {
-  elapsedMs: number;
-  eventLoopMaxMs: number;
-}): string {
-  return `in ${metrics.elapsedMs.toFixed(0)}ms eventLoopMax=${metrics.eventLoopMaxMs.toFixed(1)}ms`;
 }
 
 function shouldCheckRestartSentinel(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -184,7 +113,7 @@ function scheduleGatewayMemoryBackend(params: {
       .then(({ startGatewayMemoryBackend }) =>
         startGatewayMemoryBackend({ cfg: params.cfg, log: params.log }),
       )
-      .catch((err: unknown) => {
+      .catch((err) => {
         params.log.warn(`qmd memory startup initialization failed: ${String(err)}`);
       });
   };
@@ -210,180 +139,11 @@ function schedulePostAttachUpdateSentinelRefresh(params: {
       } catch (err) {
         params.log.warn(`restart sentinel refresh failed: ${String(err)}`);
       }
-    }).catch((err: unknown) => {
+    }).catch((err) => {
       params.log.warn(`restart sentinel refresh failed: ${String(err)}`);
     });
   });
   handle.unref?.();
-}
-
-function scheduleProviderAuthStatePrewarm(params: {
-  getConfig: () => OpenClawConfig;
-  log: {
-    info: (msg: string) => void;
-    warn: (msg: string) => void;
-  };
-  delayMs?: number;
-}): GatewayPostReadySidecarHandle {
-  let stopped = false;
-  let startupTimer: ReturnType<typeof setTimeout> | undefined;
-  let rewarmTimer: ReturnType<typeof setTimeout> | undefined;
-  let rewarmInFlight = false;
-  let pendingRewarmReason: string | undefined;
-  const isStopped = () => stopped;
-  const delayMs = params.delayMs ?? PROVIDER_AUTH_PREWARM_START_DELAY_MS;
-  void (async () => {
-    const { clearCurrentProviderAuthState, warmCurrentProviderAuthStateOffMainThread } =
-      await import("../agents/model-provider-auth.js");
-    const { setAuthProfileFailureHook } = await import("../agents/auth-profiles.js");
-    const runRewarm = async (reason: string) => {
-      if (isStopped()) {
-        return;
-      }
-      const cfg = params.getConfig();
-      rewarmInFlight = true;
-      try {
-        const metrics = await measureProviderAuthWarm(() =>
-          warmCurrentProviderAuthStateOffMainThread(cfg, { isCancelled: isStopped }),
-        );
-        if (isStopped()) {
-          return;
-        }
-        params.log.info(
-          `provider auth state re-warmed (${reason}) ${formatProviderAuthWarmMetrics(metrics)}`,
-        );
-      } catch (err) {
-        params.log.warn(`provider auth state rewarm failed: ${String(err)}`);
-      } finally {
-        rewarmInFlight = false;
-        const nextReason = pendingRewarmReason;
-        pendingRewarmReason = undefined;
-        if (nextReason && !isStopped()) {
-          scheduleAuthMapRewarm(nextReason);
-        }
-      }
-    };
-    const scheduleAuthMapRewarm = (reason: string) => {
-      // Collapse repeated auth-profile failures into one rewarm turn while a
-      // previous rewarm is queued or running.
-      if (isStopped()) {
-        return;
-      }
-      pendingRewarmReason = reason;
-      if (rewarmTimer || rewarmInFlight) {
-        return;
-      }
-      rewarmTimer = setTimeout(() => {
-        rewarmTimer = undefined;
-        const nextReason = pendingRewarmReason ?? reason;
-        pendingRewarmReason = undefined;
-        void runRewarm(nextReason);
-      }, PROVIDER_AUTH_REWARM_DELAY_MS);
-      rewarmTimer.unref?.();
-    };
-    if (isStopped()) {
-      return;
-    }
-    setAuthProfileFailureHook(() => {
-      if (isStopped()) {
-        return;
-      }
-      clearCurrentProviderAuthState();
-      scheduleAuthMapRewarm("auth-profile-failure");
-    });
-    startupTimer = setTimeout(
-      () => {
-        void (async () => {
-          if (isStopped()) {
-            return;
-          }
-          const cfg = params.getConfig();
-          const metrics = await measureProviderAuthWarm(() =>
-            warmCurrentProviderAuthStateOffMainThread(cfg, { isCancelled: isStopped }),
-          );
-          if (isStopped()) {
-            return;
-          }
-          params.log.info(
-            `provider auth state pre-warmed ${formatProviderAuthWarmMetrics(metrics)}`,
-          );
-        })().catch((err: unknown) => {
-          params.log.warn(`provider auth state pre-warm failed: ${String(err)}`);
-        });
-      },
-      Math.max(0, delayMs),
-    );
-    startupTimer.unref?.();
-  })().catch((err: unknown) => {
-    params.log.warn(`provider auth state pre-warm setup failed: ${String(err)}`);
-  });
-  return {
-    stop: () => {
-      stopped = true;
-      if (startupTimer) {
-        clearTimeout(startupTimer);
-        startupTimer = undefined;
-      }
-      if (rewarmTimer) {
-        clearTimeout(rewarmTimer);
-        rewarmTimer = undefined;
-      }
-    },
-  };
-}
-
-function scheduleAgentRuntimePluginPrewarm(params: {
-  getConfig: () => OpenClawConfig;
-  workspaceDir: string;
-  startupTrace?: GatewayStartupTrace;
-  log: {
-    info: (msg: string) => void;
-    warn: (msg: string) => void;
-  };
-  delayMs?: number;
-}): GatewayPostReadySidecarHandle {
-  let stopped = false;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const isStopped = () => stopped;
-  timer = setTimeout(
-    () => {
-      timer = undefined;
-      void measureStartup(params.startupTrace, "post-ready.agent-runtime-plugins", async () => {
-        if (isStopped()) {
-          return;
-        }
-        const started = performance.now();
-        const { ensureRuntimePluginsLoaded } = await import("../agents/runtime-plugins.js");
-        const cfg = params.getConfig();
-        if (isStopped()) {
-          return;
-        }
-        ensureRuntimePluginsLoaded({
-          config: cfg,
-          workspaceDir: params.workspaceDir,
-          allowGatewaySubagentBinding: true,
-        });
-        if (!isStopped()) {
-          params.log.info(
-            `agent runtime plugins pre-warmed in ${(performance.now() - started).toFixed(0)}ms`,
-          );
-        }
-      }).catch((err: unknown) => {
-        params.log.warn(`agent runtime plugin pre-warm failed: ${String(err)}`);
-      });
-    },
-    Math.max(0, params.delayMs ?? AGENT_RUNTIME_PLUGIN_PREWARM_START_DELAY_MS),
-  );
-  timer.unref?.();
-  return {
-    stop: () => {
-      stopped = true;
-      if (timer) {
-        clearTimeout(timer);
-        timer = undefined;
-      }
-    },
-  };
 }
 
 function schedulePostReadySidecarTask(params: {
@@ -391,7 +151,6 @@ function schedulePostReadySidecarTask(params: {
   name: string;
   log: { warn: (msg: string) => void };
   run: (isStopped: () => boolean, signal: AbortSignal) => Awaitable<void>;
-  stop?: () => Awaitable<void>;
 }): GatewayPostReadySidecarHandle {
   let stopped = false;
   const abortController = new AbortController();
@@ -402,105 +161,18 @@ function schedulePostReadySidecarTask(params: {
     }
     void measureStartup(params.startupTrace, params.name, () =>
       params.run(isStopped, abortController.signal),
-    ).catch((err: unknown) => {
+    ).catch((err) => {
       params.log.warn(`${params.name} failed after gateway ready: ${String(err)}`);
     });
   });
   handle.unref?.();
   return {
-    stop: async () => {
-      // Sidecars get both a synchronous stopped predicate and an AbortSignal so
-      // lazy imports and long-running watchers can cooperate with shutdown.
+    stop: () => {
       stopped = true;
       abortController.abort();
       clearImmediate(handle);
-      await params.stop?.();
     },
   };
-}
-
-type CleanStaleLockFiles = typeof import("../agents/session-write-lock.js").cleanStaleLockFiles;
-type MarkRestartAbortedMainSessionsFromLocks =
-  typeof import("../agents/main-session-restart-recovery.js").markRestartAbortedMainSessionsFromLocks;
-
-async function cleanupStaleSessionLocks(params: {
-  sessionDirs: readonly string[];
-  cfg: OpenClawConfig;
-  log: { warn: (msg: string) => void };
-  isStopped: () => boolean;
-  cleanStaleLockFiles: CleanStaleLockFiles;
-  markRestartAbortedMainSessionsFromLocks?: MarkRestartAbortedMainSessionsFromLocks;
-  concurrency?: number;
-}): Promise<void> {
-  const concurrency = Math.max(
-    1,
-    Math.min(
-      params.sessionDirs.length,
-      Math.floor(params.concurrency ?? SESSION_LOCK_CLEANUP_CONCURRENCY),
-    ),
-  );
-  let nextIndex = 0;
-  let markRestartAbortedMainSessionsFromLocks =
-    params.markRestartAbortedMainSessionsFromLocks ?? null;
-  const getMarker = async () => {
-    markRestartAbortedMainSessionsFromLocks ??= (await loadMainSessionRestartRecoveryModule())
-      .markRestartAbortedMainSessionsFromLocks;
-    return markRestartAbortedMainSessionsFromLocks;
-  };
-  const worker = async () => {
-    while (!params.isStopped()) {
-      const sessionsDir = params.sessionDirs[nextIndex];
-      nextIndex += 1;
-      if (!sessionsDir) {
-        return;
-      }
-      const result = await params.cleanStaleLockFiles({
-        sessionsDir,
-        config: params.cfg,
-        removeStale: true,
-        log: { warn: (message) => params.log.warn(message) },
-      });
-      if (result.cleaned.length === 0) {
-        continue;
-      }
-      const markRestartAbortedMainSessionsFromLocksLocal = await getMarker();
-      await markRestartAbortedMainSessionsFromLocksLocal({
-        sessionsDir,
-        cleanedLocks: result.cleaned,
-      });
-    }
-  };
-  await Promise.all(Array.from({ length: concurrency }, () => worker()));
-}
-
-function scheduleTranscriptsAutoStartSidecar(params: {
-  cfg: OpenClawConfig;
-  startupTrace?: GatewayStartupTrace;
-  log: { warn: (msg: string) => void };
-}): GatewayPostReadySidecarHandle {
-  let stopTranscriptsAutoStart: (() => Promise<void>) | undefined;
-  return schedulePostReadySidecarTask({
-    startupTrace: params.startupTrace,
-    name: "sidecars.transcripts-auto-start",
-    log: params.log,
-    run: async (isStopped) => {
-      const { createTranscriptsAutoStartService } =
-        await import("../agents/tools/transcripts-tool.js");
-      if (isStopped()) {
-        return;
-      }
-      const service = createTranscriptsAutoStartService({
-        config: params.cfg,
-        stateDir: resolveStateDir(),
-        logger: params.log,
-      });
-      stopTranscriptsAutoStart = () => service.stop();
-      service.start();
-    },
-    stop: async () => {
-      await stopTranscriptsAutoStart?.();
-    },
-  });
 }
 
 async function pathExists(filePath: string): Promise<boolean> {
@@ -566,7 +238,7 @@ async function refreshLatestUpdateRestartSentinelIfPresent(): Promise<Awaited<
   if (!(await hasRestartSentinelFileFast())) {
     return null;
   }
-  return await (await loadGatewayRestartSentinelModule()).refreshLatestUpdateRestartSentinel();
+  return await (await import("./server-restart-sentinel.js")).refreshLatestUpdateRestartSentinel();
 }
 
 function hasGatewayStartHooks(pluginRegistry: ReturnType<typeof loadOpenClawPlugins>): boolean {
@@ -589,7 +261,7 @@ function isConfiguredCliBackendPrimary(params: {
 }
 
 async function hasGatewayStartupInternalHookListeners(): Promise<boolean> {
-  const { hasInternalHookListeners } = await loadInternalHooksModule();
+  const { hasInternalHookListeners } = await import("../hooks/internal-hooks.js");
   return hasInternalHookListeners("gateway", "startup");
 }
 
@@ -630,7 +302,7 @@ async function prewarmConfiguredPrimaryModel(params: {
   if (!explicitPrimary) {
     return;
   }
-  const { normalizeProviderId } = await import("@openclaw/model-catalog-core/provider-id");
+  const { normalizeProviderId } = await import("../agents/provider-id.js");
   if (
     isConfiguredCliBackendPrimary({
       cfg: params.cfg,
@@ -644,10 +316,12 @@ async function prewarmConfiguredPrimaryModel(params: {
     { resolveAgentWorkspaceDir, resolveDefaultAgentDir, resolveDefaultAgentId },
     { DEFAULT_MODEL, DEFAULT_PROVIDER },
     { isCliProvider, resolveConfiguredModelRef },
+    { resolveEmbeddedAgentRuntime },
   ] = await Promise.all([
     import("../agents/agent-scope.js"),
-    loadAgentDefaultsModule(),
-    loadAgentModelSelectionModule(),
+    import("../agents/defaults.js"),
+    import("../agents/model-selection.js"),
+    import("../agents/pi-embedded-runner/runtime.js"),
   ]);
   const { provider, model } = resolveConfiguredModelRef({
     cfg: params.cfg,
@@ -655,6 +329,10 @@ async function prewarmConfiguredPrimaryModel(params: {
     defaultModel: DEFAULT_MODEL,
   });
   if (isCliProvider(provider, params.cfg)) {
+    return;
+  }
+  const runtime = resolveEmbeddedAgentRuntime();
+  if (runtime !== "auto" && runtime !== "pi") {
     return;
   }
   // Keep startup prewarm metadata-only; resolving models can import provider runtimes and block readiness.
@@ -685,7 +363,7 @@ async function prewarmConfiguredPrimaryModelWithTimeout(
 ): Promise<void> {
   let settled = false;
   const warmup = prewarm(params)
-    .catch((err: unknown) => {
+    .catch((err) => {
       params.log.warn(`startup model warmup failed: ${String(err)}`);
     })
     .finally(() => {
@@ -724,22 +402,18 @@ function schedulePrimaryModelPrewarm(
       },
       prewarm,
     ),
-  ).catch((err: unknown) => {
+  ).catch((err) => {
     params.log.warn(`startup model warmup failed: ${String(err)}`);
   });
 }
 
-/** Start post-ready sidecars such as channels, hooks, plugin services, and cleanup tasks. */
 export async function startGatewaySidecars(params: {
   cfg: OpenClawConfig;
   pluginRegistry: ReturnType<typeof loadOpenClawPlugins>;
   defaultWorkspaceDir: string;
   deps: CliDeps;
   startChannels: () => Promise<void>;
-  onChannelsStarted?: () => Awaitable<void>;
   prewarmPrimaryModel?: typeof prewarmConfiguredPrimaryModel;
-  onPluginServices?: (pluginServices: PluginServicesHandle | null) => void;
-  shouldStartPluginServices?: () => boolean;
   log: { warn: (msg: string) => void };
   logHooks: {
     info: (msg: string) => void;
@@ -756,7 +430,7 @@ export async function startGatewaySidecars(params: {
     try {
       if (internalHooksConfigured) {
         const [{ setInternalHooksEnabled }, { loadInternalHooks }] = await Promise.all([
-          loadInternalHooksModule(),
+          import("../hooks/internal-hooks.js"),
           import("../hooks/loader.js"),
         ]);
         setInternalHooksEnabled(params.cfg.hooks?.internal?.enabled !== false);
@@ -801,49 +475,38 @@ export async function startGatewaySidecars(params: {
       );
     }
   });
-  await params.onChannelsStarted?.();
-
-  let pluginServices =
-    params.shouldStartPluginServices?.() === false
-      ? null
-      : await measureStartup(params.startupTrace, "sidecars.plugin-services", async () => {
-          try {
-            const { startPluginServices } = await import("../plugins/services.js");
-            return await startPluginServices({
-              registry: params.pluginRegistry,
-              config: params.cfg,
-              workspaceDir: params.defaultWorkspaceDir,
-              startupTrace: params.startupTrace,
-            });
-          } catch (err) {
-            params.log.warn(`plugin services failed to start: ${String(err)}`);
-            return null;
-          }
-        });
-  if (pluginServices && params.shouldStartPluginServices?.() === false) {
-    await pluginServices.stop().catch((err: unknown) => {
-      params.log.warn(`plugin services stop after close failed: ${String(err)}`);
-    });
-    pluginServices = null;
-  }
-  params.onPluginServices?.(pluginServices);
 
   const shouldDispatchGatewayStartupInternalHook =
     internalHooksConfigured || (await hasGatewayStartupInternalHookListeners());
   if (shouldDispatchGatewayStartupInternalHook) {
-    // Run startup hooks after sidecar startup has yielded once so gateway bind
-    // and channel startup are not delayed by hook handlers.
     setTimeout(() => {
-      void loadInternalHooksModule().then(({ createInternalHookEvent, triggerInternalHook }) => {
-        const hookEvent = createInternalHookEvent("gateway", "startup", "gateway:startup", {
-          cfg: params.cfg,
-          deps: params.deps,
-          workspaceDir: params.defaultWorkspaceDir,
-        });
-        void triggerInternalHook(hookEvent);
-      });
+      void import("../hooks/internal-hooks.js").then(
+        ({ createInternalHookEvent, triggerInternalHook }) => {
+          const hookEvent = createInternalHookEvent("gateway", "startup", "gateway:startup", {
+            cfg: params.cfg,
+            deps: params.deps,
+            workspaceDir: params.defaultWorkspaceDir,
+          });
+          void triggerInternalHook(hookEvent);
+        },
+      );
     }, 250);
   }
+
+  let pluginServices: PluginServicesHandle | null = null;
+  await measureStartup(params.startupTrace, "sidecars.plugin-services", async () => {
+    try {
+      const { startPluginServices } = await import("../plugins/services.js");
+      pluginServices = await startPluginServices({
+        registry: params.pluginRegistry,
+        config: params.cfg,
+        workspaceDir: params.defaultWorkspaceDir,
+        startupTrace: params.startupTrace,
+      });
+    } catch (err) {
+      params.log.warn(`plugin services failed to start: ${String(err)}`);
+    }
+  });
 
   if (params.cfg.acp?.enabled) {
     void (async () => {
@@ -858,7 +521,7 @@ export async function startGatewaySidecars(params: {
         const [{ getAcpSessionManager }, { ACP_SESSION_IDENTITY_RENDERER_VERSION }] =
           await Promise.all([
             import("../acp/control-plane/manager.js"),
-            import("@openclaw/acp-core/runtime/session-identifiers"),
+            import("../acp/runtime/session-identifiers.js"),
           ]);
         const result = await getAcpSessionManager().reconcilePendingSessionIdentities({
           cfg: params.cfg,
@@ -870,7 +533,7 @@ export async function startGatewaySidecars(params: {
           `acp startup identity reconcile (renderer=${ACP_SESSION_IDENTITY_RENDERER_VERSION}): checked=${result.checked} resolved=${result.resolved} failed=${result.failed}`,
         );
       });
-    })().catch((err: unknown) => {
+    })().catch((err) => {
       params.log.warn(`acp startup identity reconcile failed: ${String(err)}`);
     });
   }
@@ -887,21 +550,32 @@ export async function startGatewaySidecars(params: {
     startupTrace: params.startupTrace,
     name: "sidecars.session-locks",
     log: params.log,
-    run: async (isStopped) => {
+    run: async () => {
       try {
-        const [{ resolveAgentSessionDirs }, { cleanStaleLockFiles }] = await Promise.all([
-          import("../agents/session-dirs.js"),
-          import("../agents/session-write-lock.js"),
-        ]);
+        const [{ resolveStateDir }, { resolveAgentSessionDirs }, { cleanStaleLockFiles }] =
+          await Promise.all([
+            import("../config/paths.js"),
+            import("../agents/session-dirs.js"),
+            import("../agents/session-write-lock.js"),
+          ]);
         const stateDir = resolveStateDir(process.env);
         const sessionDirs = await resolveAgentSessionDirs(stateDir);
-        await cleanupStaleSessionLocks({
-          sessionDirs,
-          cfg: params.cfg,
-          log: params.log,
-          isStopped,
-          cleanStaleLockFiles,
-        });
+        for (const sessionsDir of sessionDirs) {
+          const result = await cleanStaleLockFiles({
+            sessionsDir,
+            staleMs: SESSION_LOCK_STALE_MS,
+            removeStale: true,
+            log: { warn: (message) => params.log.warn(message) },
+          });
+          if (result.cleaned.length > 0) {
+            const { markRestartAbortedMainSessionsFromLocks } =
+              await import("../agents/main-session-restart-recovery.js");
+            await markRestartAbortedMainSessionsFromLocks({
+              sessionsDir,
+              cleanedLocks: result.cleaned,
+            });
+          }
+        }
       } catch (err) {
         params.log.warn(`session lock cleanup failed on startup: ${String(err)}`);
       }
@@ -920,11 +594,11 @@ export async function startGatewaySidecars(params: {
         return;
       }
       setTimeout(() => {
-        void loadGatewayRestartSentinelModule()
+        void import("./server-restart-sentinel.js")
           .then(({ scheduleRestartSentinelWake }) =>
             scheduleRestartSentinelWake({ deps: params.deps }),
           )
-          .catch((err: unknown) => {
+          .catch((err) => {
             params.log.warn(`restart sentinel wake failed to schedule: ${String(err)}`);
           });
       }, 750);
@@ -947,7 +621,7 @@ export async function startGatewaySidecars(params: {
     log: params.log,
     run: async () => {
       const { scheduleRestartAbortedMainSessionRecovery } =
-        await loadMainSessionRestartRecoveryModule();
+        await import("../agents/main-session-restart-recovery.js");
       scheduleRestartAbortedMainSessionRecovery({ cfg: params.cfg });
     },
   });
@@ -986,9 +660,9 @@ export async function startGatewaySidecars(params: {
             { loadModelCatalog },
             { getModelRefStatus, resolveConfiguredModelRef, resolveHooksGmailModel },
           ] = await Promise.all([
-            loadAgentDefaultsModule(),
+            import("../agents/defaults.js"),
             import("../agents/model-catalog.js"),
-            loadAgentModelSelectionModule(),
+            import("../agents/model-selection.js"),
           ]);
           if (isStopped()) {
             return;
@@ -1059,69 +733,6 @@ const defaultGatewayPostAttachRuntimeDeps: GatewayPostAttachRuntimeDeps = {
     (await import("./server-tailscale.js")).startGatewayTailscaleExposure(...args),
 };
 
-function createDeferredGatewayUpdateCheck(params: {
-  startupTrace?: GatewayStartupTrace;
-  runtimeDeps: GatewayPostAttachRuntimeDeps;
-  cfg: OpenClawConfig;
-  log: {
-    info: (msg: string) => void;
-    warn: (msg: string) => void;
-  };
-  isNixMode: boolean;
-  broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
-}): { start: () => void; stop: () => void } {
-  let started = false;
-  let stopped = false;
-  let stopUpdateCheck: (() => void) | null = null;
-
-  const stop = () => {
-    stopped = true;
-    stopUpdateCheck?.();
-    stopUpdateCheck = null;
-  };
-
-  const start = () => {
-    if (started || stopped) {
-      return;
-    }
-    started = true;
-    // Update checks are intentionally post-attach so startup logging, sidecars,
-    // and Tailscale exposure are not serialized behind network I/O.
-    setImmediate(() => {
-      if (stopped) {
-        return;
-      }
-      void measureStartup(params.startupTrace, "post-attach.update-check", () =>
-        params.runtimeDeps.scheduleGatewayUpdateCheck({
-          cfg: params.cfg,
-          log: params.log,
-          isNixMode: params.isNixMode,
-          onUpdateAvailableChange: (updateAvailable) => {
-            const payload: GatewayUpdateAvailableEventPayload = { updateAvailable };
-            params.broadcast(GATEWAY_EVENT_UPDATE_AVAILABLE, payload, { dropIfSlow: true });
-          },
-        }),
-      )
-        .then((nextStop) => {
-          if (stopped) {
-            nextStop();
-            return;
-          }
-          stopUpdateCheck = nextStop;
-        })
-        .catch((err: unknown) => {
-          if (stopped) {
-            return;
-          }
-          params.log.warn(`gateway update check failed to start: ${String(err)}`);
-        });
-    });
-  };
-
-  return { start, stop };
-}
-
-/** Start work that depends on the HTTP server being attached and visible. */
 export async function startGatewayPostAttachRuntime(
   params: {
     minimalTestGateway: boolean;
@@ -1139,7 +750,6 @@ export async function startGatewayPostAttachRuntime(
     broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
     tailscaleMode: GatewayTailscaleMode;
     resetOnExit: boolean;
-    serviceName?: string;
     preserveFunnel: boolean;
     controlUiBasePath: string;
     logTailscale: {
@@ -1170,63 +780,32 @@ export async function startGatewayPostAttachRuntime(
       gatewayMethods: string[];
     }) => Awaitable<void>;
     getCronService?: () => PluginHookGatewayCronService | null | undefined;
-    onChannelsStarted?: () => Awaitable<void>;
     onPluginServices?: (pluginServices: PluginServicesHandle | null) => void;
     onPostReadySidecars?: (postReadySidecars: GatewayPostReadySidecarHandle[]) => void;
-    onGatewayLifetimeSidecars?: (sidecars: GatewayPostReadySidecarHandle[]) => void;
     onSidecarsReady?: () => void;
-    isClosing?: () => boolean;
     startupTrace?: GatewayStartupTrace;
     deferSidecars?: boolean;
-    logReadyOnSidecars?: boolean;
-    providerAuthPrewarm?: {
-      enabled?: boolean;
-      delayMs?: number;
-      getConfig?: () => OpenClawConfig;
-    };
-    agentRuntimePluginPrewarm?: {
-      enabled?: boolean;
-      delayMs?: number;
-      getConfig?: () => OpenClawConfig;
-    };
   },
   runtimeDeps: GatewayPostAttachRuntimeDeps = defaultGatewayPostAttachRuntimeDeps,
 ) {
   let pluginRegistry = params.pluginRegistry;
-  let startupPluginsLoaded = false;
-  let startupPluginsLoadPromise: Promise<{
-    pluginRegistry: PluginRegistry;
-    gatewayMethods: string[];
-  }> | null = null;
-  const loadStartupPluginsIfNeeded = async () => {
-    if (params.minimalTestGateway || !params.loadStartupPlugins) {
-      return { pluginRegistry, gatewayMethods: [] };
-    }
-    if (startupPluginsLoaded) {
-      return { pluginRegistry, gatewayMethods: [] };
-    }
-    startupPluginsLoadPromise ??= (async () => {
-      params.onStartupPluginsLoading?.();
-      const loaded = await measureStartup(params.startupTrace, "plugins.runtime-post-bind", () =>
-        params.loadStartupPlugins!(),
-      );
-      pluginRegistry = loaded.pluginRegistry;
-      startupPluginsLoaded = true;
-      params.startupTrace?.detail("plugins.runtime-post-bind", [
-        [
-          "loadedPluginCount",
-          pluginRegistry.plugins.filter((plugin) => plugin.status === "loaded").length,
-        ],
-        ["gatewayMethodCount", loaded.gatewayMethods.length],
-      ]);
-      await params.onStartupPluginsLoaded?.(loaded);
-      return loaded;
-    })();
-    return await startupPluginsLoadPromise;
-  };
-  await loadStartupPluginsIfNeeded();
+  if (!params.minimalTestGateway && params.loadStartupPlugins) {
+    params.onStartupPluginsLoading?.();
+    const loaded = await measureStartup(params.startupTrace, "plugins.runtime-post-bind", () =>
+      params.loadStartupPlugins!(),
+    );
+    pluginRegistry = loaded.pluginRegistry;
+    params.startupTrace?.detail("plugins.runtime-post-bind", [
+      [
+        "loadedPluginCount",
+        pluginRegistry.plugins.filter((plugin) => plugin.status === "loaded").length,
+      ],
+      ["gatewayMethodCount", loaded.gatewayMethods.length],
+    ]);
+    await params.onStartupPluginsLoaded?.(loaded);
+  }
 
-  const startupLogPromise = measureStartup(params.startupTrace, "post-attach.log", () =>
+  await measureStartup(params.startupTrace, "post-attach.log", () =>
     runtimeDeps.logGatewayStartup({
       cfg: params.cfgAtStart,
       bindHost: params.bindHost,
@@ -1242,16 +821,19 @@ export async function startGatewayPostAttachRuntime(
     }),
   );
 
-  const updateCheck = params.minimalTestGateway
-    ? { start: () => {}, stop: () => {} }
-    : createDeferredGatewayUpdateCheck({
-        startupTrace: params.startupTrace,
-        runtimeDeps,
-        cfg: params.cfgAtStart,
-        log: params.log,
-        isNixMode: params.isNixMode,
-        broadcast: params.broadcast,
-      });
+  const stopGatewayUpdateCheckPromise = params.minimalTestGateway
+    ? Promise.resolve(() => {})
+    : measureStartup(params.startupTrace, "post-attach.update-check", () =>
+        runtimeDeps.scheduleGatewayUpdateCheck({
+          cfg: params.cfgAtStart,
+          log: params.log,
+          isNixMode: params.isNixMode,
+          onUpdateAvailableChange: (updateAvailable) => {
+            const payload: GatewayUpdateAvailableEventPayload = { updateAvailable };
+            params.broadcast(GATEWAY_EVENT_UPDATE_AVAILABLE, payload, { dropIfSlow: true });
+          },
+        }),
+      );
 
   const tailscaleCleanupPromise = params.minimalTestGateway
     ? Promise.resolve(null)
@@ -1261,7 +843,6 @@ export async function startGatewayPostAttachRuntime(
           runtimeDeps.startGatewayTailscaleExposure({
             tailscaleMode: params.tailscaleMode,
             resetOnExit: params.resetOnExit,
-            serviceName: params.serviceName,
             preserveFunnel: params.preserveFunnel,
             port: params.port,
             controlUiBasePath: params.controlUiBasePath,
@@ -1269,29 +850,9 @@ export async function startGatewayPostAttachRuntime(
           }),
         );
 
-  let pluginServicesReported = false;
-  let reportedPluginServices: PluginServicesHandle | null = null;
-  const reportPluginServices = (pluginServices: PluginServicesHandle | null) => {
-    pluginServicesReported = true;
-    reportedPluginServices = pluginServices;
-    params.onPluginServices?.(pluginServices);
-  };
-  const waitForSidecarStartTurn = () =>
-    new Promise<void>((resolve) => {
-      if (params.deferSidecars === true) {
-        // Give startup logging and bind observers a deterministic head start
-        // when tests or callers request deferred sidecar startup.
-        const timer = setTimeout(resolve, DEFERRED_SIDECAR_START_DELAY_MS);
-        timer.unref?.();
-        return;
-      }
-      setImmediate(resolve);
-    });
-
   const sidecarsPromise = params.minimalTestGateway
     ? Promise.resolve({ pluginServices: null, pluginRegistry, postReadySidecars: [] })
-    : waitForSidecarStartTurn().then(async () => {
-        await loadStartupPluginsIfNeeded();
+    : new Promise<void>((resolve) => setImmediate(resolve)).then(async () => {
         params.log.info("starting channels and sidecars...");
         const loaderStatsBefore = getPluginModuleLoaderStats();
         const result = await measureStartup(params.startupTrace, "sidecars.total", () =>
@@ -1305,9 +866,6 @@ export async function startGatewayPostAttachRuntime(
             logHooks: params.logHooks,
             logChannels: params.logChannels,
             startupTrace: params.startupTrace,
-            onChannelsStarted: params.onChannelsStarted,
-            onPluginServices: reportPluginServices,
-            shouldStartPluginServices: () => params.isClosing?.() !== true,
           }),
         );
         const loaderStatsAfter = getPluginModuleLoaderStats();
@@ -1327,58 +885,19 @@ export async function startGatewayPostAttachRuntime(
         for (const method of STARTUP_UNAVAILABLE_GATEWAY_METHODS) {
           params.unavailableGatewayMethods.delete(method);
         }
-        if (!pluginServicesReported) {
-          reportPluginServices(result.pluginServices);
-        }
-        const postReadySidecars = [...result.postReadySidecars];
-        const gatewayLifetimeSidecars: GatewayPostReadySidecarHandle[] = [];
-        if (params.agentRuntimePluginPrewarm?.enabled !== false) {
-          gatewayLifetimeSidecars.push(
-            scheduleAgentRuntimePluginPrewarm({
-              getConfig:
-                params.agentRuntimePluginPrewarm?.getConfig ??
-                params.providerAuthPrewarm?.getConfig ??
-                (() => params.gatewayPluginConfigAtStart),
-              workspaceDir: params.defaultWorkspaceDir,
-              startupTrace: params.startupTrace,
-              log: params.log,
-              delayMs: params.agentRuntimePluginPrewarm?.delayMs,
-            }),
-          );
-        }
-        if (params.providerAuthPrewarm?.enabled !== false) {
-          gatewayLifetimeSidecars.push(
-            scheduleProviderAuthStatePrewarm({
-              getConfig: params.providerAuthPrewarm?.getConfig ?? (() => params.cfgAtStart),
-              log: params.log,
-              delayMs: params.providerAuthPrewarm?.delayMs,
-            }),
-          );
-        }
-        if (params.gatewayPluginConfigAtStart.transcripts?.autoStart?.length) {
-          gatewayLifetimeSidecars.push(
-            scheduleTranscriptsAutoStartSidecar({
-              cfg: params.gatewayPluginConfigAtStart,
-              startupTrace: params.startupTrace,
-              log: params.log,
-            }),
-          );
-        }
-        params.onPostReadySidecars?.(postReadySidecars);
-        params.onGatewayLifetimeSidecars?.(gatewayLifetimeSidecars);
+        params.onPluginServices?.(result.pluginServices);
+        params.onPostReadySidecars?.(result.postReadySidecars);
         params.onSidecarsReady?.();
         params.startupTrace?.detail("sidecars.ready", [
           [
             "loadedPluginCount",
             pluginRegistry.plugins.filter((plugin) => plugin.status === "loaded").length,
           ],
-          ["postReadySidecarCount", postReadySidecars.length + gatewayLifetimeSidecars.length],
+          ["postReadySidecarCount", result.postReadySidecars.length],
         ]);
         params.startupTrace?.mark("sidecars.ready");
-        if (params.logReadyOnSidecars !== false) {
-          params.log.info("gateway ready");
-        }
-        return { ...result, postReadySidecars, gatewayLifetimeSidecars, pluginRegistry };
+        params.log.info("gateway ready");
+        return { ...result, pluginRegistry };
       });
 
   void sidecarsPromise
@@ -1394,14 +913,11 @@ export async function startGatewayPostAttachRuntime(
       if (!hasGatewayStartHooks(sidecarsResult.pluginRegistry)) {
         return;
       }
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
       const hookRunner = await runtimeDeps.getGlobalHookRunner();
       if (hookRunner?.hasHooks("gateway_start")) {
-        const { withPluginHttpRouteRegistry } = await import("../plugins/http-registry.js");
-        void withPluginHttpRouteRegistry(sidecarsResult.pluginRegistry, () =>
-          hookRunner.runGatewayStart(
+        void hookRunner
+          .runGatewayStart(
             { port: params.port },
             {
               port: params.port,
@@ -1411,50 +927,44 @@ export async function startGatewayPostAttachRuntime(
                 params.getCronService?.() ??
                 (params.deps.cron as PluginHookGatewayCronService | undefined),
             },
-          ),
-        ).catch((err: unknown) => {
-          params.log.warn(`gateway_start hook failed: ${String(err)}`);
-        });
+          )
+          .catch((err) => {
+            params.log.warn(`gateway_start hook failed: ${String(err)}`);
+          });
       }
     })
-    .catch((err: unknown) => {
+    .catch((err) => {
       params.log.warn(`gateway sidecars failed to start: ${String(err)}`);
     });
 
   if (params.deferSidecars !== true) {
-    const [, tailscaleCleanup, sidecarsResult] = await Promise.all([
-      startupLogPromise,
+    const [stopGatewayUpdateCheck, tailscaleCleanup, sidecarsResult] = await Promise.all([
+      stopGatewayUpdateCheckPromise,
       tailscaleCleanupPromise,
       sidecarsPromise,
     ]);
-    updateCheck.start();
     return {
-      stopGatewayUpdateCheck: updateCheck.stop,
+      stopGatewayUpdateCheck,
       tailscaleCleanup,
       pluginServices: sidecarsResult.pluginServices,
     };
   }
 
-  const [, tailscaleCleanup] = await Promise.all([startupLogPromise, tailscaleCleanupPromise]);
-  updateCheck.start();
+  const [stopGatewayUpdateCheck, tailscaleCleanup] = await Promise.all([
+    stopGatewayUpdateCheckPromise,
+    tailscaleCleanupPromise,
+  ]);
 
-  return {
-    stopGatewayUpdateCheck: updateCheck.stop,
-    tailscaleCleanup,
-    pluginServices: reportedPluginServices,
-  };
+  return { stopGatewayUpdateCheck, tailscaleCleanup, pluginServices: null };
 }
 
-export const testing = {
+export const __testing = {
   hasRestartSentinelFileFast,
   prewarmConfiguredPrimaryModel,
   prewarmConfiguredPrimaryModelWithTimeout,
   refreshLatestUpdateRestartSentinelIfPresent,
   resolveGatewayMemoryStartupPolicy,
-  cleanupStaleSessionLocks,
-  scheduleProviderAuthStatePrewarm,
   schedulePrimaryModelPrewarm,
   shouldSkipStartupModelPrewarm,
   stopPostReadySidecarsAfterCloseStarted,
 };
-export { testing as __testing };

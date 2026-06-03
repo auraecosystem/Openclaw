@@ -10,10 +10,7 @@ import Testing
 
         let appModel = NodeAppModel()
         appModel.gatewayServerName = nil
-        #expect(OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: false))
+        #expect(OnboardingStateStore.shouldPresentOnLaunch(appModel: appModel, defaults: defaults))
     }
 
     @Test @MainActor func doesNotPresentWhenConnected() {
@@ -23,23 +20,7 @@ import Testing
 
         let appModel = NodeAppModel()
         appModel.gatewayServerName = "gateway"
-        #expect(!OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: false))
-    }
-
-    @Test @MainActor func doesNotPresentForSavedGatewayBeforeReconnectCompletes() {
-        let testDefaults = self.makeDefaults()
-        let defaults = testDefaults.defaults
-        defer { self.reset(testDefaults) }
-
-        let appModel = NodeAppModel()
-        appModel.gatewayServerName = nil
-        #expect(!OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: true))
+        #expect(!OnboardingStateStore.shouldPresentOnLaunch(appModel: appModel, defaults: defaults))
     }
 
     @Test @MainActor func markCompletedPersistsMode() {
@@ -52,16 +33,10 @@ import Testing
 
         OnboardingStateStore.markCompleted(mode: .remoteDomain, defaults: defaults)
         #expect(OnboardingStateStore.lastMode(defaults: defaults) == .remoteDomain)
-        #expect(!OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: false))
+        #expect(!OnboardingStateStore.shouldPresentOnLaunch(appModel: appModel, defaults: defaults))
 
         OnboardingStateStore.markIncomplete(defaults: defaults)
-        #expect(OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: false))
+        #expect(OnboardingStateStore.shouldPresentOnLaunch(appModel: appModel, defaults: defaults))
     }
 
     @Test func firstRunIntroDefaultsToVisibleThenPersists() {
@@ -88,10 +63,7 @@ import Testing
         let appModel = NodeAppModel()
         appModel.gatewayServerName = nil
 
-        #expect(OnboardingStateStore.shouldPresentOnLaunch(
-            appModel: appModel,
-            defaults: defaults,
-            hasSavedGatewayConnection: false))
+        #expect(OnboardingStateStore.shouldPresentOnLaunch(appModel: appModel, defaults: defaults))
         #expect(OnboardingStateStore.shouldPresentFirstRunIntro(defaults: defaults))
         #expect(OnboardingStateStore.lastMode(defaults: defaults) == .homeNetwork)
     }

@@ -3,10 +3,7 @@ import {
   removeAckReactionHandleAfterReply,
   type AckReactionHandle,
 } from "openclaw/plugin-sdk/channel-feedback";
-import {
-  runChannelInboundEvent,
-  type CommandTurnContext,
-} from "openclaw/plugin-sdk/channel-inbound";
+import type { CommandTurnContext } from "openclaw/plugin-sdk/channel-inbound";
 import { recordInboundSession } from "openclaw/plugin-sdk/conversation-runtime";
 import {
   createInternalHookEvent,
@@ -17,6 +14,7 @@ import {
   toPluginMessageReceivedEvent,
   triggerInternalHook,
 } from "openclaw/plugin-sdk/hook-runtime";
+import { runInboundReplyTurn } from "openclaw/plugin-sdk/inbound-reply-dispatch";
 import { getGlobalHookRunner } from "openclaw/plugin-sdk/plugin-runtime";
 import { resolveBatchedReplyThreadingPolicy } from "openclaw/plugin-sdk/reply-reference";
 import { getPrimaryIdentityId, getSelfIdentity, getSenderIdentity } from "../../identity.js";
@@ -80,7 +78,7 @@ const WHATSAPP_MESSAGE_RECEIVED_HOOK_LIMITS = {
 
 type WhatsAppMessageReceivedHookConfig = {
   pluginHooks?: {
-    messageReceived?: boolean;
+    messageReceived?: unknown;
   };
   accounts?: Record<string, unknown>;
 };
@@ -90,10 +88,7 @@ function readWhatsAppMessageReceivedHookOptIn(value: unknown): boolean | undefin
     return undefined;
   }
   const pluginHooks = (value as WhatsAppMessageReceivedHookConfig).pluginHooks;
-  if (pluginHooks?.messageReceived === undefined) {
-    return undefined;
-  }
-  return pluginHooks.messageReceived;
+  return pluginHooks?.messageReceived === true ? true : undefined;
 }
 
 function shouldEmitWhatsAppMessageReceivedHooks(params: {
@@ -107,7 +102,6 @@ function shouldEmitWhatsAppMessageReceivedHooks(params: {
     params.accountId && channelConfig?.accounts
       ? channelConfig.accounts[params.accountId]
       : undefined;
-
   return (
     readWhatsAppMessageReceivedHookOptIn(accountConfig) ??
     readWhatsAppMessageReceivedHookOptIn(channelConfig) ??
@@ -116,7 +110,7 @@ function shouldEmitWhatsAppMessageReceivedHooks(params: {
 }
 
 function emitWhatsAppMessageReceivedHooks(params: {
-  ctx: Awaited<ReturnType<typeof buildWhatsAppInboundContext>>;
+  ctx: ReturnType<typeof buildWhatsAppInboundContext>;
   sessionKey: string;
 }): void {
   const canonical = deriveInboundMessageHookContext(params.ctx);
@@ -151,7 +145,7 @@ function emitWhatsAppMessageReceivedHooks(params: {
 
 function emitWhatsAppMessageReceivedHooksIfEnabled(params: {
   cfg: ReturnType<LoadConfigFn>;
-  ctx: Awaited<ReturnType<typeof buildWhatsAppInboundContext>>;
+  ctx: ReturnType<typeof buildWhatsAppInboundContext>;
   accountId?: string;
   sessionKey: string;
 }): void {
@@ -466,7 +460,7 @@ export async function processMessage(params: {
           peerId: dmRouteTarget ?? params.msg.from,
         });
 
-  const ctxPayload = await buildWhatsAppInboundContext({
+  const ctxPayload = buildWhatsAppInboundContext({
     bodyForAgent: msgForAgent.body,
     combinedBody,
     commandBody: params.msg.body,
@@ -511,7 +505,7 @@ export async function processMessage(params: {
     warn: params.replyLogger.warn.bind(params.replyLogger),
   });
 
-  const turnResult = await runChannelInboundEvent({
+  const turnResult = await runInboundReplyTurn({
     channel: "whatsapp",
     accountId: params.route.accountId,
     raw: params.msg,

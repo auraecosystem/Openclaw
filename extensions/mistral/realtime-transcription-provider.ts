@@ -7,11 +7,7 @@ import {
   type RealtimeTranscriptionWebSocketTransport,
 } from "openclaw/plugin-sdk/realtime-transcription";
 import { normalizeResolvedSecretInputString } from "openclaw/plugin-sdk/secret-input";
-import {
-  asOptionalRecord as readRecord,
-  normalizeOptionalString,
-  parseFiniteNumber as readFiniteNumber,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 type MistralRealtimeTranscriptionEncoding =
   | "pcm_s16le"
@@ -59,10 +55,26 @@ const MISTRAL_REALTIME_MAX_RECONNECT_ATTEMPTS = 5;
 const MISTRAL_REALTIME_RECONNECT_DELAY_MS = 1000;
 const MISTRAL_REALTIME_MAX_QUEUED_BYTES = 2 * 1024 * 1024;
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 function readNestedMistralConfig(rawConfig: RealtimeTranscriptionProviderConfig) {
   const raw = readRecord(rawConfig);
   const providers = readRecord(raw?.providers);
   return readRecord(providers?.mistral ?? raw?.mistral ?? raw) ?? {};
+}
+
+function readFiniteNumber(value: unknown): number | undefined {
+  const next =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number.parseFloat(value)
+        : undefined;
+  return Number.isFinite(next) ? next : undefined;
 }
 
 function normalizeMistralEncoding(
@@ -200,8 +212,9 @@ function createMistralRealtimeTranscriptionSession(
         return;
       case "error":
         config.onError?.(new Error(readErrorDetail(event)));
-
+        return;
       default:
+        return;
     }
   };
 
@@ -260,8 +273,7 @@ export function buildMistralRealtimeTranscriptionProvider(): RealtimeTranscripti
   };
 }
 
-export const testing = {
+export const __testing = {
   normalizeProviderConfig,
   toMistralRealtimeWsUrl,
 };
-export { testing as __testing };

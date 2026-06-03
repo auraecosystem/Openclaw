@@ -1,12 +1,10 @@
 import { formatCliCommand } from "../cli/command-format.js";
-import { formatPluginPackagingRuntimeOutputRecoveryHint } from "../cli/config-recovery-hints.js";
 import {
   type ConfigFileSnapshot,
   type OpenClawConfig,
   readConfigFileSnapshot,
 } from "../config/config.js";
 import { formatConfigIssueLines } from "../config/issue-format.js";
-import { isPluginPackagingRuntimeOutputInvalidConfigSnapshot } from "../config/recovery-policy.js";
 import {
   buildPluginCompatibilitySnapshotNotices,
   formatPluginCompatibilityNotice,
@@ -24,11 +22,7 @@ export async function requireValidConfigFileSnapshot(
         ? formatConfigIssueLines(snapshot.issues, "-").join("\n")
         : "Unknown validation issue.";
     runtime.error(`OpenClaw config is invalid: ${snapshot.path}\n${issues}`);
-    runtime.error(
-      isPluginPackagingRuntimeOutputInvalidConfigSnapshot(snapshot)
-        ? `Fix: ${formatPluginPackagingRuntimeOutputRecoveryHint()}`
-        : `Fix: ${formatCliCommand("openclaw doctor --fix")}`,
-    );
+    runtime.error(`Fix: ${formatCliCommand("openclaw doctor --fix")}`);
     runtime.error(`Inspect: ${formatCliCommand("openclaw config validate")}`);
     runtime.exit(1);
     return null;

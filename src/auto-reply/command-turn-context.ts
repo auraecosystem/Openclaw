@@ -1,5 +1,3 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-
 export type CommandTurnKind = "native" | "text-slash" | "normal";
 export type CommandTurnSource = "native" | "text" | "message";
 
@@ -39,8 +37,15 @@ export type CommandTurnContextInput = {
   BodyForCommands?: unknown;
   RawBody?: unknown;
   Body?: unknown;
-  BotUsername?: unknown;
 };
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
 
 function resolveCommandBody(input: CommandTurnContextInput): string | undefined {
   return (

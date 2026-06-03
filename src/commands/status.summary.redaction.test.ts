@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { redactSensitiveStatusSummary } from "./status.summary.js";
-import type { SessionStatus, StatusSummary } from "./status.types.js";
+import type { StatusSummary } from "./status.types.js";
 
-function createRecentSessionRow(): SessionStatus {
+function createRecentSessionRow() {
   return {
     key: "main",
     kind: "direct" as const,
@@ -14,9 +14,6 @@ function createRecentSessionRow(): SessionStatus {
     remainingTokens: 4,
     percentUsed: 5,
     model: "gpt-5",
-    configuredModel: "openai/gpt-5",
-    selectedModel: "openai/gpt-5",
-    modelSelectionReason: null,
     contextTokens: 200_000,
     flags: ["id:sess-1"],
   };

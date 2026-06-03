@@ -1,16 +1,9 @@
 import path from "node:path";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import {
-  normalizeStringEntries,
-  uniqueStrings,
-} from "@openclaw/normalization-core/string-normalization";
 import { MANIFEST_KEY } from "../../compat/legacy-names.js";
-import type { PluginInstallRecord } from "../../config/types.plugins.js";
 import { tryReadJsonSync } from "../../infra/json-files.js";
 import { isPrereleaseSemverVersion, parseRegistryNpmSpec } from "../../infra/npm-registry-spec.js";
 import { resolveOpenClawPackageRootSync } from "../../infra/openclaw-root.js";
 import { listChannelCatalogEntries } from "../../plugins/channel-catalog-registry.js";
-import type { PluginDiscoveryResult } from "../../plugins/discovery.js";
 import {
   describePluginInstallSource,
   type PluginInstallSourceInfo,
@@ -19,6 +12,7 @@ import type { OpenClawPackageManifest } from "../../plugins/manifest.js";
 import type { PluginPackageChannel, PluginPackageInstall } from "../../plugins/manifest.js";
 import { listOfficialExternalChannelCatalogEntries } from "../../plugins/official-external-plugin-catalog.js";
 import type { PluginOrigin } from "../../plugins/plugin-origin.types.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isRecord, resolveConfigDir, resolveUserPath } from "../../utils.js";
 import { buildManifestChannelMeta } from "./channel-meta.js";
 import type { ChannelMeta } from "./types.public.js";
@@ -58,8 +52,6 @@ type CatalogOptions = {
   officialCatalogPaths?: string[];
   env?: NodeJS.ProcessEnv;
   excludeWorkspace?: boolean;
-  installRecords?: Record<string, PluginInstallRecord>;
-  discovery?: PluginDiscoveryResult;
 };
 
 const ORIGIN_PRIORITY: Record<PluginOrigin, number> = {
@@ -81,7 +73,6 @@ type ExternalCatalogEntry = {
 const ENV_CATALOG_PATHS = ["OPENCLAW_PLUGIN_CATALOG_PATHS", "OPENCLAW_MPM_CATALOG_PATHS"];
 const OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH = path.join("dist", "channel-catalog.json");
 const officialCatalogEntriesByPath = new Map<string, ExternalCatalogEntry[] | null>();
-const externalCatalogEntriesByPath = new Map<string, ExternalCatalogEntry[] | null>();
 
 type ManifestKey = typeof MANIFEST_KEY;
 
@@ -104,9 +95,11 @@ function splitEnvPaths(value: string): string[] {
   if (!trimmed) {
     return [];
   }
-  return normalizeStringEntries(
-    trimmed.split(/[;,]/g).flatMap((chunk) => chunk.split(path.delimiter)),
-  );
+  return trimmed
+    .split(/[;,]/g)
+    .flatMap((chunk) => chunk.split(path.delimiter))
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function resolveDefaultCatalogPaths(env: NodeJS.ProcessEnv): string[] {
@@ -120,7 +113,7 @@ function resolveDefaultCatalogPaths(env: NodeJS.ProcessEnv): string[] {
 
 function resolveExternalCatalogPaths(options: CatalogOptions): string[] {
   if (options.catalogPaths && options.catalogPaths.length > 0) {
-    return normalizeStringEntries(options.catalogPaths);
+    return options.catalogPaths.map((entry) => entry.trim()).filter(Boolean);
   }
   const env = options.env ?? process.env;
   for (const key of ENV_CATALOG_PATHS) {
@@ -136,33 +129,17 @@ function loadExternalCatalogEntries(options: CatalogOptions): ExternalCatalogEnt
   const paths = resolveExternalCatalogPaths(options).map((rawPath) =>
     resolveUserPath(rawPath, options.env ?? process.env),
   );
-  return loadCatalogEntriesFromPaths(paths, externalCatalogEntriesByPath);
+  return loadCatalogEntriesFromPaths(paths);
 }
 
-function readCatalogEntriesFromPath(resolvedPath: string): ExternalCatalogEntry[] | null {
-  const payload = tryReadJsonSync(resolvedPath);
-  return payload === null ? null : parseCatalogEntries(payload);
-}
-
-function loadCatalogEntriesFromPaths(
-  paths: Iterable<string>,
-  cache?: Map<string, ExternalCatalogEntry[] | null>,
-): ExternalCatalogEntry[] {
+function loadCatalogEntriesFromPaths(paths: Iterable<string>): ExternalCatalogEntry[] {
   const entries: ExternalCatalogEntry[] = [];
   for (const resolvedPath of paths) {
-    if (cache?.has(resolvedPath)) {
-      const cached = cache.get(resolvedPath);
-      if (cached) {
-        entries.push(...cached);
-      }
+    const payload = tryReadJsonSync(resolvedPath);
+    if (payload === null) {
       continue;
     }
-    const parsed = readCatalogEntriesFromPath(resolvedPath);
-    cache?.set(resolvedPath, parsed);
-    if (parsed === null) {
-      continue;
-    }
-    entries.push(...parsed);
+    entries.push(...parseCatalogEntries(payload));
   }
   return entries;
 }
@@ -191,15 +168,13 @@ function loadOfficialCatalogEntriesFromPaths(paths: Iterable<string>): ExternalC
 
 function resolveOfficialCatalogPaths(options: CatalogOptions): string[] {
   if (options.officialCatalogPaths && options.officialCatalogPaths.length > 0) {
-    return normalizeStringEntries(options.officialCatalogPaths);
+    return options.officialCatalogPaths.map((entry) => entry.trim()).filter(Boolean);
   }
 
-  const packageRoots = uniqueStrings(
-    [
-      resolveOpenClawPackageRootSync({ cwd: process.cwd() }),
-      resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url }),
-    ].filter((entry): entry is string => Boolean(entry)),
-  );
+  const packageRoots = [
+    resolveOpenClawPackageRootSync({ cwd: process.cwd() }),
+    resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url }),
+  ].filter((entry, index, all): entry is string => Boolean(entry) && all.indexOf(entry) === index);
 
   const candidates = packageRoots.map((packageRoot) =>
     path.join(packageRoot, OFFICIAL_CHANNEL_CATALOG_RELATIVE_PATH),
@@ -211,7 +186,7 @@ function resolveOfficialCatalogPaths(options: CatalogOptions): string[] {
     candidates.push(path.join(execDir, "channel-catalog.json"));
   }
 
-  return uniqueStrings(candidates);
+  return candidates.filter((entry, index, all) => entry && all.indexOf(entry) === index);
 }
 
 function loadOfficialCatalogEntries(options: CatalogOptions): ChannelPluginCatalogEntry[] {
@@ -418,23 +393,12 @@ export function buildChannelUiCatalog(
   return { entries, order, labels, detailLabels, systemImages, byId };
 }
 
-/**
- * Raw catalog primitive. This may include untrusted workspace entries and
- * workspace shadows. Security-sensitive or execution-facing callers should
- * prefer `listTrustedChannelPluginCatalogEntries`; use this primitive only when
- * the caller immediately applies trust filtering or explicitly excludes
- * workspace entries.
- *
- * @internal
- */
-export function listRawChannelPluginCatalogEntries(
+export function listChannelPluginCatalogEntries(
   options: CatalogOptions = {},
 ): ChannelPluginCatalogEntry[] {
   const manifestEntries = listChannelCatalogEntries({
     workspaceDir: options.workspaceDir,
     env: options.env,
-    installRecords: options.installRecords,
-    discovery: options.discovery,
   });
   const resolved = new Map<string, { entry: ChannelPluginCatalogEntry; priority: number }>();
 
@@ -494,17 +458,6 @@ export function listRawChannelPluginCatalogEntries(
     });
 }
 
-/**
- * @deprecated Use `listTrustedChannelPluginCatalogEntries` for execution-facing
- * paths, or `listRawChannelPluginCatalogEntries` for internal plumbing
- * that applies its own trust filtering.
- */
-export function listChannelPluginCatalogEntries(
-  options: CatalogOptions = {},
-): ChannelPluginCatalogEntry[] {
-  return listRawChannelPluginCatalogEntries(options);
-}
-
 export function getChannelPluginCatalogEntry(
   id: string,
   options: CatalogOptions = {},
@@ -513,5 +466,5 @@ export function getChannelPluginCatalogEntry(
   if (!trimmed) {
     return undefined;
   }
-  return listRawChannelPluginCatalogEntries(options).find((entry) => entry.id === trimmed);
+  return listChannelPluginCatalogEntries(options).find((entry) => entry.id === trimmed);
 }

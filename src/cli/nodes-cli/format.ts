@@ -1,4 +1,4 @@
-import { normalizeStringifiedOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeStringifiedOptionalString } from "../../shared/string-coerce.js";
 
 export { parseNodeList, parsePairingList } from "../../shared/node-list-parse.js";
 

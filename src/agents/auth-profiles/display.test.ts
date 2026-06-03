@@ -7,8 +7,8 @@ describe("resolveAuthProfileDisplayLabel", () => {
       cfg: {
         auth: {
           profiles: {
-            "openai:id-abc": {
-              provider: "openai",
+            "openai-codex:id-abc": {
+              provider: "openai-codex",
               mode: "oauth",
               displayName: "Work account",
               email: "work@example.com",
@@ -17,10 +17,10 @@ describe("resolveAuthProfileDisplayLabel", () => {
         },
       },
       store: { version: 1, profiles: {} },
-      profileId: "openai:id-abc",
+      profileId: "openai-codex:id-abc",
     });
 
-    expect(label).toBe("openai:id-abc (Work account)");
+    expect(label).toBe("openai-codex:id-abc (Work account)");
   });
 
   it("does not synthesize bogus labels when no human metadata exists", () => {
@@ -28,18 +28,18 @@ describe("resolveAuthProfileDisplayLabel", () => {
       store: {
         version: 1,
         profiles: {
-          "openai:id-abc": {
+          "openai-codex:id-abc": {
             type: "oauth",
-            provider: "openai",
+            provider: "openai-codex",
             access: "token",
             refresh: "refresh-token",
             expires: Date.now() + 60_000,
           },
         },
       },
-      profileId: "openai:id-abc",
+      profileId: "openai-codex:id-abc",
     });
 
-    expect(label).toBe("openai:id-abc");
+    expect(label).toBe("openai-codex:id-abc");
   });
 });

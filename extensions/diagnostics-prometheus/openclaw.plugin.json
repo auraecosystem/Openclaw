@@ -1,7 +1,5 @@
 {
   "id": "diagnostics-prometheus",
-  "name": "Diagnostics Prometheus",
-  "description": "OpenClaw diagnostics Prometheus exporter for runtime metrics.",
   "activation": {
     "onStartup": true
   },

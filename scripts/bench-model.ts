@@ -1,4 +1,4 @@
-import { completeSimple, type Model } from "openclaw/plugin-sdk/llm";
+import { completeSimple, getModel, type Api, type Model } from "@earendil-works/pi-ai";
 
 type Usage = {
   input?: number;
@@ -49,7 +49,7 @@ function median(values: number[]): number {
 
 async function runModel(opts: {
   label: string;
-  model: Model;
+  model: Model<Api>;
   apiKey: string;
   runs: number;
   prompt: string;
@@ -105,17 +105,7 @@ async function main(): Promise<void> {
     contextWindow: 200000,
     maxTokens: 8192,
   };
-  const opusModel: Model<"anthropic-messages"> = {
-    id: "claude-opus-4-6",
-    name: "Claude Opus 4.6",
-    api: "anthropic-messages",
-    provider: "anthropic",
-    reasoning: true,
-    input: ["text", "image"],
-    cost: { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
-    contextWindow: 200000,
-    maxTokens: 32000,
-  };
+  const opusModel = getModel("anthropic", "claude-opus-4-6");
 
   console.log(`Prompt: ${prompt}`);
   console.log(`Runs: ${runs}`);

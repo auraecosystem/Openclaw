@@ -22,13 +22,8 @@
       }
     }
   },
-  "setup": {
-    "providers": [
-      {
-        "id": "vllm",
-        "envVars": ["VLLM_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "vllm": ["VLLM_API_KEY"]
   },
   "providerAuthChoices": [
     {

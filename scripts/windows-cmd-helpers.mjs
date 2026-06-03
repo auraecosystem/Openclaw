@@ -16,7 +16,5 @@ function escapeForCmdExe(arg) {
 }
 
 export function buildCmdExeCommandLine(command, args) {
-  const escapedCommand = escapeForCmdExe(command);
-  const commandLine = [escapedCommand, ...args.map(escapeForCmdExe)].join(" ");
-  return escapedCommand.startsWith('"') ? `"${commandLine}"` : commandLine;
+  return [escapeForCmdExe(command), ...args.map(escapeForCmdExe)].join(" ");
 }

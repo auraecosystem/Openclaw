@@ -1,18 +1,37 @@
 import type { RuntimeEnv } from "../runtime.js";
 import { writeRuntimeJson } from "../runtime.js";
 import { listTaskRecords } from "../tasks/runtime-internal.js";
-import { listTaskFlowAuditFindings } from "../tasks/task-flow-registry.audit.js";
+import {
+  listTaskFlowAuditFindings,
+  summarizeTaskFlowAuditFindings,
+  type TaskFlowAuditCode,
+  type TaskFlowAuditSeverity,
+} from "../tasks/task-flow-registry.audit.js";
+import type { TaskFlowRecord } from "../tasks/task-flow-registry.types.js";
 import { listTaskFlowRecords } from "../tasks/task-flow-runtime-internal.js";
 import {
   listTaskAuditFindings,
   summarizeTaskAuditFindings,
+  type TaskAuditCode,
+  type TaskAuditSeverity,
 } from "../tasks/task-registry.audit.js";
+import { compareTaskAuditFindingSortKeys } from "../tasks/task-registry.audit.shared.js";
 import type { TaskRecord } from "../tasks/task-registry.types.js";
-import {
-  buildTaskSystemAuditFindings,
-  type TaskSystemAuditCode,
-  type TaskSystemAuditSeverity,
-} from "./tasks-audit-system.js";
+
+type TaskSystemAuditCode = TaskAuditCode | TaskFlowAuditCode;
+type TaskSystemAuditSeverity = TaskAuditSeverity | TaskFlowAuditSeverity;
+
+type TaskSystemAuditFinding = {
+  kind: "task" | "task_flow";
+  severity: TaskSystemAuditSeverity;
+  code: TaskSystemAuditCode;
+  detail: string;
+  ageMs?: number;
+  status?: string;
+  token?: string;
+  task?: TaskRecord;
+  flow?: TaskFlowRecord;
+};
 
 function listTaskJsonRecords(): TaskRecord[] {
   // Keep the routed JSON path a read-only store snapshot; maintenance reconciliation imports
@@ -33,6 +52,21 @@ export type TasksAuditJsonArgs = {
   limit?: number;
 };
 
+function compareSystemAuditFindings(left: TaskSystemAuditFinding, right: TaskSystemAuditFinding) {
+  return compareTaskAuditFindingSortKeys(
+    {
+      severity: left.severity,
+      ageMs: left.ageMs,
+      createdAt: left.task?.createdAt ?? left.flow?.createdAt ?? 0,
+    },
+    {
+      severity: right.severity,
+      ageMs: right.ageMs,
+      createdAt: right.task?.createdAt ?? right.flow?.createdAt ?? 0,
+    },
+  );
+}
+
 function toSystemAuditFindings(params: {
   severityFilter?: TaskSystemAuditSeverity;
   codeFilter?: TaskSystemAuditCode;
@@ -41,13 +75,51 @@ function toSystemAuditFindings(params: {
   const flows = listTaskFlowRecords();
   const taskFindings = listTaskAuditFindings({ tasks });
   const flowFindings = listTaskFlowAuditFindings({ flows });
-  const result = buildTaskSystemAuditFindings({
+  const allFindings: TaskSystemAuditFinding[] = [
+    ...taskFindings.map((finding) => ({
+      kind: "task" as const,
+      severity: finding.severity,
+      code: finding.code,
+      detail: finding.detail,
+      ageMs: finding.ageMs,
+      status: finding.task.status,
+      token: finding.task.taskId,
+      task: finding.task,
+    })),
+    ...flowFindings.map((finding) => ({
+      kind: "task_flow" as const,
+      severity: finding.severity,
+      code: finding.code,
+      detail: finding.detail,
+      ageMs: finding.ageMs,
+      status: finding.flow?.status ?? "n/a",
+      token: finding.flow?.flowId,
+      ...(finding.flow ? { flow: finding.flow } : {}),
+    })),
+  ];
+  const filteredFindings = allFindings
+    .filter((finding) => {
+      if (params.severityFilter && finding.severity !== params.severityFilter) {
+        return false;
+      }
+      if (params.codeFilter && finding.code !== params.codeFilter) {
+        return false;
+      }
+      return true;
+    })
+    .toSorted(compareSystemAuditFindings);
+  const sortedAllFindings = [...allFindings].toSorted(compareSystemAuditFindings);
+  return {
+    allFindings: sortedAllFindings,
+    filteredFindings,
     taskFindings,
-    flowFindings,
-    severityFilter: params.severityFilter,
-    codeFilter: params.codeFilter,
-  });
-  return result;
+    summary: {
+      total: sortedAllFindings.length,
+      errors: sortedAllFindings.filter((finding) => finding.severity === "error").length,
+      warnings: sortedAllFindings.filter((finding) => finding.severity !== "error").length,
+      taskFlows: summarizeTaskFlowAuditFindings(flowFindings),
+    },
+  };
 }
 
 function buildTasksListJsonPayload(opts: TasksListJsonArgs) {

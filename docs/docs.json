@@ -61,32 +61,16 @@
       "destination": "/channels/matrix-migration"
     },
     {
-      "source": "/mcp",
-      "destination": "/cli/mcp"
-    },
-    {
       "source": "/help/gpt54-codex-agentic-parity",
-      "destination": "/agent-runtime-architecture"
+      "destination": "/help/gpt55-codex-agentic-parity"
     },
     {
       "source": "/help/gpt54-codex-agentic-parity-maintainers",
-      "destination": "/agent-runtime-architecture"
+      "destination": "/help/gpt55-codex-agentic-parity-maintainers"
     },
     {
-      "source": "/help/gpt55-codex-agentic-parity",
-      "destination": "/agent-runtime-architecture"
-    },
-    {
-      "source": "/help/gpt55-codex-agentic-parity-maintainers",
-      "destination": "/agent-runtime-architecture"
-    },
-    {
-      "source": "/pi",
-      "destination": "/agent-runtime-architecture"
-    },
-    {
-      "source": "/pi-dev",
-      "destination": "/openclaw-agent-runtime"
+      "source": "/mcp",
+      "destination": "/cli/mcp"
     },
     {
       "source": "/providers/modelstudio",
@@ -242,14 +226,10 @@
     },
     {
       "source": "/glm",
-      "destination": "/providers/zai"
+      "destination": "/providers/glm"
     },
     {
       "source": "/zai",
-      "destination": "/providers/zai"
-    },
-    {
-      "source": "/providers/glm",
       "destination": "/providers/zai"
     },
     {
@@ -749,14 +729,6 @@
       "destination": "/tools/skills"
     },
     {
-      "source": "/skill-workshop",
-      "destination": "/tools/skill-workshop"
-    },
-    {
-      "source": "/tools/skills-workshop",
-      "destination": "/tools/skill-workshop"
-    },
-    {
       "source": "/skills-config",
       "destination": "/tools/skills-config"
     },
@@ -1068,13 +1040,12 @@
                   "install/oracle",
                   "install/railway",
                   "install/raspberry-pi",
-                  "install/render",
-                  "install/upstash"
+                  "install/render"
                 ]
               },
               {
                 "group": "Advanced setup",
-                "pages": ["start/setup", "openclaw-agent-runtime"]
+                "pages": ["start/setup", "pi-dev"]
               }
             ]
           },
@@ -1134,7 +1105,6 @@
                   "channels/access-groups",
                   "channels/group-messages",
                   "channels/groups",
-                  "channels/ambient-room-events",
                   "channels/broadcast-groups",
                   "channels/channel-routing",
                   "channels/location",
@@ -1233,16 +1203,15 @@
                 "group": "Bundled plugin guides",
                 "pages": [
                   "plugins/codex-harness",
-                  "plugins/codex-native-plugins",
                   "plugins/codex-computer-use",
                   "plugins/google-meet",
-                  "plugins/workboard",
                   "plugins/webhooks",
                   "plugins/admin-http-rpc",
                   "plugins/voice-call",
                   "plugins/memory-wiki",
                   "plugins/memory-lancedb",
                   "plugins/oc-path",
+                  "plugins/skill-workshop",
                   "plugins/zalouser"
                 ]
               },
@@ -1250,12 +1219,10 @@
                 "group": "Building plugins",
                 "pages": [
                   "plugins/building-plugins",
-                  "plugins/tool-plugins",
                   "plugins/sdk-channel-plugins",
                   "plugins/sdk-provider-plugins",
                   "plugins/cli-backend-plugins",
                   "plugins/hooks",
-                  "plugins/plugin-permission-requests",
                   "plugins/adding-capabilities"
                 ]
               },
@@ -1263,7 +1230,6 @@
                 "group": "Skills",
                 "pages": [
                   "tools/skills",
-                  "tools/skill-workshop",
                   "tools/creating-skills",
                   "tools/skills-config",
                   "tools/slash-commands",
@@ -1289,7 +1255,6 @@
                   "tools/code-execution",
                   "tools/diffs",
                   "tools/elevated",
-                  "tools/permission-modes",
                   "tools/exec-approvals",
                   "tools/exec-approvals-advanced",
                   "tools/exec",
@@ -1342,7 +1307,6 @@
                 "group": "Agent coordination",
                 "pages": [
                   "tools/agent-send",
-                  "tools/goal",
                   "tools/steer",
                   "tools/subagents",
                   "tools/acp-agents",
@@ -1414,7 +1378,7 @@
                   "providers/fal",
                   "providers/fireworks",
                   "providers/github-copilot",
-                  "providers/gmi",
+                  "providers/glm",
                   "providers/google",
                   "providers/gradium",
                   "providers/groq",
@@ -1427,19 +1391,15 @@
                   "providers/minimax",
                   "providers/mistral",
                   "providers/moonshot",
-                  "providers/novita",
                   "providers/nvidia",
                   "providers/ollama",
-                  "providers/ollama-cloud",
                   "providers/openai",
                   "providers/opencode",
                   "providers/opencode-go",
                   "providers/openrouter",
                   "providers/perplexity-provider",
-                  "providers/pixverse",
                   "providers/qianfan",
                   "providers/qwen",
-                  "providers/qwen-oauth",
                   "providers/runway",
                   "providers/senseaudio",
                   "providers/sglang",
@@ -1470,8 +1430,7 @@
                   "platforms/linux",
                   "platforms/windows",
                   "platforms/android",
-                  "platforms/ios",
-                  "platforms/easyrunner"
+                  "platforms/ios"
                 ]
               },
               {
@@ -1567,9 +1526,7 @@
                     "group": "Security and sandboxing",
                     "pages": [
                       "gateway/security/index",
-                      "gateway/security/exposure-runbook",
                       "gateway/security/secure-file-operations",
-                      "gateway/security/shrinkwrap",
                       "gateway/security/audit-checks",
                       "gateway/operator-scopes",
                       "gateway/sandboxing",
@@ -1709,13 +1666,7 @@
                   },
                   {
                     "group": "Plugins and skills",
-                    "pages": [
-                      "cli/plugins",
-                      "cli/path",
-                      "cli/policy",
-                      "cli/skills",
-                      "cli/workboard"
-                    ]
+                    "pages": ["cli/plugins", "cli/path", "cli/skills"]
                   },
                   {
                     "group": "Interfaces",
@@ -1750,7 +1701,8 @@
                 "group": "Codex harness",
                 "pages": [
                   "plugins/codex-harness-reference",
-                  "plugins/codex-harness-runtime"
+                  "plugins/codex-harness-runtime",
+                  "plugins/codex-native-plugins"
                 ]
               },
               {
@@ -1782,8 +1734,8 @@
                   "plugins/architecture-internals",
                   "plugins/sdk-migration",
                   "plugins/compatibility",
-                  "plugins/sdk-channel-outbound",
-                  "plugins/sdk-channel-inbound",
+                  "plugins/sdk-channel-message",
+                  "plugins/sdk-channel-turn",
                   "plugins/sdk-channel-ingress",
                   "plugins/message-presentation"
                 ]
@@ -1805,7 +1757,7 @@
               {
                 "group": "Technical reference",
                 "pages": [
-                  "agent-runtime-architecture",
+                  "pi",
                   "reference/wizard",
                   "reference/token-use",
                   "reference/secretref-credential-surface",
@@ -1825,7 +1777,9 @@
                   "concepts/markdown-formatting",
                   "concepts/typing-indicators",
                   "concepts/usage-tracking",
-                  "concepts/timezone"
+                  "concepts/timezone",
+                  "help/gpt55-codex-agentic-parity",
+                  "help/gpt55-codex-agentic-parity-maintainers"
                 ]
               },
               {
@@ -1837,7 +1791,6 @@
                 "pages": [
                   "reference/RELEASING",
                   "reference/full-release-validation",
-                  "reference/release-performance-sweep",
                   "reference/test",
                   "ci",
                   "help/scripts"

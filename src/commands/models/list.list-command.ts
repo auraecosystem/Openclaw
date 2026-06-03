@@ -1,17 +1,15 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import { parseModelRef } from "../../agents/model-selection.js";
-import type { ModelRegistry } from "../../llm/model-registry.js";
-import type { Model } from "../../llm/types.js";
-import { loadManifestMetadataSnapshot } from "../../plugins/manifest-contract-eligibility.js";
 import type { RuntimeEnv } from "../../runtime.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import { createModelListAuthIndex } from "./list.auth-index.js";
 import { resolveConfiguredEntries } from "./list.configured.js";
 import { formatErrorWithStack } from "./list.errors.js";
 import { printModelTable } from "./list.table.js";
 import type { ModelRow } from "./list.types.js";
 import { loadModelsConfigWithSource } from "./load-config.js";
-import { canonicalizeModelCatalogProviderAlias } from "./provider-aliases.js";
 import { DEFAULT_PROVIDER, ensureFlagCompatibility } from "./shared.js";
 
 const DISPLAY_MODEL_PARSE_OPTIONS = { allowPluginNormalization: false } as const;
@@ -53,7 +51,7 @@ export async function modelsListCommand(
   runtime: RuntimeEnv,
 ) {
   ensureFlagCompatibility(opts);
-  const parsedProviderFilter = (() => {
+  const providerFilter = (() => {
     const raw = opts.provider?.trim();
     if (!raw) {
       return undefined;
@@ -68,7 +66,7 @@ export async function modelsListCommand(
     const parsed = parseModelRef(`${raw}/_`, DEFAULT_PROVIDER, DISPLAY_MODEL_PARSE_OPTIONS);
     return parsed?.provider ?? normalizeLowercaseStringOrEmpty(raw);
   })();
-  if (parsedProviderFilter === null) {
+  if (providerFilter === null) {
     return;
   }
   const [
@@ -88,30 +86,14 @@ export async function modelsListCommand(
   const authStore = loadAuthProfileStoreWithoutExternalProfiles(agentDir);
   const workspaceDir =
     resolveAgentWorkspaceDir(cfg, resolveDefaultAgentId(cfg)) ?? resolveDefaultAgentWorkspaceDir();
-  const metadataSnapshot = loadManifestMetadataSnapshot({
-    config: cfg,
-    workspaceDir,
-    env: process.env,
-  });
-  const providerFilter = parsedProviderFilter
-    ? canonicalizeModelCatalogProviderAlias(parsedProviderFilter, {
-        cfg,
-        metadataSnapshot,
-      })
-    : undefined;
-  const authIndex = createModelListAuthIndex({
-    cfg,
-    authStore,
-    workspaceDir,
-    metadataSnapshot,
-  });
+  const authIndex = createModelListAuthIndex({ cfg, authStore, workspaceDir });
 
   let modelRegistry: ModelRegistry | undefined;
-  let registryModels: Model[] = [];
+  let registryModels: Model<Api>[] = [];
   let discoveredKeys = new Set<string>();
   let availableKeys: Set<string> | undefined;
   let availabilityErrorMessage: string | undefined;
-  const { entries } = resolveConfiguredEntries(cfg, metadataSnapshot);
+  const { entries } = resolveConfiguredEntries(cfg);
   const configuredByKey = new Map(entries.map((entry) => [entry.key, entry]));
   const enableSourcePlanCascade = Boolean(opts.all) || Boolean(providerFilter);
   const sourcePlanModule = enableSourcePlanCascade ? await loadSourcePlanModule() : undefined;
@@ -121,19 +103,18 @@ export async function modelsListCommand(
         enableCascade: enableSourcePlanCascade,
         providerFilter,
         cfg,
-        metadataSnapshot,
       })
     : undefined;
   const shouldLoadRegistry = sourcePlan?.requiresInitialRegistry ?? false;
-  const loadRegistryState = async (optsLocal?: {
+  const loadRegistryState = async (opts?: {
     normalizeModels?: boolean;
     loadAvailability?: boolean;
   }) => {
     const { loadListModelRegistry } = await loadRegistryLoadModule();
     const loaded = await loadListModelRegistry(cfg, {
       providerFilter,
-      normalizeModels: optsLocal?.normalizeModels ?? Boolean(providerFilter),
-      loadAvailability: optsLocal?.loadAvailability,
+      normalizeModels: opts?.normalizeModels ?? Boolean(providerFilter),
+      loadAvailability: opts?.loadAvailability,
       workspaceDir,
     });
     modelRegistry = loaded.registry;
@@ -172,8 +153,6 @@ export async function modelsListCommand(
       local: opts.local,
     },
     skipRuntimeModelSuppression,
-    metadataSnapshot,
-    workspaceDir,
   });
   const rows: ModelRow[] = [];
 

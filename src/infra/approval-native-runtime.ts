@@ -266,49 +266,49 @@ export function createChannelNativeApprovalRuntime<
           approvalKind,
           request,
           adapter: adapter.nativeAdapter,
-          prepareTarget: async ({ plannedTarget, request: requestCandidate }) =>
+          prepareTarget: async ({ plannedTarget, request }) =>
             await adapter.prepareTarget({
               plannedTarget,
-              request: requestCandidate,
+              request,
               approvalKind,
               pendingContent,
             }),
-          deliverTarget: async ({ plannedTarget, preparedTarget, request: requestEntry }) =>
+          deliverTarget: async ({ plannedTarget, preparedTarget, request }) =>
             await adapter.deliverTarget({
               plannedTarget,
               preparedTarget,
-              request: requestEntry,
+              request,
               approvalKind,
               pendingContent,
             }),
           onDeliveryError: adapter.onDeliveryError
-            ? ({ error, plannedTarget, request: requestResult }) => {
+            ? ({ error, plannedTarget, request }) => {
                 adapter.onDeliveryError?.({
                   error,
                   plannedTarget,
-                  request: requestResult,
+                  request,
                   approvalKind,
                   pendingContent,
                 });
               }
             : undefined,
           onDuplicateSkipped: adapter.onDuplicateSkipped
-            ? ({ plannedTarget, preparedTarget, request: requestValue }) => {
+            ? ({ plannedTarget, preparedTarget, request }) => {
                 adapter.onDuplicateSkipped?.({
                   plannedTarget,
                   preparedTarget,
-                  request: requestValue,
+                  request,
                   approvalKind,
                   pendingContent,
                 });
               }
             : undefined,
           onDelivered: adapter.onDelivered
-            ? ({ plannedTarget, preparedTarget, request: requestLocal, entry }) => {
+            ? ({ plannedTarget, preparedTarget, request, entry }) => {
                 adapter.onDelivered?.({
                   plannedTarget,
                   preparedTarget,
-                  request: requestLocal,
+                  request,
                   approvalKind,
                   pendingContent,
                   entry,

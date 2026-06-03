@@ -1,5 +1,4 @@
-import { asDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
 import {
   buildUsageHttpErrorSnapshot,
@@ -193,12 +192,16 @@ function pickString(record: Record<string, unknown>, keys: readonly string[]): s
 
 function parseEpoch(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
-    const timestampMs = value < 1e12 ? Math.floor(value * 1000) : Math.floor(value);
-    return asDateTimestampMs(timestampMs);
+    if (value < 1e12) {
+      return Math.floor(value * 1000);
+    }
+    return Math.floor(value);
   }
   if (typeof value === "string" && value.trim()) {
     const parsed = Date.parse(value);
-    return asDateTimestampMs(parsed);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
   }
   return undefined;
 }

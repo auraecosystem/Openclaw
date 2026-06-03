@@ -1,7 +1,7 @@
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
+} from "../shared/string-coerce.js";
 import { isRecord } from "../utils.js";
 
 export type PluginManifestCommandAliasKind = "runtime-slash";

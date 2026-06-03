@@ -1,4 +1,3 @@
-import type { PreparedInboundReply } from "openclaw/plugin-sdk/channel-inbound";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ClawdbotConfig, PluginRuntime } from "../runtime-api.js";
 import { handleFeishuCommentEvent } from "./comment-handler.js";
@@ -107,25 +106,27 @@ function createTestRuntime(overrides?: {
       },
     );
   const recordInboundSession = vi.fn(async () => {});
-  const dispatchPreparedForTest = vi.fn(async (turn: PreparedInboundReply<unknown>) => {
-    await turn.recordInboundSession({
-      storePath: turn.storePath,
-      sessionKey: turn.ctxPayload.SessionKey ?? turn.routeSessionKey,
-      ctx: turn.ctxPayload,
-      groupResolution: turn.record?.groupResolution,
-      createIfMissing: turn.record?.createIfMissing,
-      updateLastRoute: turn.record?.updateLastRoute,
-      onRecordError: turn.record?.onRecordError ?? (() => undefined),
-    });
-    const dispatchResult = await turn.runDispatch();
-    return {
-      admission: { kind: "dispatch" as const },
-      dispatched: true,
-      ctxPayload: turn.ctxPayload,
-      routeSessionKey: turn.routeSessionKey,
-      dispatchResult,
-    };
-  });
+  const runPrepared = vi.fn(
+    async (turn: Parameters<PluginRuntime["channel"]["turn"]["runPrepared"]>[0]) => {
+      await turn.recordInboundSession({
+        storePath: turn.storePath,
+        sessionKey: turn.ctxPayload.SessionKey ?? turn.routeSessionKey,
+        ctx: turn.ctxPayload,
+        groupResolution: turn.record?.groupResolution,
+        createIfMissing: turn.record?.createIfMissing,
+        updateLastRoute: turn.record?.updateLastRoute,
+        onRecordError: turn.record?.onRecordError ?? (() => undefined),
+      });
+      const dispatchResult = await turn.runDispatch();
+      return {
+        admission: { kind: "dispatch" as const },
+        dispatched: true,
+        ctxPayload: turn.ctxPayload,
+        routeSessionKey: turn.routeSessionKey,
+        dispatchResult,
+      };
+    },
+  );
 
   return {
     channel: {
@@ -152,8 +153,8 @@ function createTestRuntime(overrides?: {
         resolveStorePath: vi.fn(() => "/tmp/feishu-session-store.json"),
         recordInboundSession,
       },
-      inbound: {
-        run: vi.fn(async (params: Parameters<PluginRuntime["channel"]["inbound"]["run"]>[0]) => {
+      turn: {
+        run: vi.fn(async (params: Parameters<PluginRuntime["channel"]["turn"]["run"]>[0]) => {
           const input = await params.adapter.ingest(params.raw);
           if (!input) {
             return {
@@ -169,8 +170,11 @@ function createTestRuntime(overrides?: {
           if (!("runDispatch" in turn)) {
             throw new Error("feishu comment test runtime only supports prepared turns");
           }
-          return await dispatchPreparedForTest(turn as PreparedInboundReply<unknown>);
-        }) as unknown as PluginRuntime["channel"]["inbound"]["run"],
+          return await runPrepared(
+            turn as Parameters<PluginRuntime["channel"]["turn"]["runPrepared"]>[0],
+          );
+        }) as unknown as PluginRuntime["channel"]["turn"]["run"],
+        runPrepared: runPrepared as unknown as PluginRuntime["channel"]["turn"]["runPrepared"],
       },
       pairing: {
         readAllowFromStore: vi.fn(overrides?.readAllowFromStore ?? (async () => [])),
@@ -409,6 +413,7 @@ describe("handleFeishuCommentEvent", () => {
         "```",
         "",
         "Ask the bot owner to approve with:",
+        "openclaw pairing approve feishu TESTCODE",
         "```",
         "openclaw pairing approve feishu TESTCODE",
         "```",

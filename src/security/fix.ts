@@ -453,7 +453,7 @@ export async function fixSecurityFootguns(opts?: {
     configPath,
     cfg: snap.config ?? {},
     includePaths,
-  }).catch((err: unknown) => {
+  }).catch((err) => {
     errors.push(`collectSecurityPermissionTargets failed: ${String(err)}`);
     return [] as SecurityPermissionTarget[];
   });

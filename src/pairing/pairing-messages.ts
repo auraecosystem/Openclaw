@@ -18,6 +18,7 @@ export function buildPairingReply(params: {
     "```",
     "",
     "Ask the bot owner to approve with:",
+    formatCliCommand(`openclaw pairing approve ${channel} ${code}`),
     "```",
     approveCommand,
     "```",

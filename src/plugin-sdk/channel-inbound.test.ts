@@ -1,12 +1,9 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildChannelInboundEventContext,
-  type BuildChannelInboundEventContextParams,
-} from "./channel-inbound.js";
+import { buildChannelTurnContext, type BuildChannelTurnContextParams } from "./channel-inbound.js";
 
-function createInboundParams(
-  overrides: Partial<BuildChannelInboundEventContextParams> = {},
-): BuildChannelInboundEventContextParams {
+function createLegacyTurnParams(
+  overrides: Partial<BuildChannelTurnContextParams> = {},
+): BuildChannelTurnContextParams {
   return {
     channel: "test",
     messageId: "msg-1",
@@ -15,6 +12,7 @@ function createInboundParams(
     conversation: {
       kind: "group",
       id: "room-1",
+      routePeer: { kind: "group", id: "room-1" },
     },
     route: {
       agentId: "main",
@@ -22,19 +20,22 @@ function createInboundParams(
     },
     reply: {
       to: "test:room:room-1",
+      originatingTo: "test:room:room-1",
     },
     message: {
       rawBody: "side chatter",
-      inboundEventKind: "room_event",
+      envelopeFrom: "User One",
+      inboundTurnKind: "room_event",
     },
     ...overrides,
   };
 }
 
-describe("channel-inbound public helpers", () => {
-  it("builds inbound event kind into message context", async () => {
-    const ctx = buildChannelInboundEventContext(createInboundParams());
+describe("channel-inbound public compatibility helpers", () => {
+  it("maps legacy buildChannelTurnContext inboundTurnKind into inbound event context", () => {
+    const ctx = buildChannelTurnContext(createLegacyTurnParams());
 
     expect(ctx.InboundEventKind).toBe("room_event");
+    expect(ctx.InboundTurnKind).toBe("room_event");
   });
 });

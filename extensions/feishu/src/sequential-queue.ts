@@ -1,5 +1,3 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
-
 /**
  * Per-key serial task queue for Feishu inbound message handling.
  *
@@ -67,17 +65,16 @@ async function boundedRun(
   if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
     return task();
   }
-  const resolvedTimeoutMs = resolveTimerTimeoutMs(timeoutMs, DEFAULT_TASK_TIMEOUT_MS);
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   const timeoutPromise = new Promise<void>((resolve) => {
     timeoutHandle = setTimeout(() => {
       try {
-        onTaskTimeout?.(key, resolvedTimeoutMs);
+        onTaskTimeout?.(key, timeoutMs);
       } catch {
         // Swallow logging errors so they cannot poison the queue chain.
       }
       resolve();
-    }, resolvedTimeoutMs);
+    }, timeoutMs);
   });
   try {
     await Promise.race([task(), timeoutPromise]);

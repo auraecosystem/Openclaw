@@ -7,7 +7,6 @@ export type {
   GeneratedImageAsset,
   ImageGenerationProvider,
   ImageGenerationProviderConfiguredContext,
-  ImageGenerationProviderOptions,
   ImageGenerationResolution,
   ImageGenerationRequest,
   ImageGenerationResult,

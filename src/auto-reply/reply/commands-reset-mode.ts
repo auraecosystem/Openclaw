@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 
 export type SoftResetParseResult = { matched: false } | { matched: true; tail: string };
 

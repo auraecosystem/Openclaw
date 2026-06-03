@@ -10,7 +10,7 @@ describe("auth profile portability", () => {
     const store: AuthProfileStore = {
       version: 1,
       profiles: {
-        "openai:api-key": {
+        "openai:default": {
           type: "api_key",
           provider: "openai",
           key: "sk-test",
@@ -20,9 +20,9 @@ describe("auth profile portability", () => {
           provider: "github-copilot",
           token: "gho-test",
         },
-        "openai:default": {
+        "openai-codex:default": {
           type: "oauth",
-          provider: "openai",
+          provider: "openai-codex",
           access: "access-token",
           refresh: "refresh-token",
           expires: Date.now() + 60_000,
@@ -32,10 +32,10 @@ describe("auth profile portability", () => {
 
     const portable = buildPortableAuthProfileSecretsStoreForAgentCopy(store);
 
-    expect(portable.copiedProfileIds).toEqual(["openai:api-key", "github-copilot:default"]);
-    expect(portable.skippedProfileIds).toEqual(["openai:default"]);
+    expect(portable.copiedProfileIds).toEqual(["openai:default", "github-copilot:default"]);
+    expect(portable.skippedProfileIds).toEqual(["openai-codex:default"]);
     expect(portable.store.profiles).toEqual({
-      "openai:api-key": store.profiles["openai:api-key"],
+      "openai:default": store.profiles["openai:default"],
       "github-copilot:default": store.profiles["github-copilot:default"],
     });
   });
@@ -59,7 +59,7 @@ describe("auth profile portability", () => {
   it("does not copy empty OAuth profiles even when they opt in", () => {
     const credential = {
       type: "oauth",
-      provider: "openai",
+      provider: "openai-codex",
       expires: Date.now() + 60_000,
       copyToAgents: true,
     } as AuthProfileCredential;

@@ -7,9 +7,6 @@ import kotlinx.serialization.json.JsonPrimitive
 
 private val directiveJson = Json { ignoreUnknownKeys = true }
 
-/**
- * Optional first-line JSON overrides for one Talk request.
- */
 data class TalkDirective(
   val voiceId: String? = null,
   val modelId: String? = null,
@@ -27,9 +24,6 @@ data class TalkDirective(
   val once: Boolean? = null,
 )
 
-/**
- * Parsed directive plus the utterance text after removing the directive line.
- */
 data class TalkDirectiveParseResult(
   val directive: TalkDirective?,
   val stripped: String,
@@ -37,7 +31,6 @@ data class TalkDirectiveParseResult(
 )
 
 object TalkDirectiveParser {
-  /** Parses optional first-line JSON directives while preserving normal speech text. */
   fun parse(text: String): TalkDirectiveParseResult {
     val normalized = text.replace("\r\n", "\n")
     val lines = normalized.split("\n").toMutableList()
@@ -47,7 +40,6 @@ object TalkDirectiveParser {
     if (firstNonEmpty == -1) return TalkDirectiveParseResult(null, text, emptyList())
 
     val head = lines[firstNonEmpty].trim()
-    // Directives are accepted only as a complete first-line JSON object; spoken text remains plain text.
     if (!head.startsWith("{") || !head.endsWith("}")) {
       return TalkDirectiveParseResult(null, text, emptyList())
     }
@@ -96,7 +88,6 @@ object TalkDirectiveParser {
 
     if (!hasDirective) return TalkDirectiveParseResult(null, text, emptyList())
 
-    // Keep alias matching case-insensitive so dictated JSON can use snake/camel variants.
     val knownKeys =
       setOf(
         "voice",
@@ -225,7 +216,6 @@ private fun JsonElement?.asLongOrNull(): Long? {
 private fun JsonElement?.asBooleanOrNull(): Boolean? {
   val primitive = this as? JsonPrimitive ?: return null
   val content = primitive.content.trim().lowercase()
-  // Accept dictated/config-style booleans in addition to strict JSON literals.
   return when (content) {
     "true", "yes", "1" -> true
     "false", "no", "0" -> false

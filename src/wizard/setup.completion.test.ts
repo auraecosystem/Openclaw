@@ -1,6 +1,4 @@
-import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveCompletionProfilePath } from "../cli/completion-runtime.js";
 import { setupWizardShellCompletion } from "./setup.completion.js";
 
 async function withLocale(locale: string, run: () => Promise<void>): Promise<void> {
@@ -24,14 +22,14 @@ function createPrompter(confirmValue = false) {
   };
 }
 
-function createDeps(shell: "zsh" | "bash" | "fish" | "powershell" = "zsh") {
+function createDeps() {
   const deps: NonNullable<Parameters<typeof setupWizardShellCompletion>[0]["deps"]> = {
     resolveCliName: () => "openclaw",
     checkShellCompletionStatus: vi.fn(async (_binName: string) => ({
-      shell,
+      shell: "zsh" as const,
       profileInstalled: false,
       cacheExists: false,
-      cachePath: `/tmp/openclaw.${shell === "powershell" ? "ps1" : shell}`,
+      cachePath: "/tmp/openclaw.zsh",
       usesSlowPattern: false,
     })),
     ensureCompletionCacheExists: vi.fn(async (_binName: string) => true),
@@ -82,45 +80,5 @@ describe("setupWizardShellCompletion", () => {
         "Shell completion",
       );
     });
-  });
-
-  it("resolves the concrete Windows PowerShell profile path", () => {
-    expect(
-      resolveCompletionProfilePath("powershell", {
-        env: { USERPROFILE: "C:\\Users\\Ada" },
-        homeDir: () => "C:\\Users\\Ada",
-        platform: "win32",
-      }),
-    ).toBe(
-      path.win32.join(
-        "C:\\Users\\Ada",
-        "Documents",
-        "PowerShell",
-        "Microsoft.PowerShell_profile.ps1",
-      ),
-    );
-  });
-
-  it("shows a concrete PowerShell profile reload command after setup", async () => {
-    const previousHome = process.env.HOME;
-    process.env.HOME = "/Users/ada";
-    try {
-      const prompter = createPrompter();
-      const deps = createDeps("powershell");
-
-      await setupWizardShellCompletion({ flow: "quickstart", prompter, deps });
-
-      expect(deps.installCompletion).toHaveBeenCalledWith("powershell", true, "openclaw");
-      expect(prompter.note).toHaveBeenCalledWith(
-        "Shell completion installed. Restart your shell or run: . '/Users/ada/.config/powershell/Microsoft.PowerShell_profile.ps1'",
-        "Shell completion",
-      );
-    } finally {
-      if (previousHome === undefined) {
-        delete process.env.HOME;
-      } else {
-        process.env.HOME = previousHome;
-      }
-    }
   });
 });

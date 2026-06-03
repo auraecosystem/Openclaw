@@ -1,10 +1,4 @@
 import { randomBytes } from "node:crypto";
-import {
-  asDateTimestampMs,
-  asPositiveSafeInteger,
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "@openclaw/normalization-core/number-coercion";
 import { safeEqualSecret } from "../security/secret-equal.js";
 
 export const PLUGIN_NODE_CAPABILITY_PATH_PREFIX = "/__openclaw__/cap";
@@ -72,14 +66,7 @@ function resolvePluginNodeCapabilityStorageKey(surface: PluginNodeCapabilitySurf
 }
 
 export function resolvePluginNodeCapabilityTtlMs(surface: PluginNodeCapabilitySurface) {
-  return asPositiveSafeInteger(surface.ttlMs) ?? DEFAULT_PLUGIN_NODE_CAPABILITY_TTL_MS;
-}
-
-export function resolvePluginNodeCapabilityExpiresAtMs(
-  surface: PluginNodeCapabilitySurface,
-  nowMs: number = Date.now(),
-): number | undefined {
-  return resolveExpiresAtMsFromDurationMs(resolvePluginNodeCapabilityTtlMs(surface), { nowMs });
+  return surface.ttlMs && surface.ttlMs > 0 ? surface.ttlMs : DEFAULT_PLUGIN_NODE_CAPABILITY_TTL_MS;
 }
 
 export function mintPluginNodeCapabilityToken(): string {
@@ -207,14 +194,13 @@ export function setClientPluginNodeCapability(params: {
 }) {
   const surface = normalizeSurface(params.surface.surface);
   const storageKey = resolvePluginNodeCapabilityStorageKey(params.surface);
-  const expiresAtMs = asDateTimestampMs(params.expiresAtMs);
-  if (!surface || !storageKey || expiresAtMs === undefined) {
+  if (!surface || !storageKey) {
     return;
   }
   params.client.pluginNodeCapabilities ??= {};
   params.client.pluginNodeCapabilities[storageKey] = {
     capability: params.capability,
-    expiresAtMs,
+    expiresAtMs: params.expiresAtMs,
   };
 }
 
@@ -241,10 +227,7 @@ export function refreshClientPluginNodeCapability(params: {
   const capabilitySurface = params.client.pluginNodeCapabilitySurfaces?.[surface] ?? params.surface;
   const capability = mintPluginNodeCapabilityToken();
   const nowMs = params.nowMs ?? Date.now();
-  const expiresAtMs = resolvePluginNodeCapabilityExpiresAtMs(capabilitySurface, nowMs);
-  if (expiresAtMs === undefined) {
-    return undefined;
-  }
+  const expiresAtMs = nowMs + resolvePluginNodeCapabilityTtlMs(capabilitySurface);
   const scopedUrl = replacePluginNodeCapabilityInScopedHostUrl(existingUrl, capability);
   if (!scopedUrl) {
     return undefined;
@@ -277,17 +260,14 @@ export function hasAuthorizedPluginNodeCapability(params: {
     return false;
   }
   const nowMs = params.nowMs ?? Date.now();
-  const nextExpiresAtMs = resolvePluginNodeCapabilityExpiresAtMs(params.surface, nowMs);
-  if (nextExpiresAtMs === undefined) {
-    return false;
-  }
+  const ttlMs = resolvePluginNodeCapabilityTtlMs(params.surface);
   for (const client of params.clients) {
     const entry = client.pluginNodeCapabilities?.[storageKey];
-    if (!entry || !isFutureDateTimestampMs(entry.expiresAtMs, { nowMs })) {
+    if (!entry || entry.expiresAtMs <= nowMs) {
       continue;
     }
     if (safeEqualSecret(entry.capability, params.capability)) {
-      entry.expiresAtMs = nextExpiresAtMs;
+      entry.expiresAtMs = nowMs + ttlMs;
       return true;
     }
   }

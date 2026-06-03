@@ -1,13 +1,8 @@
 import crypto from "node:crypto";
-import {
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 
 export const NOVNC_PASSWORD_ENV_KEY = "OPENCLAW_BROWSER_NOVNC_PASSWORD"; // pragma: allowlist secret
 const NOVNC_TOKEN_TTL_MS = 60 * 1000;
-const MAX_NOVNC_TOKEN_TTL_MS = NOVNC_TOKEN_TTL_MS;
 const NOVNC_PASSWORD_LENGTH = 8;
 const NOVNC_PASSWORD_ALPHABET = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
 
@@ -26,23 +21,10 @@ const NO_VNC_OBSERVER_TOKENS = new Map<string, NoVncObserverTokenEntry>();
 
 function pruneExpiredNoVncObserverTokens(now: number) {
   for (const [token, entry] of NO_VNC_OBSERVER_TOKENS) {
-    if (!isFutureDateTimestampMs(entry.expiresAt, { nowMs: now })) {
+    if (entry.expiresAt <= now) {
       NO_VNC_OBSERVER_TOKENS.delete(token);
     }
   }
-}
-
-function resolveNoVncObserverTokenExpiresAt(params: { ttlMs?: number; nowMs: number }) {
-  return (
-    resolveExpiresAtMsFromDurationMs(params.ttlMs, {
-      nowMs: params.nowMs,
-      minRemainingMs: 1,
-    }) ??
-    resolveExpiresAtMsFromDurationMs(NOVNC_TOKEN_TTL_MS, {
-      nowMs: params.nowMs,
-      minRemainingMs: 1,
-    })
-  );
 }
 
 export function isNoVncEnabled(params: { enableNoVnc: boolean; headless: boolean }) {
@@ -82,21 +64,10 @@ export function issueNoVncObserverToken(params: {
   const now = params.nowMs ?? Date.now();
   pruneExpiredNoVncObserverTokens(now);
   const token = crypto.randomBytes(24).toString("hex");
-  const requestedTtlMs =
-    typeof params.ttlMs === "number" && params.ttlMs <= MAX_NOVNC_TOKEN_TTL_MS
-      ? params.ttlMs
-      : undefined;
-  const expiresAt = resolveNoVncObserverTokenExpiresAt({
-    ttlMs: requestedTtlMs,
-    nowMs: now,
-  });
-  if (expiresAt === undefined) {
-    return token;
-  }
   NO_VNC_OBSERVER_TOKENS.set(token, {
     noVncPort: params.noVncPort,
     password: normalizeOptionalString(params.password),
-    expiresAt,
+    expiresAt: now + Math.max(1, params.ttlMs ?? NOVNC_TOKEN_TTL_MS),
   });
   return token;
 }
@@ -116,7 +87,7 @@ export function consumeNoVncObserverToken(
     return null;
   }
   NO_VNC_OBSERVER_TOKENS.delete(normalized);
-  if (!isFutureDateTimestampMs(entry.expiresAt, { nowMs: now })) {
+  if (entry.expiresAt <= now) {
     return null;
   }
   return { noVncPort: entry.noVncPort, password: entry.password };

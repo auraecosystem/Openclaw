@@ -1,8 +1,5 @@
-import { beforeAll, describe, expect, it } from "vitest";
-import {
-  createPluginBoundaryReport,
-  type PluginBoundaryReportResult,
-} from "../../scripts/plugin-boundary-report.js";
+import { describe, expect, it } from "vitest";
+import { createPluginBoundaryReport } from "../../scripts/plugin-boundary-report.js";
 
 function requirePluginSdkSummary(summary: {
   pluginSdk?: {
@@ -17,19 +14,14 @@ function requirePluginSdkSummary(summary: {
 }
 
 describe("plugin-boundary-report", () => {
-  let summaryResult: PluginBoundaryReportResult;
-
-  beforeAll(() => {
-    summaryResult = createPluginBoundaryReport([
+  it("emits compact CI-safe summary JSON", () => {
+    const result = createPluginBoundaryReport([
       "--summary",
       "--json",
       "--fail-on-cross-owner",
       "--fail-on-unclassified-unused-reserved",
     ]);
-  });
-
-  it("emits compact CI-safe summary JSON", () => {
-    const summary = JSON.parse(summaryResult.stdout) as {
+    const summary = JSON.parse(result.stdout) as {
       pluginSdk?: {
         crossOwnerReservedImportCount?: unknown;
         unusedReservedCount?: unknown;
@@ -39,8 +31,8 @@ describe("plugin-boundary-report", () => {
       };
     };
 
-    expect(summaryResult.exitCode).toBe(0);
-    expect(summaryResult.stderr).toBe("");
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
     const pluginSdk = requirePluginSdkSummary(summary);
     expect(pluginSdk.crossOwnerReservedImportCount).toBe(0);
     expect(pluginSdk.unusedReservedCount).toBe(0);

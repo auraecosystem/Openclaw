@@ -5,7 +5,7 @@ type PackageManifestContractParams = Parameters<typeof describePackageManifestCo
 const packageManifestContractTests: PackageManifestContractParams[] = [
   {
     pluginId: "discord",
-    pluginLocalRuntimeDeps: ["@discordjs/voice", "discord-api-types", "libopus-wasm"],
+    pluginLocalRuntimeDeps: ["@discordjs/voice", "discord-api-types", "opusscript"],
     minHostVersionBaseline: "2026.3.22",
   },
   {
@@ -48,7 +48,13 @@ const packageManifestContractTests: PackageManifestContractParams[] = [
   },
   {
     pluginId: "msteams",
-    pluginLocalRuntimeDeps: ["@azure/identity", "@microsoft/teams.apps"],
+    pluginLocalRuntimeDeps: [
+      "@azure/identity",
+      "@microsoft/teams.api",
+      "@microsoft/teams.apps",
+      "jsonwebtoken",
+      "jwks-rsa",
+    ],
     minHostVersionBaseline: "2026.3.22",
   },
   { pluginId: "nextcloud-talk", minHostVersionBaseline: "2026.3.22" },
@@ -70,7 +76,7 @@ const packageManifestContractTests: PackageManifestContractParams[] = [
   { pluginId: "voice-call", minHostVersionBaseline: "2026.3.22" },
   {
     pluginId: "whatsapp",
-    pluginLocalRuntimeDeps: ["audio-decode", "baileys"],
+    pluginLocalRuntimeDeps: ["audio-decode", "baileys", "jimp"],
     minHostVersionBaseline: "2026.3.22",
   },
   { pluginId: "zalo", minHostVersionBaseline: "2026.3.22" },

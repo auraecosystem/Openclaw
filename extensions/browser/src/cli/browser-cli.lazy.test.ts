@@ -4,20 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const manageMocks = vi.hoisted(() => {
   const doctorAction = vi.fn();
   const openAction = vi.fn();
-  const startAction = vi.fn();
   const statusAction = vi.fn();
-  const tabNewAction = vi.fn();
   const tabsAction = vi.fn();
   const registerBrowserManageCommands = vi.fn((browser: Command) => {
-    browser.command("start").description("Start browser").action(startAction);
     browser.command("status").description("Show browser status").action(statusAction);
     browser.command("tabs").description("List tabs").action(tabsAction);
-    browser
-      .command("tab")
-      .description("Tab shortcuts")
-      .command("new")
-      .description("Open a new tab")
-      .action(tabNewAction);
     browser.command("open").description("Open URL").argument("<url>").action(openAction);
     browser
       .command("doctor")
@@ -25,15 +16,7 @@ const manageMocks = vi.hoisted(() => {
       .option("--deep", "Run a live snapshot probe")
       .action(doctorAction);
   });
-  return {
-    doctorAction,
-    openAction,
-    registerBrowserManageCommands,
-    startAction,
-    statusAction,
-    tabNewAction,
-    tabsAction,
-  };
+  return { doctorAction, openAction, registerBrowserManageCommands, statusAction, tabsAction };
 });
 const inspectMocks = vi.hoisted(() => ({
   registerBrowserInspectCommands: vi.fn(),
@@ -85,9 +68,7 @@ describe("registerBrowserCli lazy browser subcommands", () => {
     manageMocks.registerBrowserManageCommands.mockClear();
     manageMocks.doctorAction.mockClear();
     manageMocks.openAction.mockClear();
-    manageMocks.startAction.mockClear();
     manageMocks.statusAction.mockClear();
-    manageMocks.tabNewAction.mockClear();
     manageMocks.tabsAction.mockClear();
     inspectMocks.registerBrowserInspectCommands.mockClear();
     actionInputMocks.registerBrowserActionInputCommands.mockClear();
@@ -177,57 +158,6 @@ describe("registerBrowserCli lazy browser subcommands", () => {
       "tabs action",
     );
     expect(tabsCommand.parent?.opts().json).toBe(true);
-  });
-
-  it("skips browser option values when selecting the lazy command group", async () => {
-    const program = new Command();
-    program.name("openclaw");
-
-    registerBrowserCli(program, [
-      "node",
-      "openclaw",
-      "browser",
-      "--browser-profile",
-      "status",
-      "start",
-    ]);
-
-    const browser = program.commands.find((command) => command.name() === "browser");
-    expect(browser?.commands.map((command) => command.name())).toContain("start");
-
-    await program.parseAsync(["browser", "--browser-profile", "status", "start"], {
-      from: "user",
-    });
-
-    expect(manageMocks.registerBrowserManageCommands).toHaveBeenCalledTimes(1);
-    expect(manageMocks.startAction).toHaveBeenCalledTimes(1);
-    expect(manageMocks.statusAction).not.toHaveBeenCalled();
-  });
-
-  it("resolves browser parent options for nested commands", async () => {
-    const program = new Command();
-    program.name("openclaw");
-
-    registerBrowserCli(program, [
-      "node",
-      "openclaw",
-      "browser",
-      "--browser-profile",
-      "work",
-      "tab",
-      "new",
-    ]);
-
-    await program.parseAsync(["browser", "--browser-profile", "work", "--json", "tab", "new"], {
-      from: "user",
-    });
-
-    expect(manageMocks.tabNewAction).toHaveBeenCalledTimes(1);
-    const tabCommand = requireTrailingCommand(
-      requireFirstCall(manageMocks.tabNewAction, "tab new action call"),
-      "tab new action",
-    );
-    expect(tabCommand.parent?.parent?.opts()).toMatchObject({ browserProfile: "work", json: true });
   });
 
   it("can eagerly register all browser groups for compatibility", async () => {

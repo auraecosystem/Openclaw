@@ -1,8 +1,6 @@
-import { formatDocsLink } from "../../packages/terminal-core/src/links.js";
-import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { listChatChannels } from "../channels/chat-meta.js";
-import type { ChannelPluginCatalogEntry } from "../channels/plugins/catalog.js";
+import { listChannelPluginCatalogEntries } from "../channels/plugins/catalog.js";
 import { listChannelSetupPlugins } from "../channels/plugins/setup-registry.js";
 import type { ChannelSetupPlugin } from "../channels/plugins/setup-wizard-types.js";
 import type { ChannelMeta } from "../channels/plugins/types.core.js";
@@ -24,14 +22,16 @@ import {
   resolveBundledPluginSources,
   type BundledPluginSource,
 } from "../plugins/bundled-sources.js";
+import { formatDocsLink } from "../terminal/links.js";
+import { sanitizeTerminalText } from "../terminal/safe-text.js";
 import { t, wizardT } from "../wizard/i18n/index.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
 import type { FlowContribution } from "./types.js";
 
 type ChannelStatusSummary = {
   installedPlugins: ChannelSetupPlugin[];
-  catalogEntries: ChannelPluginCatalogEntry[];
-  installedCatalogEntries: ChannelPluginCatalogEntry[];
+  catalogEntries: ReturnType<typeof listChannelPluginCatalogEntries>;
+  installedCatalogEntries: ReturnType<typeof listChannelPluginCatalogEntries>;
   statusByChannel: Map<ChannelChoice, ChannelSetupStatus>;
   statusLines: string[];
 };

@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import { note } from "../../../../packages/terminal-core/src/note.js";
+import { note } from "../../../terminal/note.js";
 import { shortenHomePath } from "../../../utils.js";
 
 const PLUGIN_RUNTIME_DEPS_MARKER = "plugin-runtime-deps";
@@ -143,7 +142,9 @@ export async function removeStalePluginRuntimeSymlinks(
 }
 
 function uniqueResolvedRoots(values: readonly string[]): string[] {
-  return sortUniqueStrings(values.map((value) => path.resolve(value)));
+  return [...new Set(values.map((value) => path.resolve(value)))].toSorted((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function isPathInsideRoot(candidate: string, root: string): boolean {

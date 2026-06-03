@@ -29,7 +29,6 @@ type ReleaseResponse = {
 const MAX_SIGNAL_CLI_ARCHIVE_BYTES = 256 * 1024 * 1024;
 const SIGNAL_CLI_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
 const SIGNAL_CLI_RELEASE_INFO_TIMEOUT_MS = 30_000;
-const CONTENT_LENGTH_RE = /^\d+$/;
 
 export type SignalInstallResult = {
   ok: boolean;
@@ -137,10 +136,7 @@ export async function downloadToFile(
 
     const rawLength = response.headers.get("content-length");
     if (rawLength !== null) {
-      const trimmedLength = rawLength.trim();
-      const declaredLength = CONTENT_LENGTH_RE.test(trimmedLength)
-        ? Number(trimmedLength)
-        : Number.NaN;
+      const declaredLength = Number(rawLength);
       if (Number.isFinite(declaredLength) && declaredLength > maxBytes) {
         throw new Error(
           `signal-cli archive exceeds the ${maxBytes}-byte download cap (declared ${declaredLength}).`,

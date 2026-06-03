@@ -145,46 +145,26 @@ describe("createTelegramDraftStream", () => {
     }
   });
 
-  it.each(["forum", "dm"] as const)(
-    "does not retry %s message preview sends without the topic id",
-    async (scope) => {
-      const api = createMockDraftApi();
-      api.sendMessage.mockRejectedValueOnce(
-        new Error("400: Bad Request: message thread not found"),
-      );
-      const warn = vi.fn();
-      const stream = createDraftStream(api, {
-        thread: { id: 42, scope },
-        warn,
-      });
-
-      stream.update("Hello");
-      await stream.flush();
-
-      expect(api.sendMessage).toHaveBeenCalledTimes(1);
-      expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", { message_thread_id: 42 });
-      expect(warn).toHaveBeenCalledWith(
-        "telegram stream preview failed: 400: Bad Request: message thread not found",
-      );
-      expect(
-        warn.mock.calls.some(([message]) => String(message).includes("retrying without thread")),
-      ).toBe(false);
-    },
-  );
-
-  it("does not finalize stale preview text after a stopped send failure", async () => {
+  it("does not retry DM message preview sends without the topic id", async () => {
     const api = createMockDraftApi();
-    api.sendMessage.mockRejectedValueOnce(new Error("temporary send failure"));
+    api.sendMessage.mockRejectedValueOnce(new Error("400: Bad Request: message thread not found"));
     const warn = vi.fn();
-    const stream = createDraftStream(api, { warn });
+    const stream = createDraftStream(api, {
+      thread: { id: 42, scope: "dm" },
+      warn,
+    });
 
     stream.update("Hello");
     await stream.flush();
-    await stream.stop();
 
     expect(api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", undefined);
-    expect(warn).toHaveBeenCalledWith("telegram stream preview failed: temporary send failure");
+    expect(api.sendMessage).toHaveBeenCalledWith(123, "Hello", { message_thread_id: 42 });
+    expect(warn).toHaveBeenCalledWith(
+      "telegram stream preview failed: 400: Bad Request: message thread not found",
+    );
+    expect(
+      warn.mock.calls.some(([message]) => String(message).includes("retrying without thread")),
+    ).toBe(false);
   });
 
   it("keeps allow_sending_without_reply on message previews that target a reply", async () => {
@@ -414,42 +394,7 @@ describe("createTelegramDraftStream", () => {
     });
   });
 
-  it("keeps non-final overflow in one editable preview", async () => {
-    const api = createMockDraftApi();
-    const onSupersededPreview = vi.fn();
-    const stream = createDraftStream(api, { maxChars: 20, onSupersededPreview });
-
-    stream.update("Hello world");
-    await stream.flush();
-    stream.update("Hello world foo bar baz qux");
-    await stream.flush();
-
-    expect(api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "Hello world", undefined);
-    expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello world foo bar");
-    expect(onSupersededPreview).not.toHaveBeenCalled();
-    expect(stream.lastDeliveredText?.()).toBe("Hello world foo bar");
-  });
-
-  it("does not retain non-final overflow preview pages", async () => {
-    const api = createMockDraftApi();
-    const onSupersededPreview = vi.fn();
-    const stream = createDraftStream(api, {
-      maxChars: 20,
-      onSupersededPreview,
-    });
-
-    stream.update("Hello world");
-    await stream.flush();
-    stream.update("Hello world foo bar baz qux");
-    await stream.flush();
-
-    expect(api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(api.editMessageText).toHaveBeenCalledWith(123, 17, "Hello world foo bar");
-    expect(onSupersededPreview).not.toHaveBeenCalled();
-  });
-
-  it("continues in a new message when a final rendered preview crosses maxChars", async () => {
+  it("continues in a new message when rendered preview crosses maxChars", async () => {
     const api = createMockDraftApi();
     api.sendMessage
       .mockResolvedValueOnce({ message_id: 17 })
@@ -459,72 +404,29 @@ describe("createTelegramDraftStream", () => {
     stream.update("Hello world");
     await stream.flush();
     stream.update("Hello world foo bar baz qux");
-    await stream.stop();
+    await stream.flush();
 
     expect(api.sendMessage).toHaveBeenCalledTimes(2);
     expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "Hello world", undefined);
     expect(api.sendMessage).toHaveBeenNthCalledWith(2, 123, "foo bar baz qux", undefined);
   });
 
-  it("clamps a first oversized non-final preview", async () => {
-    const api = createMockDraftApi();
-    const stream = createDraftStream(api, { maxChars: 10 });
-
-    stream.update("1234567890ABCDEFGHIJ");
-    await stream.flush();
-
-    expect(api.sendMessage).toHaveBeenCalledTimes(1);
-    expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "1234567890", undefined);
-    expect(stream.lastDeliveredText?.()).toBe("1234567890");
-  });
-
-  it("finalizes overflow that was hidden by a clamped non-final preview", async () => {
+  it("splits a first oversized rendered preview into chained messages", async () => {
     const api = createMockDraftApi();
     api.sendMessage
       .mockResolvedValueOnce({ message_id: 17 })
       .mockResolvedValueOnce({ message_id: 42 });
-    const onSupersededPreview = vi.fn();
-    const stream = createDraftStream(api, {
-      maxChars: 10,
-      onSupersededPreview,
-    });
+    const stream = createDraftStream(api, { maxChars: 10 });
 
     stream.update("1234567890ABCDEFGHIJ");
     await stream.flush();
-    await stream.stop();
 
     expect(api.sendMessage).toHaveBeenCalledTimes(2);
     expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "1234567890", undefined);
     expect(api.sendMessage).toHaveBeenNthCalledWith(2, 123, "ABCDEFGHIJ", undefined);
-    expect(stream.lastDeliveredText?.()).toBe("1234567890ABCDEFGHIJ");
-    expect(onSupersededPreview).toHaveBeenCalledWith(
-      expect.objectContaining({
-        messageId: 17,
-        retain: true,
-      }),
-    );
   });
 
-  it("continues finalizing more than two overflow chunks after a clamped preview", async () => {
-    const api = createMockDraftApi();
-    api.sendMessage
-      .mockResolvedValueOnce({ message_id: 17 })
-      .mockResolvedValueOnce({ message_id: 42 })
-      .mockResolvedValueOnce({ message_id: 43 });
-    const stream = createDraftStream(api, { maxChars: 10 });
-
-    stream.update("1234567890ABCDEFGHIJKLMNOPQRST");
-    await stream.flush();
-    await stream.stop();
-
-    expect(api.sendMessage).toHaveBeenCalledTimes(3);
-    expect(api.sendMessage).toHaveBeenNthCalledWith(1, 123, "1234567890", undefined);
-    expect(api.sendMessage).toHaveBeenNthCalledWith(2, 123, "ABCDEFGHIJ", undefined);
-    expect(api.sendMessage).toHaveBeenNthCalledWith(3, 123, "KLMNOPQRST", undefined);
-    expect(stream.lastDeliveredText?.()).toBe("1234567890ABCDEFGHIJKLMNOPQRST");
-  });
-
-  it("retains final overflow preview pages", async () => {
+  it("retains overflow preview pages", async () => {
     const api = createMockDraftApi();
     api.sendMessage
       .mockResolvedValueOnce({ message_id: 17 })
@@ -538,7 +440,7 @@ describe("createTelegramDraftStream", () => {
     stream.update("Hello world");
     await stream.flush();
     stream.update("Hello world foo bar baz qux");
-    await stream.stop();
+    await stream.flush();
 
     expect(onSupersededPreview).toHaveBeenCalledTimes(1);
     const [supersededPreview] = onSupersededPreview.mock.calls.at(0) ?? [];

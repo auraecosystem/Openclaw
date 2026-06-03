@@ -210,9 +210,7 @@ export type TextToSpeechTelephony = (
 export type ListSpeechVoices = (params: ListSpeechVoicesParams) => Promise<SpeechVoiceOption[]>;
 
 export type TtsRuntimeFacade = {
-  /** @deprecated Use `testApi`. */
   _test: TtsTestFacade;
-  testApi: TtsTestFacade;
   buildTtsSystemPromptHint: (cfg: OpenClawConfig, agentId?: string) => string | undefined;
   getLastTtsAttempt: () => TtsStatusEntry | undefined;
   getResolvedSpeechProviderConfig: (

@@ -20,7 +20,6 @@ import {
   uploadBatchJsonlFile,
   withRemoteHttpResponse,
 } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { VoyageEmbeddingClient } from "./embedding-provider.js";
 
 /**
@@ -54,10 +53,7 @@ function resolveVoyageBatchDeps(overrides: Partial<VoyageBatchDeps> | undefined)
     now: overrides?.now ?? Date.now,
     sleep:
       overrides?.sleep ??
-      (async (ms: number) =>
-        await new Promise((resolve) => {
-          setTimeout(resolve, ms);
-        })),
+      (async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms))),
     postJsonWithRetry: overrides?.postJsonWithRetry ?? postJsonWithRetry,
     uploadBatchJsonlFile: overrides?.uploadBatchJsonlFile ?? uploadBatchJsonlFile,
     withRemoteHttpResponse: overrides?.withRemoteHttpResponse ?? withRemoteHttpResponse,
@@ -155,9 +151,11 @@ async function readVoyageBatchError(params: {
           if (!text.trim()) {
             return undefined;
           }
-          const lines = normalizeStringEntries(text.split("\n")).map(
-            (line) => JSON.parse(line) as VoyageBatchOutputLine,
-          );
+          const lines = text
+            .split("\n")
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => JSON.parse(line) as VoyageBatchOutputLine);
           return extractBatchErrorMessage(lines);
         },
       }),
@@ -231,7 +229,7 @@ export async function runVoyageEmbeddingBatches(
       maxRequests: VOYAGE_BATCH_MAX_REQUESTS,
       debugLabel: "memory embeddings: voyage batch submit",
     }),
-    runGroup: async ({ group, groupIndex, groups, byCustomId, pollIntervalMs, timeoutMs }) => {
+    runGroup: async ({ group, groupIndex, groups, byCustomId }) => {
       const batchInfo = await submitVoyageBatch({
         client: params.client,
         requests: group,
@@ -260,8 +258,8 @@ export async function runVoyageEmbeddingBatches(
             client: params.client,
             batchId,
             wait: params.wait,
-            pollIntervalMs,
-            timeoutMs,
+            pollIntervalMs: params.pollIntervalMs,
+            timeoutMs: params.timeoutMs,
             debug: params.debug,
             initial: batchInfo,
             deps,

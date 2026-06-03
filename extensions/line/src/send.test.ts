@@ -13,36 +13,36 @@ const {
   logVerboseMock,
   resolvePinnedHostnameWithPolicyMock,
 } = vi.hoisted(() => {
-  const pushMessageMockLocal = vi.fn();
-  const replyMessageMockLocal = vi.fn();
-  const showLoadingAnimationMockLocal = vi.fn();
-  const getProfileMockLocal = vi.fn();
-  const MessagingApiClientMockLocal = vi.fn(function () {
+  const pushMessageMock = vi.fn();
+  const replyMessageMock = vi.fn();
+  const showLoadingAnimationMock = vi.fn();
+  const getProfileMock = vi.fn();
+  const MessagingApiClientMock = vi.fn(function () {
     return {
-      pushMessage: pushMessageMockLocal,
-      replyMessage: replyMessageMockLocal,
-      showLoadingAnimation: showLoadingAnimationMockLocal,
-      getProfile: getProfileMockLocal,
+      pushMessage: pushMessageMock,
+      replyMessage: replyMessageMock,
+      showLoadingAnimation: showLoadingAnimationMock,
+      getProfile: getProfileMock,
     };
   });
-  const requireRuntimeConfigMockLocal = vi.fn((cfg: unknown) => cfg ?? {});
-  const resolveLineAccountMockLocal = vi.fn(() => ({ accountId: "default" }));
-  const resolveLineChannelAccessTokenMockLocal = vi.fn(() => "line-token");
-  const recordChannelActivityMockLocal = vi.fn();
-  const logVerboseMockLocal = vi.fn();
-  const resolvePinnedHostnameWithPolicyMockLocal = vi.fn();
+  const requireRuntimeConfigMock = vi.fn((cfg: unknown) => cfg ?? {});
+  const resolveLineAccountMock = vi.fn(() => ({ accountId: "default" }));
+  const resolveLineChannelAccessTokenMock = vi.fn(() => "line-token");
+  const recordChannelActivityMock = vi.fn();
+  const logVerboseMock = vi.fn();
+  const resolvePinnedHostnameWithPolicyMock = vi.fn();
   return {
-    pushMessageMock: pushMessageMockLocal,
-    replyMessageMock: replyMessageMockLocal,
-    showLoadingAnimationMock: showLoadingAnimationMockLocal,
-    getProfileMock: getProfileMockLocal,
-    MessagingApiClientMock: MessagingApiClientMockLocal,
-    requireRuntimeConfigMock: requireRuntimeConfigMockLocal,
-    resolveLineAccountMock: resolveLineAccountMockLocal,
-    resolveLineChannelAccessTokenMock: resolveLineChannelAccessTokenMockLocal,
-    recordChannelActivityMock: recordChannelActivityMockLocal,
-    logVerboseMock: logVerboseMockLocal,
-    resolvePinnedHostnameWithPolicyMock: resolvePinnedHostnameWithPolicyMockLocal,
+    pushMessageMock,
+    replyMessageMock,
+    showLoadingAnimationMock,
+    getProfileMock,
+    MessagingApiClientMock,
+    requireRuntimeConfigMock,
+    resolveLineAccountMock,
+    resolveLineChannelAccessTokenMock,
+    recordChannelActivityMock,
+    logVerboseMock,
+    resolvePinnedHostnameWithPolicyMock,
   };
 });
 

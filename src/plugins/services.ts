@@ -1,11 +1,10 @@
 import { STATE_DIR } from "../config/paths.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
-  emitTrustedDiagnosticEventWithPrivateData,
-  onTrustedInternalDiagnosticEvent,
+  emitTrustedDiagnosticEvent,
+  onInternalDiagnosticEvent,
 } from "../infra/diagnostic-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { withPluginHttpRouteRegistry } from "./http-registry.js";
 import type { PluginServiceRegistration } from "./registry-types.js";
 import type { PluginRegistry } from "./registry.js";
 import { encodeStartupTraceSegment } from "./startup-trace-segment.js";
@@ -23,9 +22,8 @@ function createPluginLogger(): PluginLogger {
 
 function createServiceContext(params: {
   config: OpenClawConfig;
-  startupTrace?: PluginServiceStartupTrace;
   workspaceDir?: string;
-  service: PluginServiceRegistration;
+  service?: PluginServiceRegistration;
 }): OpenClawPluginServiceContext {
   const isDiagnosticsExporter =
     params.service?.pluginId === params.service?.service.id &&
@@ -40,43 +38,12 @@ function createServiceContext(params: {
     workspaceDir: params.workspaceDir,
     stateDir: STATE_DIR,
     logger: createPluginLogger(),
-    ...(params.startupTrace
-      ? {
-          startupTrace: createScopedPluginServiceStartupTrace(
-            params.startupTrace,
-            createPluginServiceTraceName(params.service),
-          ),
-        }
-      : {}),
     ...(grantsInternalDiagnostics
       ? {
           internalDiagnostics: {
-            emit: emitTrustedDiagnosticEventWithPrivateData,
-            onEvent: onTrustedInternalDiagnosticEvent,
+            emit: emitTrustedDiagnosticEvent,
+            onEvent: onInternalDiagnosticEvent,
           },
-        }
-      : {}),
-  };
-}
-
-function createPluginServiceTraceName(entry: PluginServiceRegistration): string {
-  return `sidecars.plugin-services.${encodeStartupTraceSegment(entry.pluginId)}.${encodeStartupTraceSegment(entry.service.id)}`;
-}
-
-function createScopedPluginServiceStartupTrace(
-  startupTrace: PluginServiceStartupTrace,
-  prefix: string,
-): PluginServiceStartupTrace {
-  const scopeName = (name: string) =>
-    `${prefix}.${name
-      .split(".")
-      .map((segment) => encodeStartupTraceSegment(segment))
-      .join(".")}`;
-  return {
-    measure: (name, run) => startupTrace.measure(scopeName(name), run),
-    ...(startupTrace.detail
-      ? {
-          detail: (name, metrics) => startupTrace.detail?.(scopeName(name), metrics),
         }
       : {}),
   };
@@ -104,16 +71,14 @@ export async function startPluginServices(params: {
   let failedCount = 0;
   for (const entry of params.registry.services) {
     const service = entry.service;
-    const traceName = createPluginServiceTraceName(entry);
     const serviceContext = createServiceContext({
       config: params.config,
-      startupTrace: params.startupTrace,
       workspaceDir: params.workspaceDir,
       service: entry,
     });
     try {
-      const startService = () =>
-        withPluginHttpRouteRegistry(params.registry, () => service.start(serviceContext));
+      const startService = () => service.start(serviceContext);
+      const traceName = `sidecars.plugin-services.${encodeStartupTraceSegment(entry.pluginId)}.${encodeStartupTraceSegment(service.id)}`;
       if (params.startupTrace) {
         await params.startupTrace.measure(traceName, startService);
       } else {
@@ -144,7 +109,7 @@ export async function startPluginServices(params: {
           continue;
         }
         try {
-          await withPluginHttpRouteRegistry(params.registry, () => entry.stop?.());
+          await entry.stop();
         } catch (err) {
           log.warn(`plugin service stop failed (${entry.id}): ${String(err)}`);
         }

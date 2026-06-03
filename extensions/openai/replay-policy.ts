@@ -5,7 +5,7 @@ import type {
 
 const RESPONSES_FAMILY_APIS = new Set([
   "openai-responses",
-  "openai-chatgpt-responses",
+  "openai-codex-responses",
   "azure-openai-responses",
 ]);
 

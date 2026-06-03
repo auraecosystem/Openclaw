@@ -4,7 +4,6 @@ import {
   adaptScopedAccountAccessor,
   createScopedChannelConfigAdapter,
 } from "openclaw/plugin-sdk/channel-config-helpers";
-import { isSlackPluginAccountConfigured } from "./account-configured.js";
 import { inspectSlackAccount } from "./account-inspect.js";
 import {
   listSlackAccountIds,
@@ -24,7 +23,17 @@ import { SLACK_CHANNEL } from "./setup-shared.js";
 
 export { setSlackChannelAllowlist, SLACK_CHANNEL } from "./setup-shared.js";
 
-export { isSlackPluginAccountConfigured };
+export function isSlackPluginAccountConfigured(account: ResolvedSlackAccount): boolean {
+  const mode = account.config.mode ?? "socket";
+  const hasBotToken = Boolean(account.botToken?.trim());
+  if (!hasBotToken) {
+    return false;
+  }
+  if (mode === "http") {
+    return Boolean(account.config.signingSecret?.trim());
+  }
+  return Boolean(account.appToken?.trim());
+}
 
 export const slackConfigAdapter = createScopedChannelConfigAdapter<
   ResolvedSlackAccount,

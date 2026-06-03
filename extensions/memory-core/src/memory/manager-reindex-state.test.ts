@@ -3,8 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveConfiguredScopeHash,
   resolveConfiguredSourcesForMeta,
-  resolveMemoryIndexIdentityState,
-  isMemoryIndexIdentityDirty,
+  shouldRunFullMemoryReindex,
   type MemoryIndexMeta,
 } from "./manager-reindex-state.js";
 
@@ -22,18 +21,16 @@ function createMeta(overrides: Partial<MemoryIndexMeta> = {}): MemoryIndexMeta {
   };
 }
 
-function createIdentityParams(
+function createFullReindexParams(
   overrides: {
     meta?: MemoryIndexMeta | null;
     provider?: { id: string; model: string } | null;
     providerKey?: string;
-    providerKeyKnown?: boolean;
     configuredSources?: MemorySource[];
     configuredScopeHash?: string;
     chunkTokens?: number;
     chunkOverlap?: number;
     vectorReady?: boolean;
-    hasIndexedChunks?: boolean;
     ftsTokenizer?: string;
   } = {},
 ) {
@@ -46,41 +43,26 @@ function createIdentityParams(
     chunkTokens: 4000,
     chunkOverlap: 0,
     vectorReady: false,
-    hasIndexedChunks: true,
     ftsTokenizer: "unicode61",
     ...overrides,
   };
 }
 
 describe("memory reindex state", () => {
-  it("marks identity dirty when the embedding model changes", () => {
+  it("requires a full reindex when the embedding model changes", () => {
     expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           provider: { id: "openai", model: "mock-embed-v2" },
         }),
       ),
     ).toBe(true);
   });
 
-  it("returns a mismatch reason when provider identity changes", () => {
+  it("requires a full reindex when the provider cache key changes", () => {
     expect(
-      resolveMemoryIndexIdentityState(
-        createIdentityParams({
-          provider: { id: "ollama", model: "mock-embed-v1" },
-          providerKey: "provider-key-ollama",
-        }),
-      ),
-    ).toEqual({
-      status: "mismatched",
-      reason: "index was built for provider openai, expected ollama",
-    });
-  });
-
-  it("marks identity dirty when the provider cache key changes", () => {
-    expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           provider: { id: "gemini", model: "gemini-embedding-2-preview" },
           providerKey: "provider-key-dims-768",
           meta: createMeta({
@@ -93,30 +75,7 @@ describe("memory reindex state", () => {
     ).toBe(true);
   });
 
-  it("can defer provider key comparison until provider initialization", () => {
-    expect(
-      resolveMemoryIndexIdentityState(
-        createIdentityParams({
-          providerKey: undefined,
-          providerKeyKnown: false,
-        }),
-      ),
-    ).toEqual({ status: "valid" });
-  });
-
-  it("does not mark identity dirty for vector dimensions before chunks exist", () => {
-    expect(
-      resolveMemoryIndexIdentityState(
-        createIdentityParams({
-          vectorReady: true,
-          hasIndexedChunks: false,
-          meta: createMeta({ vectorDims: undefined }),
-        }),
-      ),
-    ).toEqual({ status: "valid" });
-  });
-
-  it("marks identity dirty when extraPaths change", () => {
+  it("requires a full reindex when extraPaths change", () => {
     const workspaceDir = "/tmp/workspace";
     const firstScopeHash = resolveConfiguredScopeHash({
       workspaceDir,
@@ -138,8 +97,8 @@ describe("memory reindex state", () => {
     });
 
     expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           meta: createMeta({ scopeHash: firstScopeHash }),
           configuredScopeHash: secondScopeHash,
         }),
@@ -147,17 +106,17 @@ describe("memory reindex state", () => {
     ).toBe(true);
   });
 
-  it("marks identity dirty when configured sources add sessions", () => {
+  it("requires a full reindex when configured sources add sessions", () => {
     expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           configuredSources: ["memory", "sessions"],
         }),
       ),
     ).toBe(true);
   });
 
-  it("marks identity dirty when multimodal settings change", () => {
+  it("requires a full reindex when multimodal settings change", () => {
     const workspaceDir = "/tmp/workspace";
     const firstScopeHash = resolveConfiguredScopeHash({
       workspaceDir,
@@ -179,8 +138,8 @@ describe("memory reindex state", () => {
     });
 
     expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           meta: createMeta({ scopeHash: firstScopeHash }),
           configuredScopeHash: secondScopeHash,
         }),
@@ -190,8 +149,8 @@ describe("memory reindex state", () => {
 
   it("keeps older indexes with missing sources compatible with memory-only config", () => {
     expect(
-      isMemoryIndexIdentityDirty(
-        createIdentityParams({
+      shouldRunFullMemoryReindex(
+        createFullReindexParams({
           meta: createMeta({ sources: undefined }),
           configuredSources: resolveConfiguredSourcesForMeta(new Set(["memory"])),
         }),

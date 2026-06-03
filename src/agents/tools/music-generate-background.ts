@@ -46,5 +46,5 @@ export async function wakeMusicGenerationTaskCompletion(params: {
   mediaUrls?: string[];
   statsLine?: string;
 }) {
-  return await musicGenerationTaskLifecycle.wakeTaskCompletion(params);
+  await musicGenerationTaskLifecycle.wakeTaskCompletion(params);
 }

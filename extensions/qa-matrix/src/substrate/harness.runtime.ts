@@ -315,7 +315,7 @@ export async function startMatrixQaHarness(
   };
 }
 
-export const testing = {
+export const __testing = {
   MATRIX_QA_DEFAULT_IMAGE,
   MATRIX_QA_DEFAULT_PORT,
   MATRIX_QA_DEFAULT_SERVER_NAME,
@@ -327,4 +327,3 @@ export const testing = {
   resolveMatrixQaHarnessImage,
   waitForReachableMatrixBaseUrl,
 };
-export { testing as __testing };

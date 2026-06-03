@@ -34,7 +34,6 @@ describe("resolveSessionKeyForRun", () => {
   });
 
   afterEach(() => {
-    vi.useRealTimers();
     resetAgentRunContextForTest();
     resetResolvedSessionKeyForRunCacheForTest();
   });
@@ -262,21 +261,7 @@ describe("resolveSessionKeyForRun", () => {
 
     expect(resolveSessionKeyForRun("missing-run")).toBeUndefined();
     expect(hoisted.loadCombinedSessionStoreForGatewayMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not cache misses when miss expiry would exceed Date range", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(8_640_000_000_000_000));
-    hoisted.loadConfigMock.mockReturnValue({});
-    hoisted.loadCombinedSessionStoreForGatewayMock.mockReturnValue({
-      storePath: "(multiple)",
-      store: {},
-    });
-
-    expect(resolveSessionKeyForRun("missing-overflow")).toBeUndefined();
-    expect(resolveSessionKeyForRun("missing-overflow")).toBeUndefined();
-
-    expect(hoisted.loadCombinedSessionStoreForGatewayMock).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
   });
 
   it("prefers the structurally matching session key when duplicate session ids exist", () => {

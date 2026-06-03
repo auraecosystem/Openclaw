@@ -306,9 +306,8 @@ actor GatewayEndpointStore {
                 password: password))
         case .remote:
             let root = OpenClawConfigFile.loadDict()
-            let resolution = GatewayRemoteConfig.resolveTransportResolution(root: root)
-            if resolution.transport == .direct {
-                guard let url = resolution.directURL else {
+            if GatewayRemoteConfig.resolveTransport(root: root) == .direct {
+                guard let url = GatewayRemoteConfig.resolveGatewayUrl(root: root) else {
                     self.cancelRemoteEnsure()
                     self.setState(.unavailable(
                         mode: .remote,
@@ -471,9 +470,8 @@ actor GatewayEndpointStore {
 
     private func resolveDirectRemoteURL() throws -> URL? {
         let root = OpenClawConfigFile.loadDict()
-        let resolution = GatewayRemoteConfig.resolveTransportResolution(root: root)
-        guard resolution.transport == .direct else { return nil }
-        guard let url = resolution.directURL else {
+        guard GatewayRemoteConfig.resolveTransport(root: root) == .direct else { return nil }
+        guard let url = GatewayRemoteConfig.resolveGatewayUrl(root: root) else {
             throw NSError(
                 domain: "GatewayEndpoint",
                 code: 1,

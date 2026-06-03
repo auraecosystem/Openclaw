@@ -1,6 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ModelProviderConfig } from "openclaw/plugin-sdk/provider-model-shared";
-import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   defaultQaModelForMode,
   normalizeQaProviderMode,
@@ -27,17 +26,12 @@ export function mergeQaControlUiAllowedOrigins(extraOrigins?: string[]) {
   const normalizedExtra = (extraOrigins ?? [])
     .map((origin) => origin.trim())
     .filter((origin) => origin.length > 0);
-  return uniqueStrings([...DEFAULT_QA_CONTROL_UI_ALLOWED_ORIGINS, ...normalizedExtra]);
+  return [...new Set([...DEFAULT_QA_CONTROL_UI_ALLOWED_ORIGINS, ...normalizedExtra])];
 }
 
 function normalizeQaGatewayModelRef(input: string | undefined, fallback: string) {
   const model = input?.trim();
   return model && model.length > 0 ? model : fallback;
-}
-
-function buildQaModelSelection(primaryModel: string, alternateModel: string) {
-  const fallbacks = alternateModel !== primaryModel ? [alternateModel] : undefined;
-  return fallbacks ? { primary: primaryModel, fallbacks } : { primary: primaryModel };
 }
 
 export function buildQaGatewayConfig(params: {
@@ -74,7 +68,7 @@ export function buildQaGatewayConfig(params: {
   );
   const modelProviderIds = [primaryModel, alternateModel]
     .map((ref) => splitQaModelRef(ref)?.provider)
-    .filter((providerValue): providerValue is string => Boolean(providerValue));
+    .filter((provider): provider is string => Boolean(provider));
   const imageGenerationModelRef =
     params.imageGenerationModel !== undefined
       ? params.imageGenerationModel
@@ -86,22 +80,26 @@ export function buildQaGatewayConfig(params: {
             .map((value) =>
               typeof value === "string" ? (splitQaModelRef(value)?.provider ?? value) : null,
             )
-            .filter((providerLocal): providerLocal is string => Boolean(providerLocal)),
+            .filter((provider): provider is string => Boolean(provider)),
         ),
       ]
     : [];
   const selectedPluginIds = provider.usesModelProviderPlugins
-    ? uniqueStrings(
-        (params.enabledPluginIds?.length ?? 0) > 0
-          ? (params.enabledPluginIds ?? [])
-          : selectedProviderIds,
-      )
-    : uniqueStrings(
-        (params.enabledPluginIds ?? [])
-          .map((pluginId) => pluginId.trim())
-          .filter((pluginId) => pluginId.length > 0),
-      );
-  const transportPluginIds = uniqueStrings(params.transportPluginIds ?? [])
+    ? [
+        ...new Set(
+          (params.enabledPluginIds?.length ?? 0) > 0
+            ? params.enabledPluginIds
+            : selectedProviderIds,
+        ),
+      ]
+    : [
+        ...new Set(
+          (params.enabledPluginIds ?? [])
+            .map((pluginId) => pluginId.trim())
+            .filter((pluginId) => pluginId.length > 0),
+        ),
+      ];
+  const transportPluginIds = [...new Set(params.transportPluginIds ?? [])]
     .map((pluginId) => pluginId.trim())
     .filter((pluginId) => pluginId.length > 0);
   const pluginEntries = Object.fromEntries(
@@ -149,7 +147,9 @@ export function buildQaGatewayConfig(params: {
     agents: {
       defaults: {
         workspace: params.workspaceDir,
-        model: buildQaModelSelection(primaryModel, alternateModel),
+        model: {
+          primary: primaryModel,
+        },
         ...(imageGenerationModelRef
           ? {
               imageGenerationModel: {
@@ -183,7 +183,9 @@ export function buildQaGatewayConfig(params: {
         {
           id: "qa",
           default: true,
-          model: buildQaModelSelection(primaryModel, alternateModel),
+          model: {
+            primary: primaryModel,
+          },
           identity: {
             name: "C-3PO QA",
             theme: "Flustered Protocol Droid",

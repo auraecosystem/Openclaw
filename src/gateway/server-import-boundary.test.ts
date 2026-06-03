@@ -21,7 +21,7 @@ describe("gateway startup import boundaries", () => {
       /import\s+\{[^}]*resolveSessionKeyForRun[^}]*\}\s+from "\.\/server-session-key\.js"/s,
     );
     expect(serverImpl).not.toMatch(
-      /export\s+\{[^}]*resetModelCatalogCacheForTest[^}]*\}\s+from "\.\/server-model-catalog\.js"/s,
+      /export\s+\{[^}]*__resetModelCatalogCacheForTest[^}]*\}\s+from "\.\/server-model-catalog\.js"/s,
     );
     expect(readSource("src/gateway/server-runtime-subscriptions.ts")).toContain(
       'import("./server-session-key.js")',
@@ -39,10 +39,6 @@ describe("gateway startup import boundaries", () => {
     expect(serverImpl).not.toContain('from "../tasks/task-registry.js"');
     expect(serverImpl).not.toContain('from "../tasks/task-registry.maintenance.js"');
     expect(serverImpl).toContain('import("../tasks/task-registry.maintenance.js")');
-    expect(serverImpl).not.toContain('from "../secrets/runtime.js"');
-    expect(readSource("src/gateway/server-reload-handlers.ts")).not.toContain(
-      'from "../secrets/runtime.js"',
-    );
     const wsConnection = readSource("src/gateway/server/ws-connection.ts");
     expect(wsConnection).not.toMatch(
       /import\s+\{[^}]*attachGatewayWsMessageHandler[^}]*\}\s+from "\.\/ws-connection\/message-handler\.js"/s,
@@ -57,7 +53,7 @@ describe("gateway startup import boundaries", () => {
 
   it("marks gateway close before awaiting gateway_stop hooks", () => {
     const serverImpl = readSource("src/gateway/server.impl.ts");
-    const closeStart = /close:\s*async\s*\([^)]*\)\s*=>/u.exec(serverImpl)?.index ?? -1;
+    const closeStart = serverImpl.indexOf("close: async (opts)");
     const hookStart = serverImpl.indexOf("runGlobalGatewayStopSafely", closeStart);
     const markStart = serverImpl.indexOf("markClosePreludeStarted();", closeStart);
     const markHelperStart = serverImpl.indexOf("const markClosePreludeStarted = () => {");

@@ -1,23 +1,14 @@
 import path from "node:path";
 import { cancel, confirm, isCancel, multiselect } from "@clack/prompts";
-import {
-  stylePromptHint,
-  stylePromptMessage,
-  stylePromptTitle,
-} from "../../packages/terminal-core/src/prompt-style.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { isNixMode } from "../config/config.js";
 import { resolveGatewayService } from "../daemon/service.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import type { RuntimeEnv } from "../runtime.js";
+import { stylePromptHint, stylePromptMessage, stylePromptTitle } from "../terminal/prompt-style.js";
 import { resolveHomeDir } from "../utils.js";
 import { resolveCleanupPlanFromDisk } from "./cleanup-plan.js";
-import {
-  removePath,
-  removeStateAndLinkedPaths,
-  removeWorkspaceAttestationPaths,
-  removeWorkspaceDirs,
-} from "./cleanup-utils.js";
+import { removePath, removeStateAndLinkedPaths, removeWorkspaceDirs } from "./cleanup-utils.js";
 
 type UninstallScope = "service" | "state" | "workspace" | "app";
 
@@ -70,7 +61,7 @@ async function stopAndUninstallService(runtime: RuntimeEnv): Promise<boolean> {
     return false;
   }
   const service = resolveGatewayService();
-  let loaded;
+  let loaded = false;
   try {
     loaded = await service.isLoaded({ env: process.env });
   } catch (err) {
@@ -198,13 +189,12 @@ export async function uninstallCommand(runtime: RuntimeEnv, opts: UninstallOptio
     await removeStateAndLinkedPaths(
       { stateDir, configPath, oauthDir, configInsideState, oauthInsideState },
       runtime,
-      { dryRun, preservePaths: scopes.has("workspace") ? [] : workspaceDirs },
+      { dryRun },
     );
   }
 
   if (scopes.has("workspace")) {
     await removeWorkspaceDirs(workspaceDirs, runtime, { dryRun });
-    await removeWorkspaceAttestationPaths(workspaceDirs, runtime, { dryRun });
   }
 
   if (scopes.has("app")) {

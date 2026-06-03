@@ -1,9 +1,8 @@
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import type { HookHandler } from "../../hooks.js";
 
 function readOptionalNumber(context: Record<string, unknown>, key: string): number | undefined {
   const value = context[key];
-  return asFiniteNumber(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 const handler: HookHandler = async (event) => {

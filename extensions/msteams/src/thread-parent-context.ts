@@ -13,10 +13,6 @@
 // the same parent is not re-injected on every subsequent reply in the
 // thread.
 
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { fetchChannelMessage, stripHtmlFromTeamsMessage } from "./graph-thread.js";
 import type { GraphThreadMessage } from "./graph-thread.js";
 
@@ -65,13 +61,6 @@ function buildParentCacheKey(groupId: string, channelId: string, parentId: strin
   return `${groupId}\u0000${channelId}\u0000${parentId}`;
 }
 
-function resolveParentCacheExpiresAt(nowRaw: number): number | undefined {
-  const nowMs = asDateTimestampMs(nowRaw);
-  return nowMs === undefined
-    ? undefined
-    : resolveExpiresAtMsFromDurationMs(PARENT_CACHE_TTL_MS, { nowMs });
-}
-
 /**
  * Fetch a channel parent message with an LRU+TTL cache.
  *
@@ -86,23 +75,16 @@ export async function fetchParentMessageCached(
   fetchParent: ThreadParentContextFetcher = fetchChannelMessage,
 ): Promise<GraphThreadMessage | undefined> {
   const key = buildParentCacheKey(groupId, channelId, parentId);
-  const now = asDateTimestampMs(Date.now());
+  const now = Date.now();
   const cached = parentCache.get(key);
-  const cachedExpiresAt = cached ? asDateTimestampMs(cached.expiresAt) : undefined;
-  if (cached && now !== undefined && cachedExpiresAt !== undefined && cachedExpiresAt > now) {
+  if (cached && cached.expiresAt > now) {
     // Refresh LRU ordering on hit.
     parentCache.delete(key);
     parentCache.set(key, cached);
     return cached.message;
   }
-  if (cached) {
-    parentCache.delete(key);
-  }
   const message = await fetchParent(token, groupId, channelId, parentId);
-  const expiresAt = resolveParentCacheExpiresAt(Date.now());
-  if (expiresAt !== undefined) {
-    touchLru(parentCache, key, { message, expiresAt }, PARENT_CACHE_MAX);
-  }
+  touchLru(parentCache, key, { message, expiresAt: now + PARENT_CACHE_TTL_MS }, PARENT_CACHE_MAX);
   return message;
 }
 
@@ -171,7 +153,7 @@ export function markParentContextInjected(sessionKey: string, parentId: string):
 }
 
 // Exported for test isolation.
-export function resetThreadParentContextCachesForTest(): void {
+export function _resetThreadParentContextCachesForTest(): void {
   parentCache.clear();
   injectedParents.clear();
 }

@@ -1,7 +1,6 @@
-import { MAX_DATE_TIMESTAMP_MS } from "@openclaw/normalization-core/number-coercion";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeAccountId } from "../routing/session-key.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   resolveThreadBindingLifecycle as resolveSharedThreadBindingLifecycle,
   type ThreadBindingLifecycleRecord,
@@ -95,34 +94,26 @@ function normalizeThreadBindingHours(raw: unknown): number | undefined {
   return raw;
 }
 
-function resolveThreadBindingHoursMs(raw: unknown, fallbackHours: number): number {
-  const hours = normalizeThreadBindingHours(raw) ?? fallbackHours;
-  const durationMs = Math.floor(hours * 60 * 60 * 1000);
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    return 0;
-  }
-  return Math.min(durationMs, MAX_DATE_TIMESTAMP_MS);
-}
-
 export function resolveThreadBindingIdleTimeoutMs(params: {
   channelIdleHoursRaw: unknown;
   sessionIdleHoursRaw: unknown;
 }): number {
-  return resolveThreadBindingHoursMs(
-    params.channelIdleHoursRaw,
-    normalizeThreadBindingHours(params.sessionIdleHoursRaw) ?? DEFAULT_THREAD_BINDING_IDLE_HOURS,
-  );
+  const idleHours =
+    normalizeThreadBindingHours(params.channelIdleHoursRaw) ??
+    normalizeThreadBindingHours(params.sessionIdleHoursRaw) ??
+    DEFAULT_THREAD_BINDING_IDLE_HOURS;
+  return Math.floor(idleHours * 60 * 60 * 1000);
 }
 
 export function resolveThreadBindingMaxAgeMs(params: {
   channelMaxAgeHoursRaw: unknown;
   sessionMaxAgeHoursRaw: unknown;
 }): number {
-  return resolveThreadBindingHoursMs(
-    params.channelMaxAgeHoursRaw,
+  const maxAgeHours =
+    normalizeThreadBindingHours(params.channelMaxAgeHoursRaw) ??
     normalizeThreadBindingHours(params.sessionMaxAgeHoursRaw) ??
-      DEFAULT_THREAD_BINDING_MAX_AGE_HOURS,
-  );
+    DEFAULT_THREAD_BINDING_MAX_AGE_HOURS;
+  return Math.floor(maxAgeHours * 60 * 60 * 1000);
 }
 
 export function resolveThreadBindingEffectiveExpiresAt(params: {

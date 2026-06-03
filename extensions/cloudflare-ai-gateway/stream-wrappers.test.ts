@@ -1,7 +1,7 @@
-import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  testing,
+  __testing,
   createCloudflareAiGatewayAnthropicThinkingPrefillWrapper,
   wrapCloudflareAiGatewayProviderStream,
 } from "./stream-wrappers.js";
@@ -155,6 +155,6 @@ describe("wrapCloudflareAiGatewayProviderStream", () => {
   });
 
   it("treats missing model API as the plugin's default Anthropic Messages route", () => {
-    expect(testing.shouldPatchAnthropicMessagesPayload({} as never)).toBe(true);
+    expect(__testing.shouldPatchAnthropicMessagesPayload({} as never)).toBe(true);
   });
 });

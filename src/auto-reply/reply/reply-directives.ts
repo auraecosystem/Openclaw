@@ -17,7 +17,6 @@ export type ReplyDirectiveParseOptions = {
   currentMessageId?: string;
   silentToken?: string;
   extractMarkdownImages?: boolean;
-  extractMediaDirectives?: boolean;
 };
 
 export function parseReplyDirectives(
@@ -26,7 +25,6 @@ export function parseReplyDirectives(
 ): ReplyDirectiveParseResult {
   const split = splitMediaFromOutput(raw, {
     extractMarkdownImages: options.extractMarkdownImages,
-    extractMediaDirectives: options.extractMediaDirectives,
   });
   let text = split.text ?? "";
 

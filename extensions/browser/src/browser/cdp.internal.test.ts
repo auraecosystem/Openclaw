@@ -79,9 +79,7 @@ function replyToViewportCommandOrScreenshot(
 
 async function startMockWsServer(handle: CdpReplyHandler) {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-  await new Promise<void>((resolve) => {
-    wss.once("listening", () => resolve());
-  });
+  await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
   const port = (wss.address() as { port: number }).port;
   wss.on("connection", (socket) => {
     socket.on("message", (raw) => {
@@ -115,9 +113,7 @@ describe("cdp internal", () => {
 
   afterEach(async () => {
     if (wss) {
-      await new Promise<void>((resolve) => {
-        wss?.close(() => resolve());
-      });
+      await new Promise<void>((resolve) => wss?.close(() => resolve()));
       wss = null;
     }
   });
@@ -227,7 +223,9 @@ describe("cdp internal", () => {
           );
           return;
         }
-        replyToViewportCommandOrScreenshot(msg, socket, "FULL");
+        if (replyToViewportCommandOrScreenshot(msg, socket, "FULL")) {
+          return;
+        }
       });
       wss = server.wss;
       const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
@@ -455,38 +453,6 @@ describe("cdp internal", () => {
       }));
       const out = formatAriaSnapshot(nodes, 3);
       expect(out).toHaveLength(3);
-    });
-
-    it("returns nodes when snapshotAria receives a non-finite limit", async () => {
-      const server = await startMockWsServer((msg, socket) => {
-        if (msg.method === "Accessibility.enable") {
-          socket.send(JSON.stringify({ id: msg.id, result: {} }));
-          return;
-        }
-        if (msg.method === "Accessibility.getFullAXTree") {
-          socket.send(
-            JSON.stringify({
-              id: msg.id,
-              result: {
-                nodes: [
-                  {
-                    nodeId: "1",
-                    role: { value: "RootWebArea" },
-                    name: { value: "Home" },
-                    childIds: [],
-                  },
-                ],
-              },
-            }),
-          );
-        }
-      });
-      wss = server.wss;
-
-      const snap = await snapshotAria({ wsUrl: server.wsUrl, limit: Number.NaN });
-
-      expect(snap.nodes).toHaveLength(1);
-      expect(snap.nodes[0]?.role).toBe("RootWebArea");
     });
   });
 
@@ -790,31 +756,6 @@ describe("cdp internal", () => {
       const snap = await snapshotDom({ wsUrl: server.wsUrl });
       expect(snap.nodes).toStrictEqual([]);
     });
-
-    it("uses default DOM snapshot budgets for non-finite options", async () => {
-      const server = await startMockWsServer((msg, socket) => {
-        if (msg.method === "Runtime.enable") {
-          socket.send(JSON.stringify({ id: msg.id, result: {} }));
-          return;
-        }
-        if (msg.method === "Runtime.evaluate") {
-          const expression =
-            typeof msg.params?.expression === "string" ? msg.params.expression : "";
-          expect(expression).toContain("const maxNodes = 800;");
-          expect(expression).toContain("const maxText = 220;");
-          socket.send(JSON.stringify({ id: msg.id, result: { result: { value: { nodes: [] } } } }));
-        }
-      });
-      wss = server.wss;
-
-      const snap = await snapshotDom({
-        wsUrl: server.wsUrl,
-        limit: Number.NaN,
-        maxTextChars: Number.NaN,
-      });
-
-      expect(snap.nodes).toStrictEqual([]);
-    });
   });
 
   describe("getDomText", () => {
@@ -887,30 +828,6 @@ describe("cdp internal", () => {
       const obj = await getDomText({ wsUrl: server.wsUrl, format: "text" });
       expect(obj.text).toBe("");
     });
-
-    it("uses the default text budget for non-finite maxChars", async () => {
-      const server = await startMockWsServer((msg, socket) => {
-        if (msg.method === "Runtime.enable") {
-          socket.send(JSON.stringify({ id: msg.id, result: {} }));
-          return;
-        }
-        if (msg.method === "Runtime.evaluate") {
-          const expression =
-            typeof msg.params?.expression === "string" ? msg.params.expression : "";
-          expect(expression).toContain("const max = 200000;");
-          socket.send(JSON.stringify({ id: msg.id, result: { result: { value: "ok" } } }));
-        }
-      });
-      wss = server.wss;
-
-      const res = await getDomText({
-        wsUrl: server.wsUrl,
-        format: "text",
-        maxChars: Number.NaN,
-      });
-
-      expect(res.text).toBe("ok");
-    });
   });
 
   describe("querySelector", () => {
@@ -948,34 +865,6 @@ describe("cdp internal", () => {
       });
       wss = server.wss;
       const out = await querySelector({ wsUrl: server.wsUrl, selector: "button" });
-      expect(out.matches).toStrictEqual([]);
-    });
-
-    it("uses default query budgets for non-finite options", async () => {
-      const server = await startMockWsServer((msg, socket) => {
-        if (msg.method === "Runtime.enable") {
-          socket.send(JSON.stringify({ id: msg.id, result: {} }));
-          return;
-        }
-        if (msg.method === "Runtime.evaluate") {
-          const expression =
-            typeof msg.params?.expression === "string" ? msg.params.expression : "";
-          expect(expression).toContain("const lim = 20;");
-          expect(expression).toContain("const maxText = 500;");
-          expect(expression).toContain("const maxHtml = 1500;");
-          socket.send(JSON.stringify({ id: msg.id, result: { result: { value: [] } } }));
-        }
-      });
-      wss = server.wss;
-
-      const out = await querySelector({
-        wsUrl: server.wsUrl,
-        selector: "button",
-        limit: Number.NaN,
-        maxTextChars: Number.NaN,
-        maxHtmlChars: Number.NaN,
-      });
-
       expect(out.matches).toStrictEqual([]);
     });
   });
@@ -1062,7 +951,9 @@ describe("cdp internal", () => {
           socket.send(JSON.stringify({ id: msg.id, result: { result: { value: {} } } }));
           return;
         }
-        replyToViewportCommandOrScreenshot(msg, socket, "C");
+        if (replyToViewportCommandOrScreenshot(msg, socket, "C")) {
+          return;
+        }
       });
       wss = server.wss;
       const buf = await captureScreenshot({ wsUrl: server.wsUrl, fullPage: true });
@@ -1076,9 +967,7 @@ describe("cdp internal", () => {
       // in createTargetViaCdp — the bare-ws root triggers discovery.
       const http = await import("node:http");
       const wsServer = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-      await new Promise<void>((resolve) => {
-        wsServer.once("listening", () => resolve());
-      });
+      await new Promise<void>((resolve) => wsServer.once("listening", () => resolve()));
       const wsPort = (wsServer.address() as { port: number }).port;
       wsServer.on("connection", (socket) => {
         socket.on("message", (raw) => {
@@ -1116,9 +1005,7 @@ describe("cdp internal", () => {
         }
         res.writeHead(404).end();
       });
-      await new Promise<void>((resolve) => {
-        httpServer.listen(0, "127.0.0.1", () => resolve());
-      });
+      await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", () => resolve()));
       const httpPort = (httpServer.address() as { port: number }).port;
       try {
         const out = await createTargetViaCdp({
@@ -1127,12 +1014,8 @@ describe("cdp internal", () => {
         });
         expect(out.targetId).toBe("T_BARE_WS");
       } finally {
-        await new Promise<void>((resolve) => {
-          wsServer.close(() => resolve());
-        });
-        await new Promise<void>((resolve) => {
-          httpServer.close(() => resolve());
-        });
+        await new Promise<void>((resolve) => wsServer.close(() => resolve()));
+        await new Promise<void>((resolve) => httpServer.close(() => resolve()));
       }
     });
 

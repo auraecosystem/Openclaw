@@ -3,7 +3,7 @@ import {
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
 import { logVerbose } from "../../globals.js";
-import { getReplyPayloadMetadata, isReplyPayloadStatusNotice } from "../reply-payload.js";
+import { getReplyPayloadMetadata } from "../reply-payload.js";
 import type { ReplyPayload } from "../types.js";
 import { createBlockReplyCoalescer } from "./block-reply-coalescer.js";
 import type { BlockStreamingCoalescing } from "./block-streaming.js";
@@ -43,7 +43,6 @@ export function createAudioAsVoiceBuffer(params: {
 export function createBlockReplyPayloadKey(payload: ReplyPayload): string {
   const reply = resolveSendableOutboundReplyParts(payload);
   return JSON.stringify({
-    statusNotice: isReplyPayloadStatusNotice(payload),
     text: reply.trimmedText,
     mediaList: reply.mediaUrls,
     presentation: payload.presentation ?? null,
@@ -121,7 +120,7 @@ export function createBlockReplyPipeline(params: {
     void coalescer?.flush({ force: true });
   };
 
-  const sendPayload = (payload: ReplyPayload, bypassSeenCheck = false) => {
+  const sendPayload = (payload: ReplyPayload, bypassSeenCheck: boolean = false) => {
     if (aborted) {
       return;
     }
@@ -162,22 +161,17 @@ export function createBlockReplyPipeline(params: {
           return;
         }
         sentKeys.add(payloadKey);
-        const isStatusNotice = isReplyPayloadStatusNotice(payload);
-        if (!isStatusNotice) {
-          sentContentKeys.add(contentKey);
-        }
+        sentContentKeys.add(contentKey);
         const reply = resolveSendableOutboundReplyParts(payload);
         for (const mediaUrl of reply.mediaUrls) {
           sentMediaUrls.add(mediaUrl);
         }
-        if (!isStatusNotice && reply.trimmedText) {
+        if (!reply.hasMedia && reply.trimmedText) {
           streamedTextFragments.push(reply.trimmedText);
         }
-        if (!isStatusNotice) {
-          didStream = true;
-        }
+        didStream = true;
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         if (err === timeoutError) {
           abortController.abort();
           aborted = true;
@@ -235,32 +229,6 @@ export function createBlockReplyPipeline(params: {
     bufferedPayloadKeys.clear();
   };
 
-  const enqueueCoalescedPayload = (payload: ReplyPayload) => {
-    if (!coalescer) {
-      return;
-    }
-    const assistantMessageIndex = getReplyPayloadMetadata(payload)?.assistantMessageIndex;
-    if (
-      assistantMessageIndex !== undefined &&
-      bufferedAssistantMessageIndex !== undefined &&
-      assistantMessageIndex !== bufferedAssistantMessageIndex &&
-      coalescer.hasBuffered()
-    ) {
-      // Logical assistant blocks must not be merged together by the generic
-      // coalescer. Force-flush the previous buffered block before starting a
-      // new assistant-message block.
-      flushBufferedAssistantBlock();
-    }
-    const payloadKey = createBlockReplyPayloadKey(payload);
-    if (hasSeenOrQueuedPayloadKey(payloadKey) || bufferedKeys.has(payloadKey)) {
-      return;
-    }
-    seenKeys.add(payloadKey);
-    bufferedKeys.add(payloadKey);
-    bufferedAssistantMessageIndex = assistantMessageIndex;
-    coalescer.enqueue(payload);
-  };
-
   const enqueue = (payload: ReplyPayload) => {
     if (aborted) {
       return;
@@ -270,20 +238,35 @@ export function createBlockReplyPipeline(params: {
     }
     const reply = resolveSendableOutboundReplyParts(payload);
     const hasNonTextContent = hasOutboundReplyContent(
-      { ...payload, text: undefined, mediaUrl: undefined, mediaUrls: undefined },
+      { ...payload, text: undefined },
       { trimText: true },
     );
-    if (reply.hasMedia && coalescer && !hasNonTextContent) {
-      enqueueCoalescedPayload(payload);
-      return;
-    }
     if (reply.hasMedia || hasNonTextContent) {
       void coalescer?.flush({ force: true });
       sendPayload(payload, /* bypassSeenCheck */ false);
       return;
     }
     if (coalescer) {
-      enqueueCoalescedPayload(payload);
+      const assistantMessageIndex = getReplyPayloadMetadata(payload)?.assistantMessageIndex;
+      if (
+        assistantMessageIndex !== undefined &&
+        bufferedAssistantMessageIndex !== undefined &&
+        assistantMessageIndex !== bufferedAssistantMessageIndex &&
+        coalescer.hasBuffered()
+      ) {
+        // Logical assistant blocks must not be merged together by the generic
+        // coalescer. Force-flush the previous buffered block before starting a
+        // new assistant-message block.
+        flushBufferedAssistantBlock();
+      }
+      const payloadKey = createBlockReplyPayloadKey(payload);
+      if (hasSeenOrQueuedPayloadKey(payloadKey) || bufferedKeys.has(payloadKey)) {
+        return;
+      }
+      seenKeys.add(payloadKey);
+      bufferedKeys.add(payloadKey);
+      bufferedAssistantMessageIndex = assistantMessageIndex;
+      coalescer.enqueue(payload);
       return;
     }
     sendPayload(payload, /* bypassSeenCheck */ false);

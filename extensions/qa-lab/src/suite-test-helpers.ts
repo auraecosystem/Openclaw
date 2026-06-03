@@ -9,7 +9,6 @@ export function makeQaSuiteTestScenario(
     plugins?: string[];
     gatewayConfigPatch?: Record<string, unknown>;
     gatewayRuntime?: { forwardHostHome?: boolean };
-    runtimeParityTier?: QaSuiteTestScenario["runtimeParityTier"];
     surface?: string;
   } = {},
 ): QaSuiteTestScenario {
@@ -19,7 +18,6 @@ export function makeQaSuiteTestScenario(
     surface: params.surface ?? "test",
     objective: "test",
     successCriteria: ["test"],
-    ...(params.runtimeParityTier ? { runtimeParityTier: params.runtimeParityTier } : {}),
     ...(params.plugins ? { plugins: params.plugins } : {}),
     ...(params.gatewayConfigPatch ? { gatewayConfigPatch: params.gatewayConfigPatch } : {}),
     ...(params.gatewayRuntime ? { gatewayRuntime: params.gatewayRuntime } : {}),

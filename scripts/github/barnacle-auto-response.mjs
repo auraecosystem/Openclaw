@@ -7,7 +7,6 @@ import {
   PROOF_SUFFICIENT_LABEL,
   PROOF_SUPPLIED_LABEL,
   evaluateRealBehaviorProof,
-  hasClawSweeperExactHeadProof,
   labelsForRealBehaviorProof,
 } from "./real-behavior-proof-policy.mjs";
 
@@ -768,15 +767,6 @@ async function listPullRequestFiles(github, context, pullRequest) {
   });
 }
 
-async function listIssueComments(github, context, issueNumber) {
-  return github.paginate(github.rest.issues.listComments, {
-    owner: context.repo.owner,
-    repo: context.repo.repo,
-    issue_number: issueNumber,
-    per_page: 100,
-  });
-}
-
 async function addMissingLabels(github, context, core, issueNumber, labels, labelSet) {
   const missingLabels = labels.filter((label) => !labelSet.has(label));
   if (missingLabels.length === 0) {
@@ -794,62 +784,15 @@ async function addMissingLabels(github, context, core, issueNumber, labels, labe
   core.info(`Added candidate labels to #${issueNumber}: ${missingLabels.join(", ")}`);
 }
 
-function isClawSweeperOwnedLabel(label) {
-  return label === "clawsweeper" || label.startsWith("clawsweeper:");
-}
-
-function isActiveClawSweeperWork(pullRequest, labelSet) {
-  const authorLogin = pullRequest.user?.login ?? "";
-  const headRef = pullRequest.head?.ref ?? "";
-  return (
-    /clawsweeper/i.test(authorLogin) ||
-    headRef.startsWith("clawsweeper/") ||
-    [...labelSet].some(isClawSweeperOwnedLabel)
-  );
-}
-
-function shouldRemoveProofSufficientLabel(
-  context,
-  pullRequest,
-  labelSet,
-  proofEvaluation,
-  hasExactHeadClawSweeperProof,
-) {
-  if (hasExactHeadClawSweeperProof) {
-    return false;
-  }
-  if (proofEvaluation.status === "override") {
-    return false;
-  }
-  if (isActiveClawSweeperWork(pullRequest, labelSet)) {
-    return false;
-  }
-  if (!["edited", "synchronize"].includes(context.payload.action)) {
-    return false;
-  }
+function shouldRemoveProofSufficientLabel(context, proofEvaluation) {
   if (proofEvaluation.status !== "passed") {
     return true;
   }
-  return true;
-}
-
-const negativeProofLabels = new Set([NEEDS_REAL_BEHAVIOR_PROOF_LABEL, MOCK_ONLY_PROOF_LABEL]);
-
-function shouldPreserveClawSweeperProofJudgment(context, labelSet) {
-  return (
-    labelSet.has(PROOF_SUFFICIENT_LABEL) &&
-    !["edited", "synchronize"].includes(context.payload.action)
-  );
+  return ["edited", "synchronize"].includes(context.payload.action);
 }
 
 async function applyPullRequestCandidateLabels(github, context, core, pullRequest, labelSet) {
   const files = await listPullRequestFiles(github, context, pullRequest);
-  const hasExactHeadClawSweeperProof =
-    labelSet.has(PROOF_SUFFICIENT_LABEL) &&
-    hasClawSweeperExactHeadProof({
-      pullRequest,
-      comments: await listIssueComments(github, context, pullRequest.number),
-    });
   const proofEvaluation = evaluateRealBehaviorProof({
     pullRequest: {
       ...pullRequest,
@@ -863,33 +806,17 @@ async function applyPullRequestCandidateLabels(github, context, core, pullReques
     },
     files,
   );
-  const candidateLabelsToApply = shouldPreserveClawSweeperProofJudgment(context, labelSet)
-    ? classifiedLabels.filter((label) => !negativeProofLabels.has(label))
-    : classifiedLabels;
   const staleProofLabels = structuralProofLabelValues.filter(
-    (label) => labelSet.has(label) && !candidateLabelsToApply.includes(label),
+    (label) => labelSet.has(label) && !classifiedLabels.includes(label),
   );
   if (
     labelSet.has(PROOF_SUFFICIENT_LABEL) &&
-    shouldRemoveProofSufficientLabel(
-      context,
-      pullRequest,
-      labelSet,
-      proofEvaluation,
-      hasExactHeadClawSweeperProof,
-    )
+    shouldRemoveProofSufficientLabel(context, proofEvaluation)
   ) {
     staleProofLabels.push(PROOF_SUFFICIENT_LABEL);
   }
   await removeLabels(github, context, pullRequest.number, staleProofLabels, labelSet);
-  await addMissingLabels(
-    github,
-    context,
-    core,
-    pullRequest.number,
-    candidateLabelsToApply,
-    labelSet,
-  );
+  await addMissingLabels(github, context, core, pullRequest.number, classifiedLabels, labelSet);
 }
 
 function isAutomationUser(user, fallbackLogin = "") {
@@ -973,9 +900,6 @@ async function applyPullRequestCandidateAction({
 async function removeLabels(github, context, issueNumber, labels, labelSet) {
   for (const label of labels) {
     if (!labelSet.has(label)) {
-      continue;
-    }
-    if (isClawSweeperOwnedLabel(label)) {
       continue;
     }
     try {

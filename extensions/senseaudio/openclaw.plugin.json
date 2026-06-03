@@ -4,13 +4,8 @@
     "onStartup": false
   },
   "enabledByDefault": true,
-  "setup": {
-    "providers": [
-      {
-        "id": "senseaudio",
-        "envVars": ["SENSEAUDIO_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "senseaudio": ["SENSEAUDIO_API_KEY"]
   },
   "contracts": {
     "mediaUnderstandingProviders": ["senseaudio"]

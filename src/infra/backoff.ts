@@ -1,5 +1,3 @@
-import { clampPositiveTimerTimeoutMs } from "../shared/number-coercion.js";
-
 export type BackoffPolicy = {
   initialMs: number;
   maxMs: number;
@@ -14,8 +12,7 @@ export function computeBackoff(policy: BackoffPolicy, attempt: number) {
 }
 
 export async function sleepWithAbort(ms: number, abortSignal?: AbortSignal) {
-  const delayMs = clampPositiveTimerTimeoutMs(ms);
-  if (delayMs === undefined) {
+  if (ms <= 0) {
     return;
   }
   await new Promise<void>((resolve, reject) => {
@@ -51,7 +48,7 @@ export async function sleepWithAbort(ms: number, abortSignal?: AbortSignal) {
       }
       timer = null;
       resolve();
-    }, delayMs);
+    }, ms);
 
     if (abortSignal) {
       if (abortSignal.aborted) {

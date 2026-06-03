@@ -21,7 +21,6 @@ function usage() {
 function parseArgs(argv) {
   const options = {
     dir: "",
-    help: false,
     input: "",
     ref: "",
     repo: "",
@@ -29,9 +28,7 @@ function parseArgs(argv) {
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--help" || arg === "-h") {
-      options.help = true;
-    } else if (arg === "--repo") {
+    if (arg === "--repo") {
       options.repo = argv[(index += 1)] ?? "";
     } else if (arg?.startsWith("--repo=")) {
       options.repo = arg.slice("--repo=".length);
@@ -52,9 +49,6 @@ function parseArgs(argv) {
     } else {
       throw new Error(`unknown argument: ${arg}\n${usage()}`);
     }
-  }
-  if (options.help) {
-    return options;
   }
   if (!options.input || !options.workflow) {
     throw new Error(usage());
@@ -162,7 +156,7 @@ function ghWorkflowCommand(lanes, ref, workflow, reuseInputs = {}) {
 }
 
 function detectRepo() {
-  return run("gh", ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
+  return JSON.parse(run("gh", ["repo", "view", "--json", "nameWithOwner"])).nameWithOwner;
 }
 
 function findFiles(rootDir, basenames, out = []) {
@@ -262,10 +256,10 @@ function runInfo(runId, repo) {
   );
 }
 
-function printEntries(entries, ref, workflow, runValue) {
-  if (runValue) {
-    console.log(`Run: ${runValue.url}`);
-    console.log(`Workflow: ${runValue.workflowName}`);
+function printEntries(entries, ref, workflow, run) {
+  if (run) {
+    console.log(`Run: ${run.url}`);
+    console.log(`Workflow: ${run.workflowName}`);
   }
   console.log(`Ref: ${ref}`);
   console.log(
@@ -302,40 +296,27 @@ function printEntries(entries, ref, workflow, runValue) {
   }
 }
 
-function main() {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.help) {
-    console.log(usage());
-    return;
-  }
-  const isLocalJson = fs.existsSync(options.input) && fs.statSync(options.input).isFile();
-  if (isLocalJson) {
-    const ref = options.ref || process.env.GITHUB_SHA || "HEAD";
-    printEntries(
-      mergeByLane(failedLaneEntriesFromJson(options.input, ref, options.workflow)),
-      ref,
-      options.workflow,
-    );
-  } else {
-    const repo = options.repo || detectRepo();
-    const runLocal = runInfo(options.input, repo);
-    const ref = options.ref || runLocal.headSha || runLocal.headBranch;
-    const outputDir =
-      options.dir || path.join(os.tmpdir(), `openclaw-docker-e2e-rerun-${options.input}`);
-    const artifactNames = downloadDockerArtifacts(options.input, repo, outputDir);
-    const files = findFiles(outputDir, new Set(["failures.json", "summary.json"]));
-    const entries = mergeByLane(
-      files.flatMap((file) => failedLaneEntriesFromJson(file, ref, options.workflow)),
-    );
-    console.log(`Artifacts: ${artifactNames.join(", ")}`);
-    console.log(`Downloaded: ${outputDir}`);
-    printEntries(entries, ref, options.workflow, runLocal);
-  }
-}
-
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+const options = parseArgs(process.argv.slice(2));
+const isLocalJson = fs.existsSync(options.input) && fs.statSync(options.input).isFile();
+if (isLocalJson) {
+  const ref = options.ref || process.env.GITHUB_SHA || "HEAD";
+  printEntries(
+    mergeByLane(failedLaneEntriesFromJson(options.input, ref, options.workflow)),
+    ref,
+    options.workflow,
+  );
+} else {
+  const repo = options.repo || detectRepo();
+  const run = runInfo(options.input, repo);
+  const ref = options.ref || run.headSha || run.headBranch;
+  const outputDir =
+    options.dir || path.join(os.tmpdir(), `openclaw-docker-e2e-rerun-${options.input}`);
+  const artifactNames = downloadDockerArtifacts(options.input, repo, outputDir);
+  const files = findFiles(outputDir, new Set(["failures.json", "summary.json"]));
+  const entries = mergeByLane(
+    files.flatMap((file) => failedLaneEntriesFromJson(file, ref, options.workflow)),
+  );
+  console.log(`Artifacts: ${artifactNames.join(", ")}`);
+  console.log(`Downloaded: ${outputDir}`);
+  printEntries(entries, ref, options.workflow, run);
 }

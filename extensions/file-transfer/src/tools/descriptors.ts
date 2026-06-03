@@ -1,4 +1,3 @@
-import { optionalPositiveIntegerSchema } from "openclaw/plugin-sdk/channel-actions";
 import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { Type } from "typebox";
 
@@ -26,12 +25,14 @@ export const FileFetchToolSchema = Type.Object({
   path: Type.String({
     description: "Absolute path to the file on the node. Canonicalized server-side.",
   }),
-  maxBytes: optionalPositiveIntegerSchema({
-    description: "Max bytes to fetch. Default 8 MB, hard ceiling 16 MB (single round-trip).",
-  }),
+  maxBytes: Type.Optional(
+    Type.Number({
+      description: "Max bytes to fetch. Default 8 MB, hard ceiling 16 MB (single round-trip).",
+    }),
+  ),
   gatewayUrl: Type.Optional(Type.String()),
   gatewayToken: Type.Optional(Type.String()),
-  timeoutMs: optionalPositiveIntegerSchema(),
+  timeoutMs: Type.Optional(Type.Number()),
 });
 
 export const FILE_FETCH_TOOL_DESCRIPTOR: FileTransferToolDescriptor = {
@@ -55,12 +56,14 @@ export const DirListToolSchema = Type.Object({
         "Pagination token from a previous dir_list call. Omit to start from the beginning.",
     }),
   ),
-  maxEntries: optionalPositiveIntegerSchema({
-    description: `Max entries per page. Default ${DIR_LIST_DEFAULT_MAX_ENTRIES}, hard ceiling ${DIR_LIST_HARD_MAX_ENTRIES}.`,
-  }),
+  maxEntries: Type.Optional(
+    Type.Number({
+      description: `Max entries per page. Default ${DIR_LIST_DEFAULT_MAX_ENTRIES}, hard ceiling ${DIR_LIST_HARD_MAX_ENTRIES}.`,
+    }),
+  ),
   gatewayUrl: Type.Optional(Type.String()),
   gatewayToken: Type.Optional(Type.String()),
-  timeoutMs: optionalPositiveIntegerSchema(),
+  timeoutMs: Type.Optional(Type.Number()),
 });
 
 export const DIR_LIST_TOOL_DESCRIPTOR: FileTransferToolDescriptor = {
@@ -78,10 +81,12 @@ export const DirFetchToolSchema = Type.Object({
   path: Type.String({
     description: "Absolute path to the directory on the node to fetch. Canonicalized server-side.",
   }),
-  maxBytes: optionalPositiveIntegerSchema({
-    description:
-      "Max gzipped tarball bytes to fetch. Default 8 MB, hard ceiling 16 MB (single round-trip).",
-  }),
+  maxBytes: Type.Optional(
+    Type.Number({
+      description:
+        "Max gzipped tarball bytes to fetch. Default 8 MB, hard ceiling 16 MB (single round-trip).",
+    }),
+  ),
   includeDotfiles: Type.Optional(
     Type.Boolean({
       description: "Reserved for v2; currently always includes dotfiles (v1 quirk in BSD tar).",
@@ -89,7 +94,7 @@ export const DirFetchToolSchema = Type.Object({
   ),
   gatewayUrl: Type.Optional(Type.String()),
   gatewayToken: Type.Optional(Type.String()),
-  timeoutMs: optionalPositiveIntegerSchema(),
+  timeoutMs: Type.Optional(Type.Number()),
 });
 
 export const DIR_FETCH_TOOL_DESCRIPTOR: FileTransferToolDescriptor = {

@@ -26,9 +26,9 @@ const {
   formatProviderAuthProfileApiKeyWithPluginMock,
 } = getOAuthProviderRuntimeMocks();
 
-vi.mock("../../llm/oauth.js", () => ({
+vi.mock("@earendil-works/pi-ai/oauth", () => ({
   getOAuthApiKey: vi.fn(async () => null),
-  getOAuthProviders: () => [{ id: "openai" }],
+  getOAuthProviders: () => [{ id: "openai-codex" }],
 }));
 
 describe("OAuth refresh in-process queue", () => {
@@ -65,8 +65,8 @@ describe("OAuth refresh in-process queue", () => {
   });
 
   it("releases the queue even when the refresh throws", async () => {
-    const profileId = "openai:default";
-    const provider = "openai";
+    const profileId = "openai-codex:default";
+    const provider = "openai-codex";
     saveAuthProfileStore(createExpiredOauthStore({ profileId, provider }), agentDir);
 
     let callCount = 0;
@@ -91,12 +91,12 @@ describe("OAuth refresh in-process queue", () => {
         store: ensureAuthProfileStore(agentDir),
         profileId,
         agentDir,
-      }).catch((e: unknown) => e),
+      }).catch((e) => e),
       resolveApiKeyForProfileInTest(resolveApiKeyForProfile, {
         store: ensureAuthProfileStore(agentDir),
         profileId,
         agentDir,
-      }).catch((e: unknown) => e),
+      }).catch((e) => e),
     ]);
 
     expect(first).toBeInstanceOf(Error);
@@ -106,7 +106,7 @@ describe("OAuth refresh in-process queue", () => {
     expect(second).toEqual({
       apiKey: "second-try-access",
       email: undefined,
-      provider: "openai",
+      provider: "openai-codex",
     });
   });
 
@@ -125,8 +125,8 @@ describe("OAuth refresh in-process queue", () => {
     // wrapper does not let later arrivals skip ahead (see review P2: the
     // `refreshQueues.set(key, gate)` overwrites only the *map head*, while
     // FIFO ordering is enforced via the `await prev` chain).
-    const profileId = "openai:default";
-    const provider = "openai";
+    const profileId = "openai-codex:default";
+    const provider = "openai-codex";
     saveAuthProfileStore(createExpiredOauthStore({ profileId, provider }), agentDir);
 
     const startOrder: number[] = [];

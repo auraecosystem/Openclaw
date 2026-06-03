@@ -15,12 +15,11 @@ const hoisted = await vi.hoisted(async () => {
       sandboxRuntime: { sandboxed: false, mode: "off" },
     })),
     writeFileMock: vi.fn(
-      async (_filePath: string, _dataValue: string, _encoding?: BufferEncoding) => undefined,
+      async (_filePath: string, _data: string, _encoding?: BufferEncoding) => undefined,
     ),
     mkdirMock: vi.fn(async (_filePath: string, _options?: { recursive?: boolean }) => undefined),
     accessMock: vi.fn(async (_filePath: string) => undefined),
     pathExistsMock: vi.fn(async (_filePath: string) => true),
-    migrateSessionEntriesMock: vi.fn((_entries: unknown[]) => undefined),
     exportHtmlTemplateContents: new Map<string, string>(),
     sessionTranscriptContent: "",
   };
@@ -44,14 +43,6 @@ vi.mock("../../infra/fs-safe.js", () => ({
   pathExists: hoisted.pathExistsMock,
 }));
 
-vi.mock("../../agents/sessions/session-manager.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../agents/sessions/session-manager.js")>();
-  return {
-    ...actual,
-    migrateSessionEntries: hoisted.migrateSessionEntriesMock,
-  };
-});
-
 vi.mock("node:fs", async () => {
   const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
   const mockedFs = {
@@ -65,7 +56,7 @@ vi.mock("node:fs", async () => {
       if (filePath.includes("/export-html/")) {
         return actual.readFileSync(filePath, "utf8");
       }
-      return actual.readFileSync(filePath, "utf8");
+      return "";
     }),
   };
   return {

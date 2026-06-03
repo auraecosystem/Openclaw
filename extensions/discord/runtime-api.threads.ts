@@ -1,6 +1,5 @@
 export {
-  testing as __testing,
-  testing,
+  __testing,
   autoBindSpawnedDiscordSubagent,
   createNoopThreadBindingManager,
   createThreadBindingManager,

@@ -35,18 +35,6 @@ export type PluginHealthSummary = {
   errors: PluginHealthErrorSummary[];
 };
 
-export type ContextEngineHealthQuarantineSummary = {
-  engineId: string;
-  owner?: string;
-  operation: string;
-  reason: string;
-  failedAt: number;
-};
-
-export type ContextEngineHealthSummary = {
-  quarantined: ContextEngineHealthQuarantineSummary[];
-};
-
 export type ModelPricingHealthSummary =
   import("../gateway/model-pricing-cache-state.js").GatewayModelPricingHealth;
 
@@ -56,7 +44,6 @@ export type HealthSummary = {
   durationMs: number;
   eventLoop?: import("../gateway/server/event-loop-health.js").GatewayEventLoopHealth;
   plugins?: PluginHealthSummary;
-  contextEngines?: ContextEngineHealthSummary;
   modelPricing?: ModelPricingHealthSummary;
   channels: Record<string, ChannelHealthSummary>;
   channelOrder: string[];

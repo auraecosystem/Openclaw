@@ -65,7 +65,7 @@ async function expectSharedOperatorScopesCleared(
 
 async function expectLocalBackendGatewayClientScopesPreserved(
   port: number,
-  auth: { token?: string; password?: string; skipDefaultAuth?: boolean },
+  auth: { token?: string; password?: string },
 ) {
   const ws = await openWs(port);
   try {
@@ -75,7 +75,7 @@ async function expectLocalBackendGatewayClientScopesPreserved(
       scopes: ["operator.admin"],
       device: null,
     });
-    expect(res.ok, JSON.stringify(res)).toBe(true);
+    expect(res.ok).toBe(true);
 
     const helloOk = res.payload as
       | {
@@ -334,7 +334,30 @@ describe("gateway auth compatibility baseline", () => {
     });
 
     test("allows auth-none local backend connects without device identity", async () => {
-      await expectLocalBackendGatewayClientScopesPreserved(port, { skipDefaultAuth: true });
+      const ws = await openWs(port);
+      try {
+        const res = await connectReq(ws, {
+          skipDefaultAuth: true,
+          client: { ...BACKEND_GATEWAY_CLIENT },
+          scopes: ["operator.admin"],
+          device: null,
+        });
+        expect(res.ok, JSON.stringify(res)).toBe(true);
+
+        const helloOk = res.payload as
+          | {
+              auth?: {
+                scopes?: unknown;
+              };
+            }
+          | undefined;
+        expect(helloOk?.auth?.scopes).toEqual(["operator.admin"]);
+
+        const adminRes = await rpcReq(ws, "set-heartbeats", { enabled: false });
+        expect(adminRes.ok).toBe(true);
+      } finally {
+        ws.close();
+      }
     });
 
     test("rejects auth-none browser-origin backend connects without device identity", async () => {

@@ -62,13 +62,13 @@ describe("openai transport policy", () => {
 
   it("keeps Codex request identity session-scoped while adding turn metadata", () => {
     const state = resolveOpenAITransportTurnState({
-      provider: "openai",
+      provider: "openai-codex",
       modelId: "gpt-5.4",
       model: {
         ...nativeModel,
-        provider: "openai",
-        api: "openai-chatgpt-responses",
-        baseUrl: "https://chatgpt.com/backend-api/codex",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        baseUrl: "https://chatgpt.com/backend-api",
       },
       sessionId: "session-123",
       turnId: "turn-123",
@@ -111,13 +111,13 @@ describe("openai transport policy", () => {
 
   it("treats ChatGPT Codex backend routes as native OpenAI-family transports", () => {
     const policy = resolveOpenAIWebSocketSessionPolicy({
-      provider: "openai",
+      provider: "openai-codex",
       modelId: "gpt-5.4",
       model: {
         ...nativeModel,
-        provider: "openai",
-        api: "openai-chatgpt-responses",
-        baseUrl: "https://chatgpt.com/backend-api/codex",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        baseUrl: "https://chatgpt.com/backend-api",
       },
       sessionId: "session-123",
     });

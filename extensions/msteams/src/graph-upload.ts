@@ -10,7 +10,6 @@
  */
 
 import type { MSTeamsAccessTokenProvider } from "./attachments/types.js";
-import { createMSTeamsHttpError } from "./http-error.js";
 import { buildUserAgent } from "./user-agent.js";
 
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
@@ -51,7 +50,8 @@ export async function uploadToOneDrive(params: {
   });
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "OneDrive upload failed");
+    const body = await res.text().catch(() => "");
+    throw new Error(`OneDrive upload failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
   const data = (await res.json()) as {
@@ -103,7 +103,8 @@ async function createSharingLink(params: {
   });
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "Create sharing link failed");
+    const body = await res.text().catch(() => "");
+    throw new Error(`Create sharing link failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
   const data = (await res.json()) as {
@@ -197,7 +198,8 @@ export async function uploadToSharePoint(params: {
   );
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "SharePoint upload failed");
+    const body = await res.text().catch(() => "");
+    throw new Error(`SharePoint upload failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
   const data = (await res.json()) as {
@@ -257,7 +259,8 @@ export async function getDriveItemProperties(params: {
   );
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "Get driveItem properties failed");
+    const body = await res.text().catch(() => "");
+    throw new Error(`Get driveItem properties failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
   const data = (await res.json()) as {
@@ -368,7 +371,8 @@ async function getChatMembers(params: {
   });
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "Get chat members failed");
+    const body = await res.text().catch(() => "");
+    throw new Error(`Get chat members failed: ${res.status} ${res.statusText} - ${body}`);
   }
 
   const data = (await res.json()) as {
@@ -432,7 +436,10 @@ async function createSharePointSharingLink(params: {
   );
 
   if (!res.ok) {
-    throw await createMSTeamsHttpError(res, "Create SharePoint sharing link failed");
+    const respBody = await res.text().catch(() => "");
+    throw new Error(
+      `Create SharePoint sharing link failed: ${res.status} ${res.statusText} - ${respBody}`,
+    );
   }
 
   const data = (await res.json()) as {

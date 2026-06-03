@@ -1,6 +1,5 @@
 import { parseAbsoluteTimeMs } from "./parse.js";
 
-/** Structural rejection code for persisted cron jobs that cannot be loaded safely. */
 export type InvalidPersistedCronJobReason =
   | "missing-id"
   | "missing-schedule"
@@ -8,7 +7,6 @@ export type InvalidPersistedCronJobReason =
   | "missing-payload"
   | "invalid-payload";
 
-/** Returns the first structural reason a persisted cron job cannot be loaded safely. */
 export function getInvalidPersistedCronJobReason(
   candidate: Record<string, unknown>,
 ): InvalidPersistedCronJobReason | null {
@@ -21,8 +19,6 @@ export function getInvalidPersistedCronJobReason(
     return "missing-schedule";
   }
   if (typeof schedule === "string") {
-    // Legacy shorthand schedules are normalized later by the full cron parser;
-    // this guard only rejects shapes that cannot be persisted or quarantined.
     return null;
   }
   if (typeof schedule !== "object") {

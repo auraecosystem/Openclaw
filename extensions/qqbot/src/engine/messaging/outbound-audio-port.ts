@@ -1,20 +1,20 @@
 import type { OutboundAudioPort } from "../adapter/audio.port.js";
 
-let outboundAudioPort: OutboundAudioPort | null = null;
+let _audioPort: OutboundAudioPort | null = null;
 
 /**
  * Initialize the outbound audio adapter. Called once by gateway startup
  * via `adapters.outboundAudio`.
  */
 export function setOutboundAudioPort(port: OutboundAudioPort): void {
-  outboundAudioPort = port;
+  _audioPort = port;
 }
 
 function getAudio(): OutboundAudioPort {
-  if (!outboundAudioPort) {
+  if (!_audioPort) {
     throw new Error("OutboundAudioPort not initialized — call setOutboundAudioPort first");
   }
-  return outboundAudioPort;
+  return _audioPort;
 }
 
 export function audioFileToSilkBase64(p: string, f?: string[]): Promise<string | undefined> {

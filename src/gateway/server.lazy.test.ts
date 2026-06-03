@@ -1,33 +1,42 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const originalTrace = process.env.OPENCLAW_GATEWAY_STARTUP_TRACE;
+const lazyState = vi.hoisted(() => ({
+  loads: 0,
+  startCalls: [] as unknown[][],
+  resetCalls: 0,
+}));
+
+vi.mock("./server.impl.js", () => {
+  lazyState.loads += 1;
+  return {
+    startGatewayServer: vi.fn(async (...args: unknown[]) => {
+      lazyState.startCalls.push(args);
+      return { close: vi.fn(async () => undefined) };
+    }),
+    __resetModelCatalogCacheForTest: vi.fn(() => {
+      lazyState.resetCalls += 1;
+    }),
+  };
+});
 
 describe("gateway server boundary", () => {
   beforeEach(() => {
-    vi.resetModules();
-    process.env.OPENCLAW_GATEWAY_STARTUP_TRACE = "1";
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.resetModules();
-    if (originalTrace === undefined) {
-      delete process.env.OPENCLAW_GATEWAY_STARTUP_TRACE;
-    } else {
-      process.env.OPENCLAW_GATEWAY_STARTUP_TRACE = originalTrace;
-    }
+    lazyState.loads = 0;
+    lazyState.startCalls = [];
+    lazyState.resetCalls = 0;
   });
 
   it("lazy-loads server.impl on demand", async () => {
-    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
     const mod = await import("./server.js");
-    expect(stderrWrite).not.toHaveBeenCalledWith(
-      expect.stringContaining("gateway.server-impl-import"),
-    );
 
-    await mod.resetModelCatalogCacheForTest();
+    expect(lazyState.loads).toBe(0);
 
-    expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining("gateway.server-impl-import"));
+    await mod.__resetModelCatalogCacheForTest();
+    expect(lazyState.loads).toBe(1);
+    expect(lazyState.resetCalls).toBe(1);
+
+    await mod.startGatewayServer(4321, { bind: "loopback" });
+    expect(lazyState.loads).toBe(1);
+    expect(lazyState.startCalls).toEqual([[4321, { bind: "loopback" }]]);
   });
 });

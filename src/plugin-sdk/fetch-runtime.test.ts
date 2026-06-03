@@ -1,19 +1,16 @@
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { execNodeEvalSync } from "../test-utils/node-process.js";
 
 describe("plugin SDK fetch runtime", () => {
-  let importProbeOutput = "";
-
-  beforeAll(() => {
+  it("does not initialize the undici global dispatcher on import", () => {
     const moduleUrl = pathToFileURL(path.resolve("src/plugin-sdk/fetch-runtime.ts")).href;
     const source = `
-      const { getGlobalDispatcher } = await import("undici");
-      const before = getGlobalDispatcher();
+      const dispatcherKey = Symbol.for("undici.globalDispatcher.1");
       await import(${JSON.stringify(moduleUrl)});
-      if (getGlobalDispatcher() !== before) {
-        throw new Error("undici global dispatcher was replaced");
+      if (globalThis[dispatcherKey] !== undefined) {
+        throw new Error("undici global dispatcher was initialized");
       }
       console.log("ok");
     `;
@@ -30,10 +27,8 @@ describe("plugin SDK fetch runtime", () => {
       delete env[key];
     }
 
-    importProbeOutput = execNodeEvalSync(source, { env, imports: ["tsx"] });
-  });
+    const output = execNodeEvalSync(source, { env, imports: ["tsx"] });
 
-  it("does not replace the undici global dispatcher on import", () => {
-    expect(importProbeOutput.trim()).toBe("ok");
+    expect(output.trim()).toBe("ok");
   });
 });

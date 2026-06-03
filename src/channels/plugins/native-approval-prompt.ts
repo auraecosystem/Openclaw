@@ -1,4 +1,4 @@
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { resolveChannelApprovalCapability } from "./approvals.js";
 import type { ChannelPlugin } from "./types.plugin.js";
 
@@ -15,7 +15,6 @@ const KNOWN_NATIVE_APPROVAL_PROMPT_CHANNELS = new Set([
   "qqbot",
   "slack",
   "telegram",
-  "signal",
 ]);
 
 export function channelPluginHasNativeApprovalPromptUi(

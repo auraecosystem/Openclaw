@@ -20,7 +20,6 @@ function mergeProviderIntoRegistry(
         defaultModels: provider.defaultModels ?? existing.defaultModels,
         autoPriority: provider.autoPriority ?? existing.autoPriority,
         nativeDocumentInputs: provider.nativeDocumentInputs ?? existing.nativeDocumentInputs,
-        documentModels: provider.documentModels ?? existing.documentModels,
       }
     : provider;
   registry.set(normalizedKey, hydrateModelBackedMediaProvider(merged));
@@ -42,7 +41,7 @@ function hydrateModelBackedMediaProvider(
   };
 }
 
-export { normalizeMediaExecutionProviderId, normalizeMediaProviderId } from "./provider-id.js";
+export { normalizeMediaProviderId } from "./provider-id.js";
 
 export function buildMediaUnderstandingRegistry(
   overrides?: Record<string, MediaUnderstandingProvider>,

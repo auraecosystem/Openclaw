@@ -1,8 +1,8 @@
 import type { APIApplicationCommand } from "discord-api-types/v10";
 import { describe, expect, test } from "vitest";
-import { testing } from "./command-deploy.js";
+import { __testing } from "./command-deploy.js";
 
-const { commandsEqual } = testing;
+const { commandsEqual } = __testing;
 
 /**
  * Regression tests for Discord slash-command reconcile/deploy equality.

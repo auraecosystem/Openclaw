@@ -4,12 +4,6 @@ const [statsFile, maxMemoryRaw, maxCpuRaw, label = "docker"] = process.argv.slic
 const maxMemoryMiB = Number(maxMemoryRaw);
 const maxCpuPercent = Number(maxCpuRaw);
 
-function assertFiniteLimit(value, raw, name) {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${name} must be a finite non-negative number. Got: ${JSON.stringify(raw)}`);
-  }
-}
-
 function parseMemoryMiB(raw) {
   const value =
     String(raw || "")
@@ -17,16 +11,10 @@ function parseMemoryMiB(raw) {
       ?.trim() || "";
   const match = /^([0-9.]+)\s*([KMGT]?i?B)$/iu.exec(value);
   if (!match) {
-    return undefined;
+    return 0;
   }
   const amount = Number(match[1]);
-  if (!Number.isFinite(amount)) {
-    return undefined;
-  }
   const unit = match[2].toLowerCase();
-  if (unit === "b") {
-    return amount / 1024 / 1024;
-  }
   if (unit === "kb" || unit === "kib") {
     return amount / 1024;
   }
@@ -39,20 +27,7 @@ function parseMemoryMiB(raw) {
   if (unit === "tb" || unit === "tib") {
     return amount * 1024 * 1024;
   }
-  return undefined;
-}
-
-function parseCpuPercent(raw) {
-  const parsed = Number(String(raw || "").replace(/%$/u, ""));
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function assertSampleValue(value, raw, name, labelLocal) {
-  if (value === undefined) {
-    throw new Error(
-      `docker stats sample for ${labelLocal} had invalid ${name}: ${JSON.stringify(raw)}`,
-    );
-  }
+  return 0;
 }
 
 const lines = fs.existsSync(statsFile)
@@ -60,31 +35,25 @@ const lines = fs.existsSync(statsFile)
   : [];
 let maxObservedMemoryMiB = 0;
 let maxObservedCpuPercent = 0;
-let parsedSamples = 0;
-
-assertFiniteLimit(maxMemoryMiB, maxMemoryRaw, "max memory MiB");
-assertFiniteLimit(maxCpuPercent, maxCpuRaw, "max CPU percent");
 
 for (const line of lines) {
   let parsed;
   try {
     parsed = JSON.parse(line);
   } catch {
-    throw new Error(`docker stats sample for ${label} was not valid JSON`);
+    continue;
   }
-  const observedMemoryMiB = parseMemoryMiB(parsed.MemUsage);
-  const observedCpuPercent = parseCpuPercent(parsed.CPUPerc);
-  assertSampleValue(observedMemoryMiB, parsed.MemUsage, "MemUsage", label);
-  assertSampleValue(observedCpuPercent, parsed.CPUPerc, "CPUPerc", label);
-  parsedSamples += 1;
-  maxObservedMemoryMiB = Math.max(maxObservedMemoryMiB, observedMemoryMiB);
-  maxObservedCpuPercent = Math.max(maxObservedCpuPercent, observedCpuPercent);
+  maxObservedMemoryMiB = Math.max(maxObservedMemoryMiB, parseMemoryMiB(parsed.MemUsage));
+  maxObservedCpuPercent = Math.max(
+    maxObservedCpuPercent,
+    Number(String(parsed.CPUPerc || "0").replace(/%$/u, "")) || 0,
+  );
 }
 
 console.log(
-  `${label} resource peak: memory=${maxObservedMemoryMiB.toFixed(1)}MiB cpu=${maxObservedCpuPercent.toFixed(1)}% samples=${parsedSamples}`,
+  `${label} resource peak: memory=${maxObservedMemoryMiB.toFixed(1)}MiB cpu=${maxObservedCpuPercent.toFixed(1)}% samples=${lines.length}`,
 );
-if (parsedSamples === 0) {
+if (lines.length === 0) {
   throw new Error(`no docker stats samples captured for ${label}`);
 }
 if (maxObservedMemoryMiB > maxMemoryMiB) {

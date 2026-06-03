@@ -8,7 +8,7 @@
  * Each account gets its own isolated resource stack:
  *
  * ```
- * accountRegistry: Map<appId, AccountContext>
+ * _accountRegistry: Map<appId, AccountContext>
  *
  * AccountContext {
  *   logger      — per-account prefixed logger
@@ -27,7 +27,7 @@
 import os from "node:os";
 import { ApiClient } from "../api/api-client.js";
 import { ChunkedMediaApi as ChunkedMediaApiClass } from "../api/media-chunked.js";
-import { downloadDirectUploadUrl, MediaApi as MediaApiClass } from "../api/media.js";
+import { MediaApi as MediaApiClass } from "../api/media.js";
 import type { Credentials } from "../api/messages.js";
 import { MessageApi as MessageApiClass } from "../api/messages.js";
 import { getNextMsgSeq } from "../api/routes.js";
@@ -41,7 +41,7 @@ import {
   type OutboundMeta,
   type UploadMediaResponse,
 } from "../types.js";
-import { getMaxUploadSize, LARGE_FILE_THRESHOLD } from "../utils/file-utils.js";
+import { LARGE_FILE_THRESHOLD } from "../utils/file-utils.js";
 import { formatErrorMessage } from "../utils/format.js";
 import { debugLog, debugError, debugWarn } from "../utils/log.js";
 import { sanitizeFileName } from "../utils/string-normalize.js";
@@ -54,12 +54,12 @@ export { UploadDailyLimitExceededError } from "../api/media-chunked.js";
 
 // ============ Plugin User-Agent ============
 
-let pluginVersion = "unknown";
-let openclawVersion = "unknown";
+let _pluginVersion = "unknown";
+let _openclawVersion = "unknown";
 
 /** Build the User-Agent string from the current plugin and framework versions. */
 function buildUserAgent(): string {
-  return `QQBotPlugin/${pluginVersion} (Node/${process.versions.node}; ${os.platform()}; OpenClaw/${openclawVersion})`;
+  return `QQBotPlugin/${_pluginVersion} (Node/${process.versions.node}; ${os.platform()}; OpenClaw/${_openclawVersion})`;
 }
 
 /** Return the current User-Agent string. */
@@ -73,17 +73,17 @@ export function getPluginUserAgent(): string {
  */
 export function initSender(options: { pluginVersion?: string; openclawVersion?: string }): void {
   if (options.pluginVersion) {
-    pluginVersion = options.pluginVersion;
+    _pluginVersion = options.pluginVersion;
   }
   if (options.openclawVersion) {
-    openclawVersion = options.openclawVersion;
+    _openclawVersion = options.openclawVersion;
   }
 }
 
 /** Update the OpenClaw framework version in the User-Agent (called after runtime injection). */
 export function setOpenClawVersion(version: string): void {
   if (version) {
-    openclawVersion = version;
+    _openclawVersion = version;
   }
 }
 
@@ -101,10 +101,10 @@ interface AccountContext {
 }
 
 /** Per-appId account registry — each account owns all its resources. */
-const accountRegistry = new Map<string, AccountContext>();
+const _accountRegistry = new Map<string, AccountContext>();
 
 /** Fallback logger for unregistered accounts (CLI / test scenarios). */
-const fallbackLogger: EngineLogger = {
+const _fallbackLogger: EngineLogger = {
   info: (msg: string) => debugLog(msg),
   error: (msg: string) => debugError(msg),
   warn: (msg: string) => debugWarn(msg),
@@ -171,7 +171,7 @@ export function registerAccount(
 ): void {
   const key = appId.trim();
   const md = options.markdownSupport === true;
-  accountRegistry.set(key, buildAccountContext(options.logger, md));
+  _accountRegistry.set(key, buildAccountContext(options.logger, md));
 }
 
 /**
@@ -184,7 +184,7 @@ export function registerAccount(
 export function initApiConfig(appId: string, options: { markdownSupport?: boolean }): void {
   const key = appId.trim();
   const md = options.markdownSupport === true;
-  const existing = accountRegistry.get(key);
+  const existing = _accountRegistry.get(key);
   if (existing) {
     // Re-create only MessageApi with updated config, reuse existing stack.
     existing.messageApi = new MessageApiClass(existing.client, existing.tokenMgr, {
@@ -193,7 +193,7 @@ export function initApiConfig(appId: string, options: { markdownSupport?: boolea
     });
     existing.markdownSupport = md;
   } else {
-    accountRegistry.set(key, buildAccountContext(fallbackLogger, md));
+    _accountRegistry.set(key, buildAccountContext(_fallbackLogger, md));
   }
 }
 
@@ -205,10 +205,10 @@ export function initApiConfig(appId: string, options: { markdownSupport?: boolea
  */
 function resolveAccount(appId: string): AccountContext {
   const key = appId.trim();
-  let ctx = accountRegistry.get(key);
+  let ctx = _accountRegistry.get(key);
   if (!ctx) {
-    ctx = buildAccountContext(fallbackLogger, false);
-    accountRegistry.set(key, ctx);
+    ctx = buildAccountContext(_fallbackLogger, false);
+    _accountRegistry.set(key, ctx);
   }
   return ctx;
 }
@@ -239,7 +239,7 @@ export function clearTokenCache(appId?: string): void {
   if (appId) {
     resolveAccount(appId).tokenMgr.clearCache(appId);
   } else {
-    for (const ctx of accountRegistry.values()) {
+    for (const ctx of _accountRegistry.values()) {
       ctx.tokenMgr.clearCache();
     }
   }
@@ -267,7 +267,7 @@ export function stopBackgroundTokenRefresh(appId?: string): void {
   if (appId) {
     resolveAccount(appId).tokenMgr.stopBackgroundRefresh(appId);
   } else {
-    for (const ctx of accountRegistry.values()) {
+    for (const ctx of _accountRegistry.values()) {
       ctx.tokenMgr.stopBackgroundRefresh();
     }
   }
@@ -383,7 +383,7 @@ export async function sendText(
   target: DeliveryTarget,
   content: string,
   creds: AccountCreds,
-  opts?: { msgId?: string; messageReference?: string; forcePlainText?: boolean },
+  opts?: { msgId?: string; messageReference?: string },
 ): Promise<MessageResponse> {
   const api = resolveAccount(creds.appId).messageApi;
   const c: Credentials = { appId: creds.appId, clientSecret: creds.clientSecret };
@@ -394,12 +394,9 @@ export async function sendText(
       return api.sendMessage(scope, target.id, content, c, {
         msgId: opts.msgId,
         messageReference: opts.messageReference,
-        forcePlainText: opts.forcePlainText,
       });
     }
-    return api.sendProactiveMessage(scope, target.id, content, c, {
-      forcePlainText: opts?.forcePlainText,
-    });
+    return api.sendProactiveMessage(scope, target.id, content, c);
   }
 
   if (target.type === "dm") {
@@ -656,25 +653,11 @@ async function dispatchUpload(
   fileName?: string,
 ): Promise<UploadMediaResponse> {
   switch (source.kind) {
-    case "url": {
-      const buffer = await downloadDirectUploadUrl(source.url, {
-        maxBytes: getMaxUploadSize(fileType),
-      });
-      if (buffer.length >= LARGE_FILE_THRESHOLD) {
-        return ctx.chunkedMediaApi.uploadChunked({
-          scope,
-          targetId,
-          fileType,
-          source: { kind: "buffer", buffer, fileName },
-          creds,
-          fileName,
-        });
-      }
+    case "url":
       return ctx.mediaApi.uploadMedia(scope, targetId, fileType, creds, {
-        buffer,
+        url: source.url,
         fileName,
       });
-    }
     case "base64":
       return ctx.mediaApi.uploadMedia(scope, targetId, fileType, creds, {
         fileData: source.data,
@@ -717,9 +700,9 @@ async function dispatchUpload(
         fileName: fileName ?? source.fileName,
       });
     default: {
-      const exhaustive: never = source;
+      const _exhaustive: never = source;
       throw new Error(
-        `dispatchUpload: unsupported MediaSource kind: ${JSON.stringify(exhaustive)}`,
+        `dispatchUpload: unsupported MediaSource kind: ${JSON.stringify(_exhaustive)}`,
       );
     }
   }

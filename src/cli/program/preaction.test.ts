@@ -118,59 +118,56 @@ describe("registerPreActionHooks", () => {
     | null = null;
 
   function buildProgram() {
-    const programLocal = new Command().name("openclaw");
-    programLocal
+    const program = new Command().name("openclaw");
+    program
       .command("agent")
       .requiredOption("-m, --message <text>")
       .option("--local")
       .option("--json")
       .action(() => {});
-    programLocal
+    program
       .command("status")
       .option("--json")
       .action(() => {});
-    programLocal
+    program
       .command("backup")
       .command("create")
       .option("--json")
       .action(() => {});
-    programLocal
-      .command("doctor")
-      .option("--lint")
-      .action(() => {});
-    programLocal.command("completion").action(() => {});
-    programLocal.command("secrets").action(() => {});
-    programLocal
+    program.command("doctor").action(() => {});
+    program.command("completion").action(() => {});
+    program.command("secrets").action(() => {});
+    program
       .command("agents")
       .command("list")
       .option("--json")
       .action(() => {});
-    programLocal.command("configure").action(() => {});
-    programLocal.command("onboard").action(() => {});
-    const channels = programLocal.command("channels");
+    program.command("configure").action(() => {});
+    program.command("onboard").action(() => {});
+    const channels = program.command("channels");
     channels.command("add").action(() => {});
     channels
       .command("send")
       .option("--json")
       .action(() => {});
     applyParentDefaultHelpAction(channels);
-    programLocal
+    program
       .command("plugins")
       .command("install")
       .argument("<spec>")
       .option("--marketplace <marketplace>")
       .action(() => {});
-    programLocal
+    program
       .command("update")
       .command("status")
       .option("--json")
       .action(() => {});
-    programLocal
+    program
       .command("message")
       .command("send")
       .option("--json")
       .action(() => {});
-    const config = programLocal.command("config");
+    const config = program.command("config");
     config.option("--section <section>");
     setCommandJsonMode(config.command("set"), "parse-only")
       .argument("<path>")
@@ -182,8 +179,8 @@ describe("registerPreActionHooks", () => {
       .option("--json")
       .action(() => {});
     config.command("schema").action(() => {});
-    registerPreActionHooks(programLocal, "9.9.9-test");
-    return programLocal;
+    registerPreActionHooks(program, "9.9.9-test");
+    return program;
   }
 
   function resolveActionCommand(parseArgv: string[]): Command {
@@ -331,16 +328,6 @@ describe("registerPreActionHooks", () => {
     await runPreAction({
       parseArgv: ["config"],
       processArgv: ["node", "openclaw", "config", "--section", "models"],
-    });
-
-    expect(ensureConfigReadyMock).not.toHaveBeenCalled();
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
-  });
-
-  it("skips the config guard and plugin loading for doctor lint", async () => {
-    await runPreAction({
-      parseArgv: ["doctor"],
-      processArgv: ["node", "openclaw", "doctor", "--lint"],
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
@@ -542,7 +529,6 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for config validate when root option values are present", async () => {
@@ -552,7 +538,6 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for config schema", async () => {
@@ -562,7 +547,6 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("bypasses config guard for backup create", async () => {
@@ -572,7 +556,6 @@ describe("registerPreActionHooks", () => {
     });
 
     expect(ensureConfigReadyMock).not.toHaveBeenCalled();
-    expect(ensurePluginRegistryLoadedMock).not.toHaveBeenCalled();
   });
 
   it("routes logs to stderr during plugin loading in --json mode and restores after", async () => {
@@ -612,7 +595,7 @@ describe("registerPreActionHooks", () => {
           preAction?: Array<(thisCommand: Command, actionCommand: Command) => Promise<void> | void>;
         };
       }
-    )["_lifeCycleHooks"]?.preAction;
+    )._lifeCycleHooks?.preAction;
     preActionHook = hooks?.[0] ?? null;
   });
 });

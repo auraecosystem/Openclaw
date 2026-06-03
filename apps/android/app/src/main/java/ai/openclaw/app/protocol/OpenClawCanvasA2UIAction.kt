@@ -4,7 +4,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 object OpenClawCanvasA2UIAction {
-  /** Reads the agent-facing action name from either the modern name field or legacy action field. */
   fun extractActionName(userAction: JsonObject): String? {
     val name =
       (userAction["name"] as? JsonPrimitive)
@@ -20,7 +19,6 @@ object OpenClawCanvasA2UIAction {
     return action.ifEmpty { null }
   }
 
-  /** Normalizes prompt tag values so the compact CANVAS_A2UI envelope stays parser-friendly. */
   fun sanitizeTagValue(value: String): String {
     val trimmed = value.trim().ifEmpty { "-" }
     val normalized = trimmed.replace(" ", "_")
@@ -37,7 +35,6 @@ object OpenClawCanvasA2UIAction {
     return out.toString()
   }
 
-  /** Formats the compact text envelope sent to the agent when a canvas UI action fires. */
   fun formatAgentMessage(
     actionName: String,
     sessionKey: String,
@@ -60,7 +57,6 @@ object OpenClawCanvasA2UIAction {
     ).joinToString(separator = " ")
   }
 
-  /** Builds JS that reports an agent action result back to the canvas runtime. */
   fun jsDispatchA2UIActionStatus(
     actionId: String,
     ok: Boolean,

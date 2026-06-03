@@ -1,24 +1,17 @@
-import { normalizeModelCatalogProviderRows } from "@openclaw/model-catalog-core/model-catalog-normalize";
-import {
-  buildModelCatalogMergeKey,
-  normalizeModelCatalogProviderId,
-} from "@openclaw/model-catalog-core/model-catalog-refs";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { normalizeModelCatalogProviderRows } from "./normalize.js";
+import { buildModelCatalogMergeKey, normalizeModelCatalogProviderId } from "./refs.js";
 import type {
   ModelCatalog,
   ModelCatalogAlias,
   ModelCatalogDiscovery,
   NormalizedModelCatalogRow,
-} from "@openclaw/model-catalog-core/model-catalog-types";
-import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
-import { normalizeUniqueStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
+} from "./types.js";
 
 type ManifestModelCatalogPlugin = {
   id: string;
   providers?: readonly string[];
-  modelCatalog?: Pick<
-    ModelCatalog,
-    "providers" | "aliases" | "suppressions" | "discovery" | "runtimeAugment"
-  >;
+  modelCatalog?: Pick<ModelCatalog, "providers" | "aliases" | "suppressions" | "discovery">;
 };
 
 type ManifestModelCatalogRegistry = {
@@ -163,9 +156,7 @@ function planManifestModelCatalogPluginEntries(params: {
 }
 
 function buildOwnedProviderSet(plugin: ManifestModelCatalogPlugin): ReadonlySet<string> {
-  return new Set(
-    normalizeUniqueStringEntries((plugin.providers ?? []).map(normalizeModelCatalogProviderId)),
-  );
+  return new Set((plugin.providers ?? []).map(normalizeModelCatalogProviderId).filter(Boolean));
 }
 
 function buildModelCatalogProviderAliasTargets(

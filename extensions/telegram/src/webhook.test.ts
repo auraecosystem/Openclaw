@@ -27,9 +27,7 @@ const WEBHOOK_DRAIN_GUARD_MS = 5;
 const TELEGRAM_WEBHOOK_RATE_LIMIT_BURST = WEBHOOK_RATE_LIMIT_DEFAULTS.maxRequests + 10;
 
 async function yieldWebhookTask(): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setImmediate(resolve);
-  });
+  await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 function collectResponseBody(
@@ -300,7 +298,7 @@ async function postWebhookPayloadWithChunkPlan(params: {
         },
       },
       (res) => {
-        collectResponseBody(res, settle["resolve"]);
+        collectResponseBody(res, settle.resolve);
       },
     );
 
@@ -346,7 +344,7 @@ async function postWebhookPayloadWithChunkPlan(params: {
       req.end();
     };
 
-    void writeAll().catch((error: unknown) => {
+    void writeAll().catch((error) => {
       settle.reject(error);
     });
   });

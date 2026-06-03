@@ -1,5 +1,4 @@
 import path from "node:path";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 
 export function isTypeScriptPackageEntry(entryPath: string): boolean {
   return [".ts", ".mts", ".cts"].includes(path.extname(entryPath).toLowerCase());
@@ -24,5 +23,5 @@ export function listBuiltRuntimeEntryCandidates(entryPath: string): string[] {
     ...withJavaScriptExtensions(distWithoutExtension),
     ...withJavaScriptExtensions(withoutExtension),
   ];
-  return uniqueStrings(candidates).filter((candidate) => candidate !== normalized);
+  return [...new Set(candidates)].filter((candidate) => candidate !== normalized);
 }

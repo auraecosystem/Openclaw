@@ -68,7 +68,7 @@ function cloneRestartSentinelPayload(
   if (!payload) {
     return null;
   }
-  return structuredClone(payload);
+  return JSON.parse(JSON.stringify(payload)) as RestartSentinelPayload;
 }
 
 function hasRoutableDeliveryContext(context?: {
@@ -201,6 +201,19 @@ function resolveRestartContinuationRoute(params: {
   };
 }
 
+function resolveRestartContinuationOutboundPayload(params: {
+  payload: OutboundReplyPayload;
+  messageId: string;
+  replyToId?: string;
+}): OutboundReplyPayload {
+  if (params.payload.replyToId !== params.messageId) {
+    return params.payload;
+  }
+  const payload: OutboundReplyPayload = { ...params.payload };
+  delete payload.replyToId;
+  return params.replyToId ? { ...payload, replyToId: params.replyToId } : payload;
+}
+
 function isRestartContinuationBusyPayload(payload: OutboundReplyPayload): boolean {
   return (
     typeof payload.text === "string" && payload.text.trim() === REPLY_RUN_STILL_SHUTTING_DOWN_TEXT
@@ -241,30 +254,46 @@ async function deliverQueuedSessionDelivery(params: {
   deps: CliDeps;
   entry: QueuedSessionDelivery;
 }) {
-  const { cfg, entry, storePath, canonicalKey } = loadSessionEntry(params.entry.sessionKey);
+  const { cfg, storePath, canonicalKey } = loadSessionEntry(params.entry.sessionKey);
   const queuedDeliveryContext = resolveQueuedSessionDeliveryContext(params.entry);
 
   if (params.entry.kind === "systemEvent") {
-    enqueueRestartSentinelWake(params.entry.text, canonicalKey, queuedDeliveryContext);
-    return;
-  }
-
-  if (
-    params.entry.expectedSessionId &&
-    (!entry?.sessionId || entry.sessionId !== params.entry.expectedSessionId)
-  ) {
-    log.warn("restart continuation skipped: session changed", {
+    enqueueSystemEvent(params.entry.text, {
       sessionKey: canonicalKey,
-      queueId: params.entry.id,
-      expectedSessionId: params.entry.expectedSessionId,
-      actualSessionId: entry?.sessionId ?? null,
+      ...(queuedDeliveryContext
+        ? {
+            deliveryContext: {
+              ...queuedDeliveryContext,
+            },
+          }
+        : {}),
     });
-    enqueueRestartSentinelWake(params.entry.message, canonicalKey, queuedDeliveryContext);
+    requestHeartbeat({
+      source: "restart-sentinel",
+      intent: "immediate",
+      reason: "wake",
+      sessionKey: canonicalKey,
+    });
     return;
   }
 
   if (!params.entry.route) {
-    enqueueRestartSentinelWake(params.entry.message, canonicalKey, queuedDeliveryContext);
+    enqueueSystemEvent(params.entry.message, {
+      sessionKey: canonicalKey,
+      ...(queuedDeliveryContext
+        ? {
+            deliveryContext: {
+              ...queuedDeliveryContext,
+            },
+          }
+        : {}),
+    });
+    requestHeartbeat({
+      source: "restart-sentinel",
+      intent: "immediate",
+      reason: "wake",
+      sessionKey: canonicalKey,
+    });
     return;
   }
 
@@ -300,7 +329,7 @@ async function deliverQueuedSessionDelivery(params: {
       ReplyToId: route.replyToId,
       OriginatingChannel: route.channel,
       OriginatingTo: route.to,
-      ExplicitDeliverRoute: false,
+      ExplicitDeliverRoute: true,
       MessageThreadId: route.threadId,
     },
     {
@@ -318,20 +347,50 @@ async function deliverQueuedSessionDelivery(params: {
     ctxPayload,
     recordInboundSession,
     dispatchReplyWithBufferedBlockDispatcher,
-    replyOptions: {
-      sourceReplyDeliveryMode: "message_tool_only",
-    },
     delivery: {
       preparePayload: (payload) => {
         if (isRestartContinuationBusyPayload(payload)) {
           throw new Error(RESTART_CONTINUATION_BUSY_RETRY_ERROR);
         }
-        return payload;
+        return resolveRestartContinuationOutboundPayload({
+          payload,
+          messageId,
+          replyToId: route.replyToId,
+        });
       },
-      durable: false,
-      // Restart continuations are internal lifecycle turns. Visible follow-up
-      // must go through the message tool; automatic final delivery stays off.
-      deliver: async () => ({ visibleReplySent: false }),
+      durable: (_payload, info) =>
+        info.kind === "final"
+          ? {
+              to: route.to,
+              replyToId: route.replyToId,
+              threadId: route.threadId,
+              deps: params.deps,
+            }
+          : false,
+      deliver: async (payload) => {
+        const send = await sendDurableMessageBatch({
+          cfg,
+          channel: route.channel,
+          to: route.to,
+          accountId: route.accountId,
+          replyToId: route.replyToId,
+          threadId: route.threadId,
+          payloads: [payload],
+          session: buildOutboundSessionContext({
+            cfg,
+            sessionKey: canonicalKey,
+          }),
+          deps: params.deps,
+          bestEffort: false,
+        });
+        if (send.status === "failed" || send.status === "partial_failed") {
+          throw send.error;
+        }
+        const results = send.status === "sent" ? send.results : [];
+        if (results.length === 0) {
+          throw new Error("restart continuation delivery returned no results");
+        }
+      },
       onError: (err, info) => {
         dispatchError ??= err;
         log.warn(`restart continuation dispatch failed during ${info.kind}: ${String(err)}`, {
@@ -348,7 +407,7 @@ async function deliverQueuedSessionDelivery(params: {
     },
   });
   if (dispatchError) {
-    throw toLintErrorObject(dispatchError, "Non-Error thrown");
+    throw dispatchError;
   }
 }
 
@@ -356,7 +415,6 @@ function buildQueuedRestartContinuation(params: {
   sessionKey: string;
   continuation: RestartSentinelContinuation;
   route?: SessionDeliveryRoute;
-  expectedSessionId?: string | undefined;
   ts: number;
   deliveryContext?: {
     channel?: string;
@@ -385,7 +443,6 @@ function buildQueuedRestartContinuation(params: {
     sessionKey: params.sessionKey,
     message: params.continuation.message,
     messageId: idempotencyKey,
-    ...(params.expectedSessionId ? { expectedSessionId: params.expectedSessionId } : {}),
     maxRetries: RESTART_CONTINUATION_BUSY_MAX_ATTEMPTS,
     ...(params.route ? { route: params.route } : {}),
     ...(params.deliveryContext ? { deliveryContext: params.deliveryContext } : {}),
@@ -566,7 +623,6 @@ async function loadRestartSentinelStartupTask(params: {
           continuation: payload.continuation,
           ts: payload.ts,
           route: continuationRoute,
-          expectedSessionId: entry?.sessionId,
           deliveryContext:
             resolvedTo && channel
               ? {
@@ -657,18 +713,4 @@ export function getLatestUpdateRestartSentinel(): RestartSentinelPayload | null 
 
 export function recordLatestUpdateRestartSentinel(payload: RestartSentinelPayload): void {
   latestUpdateRestartSentinel = cloneRestartSentinelPayload(payload);
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

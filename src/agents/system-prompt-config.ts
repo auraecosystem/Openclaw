@@ -4,7 +4,6 @@ import { resolveAgentConfig } from "./agent-scope.js";
 import { buildModelAliasLines } from "./model-alias-lines.js";
 import { resolveOwnerDisplaySetting } from "./owner-display.js";
 import { buildAgentSystemPrompt } from "./system-prompt.js";
-import { resolveEffectiveToolFsWorkspaceOnly } from "./tool-fs-policy.js";
 
 type AgentSystemPromptRenderParams = Parameters<typeof buildAgentSystemPrompt>[0];
 
@@ -16,7 +15,6 @@ export type ResolvedAgentSystemPromptConfig = Pick<
   | "ttsHint"
   | "modelAliasLines"
   | "memoryCitationsMode"
-  | "fsWorkspaceOnly"
 >;
 
 export type ConfiguredAgentSystemPromptParams = AgentSystemPromptRenderParams & {
@@ -42,7 +40,6 @@ export function resolveAgentSystemPromptConfig(params: {
     ttsHint: config ? buildTtsSystemPromptHint(config, agentId) : undefined,
     modelAliasLines: buildModelAliasLines(config),
     memoryCitationsMode: config?.memory?.citations,
-    fsWorkspaceOnly: resolveEffectiveToolFsWorkspaceOnly({ cfg: config, agentId }),
   };
 }
 

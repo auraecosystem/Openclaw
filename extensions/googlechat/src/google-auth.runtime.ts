@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import type { ConnectionOptions } from "node:tls";
-import { parseMediaContentLength } from "openclaw/plugin-sdk/media-runtime";
 import type { PinnedDispatcherPolicy } from "openclaw/plugin-sdk/ssrf-dispatcher";
 import {
   buildHostnameAllowlistPolicyFromSuffixAllowlist,
@@ -313,7 +312,7 @@ async function readCredentialsFile(filePath: string): Promise<Record<string, unk
     throw new Error("Google Chat service account file path is empty");
   }
 
-  let handle: Awaited<ReturnType<typeof fs.open>> | null;
+  let handle: Awaited<ReturnType<typeof fs.open>> | null = null;
   try {
     handle = await fs.open(resolvedPath, "r");
   } catch {
@@ -464,8 +463,8 @@ export function createGoogleAuthFetch(baseFetch?: FetchLike): FetchLike {
 async function readGoogleAuthResponseBytes(response: Response): Promise<Uint8Array> {
   const contentLengthHeader = response.headers.get("content-length");
   if (contentLengthHeader) {
-    const contentLength = parseMediaContentLength(contentLengthHeader);
-    if (contentLength !== null && contentLength > MAX_GOOGLE_AUTH_RESPONSE_BYTES) {
+    const contentLength = Number(contentLengthHeader);
+    if (Number.isFinite(contentLength) && contentLength > MAX_GOOGLE_AUTH_RESPONSE_BYTES) {
       throw new Error(`Google auth response exceeds ${MAX_GOOGLE_AUTH_RESPONSE_BYTES} bytes.`);
     }
   }
@@ -557,7 +556,7 @@ export async function resolveValidatedGoogleChatCredentials(
   return null;
 }
 
-export const testing = {
+export const __testing = {
   resetGoogleAuthRuntimeForTests(): void {
     googleAuthRuntimePromise = null;
   },
@@ -566,4 +565,3 @@ export const testing = {
   resolveGoogleAuthEnvProxyUrl,
   validateGoogleChatServiceAccountCredentials,
 };
-export { testing as __testing };

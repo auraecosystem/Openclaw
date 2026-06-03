@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import {
   findConflictMarkerLines,
   findConflictMarkersInFiles,
-  findConflictMarkersInTrackedFiles,
   listTrackedFiles,
 } from "../../scripts/check-no-conflict-markers.mjs";
 import { createScriptTestHarness } from "./test-helpers.js";
@@ -38,9 +37,7 @@ describe("check-no-conflict-markers", () => {
   it("ignores marker-like text when it is indented or inline", () => {
     expect(
       findConflictMarkerLines(
-        ["Example:", "  <<<<<<< HEAD", "const text = '======= not a conflict';", "========"].join(
-          "\n",
-        ),
+        ["Example:", "  <<<<<<< HEAD", "const text = '======= not a conflict';"].join("\n"),
       ),
     ).toStrictEqual([]);
   });
@@ -82,14 +79,7 @@ describe("check-no-conflict-markers", () => {
     );
     git(rootDir, "add", "scripts/bundled-plugin-metadata-runtime.mjs");
 
-    expect(findConflictMarkersInFiles(listTrackedFiles(rootDir))).toEqual([
-      {
-        filePath: scriptFile,
-        lines: [1, 3, 5],
-      },
-    ]);
-
-    const violations = findConflictMarkersInTrackedFiles(rootDir);
+    const violations = findConflictMarkersInFiles(listTrackedFiles(rootDir));
 
     expect(violations).toEqual([
       {

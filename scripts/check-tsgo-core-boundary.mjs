@@ -2,7 +2,6 @@
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
-import { createManagedCommandInvocation } from "./lib/managed-child-process.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const tsgoPath = path.join(repoRoot, "node_modules", ".bin", "tsgo");
@@ -24,16 +23,11 @@ function normalizeFilePath(filePath) {
 }
 
 function listGraphFiles(graph) {
-  const tsgo = createManagedCommandInvocation({
-    args: ["-p", graph.config, "--pretty", "false", "--listFilesOnly"],
-    bin: tsgoPath,
-  });
-  const result = spawnSync(tsgo.command, tsgo.args, {
+  const result = spawnSync(tsgoPath, ["-p", graph.config, "--pretty", "false", "--listFilesOnly"], {
     cwd: repoRoot,
     encoding: "utf8",
     maxBuffer: 256 * 1024 * 1024,
-    shell: tsgo.shell,
-    windowsVerbatimArguments: tsgo.windowsVerbatimArguments,
+    shell: process.platform === "win32",
   });
   if (result.error) {
     throw result.error;

@@ -8,8 +8,7 @@ import {
 } from "./bundled-compat.js";
 import { resolveBundledPluginRepoEntryPath } from "./bundled-plugin-metadata.js";
 import { createCapturedPluginRegistration } from "./captured-registration.js";
-import { resolveOpenClawDevSourceRoot } from "./dev-source-root.js";
-import { discoverOpenClawPlugins, type PluginDiscoveryResult } from "./discovery.js";
+import { discoverOpenClawPlugins } from "./discovery.js";
 import type { PluginLoadOptions } from "./loader.js";
 import { loadPluginManifestRegistry } from "./manifest-registry.js";
 import { unwrapDefaultModuleExport } from "./module-export.js";
@@ -154,12 +153,10 @@ function createCapabilityPluginRecord(params: {
     channelIds: [],
     cliBackendIds: [],
     providerIds: [],
-    embeddingProviderIds: [],
     speechProviderIds: [],
     realtimeTranscriptionProviderIds: [],
     realtimeVoiceProviderIds: [],
     mediaUnderstandingProviderIds: [],
-    transcriptSourceProviderIds: [],
     imageGenerationProviderIds: [],
     videoGenerationProviderIds: [],
     musicGenerationProviderIds: [],
@@ -199,10 +196,8 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
   pluginIds: readonly string[];
   env?: PluginLoadOptions["env"];
   pluginSdkResolution?: PluginSdkResolutionPreference;
-  discovery?: PluginDiscoveryResult;
 }) {
   const env = params.env ?? process.env;
-  const devSourceRoot = resolveOpenClawDevSourceRoot(env);
   const pluginIds = new Set(params.pluginIds);
   const registry = createEmptyPluginRegistry();
   const moduleLoaders: PluginModuleLoaderCache = createPluginModuleLoaderCache();
@@ -221,7 +216,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
             process.argv[1],
             import.meta.url,
             params.pluginSdkResolution,
-            devSourceRoot,
           ),
           pluginSdkResolution: params.pluginSdkResolution,
           env,
@@ -231,7 +225,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       cache: moduleLoaders,
       modulePath,
       importerUrl: import.meta.url,
-      devSourceRoot,
       loaderFilename: import.meta.url,
       ...(aliasMap ? { aliasMap } : {}),
       pluginSdkResolution: params.pluginSdkResolution,
@@ -239,7 +232,9 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
     });
   };
 
-  const discovery = params.discovery ?? discoverOpenClawPlugins({ env });
+  const discovery = discoverOpenClawPlugins({
+    env,
+  });
   const manifestRegistry = loadPluginManifestRegistry({
     config: buildBundledCapabilityRuntimeConfig(params.pluginIds, env),
     env,
@@ -300,7 +295,7 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
     const safeSource = opened.path;
     fs.closeSync(opened.fd);
 
-    let mod: OpenClawPluginModule | null;
+    let mod: OpenClawPluginModule | null = null;
     try {
       mod = getModuleLoader(safeSource)(safeSource) as OpenClawPluginModule;
     } catch (error) {
@@ -322,7 +317,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       register(captured.api);
       record.cliBackendIds.push(...captured.cliBackends.map((entry) => entry.id));
       record.providerIds.push(...captured.providers.map((entry) => entry.id));
-      record.embeddingProviderIds.push(...captured.embeddingProviders.map((entry) => entry.id));
       record.speechProviderIds.push(...captured.speechProviders.map((entry) => entry.id));
       record.realtimeTranscriptionProviderIds.push(
         ...captured.realtimeTranscriptionProviders.map((entry) => entry.id),
@@ -332,9 +326,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       );
       record.mediaUnderstandingProviderIds.push(
         ...captured.mediaUnderstandingProviders.map((entry) => entry.id),
-      );
-      record.transcriptSourceProviderIds.push(
-        ...captured.transcriptSourceProviders.map((entry) => entry.id),
       );
       record.imageGenerationProviderIds.push(
         ...captured.imageGenerationProviders.map((entry) => entry.id),
@@ -381,15 +372,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
           rootDir: record.rootDir,
         })),
       );
-      registry.embeddingProviders.push(
-        ...captured.embeddingProviders.map((provider) => ({
-          pluginId: record.id,
-          pluginName: record.name,
-          provider,
-          source: record.source,
-          rootDir: record.rootDir,
-        })),
-      );
       registry.speechProviders.push(
         ...captured.speechProviders.map((provider) => ({
           pluginId: record.id,
@@ -419,15 +401,6 @@ export function loadBundledCapabilityRuntimeRegistry(params: {
       );
       registry.mediaUnderstandingProviders.push(
         ...captured.mediaUnderstandingProviders.map((provider) => ({
-          pluginId: record.id,
-          pluginName: record.name,
-          provider,
-          source: record.source,
-          rootDir: record.rootDir,
-        })),
-      );
-      registry.transcriptSourceProviders.push(
-        ...captured.transcriptSourceProviders.map((provider) => ({
           pluginId: record.id,
           pluginName: record.name,
           provider,

@@ -13,7 +13,6 @@ type WebSearchConfig = NonNullable<OpenClawConfig["tools"]>["web"] extends infer
 
 export type ResolveWebSearchDefinitionParams = {
   config?: OpenClawConfig;
-  agentDir?: string;
   sandboxed?: boolean;
   runtimeWebSearch?: RuntimeWebSearchMetadata;
   providerId?: string;

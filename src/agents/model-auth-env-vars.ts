@@ -2,11 +2,9 @@ import {
   listKnownProviderAuthEnvVarNames,
   resolveProviderAuthEvidence,
   resolveProviderAuthEnvVarCandidates,
-  resolveProviderAuthLookupMaps,
 } from "../secrets/provider-env-vars.js";
 import type {
   ProviderAuthEvidence,
-  ProviderAuthLookupMaps,
   ProviderEnvVarLookupParams,
 } from "../secrets/provider-env-vars.js";
 
@@ -22,12 +20,6 @@ export function resolveProviderEnvAuthEvidence(
   return resolveProviderAuthEvidence(params);
 }
 
-export function resolveProviderEnvAuthLookupMaps(
-  params?: ProviderEnvVarLookupParams,
-): ProviderAuthLookupMaps {
-  return resolveProviderAuthLookupMaps(params);
-}
-
 export function listProviderEnvAuthLookupKeys(params: {
   envCandidateMap: Readonly<Record<string, readonly string[]>>;
   authEvidenceMap: Readonly<Record<string, readonly ProviderAuthEvidence[]>>;
@@ -38,12 +30,13 @@ export function listProviderEnvAuthLookupKeys(params: {
 }
 
 export function resolveProviderEnvAuthLookupKeys(params?: ProviderEnvVarLookupParams): string[] {
-  const lookupMaps = resolveProviderEnvAuthLookupMaps(params);
   return listProviderEnvAuthLookupKeys({
-    envCandidateMap: lookupMaps.envCandidateMap,
-    authEvidenceMap: lookupMaps.authEvidenceMap,
+    envCandidateMap: resolveProviderEnvApiKeyCandidates(params),
+    authEvidenceMap: resolveProviderEnvAuthEvidence(params),
   });
 }
+
+export const PROVIDER_ENV_API_KEY_CANDIDATES = resolveProviderEnvApiKeyCandidates();
 
 export function listKnownProviderEnvApiKeyNames(): string[] {
   return listKnownProviderAuthEnvVarNames();

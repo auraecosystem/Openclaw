@@ -8,7 +8,7 @@ import {
 } from "openclaw/plugin-sdk/status-helpers";
 import { resolveWhatsAppAccount, type ResolvedWhatsAppAccount } from "./accounts.js";
 import { createWhatsAppLoginTool } from "./agent-tools-login.js";
-import { whatsappApprovalCapability } from "./approval-native.js";
+import { whatsappApprovalAuth } from "./approval-auth.js";
 import type { WebChannelStatus } from "./auto-reply/types.js";
 import {
   describeWhatsAppMessageActions,
@@ -51,7 +51,7 @@ const loadWhatsAppChannelReactAction = createLazyRuntimeModule(
   () => import("./channel-react-action.js"),
 );
 
-function resolveWhatsAppTargetInfo(raw: string) {
+function parseWhatsAppExplicitTarget(raw: string) {
   const normalized = normalizeWhatsAppTarget(raw);
   if (!normalized) {
     return null;
@@ -120,7 +120,8 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
         targetPrefixes: ["whatsapp"],
         normalizeTarget: normalizeWhatsAppMessagingTarget,
         resolveOutboundSessionRoute: (params) => resolveWhatsAppOutboundSessionRoute(params),
-        inferTargetChatType: ({ to }) => resolveWhatsAppTargetInfo(to)?.chatType,
+        parseExplicitTarget: ({ raw }) => parseWhatsAppExplicitTarget(raw),
+        inferTargetChatType: ({ to }) => parseWhatsAppExplicitTarget(to)?.chatType,
         targetResolver: {
           looksLikeId: looksLikeWhatsAppTargetId,
           hint: "<E.164|group JID|newsletter JID>",
@@ -150,35 +151,21 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
       actions: {
         describeMessageTool: ({ cfg, accountId }) =>
           describeWhatsAppMessageActions({ cfg, accountId }),
-        supportsAction: ({ action }) => action === "react" || action === "upload-file",
-        resolveExecutionMode: ({ action }) =>
-          action === "react" || action === "upload-file" ? "gateway" : "local",
-        handleAction: async ({
-          action,
-          params,
-          cfg,
-          accountId,
-          requesterSenderId,
-          mediaAccess,
-          mediaLocalRoots,
-          mediaReadFile,
-          toolContext,
-        }) =>
+        supportsAction: ({ action }) => action === "react",
+        resolveExecutionMode: ({ action }) => (action === "react" ? "gateway" : "local"),
+        handleAction: async ({ action, params, cfg, accountId, requesterSenderId, toolContext }) =>
           await (
             await loadWhatsAppChannelReactAction()
-          ).handleWhatsAppMessageAction({
+          ).handleWhatsAppReactAction({
             action,
             params,
             cfg,
             accountId,
             requesterSenderId,
-            mediaAccess,
-            mediaLocalRoots,
-            mediaReadFile,
             toolContext,
           }),
       },
-      approvalCapability: whatsappApprovalCapability,
+      approvalCapability: whatsappApprovalAuth,
       auth: {
         login: async ({ cfg, accountId, runtime, verbose }) => {
           const resolvedAccountId =
@@ -324,7 +311,6 @@ export const whatsappPlugin: ChannelPlugin<ResolvedWhatsAppAccount> =
               statusSink: (next: WebChannelStatus) =>
                 ctx.setStatus({ accountId: ctx.accountId, ...next }),
               accountId: account.accountId,
-              channelRuntime: ctx.channelRuntime,
             },
           );
         },

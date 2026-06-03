@@ -3,7 +3,6 @@ import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { replaceFileAtomicSync } from "../infra/replace-file.js";
 import type { ConfigSchemaResponse } from "./schema.js";
@@ -101,10 +100,6 @@ const uiHintIndexCache = new WeakMap<
 >();
 const schemaHasChildrenCache = new WeakMap<JsonSchemaObject, boolean>();
 
-function compareBaselineStrings(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
 function logConfigDocBaselineDebug(message: string): void {
   if (process.env.OPENCLAW_CONFIG_DOC_BASELINE_DEBUG === "1") {
     console.error(`[config-doc-baseline] ${message}`);
@@ -157,7 +152,7 @@ function normalizeJsonValue(value: unknown): JsonValue | undefined {
   }
 
   const entries = Object.entries(value as Record<string, unknown>)
-    .toSorted(([left], [right]) => compareBaselineStrings(left, right))
+    .toSorted(([left], [right]) => left.localeCompare(right))
     .map(([key, entry]) => {
       const normalized = normalizeJsonValue(entry);
       return normalized === undefined ? null : ([key, normalized] as const);
@@ -184,16 +179,16 @@ function asSchemaObject(value: unknown): JsonSchemaObject | null {
   return value as JsonSchemaObject;
 }
 
-function splitHintLookupPath(pathResult: string): string[] {
-  const normalized = normalizeBaselinePath(pathResult);
+function splitHintLookupPath(path: string): string[] {
+  const normalized = normalizeBaselinePath(path);
   return normalized ? normalized.split(".").filter(Boolean) : [];
 }
 
 function resolveUiHintMatch(
   uiHints: ConfigSchemaResponse["uiHints"],
-  pathLocal: string,
+  path: string,
 ): ConfigSchemaResponse["uiHints"][string] | undefined {
-  const targetParts = splitHintLookupPath(pathLocal);
+  const targetParts = splitHintLookupPath(path);
   if (targetParts.length === 0) {
     return undefined;
   }
@@ -229,9 +224,9 @@ function resolveUiHintMatch(
   for (const candidate of candidates) {
     let wildcardCount = 0;
     let matches = true;
-    for (let indexLocal = 0; indexLocal < candidate.parts.length; indexLocal += 1) {
-      const hintPart = candidate.parts[indexLocal];
-      const targetPart = targetParts[indexLocal];
+    for (let index = 0; index < candidate.parts.length; index += 1) {
+      const hintPart = candidate.parts[index];
+      const targetPart = targetParts[index];
       if (hintPart === targetPart) {
         continue;
       }
@@ -271,7 +266,7 @@ function normalizeTypeValue(value: string | string[] | undefined): string | stri
     return undefined;
   }
   if (Array.isArray(value)) {
-    const normalized = sortUniqueStrings(value);
+    const normalized = [...new Set(value)].toSorted((left, right) => left.localeCompare(right));
     return normalized.length === 1 ? normalized[0] : normalized;
   }
   return value;
@@ -317,7 +312,7 @@ function mergeJsonValueArrays(
     merged.set(JSON.stringify(value), value);
   }
   return [...merged.entries()]
-    .toSorted(([leftKey], [rightKey]) => compareBaselineStrings(leftKey, rightKey))
+    .toSorted(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
     .map(([, value]) => value);
 }
 
@@ -340,7 +335,9 @@ function mergeConfigDocBaselineEntry(
     defaultValue,
     deprecated: current.deprecated || next.deprecated,
     sensitive: current.sensitive || next.sensitive,
-    tags: sortUniqueStrings([...current.tags, ...next.tags]),
+    tags: [...new Set([...current.tags, ...next.tags])].toSorted((left, right) =>
+      left.localeCompare(right),
+    ),
     label,
     help,
     hasChildren: current.hasChildren || next.hasChildren,
@@ -419,7 +416,7 @@ export function collectConfigDocBaselineEntries(
       defaultValue: normalizeJsonValue(schema.default),
       deprecated: schema.deprecated === true,
       sensitive: hint?.sensitive === true,
-      tags: [...(hint?.tags ?? [])].toSorted(compareBaselineStrings),
+      tags: [...(hint?.tags ?? [])].toSorted((left, right) => left.localeCompare(right)),
       label: hint?.label,
       help: hint?.help,
       hasChildren: resolveSchemaHasChildren(schema),
@@ -427,7 +424,9 @@ export function collectConfigDocBaselineEntries(
   }
 
   const requiredKeys = new Set(schema.required ?? []);
-  for (const key of Object.keys(schema.properties ?? {}).toSorted(compareBaselineStrings)) {
+  for (const key of Object.keys(schema.properties ?? {}).toSorted((left, right) =>
+    left.localeCompare(right),
+  )) {
     const child = asSchemaObject(schema.properties?.[key]);
     if (!child) {
       continue;
@@ -489,9 +488,7 @@ export function dedupeConfigDocBaselineEntries(
     const current = byPath.get(entry.path);
     byPath.set(entry.path, current ? mergeConfigDocBaselineEntry(current, entry) : entry);
   }
-  return [...byPath.values()].toSorted((left, right) =>
-    compareBaselineStrings(left.path, right.path),
-  );
+  return [...byPath.values()].toSorted((left, right) => left.path.localeCompare(right.path));
 }
 
 function splitConfigDocBaselineEntries(entries: ConfigDocBaselineEntry[]): {

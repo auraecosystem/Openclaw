@@ -2,10 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { loadAgents, loadToolsCatalog, loadToolsEffective, saveAgentsConfig } from "./agents.ts";
 import type { AgentsConfigSaveState, AgentsState } from "./agents.ts";
 
-type TestRequest = (method: string, payload?: unknown) => Promise<unknown>;
-
-function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn<TestRequest>> } {
-  const request = vi.fn<TestRequest>();
+function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn> } {
+  const request = vi.fn();
   const state: AgentsState = {
     client: {
       request,
@@ -48,7 +46,7 @@ function createState(): { state: AgentsState; request: ReturnType<typeof vi.fn<T
 
 function createSaveState(): {
   state: AgentsConfigSaveState;
-  request: ReturnType<typeof vi.fn<TestRequest>>;
+  request: ReturnType<typeof vi.fn>;
 } {
   const { state, request } = createState();
   return {

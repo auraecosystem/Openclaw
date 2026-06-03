@@ -1,5 +1,3 @@
-import { asDateTimestampMs } from "openclaw/plugin-sdk/number-runtime";
-
 export type IMessagePrivateApiStatus = {
   available: boolean;
   v2Ready: boolean;
@@ -58,11 +56,7 @@ export function getCachedIMessagePrivateApiStatus(
   if (!entry) {
     return undefined;
   }
-  if (entry.expiresAt === 0) {
-    return entry.status;
-  }
-  const now = asDateTimestampMs(Date.now());
-  if (now === undefined || entry.expiresAt <= now) {
+  if (entry.expiresAt > 0 && entry.expiresAt < Date.now()) {
     bridgeStatusCache.delete(key);
     return undefined;
   }
@@ -74,9 +68,6 @@ export function setCachedIMessagePrivateApiStatus(
   status: IMessagePrivateApiStatus,
   expiresAt = 0,
 ): void {
-  if (expiresAt !== 0 && asDateTimestampMs(expiresAt) === undefined) {
-    return;
-  }
   bridgeStatusCache.set(normalizeCliPath(cliPath), { status, expiresAt });
 }
 

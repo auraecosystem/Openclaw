@@ -7,12 +7,8 @@ import { resolveAcpxPluginConfig, resolveAcpxPluginRoot } from "./config.js";
 const requireFromTest = createRequire(import.meta.url);
 const TSX_IMPORT = requireFromTest.resolve("tsx");
 
-function expectedMcpServerArgs(params: { sourceEntry: string; distEntry: string }): string[] {
-  const distEntry = path.resolve(params.distEntry);
-  if (fs.existsSync(distEntry)) {
-    return [distEntry];
-  }
-  return ["--import", TSX_IMPORT, path.resolve(params.sourceEntry)];
+function expectedSourceMcpServerArgs(entrypoint: string): string[] {
+  return ["--import", TSX_IMPORT, path.resolve(entrypoint)];
 }
 
 describe("embedded acpx plugin config", () => {
@@ -168,10 +164,7 @@ describe("embedded acpx plugin config", () => {
     const server = resolved.mcpServers["openclaw-plugin-tools"];
     expect(server).toEqual({
       command: process.execPath,
-      args: expectedMcpServerArgs({
-        sourceEntry: "src/mcp/plugin-tools-serve.ts",
-        distEntry: "dist/mcp/plugin-tools-serve.js",
-      }),
+      args: expectedSourceMcpServerArgs("src/mcp/plugin-tools-serve.ts"),
     });
   });
 
@@ -186,10 +179,7 @@ describe("embedded acpx plugin config", () => {
     const server = resolved.mcpServers["openclaw-tools"];
     expect(server).toEqual({
       command: process.execPath,
-      args: expectedMcpServerArgs({
-        sourceEntry: "src/mcp/openclaw-tools-serve.ts",
-        distEntry: "dist/mcp/openclaw-tools-serve.js",
-      }),
+      args: expectedSourceMcpServerArgs("src/mcp/openclaw-tools-serve.ts"),
     });
   });
 

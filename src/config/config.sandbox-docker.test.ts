@@ -255,10 +255,7 @@ describe("sandbox browser binds config", () => {
         defaults: {
           sandbox: {
             browser: {
-              binds: [
-                "/home/user/.chrome-profile:/data/chrome:rw",
-                "D:/data/openclaw/chrome:/data/chrome-windows:rw",
-              ],
+              binds: ["/home/user/.chrome-profile:/data/chrome:rw"],
             },
           },
         },
@@ -268,28 +265,7 @@ describe("sandbox browser binds config", () => {
     if (res.ok) {
       expect(res.config.agents?.defaults?.sandbox?.browser?.binds).toEqual([
         "/home/user/.chrome-profile:/data/chrome:rw",
-        "D:/data/openclaw/chrome:/data/chrome-windows:rw",
       ]);
-    }
-  });
-
-  it("rejects relative source paths in browser binds", () => {
-    for (const bind of [
-      "relative/profile:/data/chrome:rw",
-      "D:relative\\profile:/data/chrome:rw",
-    ]) {
-      const res = validateConfigObject({
-        agents: {
-          defaults: {
-            sandbox: {
-              browser: {
-                binds: [bind],
-              },
-            },
-          },
-        },
-      });
-      expect(res.ok, bind).toBe(false);
     }
   });
 

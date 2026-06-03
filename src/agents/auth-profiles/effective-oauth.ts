@@ -5,7 +5,6 @@ import type { OAuthCredential } from "./types.js";
 export function resolveEffectiveOAuthCredential(params: {
   profileId: string;
   credential: OAuthCredential;
-  allowKeychainPrompt?: boolean;
 }): OAuthCredential {
   return resolveManagedOAuthCredential({
     profileId: params.profileId,
@@ -14,7 +13,6 @@ export function resolveEffectiveOAuthCredential(params: {
       readManagedExternalCliCredential({
         profileId,
         credential,
-        allowKeychainPrompt: params.allowKeychainPrompt ?? false,
       }),
   });
 }

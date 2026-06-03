@@ -18,8 +18,8 @@ type IncrementRunCompactionCountParams = Omit<
   newSessionFile?: string;
 };
 
-function resolveNonNegativeTokenCount(value: number | undefined): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) && value >= 0
+function resolvePositiveTokenCount(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : undefined;
 }
@@ -32,7 +32,7 @@ export async function incrementRunCompactionCount(
   params: IncrementRunCompactionCountParams,
 ): Promise<number | undefined> {
   const tokensAfterCompaction =
-    resolveNonNegativeTokenCount(params.compactionTokensAfter) ??
+    resolvePositiveTokenCount(params.compactionTokensAfter) ??
     (params.lastCallUsage
       ? deriveSessionTotalTokens({
           usage: params.lastCallUsage,

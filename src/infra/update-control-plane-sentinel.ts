@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   markUpdateRestartSentinelFailure,
   writeRestartSentinel,
@@ -50,6 +49,10 @@ export function isPendingControlPlaneUpdateRestartSentinel(
     typeof reason === "string" &&
     CONTROL_PLANE_UPDATE_PENDING_REASONS.has(reason)
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function normalizeText(value: unknown): string | undefined {

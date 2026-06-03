@@ -1,5 +1,5 @@
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
-import type { AgentTool } from "../runtime/index.js";
 
 export type AgentRuntimeTransport = "sse" | "websocket" | "auto";
 
@@ -76,64 +76,24 @@ export type AgentRuntimeProviderHandle = {
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
   applyAutoEnable?: boolean;
+  bundledProviderAllowlistCompat?: boolean;
   bundledProviderVitestCompat?: boolean;
 };
 
 export type AgentRuntimeInteractiveButtonStyle = "primary" | "secondary" | "success" | "danger";
 
-export type AgentRuntimeMessagePresentationAction =
-  | {
-      type: "command";
-      command: string;
-    }
-  | {
-      type: "callback";
-      value: string;
-    };
-
-/** Portable action control exposed to agent runtime reply payloads. */
-export type AgentRuntimeMessagePresentationButton = {
-  /** User-visible button label. */
+export type AgentRuntimeInteractiveReplyButton = {
   label: string;
-  /** Typed action sent when pressed. */
-  action?: AgentRuntimeMessagePresentationAction;
-  /** Legacy opaque callback value sent when pressed. */
   value?: string;
-  /** External URL opened by the button. */
   url?: string;
-  /** Channel-native web app URL for renderers that support embedded web apps. */
-  webApp?: { url: string };
-  /** Higher values are kept first when channel action limits require dropping controls. */
-  priority?: number;
-  /** Disabled action hint; channels without disabled-state support render fallback text. */
-  disabled?: boolean;
-  /** Optional visual style hint for renderers that support styled actions. */
   style?: AgentRuntimeInteractiveButtonStyle;
 };
 
-/** Portable select/menu option exposed to agent runtime reply payloads. */
-export type AgentRuntimeMessagePresentationOption = {
-  /** User-visible option label. */
+export type AgentRuntimeInteractiveReplyOption = {
   label: string;
-  /** Typed action sent when selected. */
-  action?: AgentRuntimeMessagePresentationAction;
-  /** Legacy opaque callback value sent when selected. */
-  value?: string;
+  value: string;
 };
 
-/**
- * @deprecated Use AgentRuntimeMessagePresentationButton.
- */
-export type AgentRuntimeInteractiveReplyButton = AgentRuntimeMessagePresentationButton;
-
-/**
- * @deprecated Use AgentRuntimeMessagePresentationOption.
- */
-export type AgentRuntimeInteractiveReplyOption = AgentRuntimeMessagePresentationOption;
-
-/**
- * @deprecated Use AgentRuntimeMessagePresentationBlock.
- */
 export type AgentRuntimeInteractiveReplyBlock =
   | {
       type: "text";
@@ -149,9 +109,6 @@ export type AgentRuntimeInteractiveReplyBlock =
       options: AgentRuntimeInteractiveReplyOption[];
     };
 
-/**
- * @deprecated Use AgentRuntimeMessagePresentation.
- */
 export type AgentRuntimeInteractiveReply = {
   blocks: AgentRuntimeInteractiveReplyBlock[];
 };
@@ -177,20 +134,17 @@ export type AgentRuntimeMessagePresentationBlock =
     }
   | {
       type: "buttons";
-      buttons: AgentRuntimeMessagePresentationButton[];
+      buttons: AgentRuntimeInteractiveReplyButton[];
     }
   | {
       type: "select";
       placeholder?: string;
-      options: AgentRuntimeMessagePresentationOption[];
+      options: AgentRuntimeInteractiveReplyOption[];
     };
 
 export type AgentRuntimeMessagePresentation = {
-  /** Optional short heading rendered before blocks when supported. */
   title?: string;
-  /** Optional severity/status tone for renderers that support toned presentations. */
   tone?: AgentRuntimeMessagePresentationTone;
-  /** Ordered portable blocks rendered or downgraded by channel adapters. */
   blocks: AgentRuntimeMessagePresentationBlock[];
 };
 
@@ -212,9 +166,6 @@ export type AgentRuntimeReplyPayload = {
   sensitiveMedia?: boolean;
   presentation?: AgentRuntimeMessagePresentation;
   delivery?: AgentRuntimeReplyPayloadDelivery;
-  /**
-   * @deprecated Use presentation.
-   */
   interactive?: AgentRuntimeInteractiveReply;
   btw?: {
     question: string;
@@ -224,16 +175,10 @@ export type AgentRuntimeReplyPayload = {
   replyToCurrent?: boolean;
   audioAsVoice?: boolean;
   spokenText?: string;
-  ttsSupplement?: {
-    spokenText: string;
-    visibleTextAlreadyDelivered?: boolean;
-  };
   isError?: boolean;
   isReasoning?: boolean;
-  isReasoningSnapshot?: boolean;
   isCompactionNotice?: boolean;
   isFallbackNotice?: boolean;
-  isStatusNotice?: boolean;
   channelData?: Record<string, unknown>;
 };
 

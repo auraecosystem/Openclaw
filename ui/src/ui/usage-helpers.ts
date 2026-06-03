@@ -77,15 +77,11 @@ const parseQueryNumber = (value: string): number | null => {
     multiplier = 1_000_000;
     raw = raw.slice(0, -1);
   }
-  if (!/^\d+(?:\.\d+)?$/.test(raw)) {
-    return null;
-  }
   const parsed = Number(raw);
-  const normalized = parsed * multiplier;
-  if (!Number.isFinite(normalized) || !Number.isSafeInteger(Math.round(normalized))) {
+  if (!Number.isFinite(parsed)) {
     return null;
   }
-  return normalized;
+  return parsed * multiplier;
 };
 
 export const extractQueryTerms = (query: string): UsageQueryTerm[] => {

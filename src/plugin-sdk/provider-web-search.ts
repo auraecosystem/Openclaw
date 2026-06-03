@@ -9,9 +9,7 @@ import type {
 } from "../plugins/types.js";
 export {
   jsonResult,
-  readNonNegativeIntegerParam,
   readNumberParam,
-  readPositiveIntegerParam,
   readStringArrayParam,
   readStringParam,
 } from "../agents/tools/common.js";
@@ -26,7 +24,6 @@ export {
   normalizeFreshness,
   normalizeToIsoDate,
   parseIsoDateRange,
-  parseWebSearchTimeFilters,
   readCachedSearchPayload,
   readConfiguredSecretString,
   readProviderEnvValue,
@@ -63,7 +60,6 @@ export {
   readCache,
   readResponseText,
   resolveCacheTtlMs,
-  resolvePositiveTimeoutSeconds,
   resolveTimeoutSeconds,
   writeCache,
 } from "../agents/tools/web-shared.js";

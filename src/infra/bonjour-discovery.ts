@@ -1,10 +1,5 @@
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import {
-  normalizeStringEntries,
-  uniqueStrings,
-} from "@openclaw/normalization-core/string-normalization";
 import { runCommandWithTimeout } from "../process/exec.js";
-import { parseStrictInteger } from "./parse-finite-number.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { isTailnetIPv4 } from "./tailnet.js";
 import { resolveWideAreaDiscoveryDomain } from "./widearea-dns.js";
 
@@ -40,13 +35,7 @@ export function resolveGatewayDiscoveryEndpoint(
 ): GatewayDiscoveryResolvedEndpoint | null {
   const host = beacon.host?.trim();
   const port = beacon.port;
-  if (
-    !host ||
-    typeof port !== "number" ||
-    !Number.isSafeInteger(port) ||
-    port <= 0 ||
-    port > MAX_TCP_PORT
-  ) {
+  if (!host || typeof port !== "number" || !Number.isFinite(port) || port <= 0) {
     return null;
   }
   const gatewayTls = beacon.gatewayTls === true;
@@ -79,7 +68,6 @@ export type GatewayBonjourDiscoverOpts = {
 
 const DEFAULT_TIMEOUT_MS = 2000;
 const GATEWAY_SERVICE_TYPE = "_openclaw-gw._tcp";
-const MAX_TCP_PORT = 65_535;
 
 function decodeDnsSdEscapes(value: string): string {
   let decoded = false;
@@ -122,7 +110,10 @@ function decodeDnsSdEscapes(value: string): string {
 }
 
 function parseDigShortLines(stdout: string): string[] {
-  return normalizeStringEntries(stdout.split("\n"));
+  return stdout
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
 }
 
 function parseDigTxt(stdout: string): string[] {
@@ -156,9 +147,9 @@ function parseDigSrv(stdout: string): { host: string; port: number } | null {
   if (parts.length < 4) {
     return null;
   }
-  const port = parsePortOrUndefined(parts[2]);
+  const port = Number.parseInt(parts[2] ?? "", 10);
   const hostRaw = parts[3] ?? "";
-  if (port === undefined) {
+  if (!Number.isFinite(port) || port <= 0) {
     return null;
   }
   const host = hostRaw.replace(/\.$/, "");
@@ -200,15 +191,15 @@ function parseTailscaleStatusIPv4s(stdout: string): string[] {
     }
   }
 
-  return uniqueStrings(out);
+  return [...new Set(out)];
 }
 
-function parsePortOrUndefined(value: string | undefined): number | undefined {
+function parseIntOrNull(value: string | undefined): number | undefined {
   if (!value) {
     return undefined;
   }
-  const parsed = parseStrictInteger(value);
-  return parsed !== undefined && parsed > 0 && parsed <= MAX_TCP_PORT ? parsed : undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function parseTxtTokens(tokens: string[]): Record<string, string> {
@@ -257,12 +248,12 @@ function parseDnsSdResolve(stdout: string, instanceName: string): GatewayBonjour
     }
 
     if (line.includes("can be reached at")) {
-      const match = line.match(/can be reached at\s+([^\s:]+):([^\s]+)/i);
+      const match = line.match(/can be reached at\s+([^\s:]+):(\d+)/i);
       if (match?.[1]) {
         beacon.host = match[1].replace(/\.$/, "");
       }
       if (match?.[2]) {
-        beacon.port = parsePortOrUndefined(match[2]);
+        beacon.port = parseIntOrNull(match[2]);
       }
       continue;
     }
@@ -286,8 +277,8 @@ function parseDnsSdResolve(stdout: string, instanceName: string): GatewayBonjour
   if (txt.cliPath) {
     beacon.cliPath = txt.cliPath;
   }
-  beacon.gatewayPort = parsePortOrUndefined(txt.gatewayPort);
-  beacon.sshPort = parsePortOrUndefined(txt.sshPort);
+  beacon.gatewayPort = parseIntOrNull(txt.gatewayPort);
+  beacon.sshPort = parseIntOrNull(txt.sshPort);
   if (txt.gatewayTls) {
     const raw = normalizeOptionalLowercaseString(txt.gatewayTls);
     beacon.gatewayTls = raw === "1" || raw === "true" || raw === "yes";
@@ -461,8 +452,8 @@ async function discoverWideAreaViaTailnetDns(
       host: srvParsed.host,
       port: srvParsed.port,
       txt: Object.keys(txtMap).length ? txtMap : undefined,
-      gatewayPort: parsePortOrUndefined(txtMap.gatewayPort),
-      sshPort: parsePortOrUndefined(txtMap.sshPort),
+      gatewayPort: parseIntOrNull(txtMap.gatewayPort),
+      sshPort: parseIntOrNull(txtMap.sshPort),
       tailnetDns: txtMap.tailnetDns || undefined,
       cliPath: txtMap.cliPath || undefined,
     };
@@ -527,7 +518,7 @@ function parseAvahiBrowse(stdout: string): GatewayBonjourBeacon[] {
     if (trimmed.startsWith("port =")) {
       const match = trimmed.match(/port\s*=\s*\[(\d+)\]/);
       if (match?.[1]) {
-        current.port = parsePortOrUndefined(match[1]);
+        current.port = parseIntOrNull(match[1]);
       }
       continue;
     }
@@ -548,11 +539,11 @@ function parseAvahiBrowse(stdout: string): GatewayBonjourBeacon[] {
       if (txt.cliPath) {
         current.cliPath = txt.cliPath;
       }
-      current.gatewayPort = parsePortOrUndefined(txt.gatewayPort);
-      current.sshPort = parsePortOrUndefined(txt.sshPort);
+      current.gatewayPort = parseIntOrNull(txt.gatewayPort);
+      current.sshPort = parseIntOrNull(txt.sshPort);
       if (txt.gatewayTls) {
-        const rawLocal = normalizeOptionalLowercaseString(txt.gatewayTls);
-        current.gatewayTls = rawLocal === "1" || rawLocal === "true" || rawLocal === "yes";
+        const raw = normalizeOptionalLowercaseString(txt.gatewayTls);
+        current.gatewayTls = raw === "1" || raw === "true" || raw === "yes";
       }
       if (txt.gatewayTlsSha256) {
         current.gatewayTlsFingerprintSha256 = txt.gatewayTlsSha256;
@@ -595,9 +586,10 @@ export async function discoverGatewayBeacons(
   const wideAreaDomain = resolveWideAreaDiscoveryDomain({ configDomain: opts.wideAreaDomain });
   const domainsRaw = Array.isArray(opts.domains) ? opts.domains : [];
   const defaultDomains = ["local.", ...(wideAreaDomain ? [wideAreaDomain] : [])];
-  const domains = normalizeStringEntries(domainsRaw.length > 0 ? domainsRaw : defaultDomains).map(
-    (d) => (d.endsWith(".") ? d : `${d}.`),
-  );
+  const domains = (domainsRaw.length > 0 ? domainsRaw : defaultDomains)
+    .map((d) => d.trim())
+    .filter(Boolean)
+    .map((d) => (d.endsWith(".") ? d : `${d}.`));
 
   try {
     if (platform === "darwin") {

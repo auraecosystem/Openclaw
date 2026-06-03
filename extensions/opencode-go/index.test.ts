@@ -1,4 +1,4 @@
-import type { ProviderRuntimeModel } from "openclaw/plugin-sdk/plugin-entry";
+import { getModels } from "@earendil-works/pi-ai";
 import {
   registerProviderPlugin,
   registerSingleProviderPlugin,
@@ -72,7 +72,8 @@ describe("opencode-go provider plugin", () => {
     const provider = await registerSingleProviderPlugin(plugin);
     expect(provider.catalog).toBeUndefined();
 
-    const expectedModelIds = [
+    const models = new Map(getModels("opencode-go").map((model) => [model.id, model]));
+    expect([...models.keys()]).toEqual([
       "deepseek-v4-flash",
       "deepseek-v4-pro",
       "glm-5",
@@ -85,16 +86,7 @@ describe("opencode-go provider plugin", () => {
       "minimax-m2.7",
       "qwen3.5-plus",
       "qwen3.6-plus",
-    ];
-    const models = new Map<string, ProviderRuntimeModel>();
-    for (const modelId of expectedModelIds) {
-      const model = provider.resolveDynamicModel?.({ modelId } as never);
-      if (!model) {
-        throw new Error(`expected OpenCode Go model ${modelId}`);
-      }
-      models.set(model.id, model);
-    }
-    expect([...models.keys()]).toEqual(expectedModelIds);
+    ]);
     const supplemental = await provider.augmentModelCatalog?.({
       entries: [...models.values()].map((model) => ({
         provider: model.provider,

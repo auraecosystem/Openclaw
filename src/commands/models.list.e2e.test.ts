@@ -32,19 +32,6 @@ const loadProviderIndexCatalogRowsForList = vi.fn<() => Array<Record<string, unk
 const hasProviderStaticCatalogForFilter = vi.fn().mockResolvedValue(false);
 const shouldSuppressBuiltInModel = vi.fn().mockReturnValue(false);
 const shouldSuppressBuiltInModelFromManifest = vi.fn().mockReturnValue(false);
-const normalizeProviderResolvedModelWithPlugin = vi.hoisted(() =>
-  vi.fn(({ context }) => {
-    if (
-      context?.provider === "anthropic" &&
-      context?.modelId === "claude-sonnet-4-5" &&
-      Array.isArray(context?.model?.input) &&
-      !context.model.input.includes("image")
-    ) {
-      return { ...context.model, input: ["text", "image"] };
-    }
-    return undefined;
-  }),
-);
 const modelRegistryState = {
   models: [] as Array<Record<string, unknown>>,
   available: [] as Array<Record<string, unknown>>,
@@ -86,7 +73,7 @@ vi.mock("../agents/model-catalog.js", () => ({
   loadModelCatalog,
 }));
 
-vi.mock("../agents/embedded-agent-runner/model.js", () => ({
+vi.mock("../agents/pi-embedded-runner/model.js", () => ({
   resolveModelWithRegistry: ({
     provider,
     modelId,
@@ -98,11 +85,11 @@ vi.mock("../agents/embedded-agent-runner/model.js", () => ({
   }) => modelRegistry.find(provider, modelId),
 }));
 
-vi.mock("../agents/agent-model-discovery.js", () => {
+vi.mock("../agents/pi-model-discovery.js", () => {
   class MockModelRegistry {
     find(provider: string, id: string) {
       if (modelRegistryState.findError !== undefined) {
-        throw toLintErrorObject(modelRegistryState.findError, "Non-Error thrown");
+        throw modelRegistryState.findError;
       }
       return (
         modelRegistryState.models.find((model) => model.provider === provider && model.id === id) ??
@@ -112,14 +99,14 @@ vi.mock("../agents/agent-model-discovery.js", () => {
 
     getAll() {
       if (modelRegistryState.getAllError !== undefined) {
-        throw toLintErrorObject(modelRegistryState.getAllError, "Non-Error thrown");
+        throw modelRegistryState.getAllError;
       }
       return modelRegistryState.models;
     }
 
     getAvailable() {
       if (modelRegistryState.getAvailableError !== undefined) {
-        throw toLintErrorObject(modelRegistryState.getAvailableError, "Non-Error thrown");
+        throw modelRegistryState.getAvailableError;
       }
       return modelRegistryState.available;
     }
@@ -134,14 +121,6 @@ vi.mock("../agents/agent-model-discovery.js", () => {
   return {
     discoverAuthStorage: () => ({}) as unknown,
     discoverModels: () => new MockModelRegistry() as unknown,
-  };
-});
-
-vi.mock("../plugins/provider-runtime.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../plugins/provider-runtime.js")>();
-  return {
-    ...actual,
-    normalizeProviderResolvedModelWithPlugin,
   };
 });
 
@@ -253,7 +232,6 @@ beforeEach(() => {
   hasProviderStaticCatalogForFilter.mockResolvedValue(false);
   shouldSuppressBuiltInModel.mockReset();
   shouldSuppressBuiltInModel.mockReturnValue(false);
-  normalizeProviderResolvedModelWithPlugin.mockClear();
   readConfigFileSnapshotForWrite.mockClear();
   readConfigFileSnapshotForWrite.mockResolvedValue({
     snapshot: { valid: false, resolved: {} },
@@ -470,29 +448,6 @@ describe("models list/status", () => {
     expect(runtimeLogText(runtime)).toBe("openrouter/hunter-alpha");
   });
 
-  it("models list configured fallback marks stale Anthropic Claude 4 refs image-capable", async () => {
-    getRuntimeConfig.mockReturnValue({
-      agents: { defaults: { model: "anthropic/claude-sonnet-4-5" } },
-    });
-    const runtime = makeRuntime();
-
-    await modelsListCommand({ json: true }, runtime);
-
-    const payload = parseJsonLog(runtime);
-    expect(payload.models[0]).toMatchObject({
-      key: "anthropic/claude-sonnet-4-5",
-      input: "text+image",
-    });
-    expect(normalizeProviderResolvedModelWithPlugin).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "anthropic",
-        context: expect.objectContaining({
-          modelId: "claude-sonnet-4-5",
-        }),
-      }),
-    );
-  });
-
   it.each(["z.ai", "Z.AI", "z-ai"] as const)(
     "models list provider filter normalizes %s alias",
     async (provider) => {
@@ -673,7 +628,9 @@ describe("models list/status", () => {
   it("filters stale spark rows from models list and registry views", async () => {
     const suppressSpark = ({ provider, id }: { provider?: string | null; id?: string | null }) =>
       id === "gpt-5.3-codex-spark" &&
-      (provider === "openai" || provider === "azure-openai-responses" || provider === "openai");
+      (provider === "openai" ||
+        provider === "azure-openai-responses" ||
+        provider === "openai-codex");
     shouldSuppressBuiltInModel.mockImplementation(suppressSpark);
     shouldSuppressBuiltInModelFromManifest.mockImplementation(suppressSpark);
     setDefaultModel("openai/gpt-5.5");
@@ -768,17 +725,3 @@ describe("models list/status", () => {
     expect(row.available).toBe(false);
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

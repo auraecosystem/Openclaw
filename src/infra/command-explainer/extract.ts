@@ -262,7 +262,9 @@ function appendDecodedText(
   sourceEndOffset: number,
 ): void {
   decoded.value += value;
-  decoded.sourceOffsets.push(...Array.from({ length: value.length }, () => sourceEndOffset));
+  for (let index = 0; index < value.length; index += 1) {
+    decoded.sourceOffsets.push(sourceEndOffset);
+  }
 }
 
 function identityDecodedShellText(text: string, sourceOffset = 0): DecodedShellText {

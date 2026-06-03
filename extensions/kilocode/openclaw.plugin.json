@@ -17,13 +17,8 @@
       }
     }
   },
-  "setup": {
-    "providers": [
-      {
-        "id": "kilocode",
-        "envVars": ["KILOCODE_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "kilocode": ["KILOCODE_API_KEY"]
   },
   "providerAuthChoices": [
     {

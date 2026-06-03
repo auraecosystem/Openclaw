@@ -5,9 +5,8 @@ import type { MockFn } from "../test-utils/vitest-mock-fn.js";
 const resolveCleanupPlanFromDisk = vi.fn();
 const removePath = vi.fn();
 const listAgentSessionDirs = vi.fn();
-export const removeStateAndLinkedPaths = vi.fn();
+const removeStateAndLinkedPaths = vi.fn();
 const removeWorkspaceDirs = vi.fn();
-export const removeWorkspaceAttestationPaths = vi.fn();
 
 vi.mock("../config/config.js", () => ({
   isNixMode: false,
@@ -21,7 +20,6 @@ vi.mock("./cleanup-utils.js", () => ({
   removePath,
   listAgentSessionDirs,
   removeStateAndLinkedPaths,
-  removeWorkspaceAttestationPaths,
   removeWorkspaceDirs,
 }));
 
@@ -43,7 +41,6 @@ export function resetCleanupCommandMocks() {
   listAgentSessionDirs.mockResolvedValue(["/tmp/.openclaw/agents/main/sessions"]);
   removeStateAndLinkedPaths.mockResolvedValue(undefined);
   removeWorkspaceDirs.mockResolvedValue(undefined);
-  removeWorkspaceAttestationPaths.mockResolvedValue(undefined);
 }
 
 export function silenceCleanupCommandRuntime(runtime: RuntimeEnv) {

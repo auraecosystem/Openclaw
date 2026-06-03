@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { WhatsAppSendResult } from "../inbound/send-result.js";
 import { buildMentionConfig } from "./mentions.js";
 import { applyGroupGating, type GroupHistoryEntry } from "./monitor/group-gating.js";
-import { formatWhatsAppInboundListeningLog } from "./monitor/listener-log.js";
 import { buildInboundLine, formatReplyContext } from "./monitor/message-line.js";
 import type { WebInboundMsg } from "./types.js";
 
@@ -60,7 +59,6 @@ async function runGroupGating(params: {
   const agentId = params.agentId ?? "main";
   const sessionKey = `agent:${agentId}:whatsapp:group:${conversationId}`;
   const baseMentionConfig = buildMentionConfig(params.cfg, undefined);
-  const verboseLogs: string[] = [];
   const result = await applyGroupGating({
     cfg: params.cfg,
     msg: params.msg,
@@ -74,10 +72,10 @@ async function runGroupGating(params: {
     groupHistories,
     groupHistoryLimit: 10,
     groupMemberNames: new Map(),
-    logVerbose: (message) => verboseLogs.push(message),
-    replyLogger: { debug: () => {}, warn: () => {} },
+    logVerbose: () => {},
+    replyLogger: { debug: () => {} },
   });
-  return { result, groupHistories, verboseLogs };
+  return { result, groupHistories };
 }
 
 function createGroupMessage(overrides: Partial<WebInboundMsg> = {}): WebInboundMsg {
@@ -117,55 +115,6 @@ function makeInboundCfg(messagePrefix = "") {
     channels: { whatsapp: { messagePrefix } },
   } as never;
 }
-
-describe("WhatsApp listener diagnostics", () => {
-  it("describes WhatsApp inbound listener scope without implying DM-only routing", () => {
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groupPolicy: "open",
-        hasGroupAllowFrom: false,
-      }),
-    ).toBe(
-      "Listening for WhatsApp inbound messages (DM + all groups; no group allowlist configured).",
-    );
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groupPolicy: "disabled",
-        hasGroupAllowFrom: true,
-      }),
-    ).toBe("Listening for WhatsApp inbound messages (DM + groups disabled by groupPolicy).");
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groupPolicy: "allowlist",
-        hasGroupAllowFrom: false,
-      }),
-    ).toBe(
-      "Listening for WhatsApp inbound messages (DM + group inbound blocked by empty groupPolicy allowlist).",
-    );
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groupPolicy: "allowlist",
-        hasGroupAllowFrom: true,
-      }),
-    ).toBe(
-      "Listening for WhatsApp inbound messages (DM + all groups; sender allowlist configured).",
-    );
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groups: { "123@g.us": {}, "*": {} },
-        groupPolicy: "allowlist",
-        hasGroupAllowFrom: true,
-      }),
-    ).toBe("Listening for WhatsApp inbound messages (DM + all groups; wildcard configured).");
-    expect(
-      formatWhatsAppInboundListeningLog({
-        groups: { "123@g.us": {}, "456@g.us": {} },
-        groupPolicy: "allowlist",
-        hasGroupAllowFrom: true,
-      }),
-    ).toBe("Listening for WhatsApp inbound messages (DM + 2 configured groups).");
-  });
-});
 
 describe("applyGroupGating", () => {
   it("treats reply-to-bot as implicit mention", async () => {
@@ -634,7 +583,7 @@ describe("applyGroupGating", () => {
       },
     });
 
-    const { result, verboseLogs } = await runGroupGating({
+    const { result } = await runGroupGating({
       cfg,
       msg: createGroupMessage({
         body: "@workbot ping",
@@ -644,9 +593,6 @@ describe("applyGroupGating", () => {
     });
 
     expect(result.shouldProcess).toBe(false);
-    expect(verboseLogs).toContain(
-      'Dropping message from unregistered WhatsApp group 123@g.us. Add the group JID to channels.whatsapp.groups, or add "*" there to admit all groups. Sender authorization still applies.',
-    );
   });
 });
 

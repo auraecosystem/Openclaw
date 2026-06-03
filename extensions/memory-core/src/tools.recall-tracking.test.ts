@@ -67,17 +67,6 @@ describe("memory_search recall tracking", () => {
     const tool = createSearchTool(
       asOpenClawConfig({
         agents: { list: [{ id: "main", default: true }] },
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                },
-              },
-            },
-          },
-        },
         memory: {
           backend: "qmd",
           citations: "on",
@@ -114,17 +103,6 @@ describe("memory_search recall tracking", () => {
     const tool = createSearchTool(
       asOpenClawConfig({
         agents: { list: [{ id: "main", default: true }] },
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                },
-              },
-            },
-          },
-        },
       }),
     );
     setMemorySearchImpl(async () => [
@@ -186,7 +164,6 @@ describe("memory_search recall tracking", () => {
             "memory-core": {
               config: {
                 dreaming: {
-                  enabled: true,
                   timezone: "Europe/London",
                 },
               },
@@ -201,41 +178,5 @@ describe("memory_search recall tracking", () => {
     expect(recallTrackingMock.recordShortTermRecalls).toHaveBeenCalledTimes(1);
     const [firstCall] = recallTrackingMock.recordShortTermRecalls.mock.calls;
     expect(firstCall?.[0]?.timezone).toBe("Europe/London");
-  });
-
-  it("skips recall tracking when dreaming is disabled", async () => {
-    setMemorySearchImpl(async () => [
-      {
-        path: "memory/2026-04-03.md",
-        startLine: 1,
-        endLine: 2,
-        score: 0.95,
-        snippet: "Move backups to S3 Glacier.",
-        source: "memory" as const,
-      },
-    ]);
-
-    const tool = createSearchTool(
-      asOpenClawConfig({
-        agents: { list: [{ id: "main", default: true }] },
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: false,
-                },
-              },
-            },
-          },
-        },
-      }),
-    );
-
-    const result = await tool.execute("call_recall_disabled", { query: "glacier" });
-    const details = result.details as { results: Array<{ path: string }> };
-    expect(details.results).toHaveLength(1);
-    expect(details.results[0]?.path).toBe("memory/2026-04-03.md");
-    expect(recallTrackingMock.recordShortTermRecalls).not.toHaveBeenCalled();
   });
 });

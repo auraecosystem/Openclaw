@@ -2981,15 +2981,14 @@ function renderCaptureView(state: UiState): string {
                                       const key = captureEventKey(event);
                                       return key === selectedEventKey;
                                     }) ?? null;
-                                  const selectedFlowIdLocal =
+                                  const selectedFlowId =
                                     selectedLaneEvent?.flowId || selectedEvent?.flowId || "";
                                   const focusSelectedFlow =
                                     state.captureTimelineFocusSelectedFlow &&
-                                    selectedFlowIdLocal.length > 0;
+                                    selectedFlowId.length > 0;
                                   const laneFocusedEventCount = focusSelectedFlow
-                                    ? lane.events.filter(
-                                        (event) => event.flowId === selectedFlowIdLocal,
-                                      ).length
+                                    ? lane.events.filter((event) => event.flowId === selectedFlowId)
+                                        .length
                                     : 0;
                                   const laneBackgroundEventCount = focusSelectedFlow
                                     ? lane.events.length - laneFocusedEventCount
@@ -3057,11 +3056,11 @@ function renderCaptureView(state: UiState): string {
                                             const length = Math.sqrt(dx * dx + dy * dy);
                                             const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
                                             const selected =
-                                              selectedFlowIdLocal.length > 0 &&
-                                              marker.event.flowId === selectedFlowIdLocal;
+                                              selectedFlowId.length > 0 &&
+                                              marker.event.flowId === selectedFlowId;
                                             const dimmed =
                                               focusSelectedFlow &&
-                                              marker.event.flowId !== selectedFlowIdLocal;
+                                              marker.event.flowId !== selectedFlowId;
                                             const paired =
                                               pairedEventKey != null &&
                                               captureEventKey(marker.event) === pairedEventKey;
@@ -3088,7 +3087,7 @@ function renderCaptureView(state: UiState): string {
                                         selectedEventKey != null && key === selectedEventKey;
                                       const kindClass = `capture-timeline-marker-${event.kind.replace(/[^a-z0-9]+/gi, "-").toLowerCase()}`;
                                       const dimmed =
-                                        focusSelectedFlow && event.flowId !== selectedFlowIdLocal;
+                                        focusSelectedFlow && event.flowId !== selectedFlowId;
                                       const paired =
                                         pairedEventKey != null && key === pairedEventKey;
                                       const label = [
@@ -3122,8 +3121,7 @@ function renderCaptureView(state: UiState): string {
                                             .replace(/[^a-z0-9]+/gi, "-")
                                             .toLowerCase()}`;
                                           const dimmed =
-                                            focusSelectedFlow &&
-                                            event.flowId !== selectedFlowIdLocal;
+                                            focusSelectedFlow && event.flowId !== selectedFlowId;
                                           const paired =
                                             pairedEventKey != null && key === pairedEventKey;
                                           return `<button
@@ -3212,7 +3210,7 @@ function renderCaptureView(state: UiState): string {
                                   ${
                                     focusSelectedFlow && laneSelected
                                       ? `<div class="capture-timeline-lane-focus-meta">
-                                          <span class="capture-mono">${esc(selectedFlowIdLocal)}</span>
+                                          <span class="capture-mono">${esc(selectedFlowId)}</span>
                                           <span>·</span>
                                           <span>${laneFocusedEventCount}/${lane.events.length} events focused</span>
                                           <span>·</span>
@@ -3335,7 +3333,7 @@ function renderCaptureView(state: UiState): string {
                               ]
                                 .filter(Boolean)
                                 .join(" · ");
-                              const rowsLocal =
+                              const rows =
                                 state.captureGroupMode === "burst"
                                   ? clusterEventBursts(group.events)
                                       .map((cluster) => {
@@ -3438,13 +3436,13 @@ function renderCaptureView(state: UiState): string {
                                       })
                                       .join("");
                               return state.captureGroupMode === "none"
-                                ? rowsLocal
+                                ? rows
                                 : `<section class="capture-group">
                                   <div class="capture-group-header">
                                     <div class="capture-group-title">${esc(group.label)}</div>
                                     <div class="capture-group-meta">${esc(groupMeta)}</div>
                                   </div>
-                                  ${rowsLocal}
+                                  ${rows}
                                 </section>`;
                             })
                             .join("")

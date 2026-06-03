@@ -1,4 +1,3 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -7,17 +6,12 @@ import {
 } from "../plugins/config-contracts.js";
 import { normalizePluginsConfig, resolveEnableState } from "../plugins/config-state.js";
 import type { PluginOrigin } from "../plugins/plugin-origin.types.js";
-import { parseConfigPathArrayIndex } from "../shared/path-array-index.js";
 import {
   collectSecretInputAssignment,
   type ResolverContext,
   type SecretDefaults,
 } from "./runtime-shared.js";
 import { isRecord } from "./shared.js";
-
-function parsePluginConfigArrayIndex(segment: string): number | undefined {
-  return parseConfigPathArrayIndex(segment);
-}
 
 /**
  * Walk manifest-declared plugin config SecretRef surfaces and collect
@@ -167,15 +161,19 @@ function createPluginConfigAssignmentApply(
   relativePath: string,
 ): (value: unknown) => void {
   return (value) => {
-    const segments = normalizeStringEntries(relativePath.replace(/\[(\d+)\]/g, ".$1").split("."));
+    const segments = relativePath
+      .replace(/\[(\d+)\]/g, ".$1")
+      .split(".")
+      .map((segment) => segment.trim())
+      .filter(Boolean);
     if (segments.length === 0) {
       return;
     }
     let current: unknown = pluginConfig;
     for (const segment of segments.slice(0, -1)) {
       if (Array.isArray(current)) {
-        const index = parsePluginConfigArrayIndex(segment);
-        current = index !== undefined && index < current.length ? current[index] : undefined;
+        const index = Number.parseInt(segment, 10);
+        current = Number.isInteger(index) ? current[index] : undefined;
         continue;
       }
       current = isRecord(current) ? current[segment] : undefined;
@@ -185,8 +183,8 @@ function createPluginConfigAssignmentApply(
       return;
     }
     if (Array.isArray(current)) {
-      const index = parsePluginConfigArrayIndex(finalSegment);
-      if (index !== undefined && index < current.length) {
+      const index = Number.parseInt(finalSegment, 10);
+      if (Number.isInteger(index) && index >= 0 && index < current.length) {
         current[index] = value;
       }
       return;

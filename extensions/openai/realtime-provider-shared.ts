@@ -1,18 +1,22 @@
-import { resolveExpiresAtMsFromEpochSeconds } from "openclaw/plugin-sdk/number-runtime";
 import {
   createProviderHttpError,
   resolveProviderRequestHeaders,
 } from "openclaw/plugin-sdk/provider-http";
 import { captureWsEvent } from "openclaw/plugin-sdk/proxy-capture";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
-import {
-  asFiniteNumber,
-  asOptionalRecord as asObjectRecord,
-  normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export const trimToUndefined = normalizeOptionalString;
-export { asFiniteNumber, asObjectRecord };
+
+export function asFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+export function asObjectRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
 
 export function readRealtimeErrorDetail(error: unknown): string {
   if (typeof error === "string" && error) {
@@ -126,10 +130,9 @@ async function createOpenAIRealtimeSecret(
     payload && typeof payload === "object"
       ? (payload as Record<string, unknown>).expires_at
       : undefined;
-  const expiresAtMs = resolveExpiresAtMsFromEpochSeconds(expiresAt);
   return {
     value: clientSecret,
-    ...(expiresAtMs === undefined ? {} : { expiresAt: expiresAtMs }),
+    ...(typeof expiresAt === "number" ? { expiresAt } : {}),
   };
 }
 

@@ -11,7 +11,6 @@ type PluginRegistrationContractParams = {
   realtimeTranscriptionProviderIds?: string[];
   realtimeVoiceProviderIds?: string[];
   mediaUnderstandingProviderIds?: string[];
-  transcriptSourceProviderIds?: string[];
   imageGenerationProviderIds?: string[];
   videoGenerationProviderIds?: string[];
   musicGenerationProviderIds?: string[];
@@ -98,14 +97,6 @@ export function describePluginRegistrationContract(params: PluginRegistrationCon
       it("keeps bundled media-understanding ownership explicit", () => {
         expect(findRegistration(params.pluginId).mediaUnderstandingProviderIds).toEqual(
           params.mediaUnderstandingProviderIds,
-        );
-      });
-    }
-
-    if (params.transcriptSourceProviderIds) {
-      it("keeps bundled transcripts source ownership explicit", () => {
-        expect(findRegistration(params.pluginId).transcriptSourceProviderIds).toEqual(
-          params.transcriptSourceProviderIds,
         );
       });
     }

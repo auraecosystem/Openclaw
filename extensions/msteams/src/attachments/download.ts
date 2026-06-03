@@ -124,7 +124,6 @@ async function fetchWithAuthFallback(params: {
   url: string;
   tokenProvider?: MSTeamsAccessTokenProvider;
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   requestInit?: RequestInit;
   resolveFn?: MSTeamsAttachmentResolveFn;
   policy: MSTeamsAttachmentFetchPolicy;
@@ -133,7 +132,6 @@ async function fetchWithAuthFallback(params: {
     url: params.url,
     policy: params.policy,
     fetchFn: params.fetchFn,
-    fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
     requestInit: params.requestInit,
     resolveFn: params.resolveFn,
   });
@@ -149,7 +147,6 @@ async function fetchWithAuthFallback(params: {
   if (!isUrlAllowed(params.url, params.policy.authAllowHosts)) {
     return firstAttempt;
   }
-  await firstAttempt.body?.cancel();
 
   const scopes = scopeCandidatesForUrl(params.url);
   const fetchFn = params.fetchFn ?? fetch;
@@ -162,7 +159,6 @@ async function fetchWithAuthFallback(params: {
         url: params.url,
         policy: params.policy,
         fetchFn,
-        fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
         requestInit: {
           ...params.requestInit,
           headers: authHeaders,
@@ -178,10 +174,8 @@ async function fetchWithAuthFallback(params: {
       }
       if (authAttempt.status !== 401 && authAttempt.status !== 403) {
         // Preserve scope fallback semantics for non-auth failures.
-        await authAttempt.body?.cancel();
         continue;
       }
-      await authAttempt.body?.cancel();
     } catch {
       // Try the next scope.
     }
@@ -201,7 +195,6 @@ export async function downloadMSTeamsAttachments(params: {
   allowHosts?: string[];
   authAllowHosts?: string[];
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   resolveFn?: MSTeamsAttachmentResolveFn;
   /** When true, embeds original filename in stored path for later extraction. */
   preserveFilenames?: boolean;
@@ -300,15 +293,16 @@ export async function downloadMSTeamsAttachments(params: {
         placeholder: candidate.placeholder,
         preserveFilenames: params.preserveFilenames,
         ssrfPolicy,
-        // `fetchImpl` below owns Teams auth fallback and enforces the
-        // attachment fetch policy through `safeFetchWithPolicy`.
+        // `fetchImpl` below already validates each hop against the hostname
+        // allowlist via `safeFetchWithPolicy`, so skip `readRemoteMediaBuffer`'s
+        // strict SSRF dispatcher (incompatible with Node 24+ / undici v7;
+        // see issue #63396).
         useDirectFetch: true,
         fetchImpl: (input, init) =>
           fetchWithAuthFallback({
             url: resolveRequestUrl(input),
             tokenProvider: params.tokenProvider,
             fetchFn: params.fetchFn,
-            fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
             requestInit: init,
             resolveFn: params.resolveFn,
             policy,
@@ -316,10 +310,10 @@ export async function downloadMSTeamsAttachments(params: {
       });
       out.push(media);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      params.logger?.warn?.(
-        `msteams attachment download failed host=${safeHostForLog(candidate.url)} error=${msg}`,
-      );
+      params.logger?.warn?.("msteams attachment download failed", {
+        error: err instanceof Error ? err.message : String(err),
+        host: safeHostForLog(candidate.url),
+      });
     }
   }
   return out;

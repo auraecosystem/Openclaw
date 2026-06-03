@@ -6,7 +6,6 @@ import {
   buildGatewayDiscoveryLabel,
   buildGatewayDiscoveryTarget,
 } from "../infra/gateway-discovery-targets.js";
-import { parseStrictNonNegativeInteger } from "../infra/parse-finite-number.js";
 import { resolveWideAreaDiscoveryDomain } from "../infra/widearea-dns.js";
 import { resolveSecretInputModeForEnvSelection } from "../plugins/provider-auth-mode.js";
 import { promptSecretRefForSetup } from "../plugins/provider-auth-ref.js";
@@ -97,8 +96,8 @@ export async function promptRemoteGatewayConfig(
         ],
       });
       if (selection !== "manual") {
-        const idx = parseStrictNonNegativeInteger(selection);
-        selectedBeacon = idx === undefined ? null : (beacons[idx] ?? null);
+        const idx = Number.parseInt(selection, 10);
+        selectedBeacon = Number.isFinite(idx) ? (beacons[idx] ?? null) : null;
       }
     }
   }

@@ -1,4 +1,3 @@
-import { readStringValue } from "@openclaw/normalization-core/string-coerce";
 import { Type } from "typebox";
 import { getRuntimeConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -6,14 +5,14 @@ import { callGateway } from "../../gateway/call.js";
 import { capArrayByJsonBytes } from "../../gateway/session-utils.fs.js";
 import { jsonUtf8Bytes } from "../../infra/json-utf8-bytes.js";
 import { redactToolPayloadText } from "../../logging/redact.js";
+import { readStringValue } from "../../shared/string-coerce.js";
 import { truncateUtf16Safe } from "../../utils.js";
-import { optionalPositiveIntegerSchema } from "../schema/typebox.js";
 import {
   describeSessionsHistoryTool,
   SESSIONS_HISTORY_TOOL_DISPLAY_SUMMARY,
 } from "../tool-description-presets.js";
 import type { AnyAgentTool } from "./common.js";
-import { jsonResult, readPositiveIntegerParam, readStringParam } from "./common.js";
+import { jsonResult, readStringParam } from "./common.js";
 import {
   createSessionVisibilityGuard,
   createAgentToAgentPolicy,
@@ -26,7 +25,7 @@ import {
 
 const SessionsHistoryToolSchema = Type.Object({
   sessionKey: Type.String(),
-  limit: optionalPositiveIntegerSchema(),
+  limit: Type.Optional(Type.Number({ minimum: 1 })),
   includeTools: Type.Optional(Type.Boolean()),
 });
 
@@ -80,10 +79,6 @@ function sanitizeHistoryContentBlock(block: unknown): {
     // The encrypted signature can be extremely large and is not useful for history recall.
     if ("thinkingSignature" in entry) {
       delete entry.thinkingSignature;
-      truncated = true;
-    }
-    if ("openclawReasoningReplay" in entry) {
-      delete entry.openclawReasoningReplay;
       truncated = true;
     }
   }
@@ -248,7 +243,10 @@ export function createSessionsHistoryTool(opts?: {
         });
       }
 
-      const limit = readPositiveIntegerParam(params, "limit");
+      const limit =
+        typeof params.limit === "number" && Number.isFinite(params.limit)
+          ? Math.max(1, Math.floor(params.limit))
+          : undefined;
       const includeTools = Boolean(params.includeTools);
       const result = await gatewayCall<{ messages: Array<unknown> }>({
         method: "chat.history",

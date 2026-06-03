@@ -1,5 +1,5 @@
+import sharp from "sharp";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { createSolidPngBuffer } from "../../test/helpers/image-fixtures.js";
 
 const { infoMock, warnMock } = vi.hoisted(() => ({
   infoMock: vi.fn(),
@@ -25,7 +25,14 @@ vi.mock("../logging/subsystem.js", () => {
 import { sanitizeContentBlocksImages } from "./tool-images.js";
 
 async function createLargePng(): Promise<Buffer> {
-  return createSolidPngBuffer(2001, 8, { r: 0x7f, g: 0x7f, b: 0x7f });
+  const width = 2001;
+  const height = 8;
+  const raw = Buffer.alloc(width * height * 3, 0x7f);
+  return await sharp(raw, {
+    raw: { width, height, channels: 3 },
+  })
+    .png({ compressionLevel: 0 })
+    .toBuffer();
 }
 
 describe("tool-images log context", () => {
@@ -38,6 +45,16 @@ describe("tool-images log context", () => {
   beforeEach(() => {
     infoMock.mockClear();
     warnMock.mockClear();
+  });
+
+  it("includes filename from MEDIA text", async () => {
+    const blocks = [
+      { type: "text" as const, text: "MEDIA:/tmp/snapshots/camera-front.png" },
+      { type: "image" as const, data: png.toString("base64"), mimeType: "image/png" },
+    ];
+    await sanitizeContentBlocksImages(blocks, "nodes:camera_snap");
+    const messages = infoMock.mock.calls.map((call) => String(call[0] ?? ""));
+    expect(messages.join("\n")).toContain("camera-front.png");
   });
 
   it("includes filename from read label", async () => {

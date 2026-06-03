@@ -9,11 +9,7 @@
 import fs from "node:fs/promises";
 import nodePath from "node:path";
 import { resolveFetch } from "openclaw/plugin-sdk/fetch-runtime";
-import { detectMime, parseMediaContentLength } from "openclaw/plugin-sdk/media-runtime";
-import {
-  parseStrictNonNegativeInteger,
-  resolveTimerTimeoutMs,
-} from "openclaw/plugin-sdk/number-runtime";
+import { detectMime } from "openclaw/plugin-sdk/media-runtime";
 import { readResponseWithLimit } from "openclaw/plugin-sdk/response-limit-runtime";
 import WebSocket from "ws";
 
@@ -80,9 +76,8 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   if (!fetchImpl) {
     throw new Error("fetch is not available");
   }
-  const safeTimeoutMs = resolveTimerTimeoutMs(timeoutMs, DEFAULT_TIMEOUT_MS);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), safeTimeoutMs);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetchImpl(url, { ...init, signal: controller.signal });
   } finally {
@@ -98,7 +93,12 @@ function normalizeMaxResponseBytes(value: number | undefined): number {
 }
 
 function readContentLength(res: Response): number | undefined {
-  return parseMediaContentLength(res.headers?.get("content-length") ?? null) ?? undefined;
+  const raw = res.headers?.get("content-length");
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 async function readCappedResponseBuffer(res: Response, maxResponseBytes: number): Promise<Buffer> {
@@ -146,13 +146,12 @@ function containerReceiveCheck(
 ): Promise<{ ok: boolean; status?: number | null; error?: string | null }> {
   const wsUrl = `${normalizedBaseUrl.replace(/^http/, "ws")}/v1/receive/${encodeURIComponent(account)}`;
   return new Promise((resolve) => {
-    const safeTimeoutMs = resolveTimerTimeoutMs(timeoutMs, DEFAULT_TIMEOUT_MS);
     let settled = false;
     let ws: WebSocket | undefined;
     const timer = setTimeout(() => {
       settle({ ok: false, status: null, error: "Signal container receive WebSocket timed out" });
       ws?.terminate();
-    }, safeTimeoutMs);
+    }, timeoutMs);
     timer.unref?.();
     const settle = (result: { ok: boolean; status?: number | null; error?: string | null }) => {
       if (settled) {
@@ -298,7 +297,7 @@ export async function streamContainerEvents(params: {
       logError(
         `[signal-ws] failed to create WebSocket: ${err instanceof Error ? err.message : String(err)}`,
       );
-      reject(toLintErrorObject(err, "Non-Error rejection"));
+      reject(err);
       return;
     }
 
@@ -421,8 +420,9 @@ function parseContainerSendTimestamp(raw: unknown): number | undefined {
   if (raw == null) {
     return undefined;
   }
-  const timestamp = parseStrictNonNegativeInteger(raw);
-  if (timestamp === undefined) {
+  const timestamp =
+    typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(timestamp)) {
     throw new Error("Signal REST send returned invalid timestamp");
   }
   return timestamp;
@@ -716,18 +716,4 @@ export async function containerRpcRequest<T = unknown>(
     default:
       throw new Error(`Unsupported container RPC method: ${method}`);
   }
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

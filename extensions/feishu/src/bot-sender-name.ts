@@ -1,7 +1,3 @@
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createFeishuClient } from "./client.js";
 import type { ResolvedFeishuAccount } from "./types.js";
@@ -93,13 +89,9 @@ export async function resolveFeishuSenderName(params: {
   }
 
   const cached = senderNameCache.get(normalizedSenderId);
-  const now = asDateTimestampMs(Date.now());
-  const cachedExpireAt = cached ? asDateTimestampMs(cached.expireAt) : undefined;
-  if (cached && now !== undefined && cachedExpireAt !== undefined && cachedExpireAt > now) {
+  const now = Date.now();
+  if (cached && cached.expireAt > now) {
     return { name: cached.name };
-  }
-  if (cached) {
-    senderNameCache.delete(normalizedSenderId);
   }
 
   try {
@@ -113,10 +105,7 @@ export async function resolveFeishuSenderName(params: {
     const name = user?.name ?? user?.nickname ?? user?.en_name;
 
     if (name) {
-      const expireAt = resolveExpiresAtMsFromDurationMs(SENDER_NAME_TTL_MS);
-      if (expireAt !== undefined) {
-        senderNameCache.set(normalizedSenderId, { name, expireAt });
-      }
+      senderNameCache.set(normalizedSenderId, { name, expireAt: now + SENDER_NAME_TTL_MS });
       return { name };
     }
     return {};

@@ -294,7 +294,7 @@ async function processMessage(
   const configuredGroupName = message.groupName?.trim() || "";
   const groupContext =
     isGroup && !configuredGroupName
-      ? await resolveZaloGroupContext(account.profile, chatId).catch((err: unknown) => {
+      ? await resolveZaloGroupContext(account.profile, chatId).catch((err) => {
           logVerbose(
             core,
             runtime,
@@ -621,7 +621,7 @@ async function processMessage(
     cliMsgId: message.cliMsgId,
   });
 
-  const ctxPayload = core.channel.inbound.buildContext({
+  const ctxPayload = core.channel.turn.buildContext({
     channel: "zalouser",
     accountId: route.accountId,
     messageId: messageSid,
@@ -636,6 +636,10 @@ async function processMessage(
       kind: isGroup ? "group" : "direct",
       id: chatId,
       label: fromLabel,
+      routePeer: {
+        kind: isGroup ? "group" : "direct",
+        id: chatId,
+      },
     },
     route: {
       agentId: route.agentId,
@@ -653,6 +657,7 @@ async function processMessage(
       rawBody,
       commandBody,
       inboundHistory,
+      envelopeFrom: fromLabel,
     },
     extra: {
       BodyForCommands: commandBody,
@@ -661,9 +666,6 @@ async function processMessage(
       GroupMembers: isGroup ? groupMembers : undefined,
       WasMentioned: isGroup ? mentionDecision.effectiveWasMentioned : undefined,
       CommandAuthorized: commandAuthorized,
-      ReplyToId: message.quotedGlobalMsgId || undefined,
-      ReplyToBody: message.quotedBody || undefined,
-      ReplyToIsQuote: message.quotedGlobalMsgId ? true : undefined,
     },
   });
 
@@ -684,7 +686,7 @@ async function processMessage(
     },
   };
 
-  await core.channel.inbound.dispatchReply({
+  await core.channel.turn.runAssembled({
     channel: "zalouser",
     accountId: account.accountId,
     cfg: config,
@@ -816,8 +818,7 @@ async function deliverZalouserReply(params: {
 export async function monitorZalouserProvider(
   options: ZalouserMonitorOptions,
 ): Promise<ZalouserMonitorResult> {
-  const { config } = options;
-  let { account } = options;
+  let { account, config } = options;
   const { abortSignal, statusSink, runtime } = options;
 
   const core = getZalouserRuntime();
@@ -986,7 +987,7 @@ export async function monitorZalouserProvider(
               statusSink,
             );
           })
-          .catch((err: unknown) => {
+          .catch((err) => {
             runtime.error(`[${account.accountId}] Failed to process message: ${String(err)}`);
           });
       },
@@ -1022,7 +1023,7 @@ export async function monitorZalouserProvider(
   return { stop };
 }
 
-export const testing = {
+export const __testing = {
   processMessage: async (params: {
     message: ZaloInboundMessage;
     account: ResolvedZalouserAccount;
@@ -1053,4 +1054,3 @@ export const testing = {
     );
   },
 };
-export { testing as __testing };

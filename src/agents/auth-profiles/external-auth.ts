@@ -23,7 +23,7 @@ type ExternalCliOverlayOptions = {
 
 let resolveExternalAuthProfilesForRuntime: ResolveExternalAuthProfiles | undefined;
 
-export const testing = {
+export const __testing = {
   resetResolveExternalAuthProfilesForTest(): void {
     resolveExternalAuthProfilesForRuntime = undefined;
   },
@@ -89,7 +89,7 @@ function resolveExternalAuthProfileMap(params: {
   return resolved;
 }
 
-export function listRuntimeExternalAuthProfiles(params: {
+function listRuntimeExternalAuthProfiles(params: {
   store: AuthProfileStore;
   agentDir?: string;
   env?: NodeJS.ProcessEnv;
@@ -121,10 +121,6 @@ function hasPersistableExternalCliSyncCandidate(
   return false;
 }
 
-function hasScopedExternalCliOverlay(params?: ExternalCliOverlayOptions): boolean {
-  return Boolean(params?.externalCliProviderIds || params?.externalCliProfileIds);
-}
-
 export function overlayExternalAuthProfiles(
   store: AuthProfileStore,
   params?: { agentDir?: string; env?: NodeJS.ProcessEnv } & ExternalCliOverlayOptions,
@@ -135,9 +131,7 @@ export function overlayExternalAuthProfiles(
     env: params?.env,
     externalCli: params,
   });
-  return overlayRuntimeExternalOAuthProfiles(store, profiles, {
-    runtimeExternalProfileIdsAuthoritative: !hasScopedExternalCliOverlay(params),
-  });
+  return overlayRuntimeExternalOAuthProfiles(store, profiles);
 }
 
 export function shouldPersistExternalAuthProfile(params: {
@@ -201,4 +195,3 @@ export function syncPersistedExternalCliAuthProfiles(
 // Compat aliases while file/function naming catches up.
 export const overlayExternalOAuthProfiles = overlayExternalAuthProfiles;
 export const shouldPersistExternalOAuthProfile = shouldPersistExternalAuthProfile;
-export { testing as __testing };

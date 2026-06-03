@@ -13,9 +13,8 @@ export { createBoundDeliveryRouter } from "../infra/outbound/bound-delivery-rout
 export { resolveConversationIdFromTargets } from "../infra/outbound/conversation-id.js";
 export { getGlobalHookRunner } from "../plugins/hook-runner-global.js";
 export {
-  formatEmbeddedAgentQueueFailureSummary,
-  isEmbeddedAgentRunActive,
-  isEmbeddedRunAbandoned,
-  queueEmbeddedAgentMessageWithOutcomeAsync,
+  formatEmbeddedPiQueueFailureSummary,
+  isEmbeddedPiRunActive,
+  queueEmbeddedPiMessageWithOutcomeAsync,
   resolveActiveEmbeddedRunSessionId,
-} from "./embedded-agent-runner/runs.js";
+} from "./pi-embedded-runner/runs.js";

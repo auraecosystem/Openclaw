@@ -3,72 +3,60 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { undiciFetchMock, agentSpy, envHttpProxyAgentSpy, proxyAgentSpy, createMockUndiciRuntime } =
-  vi.hoisted(() => {
-    const undiciFetchMockLocal = vi.fn();
-    const agentSpyLocal = vi.fn();
-    const envHttpProxyAgentSpyLocal = vi.fn();
-    const proxyAgentSpyLocal = vi.fn();
-    const createMockUndiciRuntimeLocal = () => {
-      class Agent {
-        options: unknown;
-        constructor(options?: unknown) {
-          this.options = options;
-          agentSpyLocal(options);
-        }
-      }
-      class EnvHttpProxyAgent {
-        options: unknown;
-        constructor(options?: unknown) {
-          if (
-            typeof options === "object" &&
-            options !== null &&
-            ("httpsProxy" in options || "httpProxy" in options)
-          ) {
-            const proxyOptions = options as { httpsProxy?: unknown; httpProxy?: unknown };
-            if (proxyOptions.httpsProxy === "bad-proxy" || proxyOptions.httpProxy === "bad-proxy") {
-              throw new Error("bad env proxy");
-            }
-          }
-          this.options = options;
-          envHttpProxyAgentSpyLocal(options);
-        }
-      }
-      class ProxyAgent {
-        options: unknown;
-        uri: string;
-        constructor(options: string | { uri: string; allowH2?: boolean }) {
-          const resolved = typeof options === "string" ? { uri: options } : options;
-          if (resolved.uri === "bad-proxy") {
-            throw new Error("bad proxy");
-          }
-          this.options = resolved;
-          this.uri = resolved.uri;
-          proxyAgentSpyLocal(resolved);
-        }
-      }
-      return {
-        Agent,
-        EnvHttpProxyAgent,
-        ProxyAgent,
-        fetch: undiciFetchMockLocal,
-      };
-    };
-    return {
-      undiciFetchMock: undiciFetchMockLocal,
-      agentSpy: agentSpyLocal,
-      envHttpProxyAgentSpy: envHttpProxyAgentSpyLocal,
-      proxyAgentSpy: proxyAgentSpyLocal,
-      createMockUndiciRuntime: createMockUndiciRuntimeLocal,
-    };
-  });
+const { undiciFetchMock, agentSpy, envHttpProxyAgentSpy, proxyAgentSpy } = vi.hoisted(() => ({
+  undiciFetchMock: vi.fn(),
+  agentSpy: vi.fn(),
+  envHttpProxyAgentSpy: vi.fn(),
+  proxyAgentSpy: vi.fn(),
+}));
 
 const TEST_UNDICI_RUNTIME_DEPS_KEY = "__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__";
 
-vi.mock("undici", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("undici")>()),
-  ...createMockUndiciRuntime(),
-}));
+vi.mock("undici", () => {
+  class Agent {
+    options: unknown;
+    constructor(options?: unknown) {
+      this.options = options;
+      agentSpy(options);
+    }
+  }
+  class EnvHttpProxyAgent {
+    options: unknown;
+    constructor(options?: unknown) {
+      if (
+        typeof options === "object" &&
+        options !== null &&
+        ("httpsProxy" in options || "httpProxy" in options)
+      ) {
+        const proxyOptions = options as { httpsProxy?: unknown; httpProxy?: unknown };
+        if (proxyOptions.httpsProxy === "bad-proxy" || proxyOptions.httpProxy === "bad-proxy") {
+          throw new Error("bad env proxy");
+        }
+      }
+      this.options = options;
+      envHttpProxyAgentSpy(options);
+    }
+  }
+  class ProxyAgent {
+    options: unknown;
+    uri: string;
+    constructor(options: string | { uri: string; allowH2?: boolean }) {
+      const resolved = typeof options === "string" ? { uri: options } : options;
+      if (resolved.uri === "bad-proxy") {
+        throw new Error("bad proxy");
+      }
+      this.options = resolved;
+      this.uri = resolved.uri;
+      proxyAgentSpy(resolved);
+    }
+  }
+  return {
+    Agent,
+    EnvHttpProxyAgent,
+    ProxyAgent,
+    fetch: undiciFetchMock,
+  };
+});
 
 let resolveDiscordRestFetch: typeof import("./rest-fetch.js").resolveDiscordRestFetch;
 
@@ -104,7 +92,43 @@ function recordField(value: unknown, field: string): Record<string, unknown> {
 }
 
 function installUndiciRuntimeDeps(): void {
-  const runtime = createMockUndiciRuntime();
+  class Agent {
+    options: unknown;
+    constructor(options?: unknown) {
+      this.options = options;
+      agentSpy(options);
+    }
+  }
+  class EnvHttpProxyAgent {
+    options: unknown;
+    constructor(options?: unknown) {
+      if (
+        typeof options === "object" &&
+        options !== null &&
+        ("httpsProxy" in options || "httpProxy" in options)
+      ) {
+        const proxyOptions = options as { httpsProxy?: unknown; httpProxy?: unknown };
+        if (proxyOptions.httpsProxy === "bad-proxy" || proxyOptions.httpProxy === "bad-proxy") {
+          throw new Error("bad env proxy");
+        }
+      }
+      this.options = options;
+      envHttpProxyAgentSpy(options);
+    }
+  }
+  class ProxyAgent {
+    options: unknown;
+    uri: string;
+    constructor(options: string | { uri: string; allowH2?: boolean }) {
+      const resolved = typeof options === "string" ? { uri: options } : options;
+      if (resolved.uri === "bad-proxy") {
+        throw new Error("bad proxy");
+      }
+      this.options = resolved;
+      this.uri = resolved.uri;
+      proxyAgentSpy(resolved);
+    }
+  }
   class Pool {
     constructor(
       readonly origin: unknown,
@@ -112,8 +136,11 @@ function installUndiciRuntimeDeps(): void {
     ) {}
   }
   (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
-    ...runtime,
+    Agent,
+    EnvHttpProxyAgent,
     Pool,
+    ProxyAgent,
+    fetch: undiciFetchMock,
   };
 }
 

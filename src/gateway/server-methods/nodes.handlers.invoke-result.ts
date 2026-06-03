@@ -1,8 +1,4 @@
-import {
-  ErrorCodes,
-  errorShape,
-  validateNodeInvokeResultParams,
-} from "../../../packages/gateway-protocol/src/index.js";
+import { ErrorCodes, errorShape, validateNodeInvokeResultParams } from "../protocol/index.js";
 import { respondInvalidParams } from "./nodes.helpers.js";
 import type { GatewayRequestHandler } from "./types.js";
 

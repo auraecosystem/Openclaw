@@ -1,20 +1,45 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveGatewayCredentialsWithSecretInputs } from "./credentials-secret-inputs.js";
+import type {
+  ExplicitGatewayAuth,
+  GatewayCredentialMode,
+  GatewayCredentialPrecedence,
+  GatewayRemoteCredentialFallback,
+  GatewayRemoteCredentialPrecedence,
+} from "./credentials.js";
 import { resolveGatewayCredentialsFromConfig } from "./credentials.js";
 
-type GatewayCredentialConfigOptions = Parameters<typeof resolveGatewayCredentialsFromConfig>[0];
-
-export type GatewayConnectionAuthOptions = Omit<GatewayCredentialConfigOptions, "cfg"> & {
+export type GatewayConnectionAuthOptions = {
   config: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+  explicitAuth?: ExplicitGatewayAuth;
+  urlOverride?: string;
+  urlOverrideSource?: "cli" | "env";
+  modeOverride?: GatewayCredentialMode;
+  localTokenPrecedence?: GatewayCredentialPrecedence;
+  localPasswordPrecedence?: GatewayCredentialPrecedence;
+  remoteTokenPrecedence?: GatewayRemoteCredentialPrecedence;
+  remotePasswordPrecedence?: GatewayRemoteCredentialPrecedence;
+  remoteTokenFallback?: GatewayRemoteCredentialFallback;
+  remotePasswordFallback?: GatewayRemoteCredentialFallback;
 };
 
 function toGatewayCredentialOptions(
-  params: GatewayConnectionAuthOptions,
-): GatewayCredentialConfigOptions {
-  const { config, ...rest } = params;
+  params: Omit<GatewayConnectionAuthOptions, "config"> & { cfg: OpenClawConfig },
+) {
   return {
-    cfg: config,
-    ...rest,
+    cfg: params.cfg,
+    env: params.env,
+    explicitAuth: params.explicitAuth,
+    urlOverride: params.urlOverride,
+    urlOverrideSource: params.urlOverrideSource,
+    modeOverride: params.modeOverride,
+    localTokenPrecedence: params.localTokenPrecedence,
+    localPasswordPrecedence: params.localPasswordPrecedence,
+    remoteTokenPrecedence: params.remoteTokenPrecedence,
+    remotePasswordPrecedence: params.remotePasswordPrecedence,
+    remoteTokenFallback: params.remoteTokenFallback,
+    remotePasswordFallback: params.remotePasswordFallback,
   };
 }
 
@@ -23,13 +48,12 @@ export async function resolveGatewayConnectionAuth(
 ): Promise<{ token?: string; password?: string }> {
   return await resolveGatewayCredentialsWithSecretInputs({
     config: params.config,
-    ...toGatewayCredentialOptions(params),
+    ...toGatewayCredentialOptions({ ...params, cfg: params.config }),
   });
 }
 
-export function resolveGatewayConnectionAuthFromConfig(params: GatewayCredentialConfigOptions): {
-  token?: string;
-  password?: string;
-} {
-  return resolveGatewayCredentialsFromConfig(params);
+export function resolveGatewayConnectionAuthFromConfig(
+  params: Omit<GatewayConnectionAuthOptions, "config"> & { cfg: OpenClawConfig },
+): { token?: string; password?: string } {
+  return resolveGatewayCredentialsFromConfig(toGatewayCredentialOptions(params));
 }

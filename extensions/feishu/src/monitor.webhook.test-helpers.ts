@@ -1,9 +1,5 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import {
-  fetchWithSsrFGuard,
-  ssrfPolicyFromDangerouslyAllowPrivateNetwork,
-} from "openclaw/plugin-sdk/ssrf-runtime";
 import { vi } from "vitest";
 import type { ClawdbotConfig } from "../runtime-api.js";
 import type { monitorFeishuProvider } from "./monitor.js";
@@ -14,41 +10,26 @@ const WEBHOOK_MONITOR_START_MAX_ATTEMPTS = 4;
 
 export async function getFreePort(): Promise<number> {
   const server = createServer();
-  await new Promise<void>((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve());
-  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
   const address = server.address() as AddressInfo | null;
   if (!address) {
     throw new Error("missing server address");
   }
-  await new Promise<void>((resolve) => {
-    server.close(() => resolve());
-  });
+  await new Promise<void>((resolve) => server.close(() => resolve()));
   return address.port;
 }
 
 async function waitUntilServerReady(url: string): Promise<void> {
   for (let i = 0; i < WEBHOOK_READY_MAX_ATTEMPTS; i += 1) {
     try {
-      const { response, release } = await fetchWithSsrFGuard({
-        url,
-        init: { method: "GET" },
-        policy: ssrfPolicyFromDangerouslyAllowPrivateNetwork(true),
-        auditContext: "feishu-webhook-test-ready",
-      });
-      try {
-        if (response.status >= 200 && response.status < 500) {
-          return;
-        }
-      } finally {
-        await release();
+      const response = await fetch(url, { method: "GET" });
+      if (response.status >= 200 && response.status < 500) {
+        return;
       }
     } catch {
       // retry
     }
-    await new Promise((resolve) => {
-      setTimeout(resolve, WEBHOOK_READY_RETRY_DELAY_MS);
-    });
+    await new Promise((resolve) => setTimeout(resolve, WEBHOOK_READY_RETRY_DELAY_MS));
   }
   throw new Error(`server did not start: ${url}`);
 }
@@ -127,9 +108,7 @@ export async function withRunningWebhookMonitor(
       abortController.abort();
       await monitorPromise.catch(() => undefined);
       if (attempt < WEBHOOK_MONITOR_START_MAX_ATTEMPTS) {
-        await new Promise((resolve) => {
-          setTimeout(resolve, attempt * WEBHOOK_READY_RETRY_DELAY_MS);
-        });
+        await new Promise((resolve) => setTimeout(resolve, attempt * WEBHOOK_READY_RETRY_DELAY_MS));
       }
     }
   }

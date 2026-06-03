@@ -3,12 +3,6 @@ import path from "node:path";
 import { resolveAgentModelFallbackValues } from "../config/model-input.js";
 import { hasSessionAutoModelFallbackProvenance } from "../config/sessions/model-override-provenance.js";
 export { hasSessionAutoModelFallbackProvenance } from "../config/sessions/model-override-provenance.js";
-import {
-  lowercasePreservingWhitespace,
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalString,
-  resolvePrimaryStringValue,
-} from "@openclaw/normalization-core/string-coerce";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { AgentDefaultsConfig } from "../config/types.agent-defaults.js";
 import type { AgentModelConfig } from "../config/types.agents-shared.js";
@@ -16,12 +10,16 @@ import type { AgentConfig } from "../config/types.agents.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { isPathInside } from "../infra/path-guards.js";
 import {
-  isSubagentSessionKey,
   normalizeAgentId,
   parseAgentSessionKey,
   resolveAgentIdFromSessionKey,
 } from "../routing/session-key.js";
-import { resolveEffectiveAgentSkillFilter } from "../skills/discovery/agent-filter.js";
+import {
+  lowercasePreservingWhitespace,
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+  resolvePrimaryStringValue,
+} from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 import {
   listAgentIds,
@@ -29,6 +27,7 @@ import {
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
 } from "./agent-scope-config.js";
+import { resolveEffectiveAgentSkillFilter } from "./skills/agent-filter.js";
 export {
   listAgentEntries,
   listAgentIds,
@@ -43,7 +42,8 @@ export {
 
 /** Strip null bytes from paths to prevent ENOTDIR errors. */
 function stripNullBytes(s: string): string {
-  return s.split("\0").join("");
+  // eslint-disable-next-line no-control-regex
+  return s.replace(/\0/g, "");
 }
 
 const AUTO_FALLBACK_PRIMARY_PROBE_INTERVAL_MS = 5 * 60 * 1000;
@@ -96,24 +96,6 @@ export type AutoFallbackPrimaryProbe = {
   fallbackAuthProfileId?: string;
   fallbackAuthProfileIdSource?: "auto" | "user";
 };
-
-export function hasLegacyAutoFallbackWithoutOrigin(
-  entry:
-    | Pick<
-        SessionEntry,
-        | "modelOverrideSource"
-        | "modelOverrideFallbackOriginProvider"
-        | "modelOverrideFallbackOriginModel"
-      >
-    | null
-    | undefined,
-): boolean {
-  return (
-    entry?.modelOverrideSource === "auto" &&
-    (!normalizeOptionalString(entry.modelOverrideFallbackOriginProvider) ||
-      !normalizeOptionalString(entry.modelOverrideFallbackOriginModel))
-  );
-}
 
 export function resolveAutoFallbackPrimaryProbe(params: {
   entry:
@@ -316,7 +298,6 @@ export function resolveSessionAgentIds(params: {
 export function resolveSessionAgentId(params: {
   sessionKey?: string;
   config?: OpenClawConfig;
-  agentId?: string;
 }): string {
   return resolveSessionAgentIds(params).sessionAgentId;
 }
@@ -324,13 +305,12 @@ export function resolveSessionAgentId(params: {
 export function resolveAgentExecutionContract(
   cfg: OpenClawConfig | undefined,
   agentId?: string | null,
-): NonNullable<NonNullable<AgentDefaultsConfig["embeddedAgent"]>["executionContract"]> | undefined {
-  const defaultContract = cfg?.agents?.defaults?.embeddedAgent?.executionContract;
+): NonNullable<NonNullable<AgentDefaultsConfig["embeddedPi"]>["executionContract"]> | undefined {
+  const defaultContract = cfg?.agents?.defaults?.embeddedPi?.executionContract;
   if (!cfg || !agentId) {
     return defaultContract;
   }
-  const agentConfig = resolveAgentConfig(cfg, agentId);
-  const agentContract = agentConfig?.embeddedAgent?.executionContract;
+  const agentContract = resolveAgentConfig(cfg, agentId)?.embeddedPi?.executionContract;
   return agentContract ?? defaultContract;
 }
 
@@ -423,18 +403,6 @@ function resolveSelectedModelFallbacksOverride(
   return Array.isArray(raw.fallbacks) ? raw.fallbacks : undefined;
 }
 
-function resolveFirstModelFallbacksOverride(
-  candidates: Array<AgentModelConfig | undefined>,
-): string[] | undefined {
-  for (const candidate of candidates) {
-    const fallbackOverride = resolveSelectedModelFallbacksOverride(candidate);
-    if (fallbackOverride !== undefined) {
-      return fallbackOverride;
-    }
-  }
-  return undefined;
-}
-
 export type SubagentModelConfigSelectionSource = "subagent" | "agent" | "default-subagent";
 
 export type SubagentModelConfigSelectionResult = {
@@ -494,18 +462,6 @@ export function resolveSubagentModelFallbacksOverride(
   return undefined;
 }
 
-function resolveSubagentSpawnModelFallbacksOverride(
-  cfg: OpenClawConfig,
-  agentId: string,
-): string[] | undefined {
-  const agentConfig = resolveAgentConfig(cfg, agentId);
-  return resolveFirstModelFallbacksOverride([
-    agentConfig?.subagents?.model,
-    cfg.agents?.defaults?.subagents?.model,
-    agentConfig?.model,
-  ]);
-}
-
 export function resolveFallbackAgentId(params: {
   agentId?: string | null;
   sessionKey?: string | null;
@@ -544,7 +500,6 @@ export function hasConfiguredModelFallbacks(params: {
 export function resolveEffectiveModelFallbacks(params: {
   cfg: OpenClawConfig;
   agentId: string;
-  sessionKey?: string | null;
   hasSessionModelOverride: boolean;
   modelOverrideSource?: "auto" | "user";
   hasAutoFallbackProvenance?: boolean;
@@ -558,12 +513,6 @@ export function resolveEffectiveModelFallbacks(params: {
     (params.modelOverrideSource === undefined && params.hasAutoFallbackProvenance === true);
   if (!canUseConfiguredFallbacks) {
     return [];
-  }
-  const subagentFallbacksOverride = isSubagentSessionKey(params.sessionKey)
-    ? resolveSubagentSpawnModelFallbacksOverride(params.cfg, params.agentId)
-    : undefined;
-  if (subagentFallbacksOverride !== undefined) {
-    return subagentFallbacksOverride;
   }
   const defaultFallbacks = resolveAgentModelFallbackValues(params.cfg.agents?.defaults?.model);
   return agentFallbacksOverride ?? defaultFallbacks;

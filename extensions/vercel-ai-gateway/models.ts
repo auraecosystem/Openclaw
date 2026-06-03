@@ -1,9 +1,7 @@
-import { parseStrictFiniteNumber } from "openclaw/plugin-sdk/number-runtime";
 import { readProviderJsonArrayFieldResponse } from "openclaw/plugin-sdk/provider-http";
 import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { createSubsystemLogger } from "openclaw/plugin-sdk/runtime-env";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
-import { asPositiveSafeInteger } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export const VERCEL_AI_GATEWAY_PROVIDER_ID = "vercel-ai-gateway";
 export const VERCEL_AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
@@ -101,9 +99,9 @@ function toPerMillionCost(value: number | string | undefined): number {
     typeof value === "number"
       ? value
       : typeof value === "string"
-        ? parseStrictFiniteNumber(value)
-        : undefined;
-  if (numeric === undefined || numeric < 0) {
+        ? Number.parseFloat(value)
+        : Number.NaN;
+  if (!Number.isFinite(numeric) || numeric < 0) {
     return 0;
   }
   return numeric * 1_000_000;
@@ -152,13 +150,13 @@ function buildDiscoveredModelDefinition(
 
   const fallback = getStaticFallbackModel(id);
   const contextWindow =
-    asPositiveSafeInteger(model.context_window) ??
-    fallback?.contextWindow ??
-    VERCEL_AI_GATEWAY_DEFAULT_CONTEXT_WINDOW;
+    typeof model.context_window === "number" && Number.isFinite(model.context_window)
+      ? model.context_window
+      : (fallback?.contextWindow ?? VERCEL_AI_GATEWAY_DEFAULT_CONTEXT_WINDOW);
   const maxTokens =
-    asPositiveSafeInteger(model.max_tokens) ??
-    fallback?.maxTokens ??
-    VERCEL_AI_GATEWAY_DEFAULT_MAX_TOKENS;
+    typeof model.max_tokens === "number" && Number.isFinite(model.max_tokens)
+      ? model.max_tokens
+      : (fallback?.maxTokens ?? VERCEL_AI_GATEWAY_DEFAULT_MAX_TOKENS);
   const normalizedCost = normalizeCost(model.pricing);
 
   return {

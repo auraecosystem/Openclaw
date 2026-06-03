@@ -63,14 +63,6 @@ extension CritterStatusLabel {
                     .frame(width: 6, height: 6)
                     .padding(1)
             }
-
-            if self.voiceWakeMeterActive {
-                Circle()
-                    .fill(.orange)
-                    .frame(width: 5, height: 5)
-                    .padding(2)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-            }
         }
         .frame(width: 18, height: 18)
     }
@@ -247,8 +239,7 @@ extension CritterStatusLabel {
             sendCelebrationTick: 1,
             gatewayStatus: .running(details: nil),
             animationsEnabled: true,
-            iconState: .workingMain(.tool(.bash)),
-            voiceWakeMeterActive: true)
+            iconState: .workingMain(.tool(.bash)))
 
         _ = label.body
         _ = label.iconImage
@@ -284,8 +275,7 @@ extension CritterStatusLabel {
             sendCelebrationTick: 0,
             gatewayStatus: .failed("boom"),
             animationsEnabled: false,
-            iconState: .idle,
-            voiceWakeMeterActive: false)
+            iconState: .idle)
         _ = failed.gatewayNeedsAttention
         _ = failed.gatewayBadgeColor
 
@@ -298,8 +288,7 @@ extension CritterStatusLabel {
             sendCelebrationTick: 0,
             gatewayStatus: .stopped,
             animationsEnabled: false,
-            iconState: .idle,
-            voiceWakeMeterActive: false)
+            iconState: .idle)
         _ = stopped.gatewayNeedsAttention
         _ = stopped.gatewayBadgeColor
 

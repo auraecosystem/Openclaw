@@ -319,7 +319,9 @@ export function createStatusSummary(
       paths: [],
       defaults: {},
       recent: [],
-      ...(Object.hasOwn(options, "byAgent") ? { byAgent: options.byAgent ?? [] } : {}),
+      ...(Object.prototype.hasOwnProperty.call(options, "byAgent")
+        ? { byAgent: options.byAgent ?? [] }
+        : {}),
     },
   };
 }

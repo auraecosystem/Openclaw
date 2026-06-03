@@ -14,18 +14,11 @@ const mockState = vi.hoisted(() => ({
   prepareFileConsentActivityFs: vi.fn(),
   extractFilename: vi.fn(async () => "fallback.bin"),
   sendMSTeamsMessages: vi.fn(),
-  sendMSTeamsActivityWithReference: vi.fn(async () => ({ id: "message-1" })),
-  updateMSTeamsActivityWithReference: vi.fn(async () => ({ id: "updated" })),
-  deleteMSTeamsActivityWithReference: vi.fn(async () => {}),
   uploadAndShareSharePoint: vi.fn(),
   getDriveItemProperties: vi.fn(),
   buildTeamsFileInfoCard: vi.fn(),
-  createMSTeamsTokenProvider: vi.fn(),
 }));
 
-// `loadOutboundMediaFromUrl` is re-exported from msteams's runtime-api which
-// pulls from `openclaw/plugin-sdk/outbound-media` (post-migration). Mock the
-// canonical source so the re-export carries our stub through.
 vi.mock("openclaw/plugin-sdk/outbound-media", () => ({
   loadOutboundMediaFromUrl: mockState.loadOutboundMediaFromUrl,
 }));
@@ -59,16 +52,7 @@ vi.mock("./media-helpers.js", () => ({
 
 vi.mock("./messenger.js", () => ({
   sendMSTeamsMessages: mockState.sendMSTeamsMessages,
-  buildConversationReference: (ref: Record<string, unknown>) => ({
-    serviceUrl: (ref as { serviceUrl?: string }).serviceUrl ?? "https://service.example.com",
-    conversation: (ref as { conversation?: Record<string, unknown> }).conversation ?? {
-      id: "19:conversation@thread.tacv2",
-    },
-    agent: (ref as { agent?: Record<string, unknown> }).agent,
-    user: (ref as { user?: Record<string, unknown> }).user,
-    tenantId: (ref as { tenantId?: string }).tenantId,
-    aadObjectId: (ref as { aadObjectId?: string }).aadObjectId,
-  }),
+  buildConversationReference: () => ({}),
 }));
 
 vi.mock("./runtime.js", () => ({
@@ -92,49 +76,10 @@ vi.mock("./graph-chat.js", () => ({
   buildTeamsFileInfoCard: mockState.buildTeamsFileInfoCard,
 }));
 
-vi.mock("./sdk.js", () => ({
-  createMSTeamsTokenProvider: mockState.createMSTeamsTokenProvider,
-}));
-
-vi.mock("./sdk-proactive.js", () => ({
-  sendMSTeamsActivityWithReference: mockState.sendMSTeamsActivityWithReference,
-  updateMSTeamsActivityWithReference: mockState.updateMSTeamsActivityWithReference,
-  deleteMSTeamsActivityWithReference: mockState.deleteMSTeamsActivityWithReference,
-}));
-
-function createMockApp(overrides?: {
-  send?: ReturnType<typeof vi.fn>;
-  update?: ReturnType<typeof vi.fn>;
-  delete?: ReturnType<typeof vi.fn>;
-}) {
-  const sendFn = overrides?.send ?? vi.fn(async () => ({ id: "message-1" }));
-  const updateFn = overrides?.update ?? vi.fn(async () => ({ id: "updated" }));
-  const deleteFn = overrides?.delete ?? vi.fn(async () => {});
-  return {
-    send: sendFn,
-    api: {
-      conversations: {
-        activities: () => ({
-          create: sendFn,
-          update: updateFn,
-          delete: deleteFn,
-        }),
-      },
-    },
-  };
-}
-
-function mockProactiveSendContextFailure(error: string) {
-  mockState.sendMSTeamsActivityWithReference.mockRejectedValue(new Error(error));
-  mockState.updateMSTeamsActivityWithReference.mockRejectedValue(new Error(error));
-  mockState.deleteMSTeamsActivityWithReference.mockRejectedValue(new Error(error));
-  const failingApp = createMockApp({
-    send: vi.fn().mockRejectedValue(new Error(error)),
-    update: vi.fn().mockRejectedValue(new Error(error)),
-    delete: vi.fn().mockRejectedValue(new Error(error)),
-  });
+function mockContinueConversationFailure(error: string) {
+  const mockContinueConversation = vi.fn().mockRejectedValue(new Error(error));
   mockState.resolveMSTeamsSendContext.mockResolvedValue({
-    app: failingApp,
+    adapter: { continueConversation: mockContinueConversation },
     appId: "app-id",
     conversationId: "19:conversation@thread.tacv2",
     ref: {
@@ -145,10 +90,36 @@ function mockProactiveSendContextFailure(error: string) {
     },
     log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     conversationType: "personal",
-    sdkCloudOptions: { cloud: "Public" },
     tokenProvider: {},
   });
+  return mockContinueConversation;
 }
+
+const continueConversationFailureCases = [
+  {
+    name: "editMessageMSTeams",
+    error: "Service unavailable",
+    expected: "msteams edit failed",
+    invoke: () =>
+      editMessageMSTeams({
+        cfg: {} as OpenClawConfig,
+        to: "conversation:19:conversation@thread.tacv2",
+        activityId: "activity-123",
+        text: "Updated text",
+      }),
+  },
+  {
+    name: "deleteMessageMSTeams",
+    error: "Not found",
+    expected: "msteams delete failed",
+    invoke: () =>
+      deleteMessageMSTeams({
+        cfg: {} as OpenClawConfig,
+        to: "conversation:19:conversation@thread.tacv2",
+        activityId: "activity-456",
+      }),
+  },
+];
 
 function createSharePointSendContext(params: {
   conversationId: string;
@@ -156,7 +127,15 @@ function createSharePointSendContext(params: {
   siteId: string;
 }) {
   return {
-    app: createMockApp(),
+    adapter: {
+      continueConversation: vi.fn(
+        async (
+          _id: string,
+          _ref: unknown,
+          fn: (ctx: { sendActivity: () => { id: "msg-1" } }) => Promise<void>,
+        ) => fn({ sendActivity: () => ({ id: "msg-1" }) }),
+      ),
+    },
     appId: "app-id",
     conversationId: params.conversationId,
     graphChatId: params.graphChatId,
@@ -164,7 +143,6 @@ function createSharePointSendContext(params: {
     log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     conversationType: "groupChat" as const,
     replyStyle: "top-level" as const,
-    sdkCloudOptions: { cloud: "Public" as const },
     tokenProvider: { getAccessToken: vi.fn(async () => "token") },
     mediaMaxBytes: 8 * 1024 * 1024,
     sharePointSiteId: params.siteId,
@@ -207,13 +185,34 @@ type MockWithCalls = {
   mock: { calls: unknown[][] };
 };
 
+function mockCallAt(mock: MockWithCalls, index = 0): unknown[] {
+  const call = mock.mock.calls[index];
+  if (!call) {
+    throw new Error(`expected mock call ${index}`);
+  }
+  return call;
+}
+
 function firstObjectArg(mock: MockWithCalls): Record<string, unknown> {
-  const value = mock.mock.calls[0]?.[0];
+  const value = mockCallAt(mock)[0];
   if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("expected first mock call to receive an object argument");
   }
   return value as Record<string, unknown>;
 }
+
+function continueConversationCall(mock: MockWithCalls): unknown[] {
+  return mockCallAt(mock);
+}
+
+function continueConversationRef(mock: MockWithCalls): Record<string, unknown> {
+  const ref = continueConversationCall(mock)[1];
+  if (ref === undefined || ref === null || typeof ref !== "object" || Array.isArray(ref)) {
+    throw new Error("expected continueConversation ref object");
+  }
+  return ref as Record<string, unknown>;
+}
+
 describe("sendMessageMSTeams", () => {
   beforeEach(() => {
     mockState.loadOutboundMediaFromUrl.mockReset();
@@ -231,9 +230,6 @@ describe("sendMessageMSTeams", () => {
     mockState.prepareFileConsentActivityFs.mockReset();
     mockState.extractFilename.mockReset();
     mockState.sendMSTeamsMessages.mockReset();
-    mockState.sendMSTeamsActivityWithReference.mockReset();
-    mockState.updateMSTeamsActivityWithReference.mockReset();
-    mockState.deleteMSTeamsActivityWithReference.mockReset();
     mockState.uploadAndShareSharePoint.mockReset();
     mockState.getDriveItemProperties.mockReset();
     mockState.buildTeamsFileInfoCard.mockReset();
@@ -241,22 +237,18 @@ describe("sendMessageMSTeams", () => {
     mockState.extractFilename.mockResolvedValue("fallback.bin");
     mockState.requiresFileConsent.mockReturnValue(false);
     mockState.resolveMSTeamsSendContext.mockResolvedValue({
-      app: createMockApp(),
+      adapter: {},
       appId: "app-id",
       conversationId: "19:conversation@thread.tacv2",
       ref: {},
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "personal",
       replyStyle: "top-level",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: { getAccessToken: vi.fn(async () => "token") },
       mediaMaxBytes: 8 * 1024,
       sharePointSiteId: undefined,
     });
     mockState.sendMSTeamsMessages.mockResolvedValue(["message-1"]);
-    mockState.sendMSTeamsActivityWithReference.mockResolvedValue({ id: "message-1" });
-    mockState.updateMSTeamsActivityWithReference.mockResolvedValue({ id: "updated" });
-    mockState.deleteMSTeamsActivityWithReference.mockResolvedValue(undefined);
   });
 
   it("loads media through shared helper and forwards mediaLocalRoots", async () => {
@@ -339,7 +331,6 @@ describe("sendMessageMSTeams", () => {
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "channel",
       replyStyle: "thread",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: { getAccessToken: vi.fn(async () => "token") },
       mediaMaxBytes: 8 * 1024,
       sharePointSiteId: undefined,
@@ -366,7 +357,6 @@ describe("sendMessageMSTeams", () => {
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "channel",
       replyStyle: "top-level",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: { getAccessToken: vi.fn(async () => "token") },
       mediaMaxBytes: 8 * 1024,
       sharePointSiteId: undefined,
@@ -449,20 +439,35 @@ describe("MSTeams continueConversation failure handling", () => {
   beforeEach(() => {
     mockState.resolveMSTeamsSendContext.mockReset();
   });
+
+  it.each(continueConversationFailureCases)(
+    "$name throws a descriptive error when continueConversation fails",
+    async ({ error, expected, invoke }) => {
+      mockContinueConversationFailure(error);
+
+      await expect(invoke()).rejects.toThrow(expected);
+    },
+  );
 });
 
 describe("editMessageMSTeams", () => {
   beforeEach(() => {
     mockState.resolveMSTeamsSendContext.mockReset();
-    mockState.updateMSTeamsActivityWithReference.mockReset();
-    mockState.updateMSTeamsActivityWithReference.mockResolvedValue({ id: "updated" });
   });
 
-  it("updates with the resolved Teams conversation reference", async () => {
-    const mockUpdateActivity = vi.fn(async () => ({ id: "updated" }));
-    const mockApp = createMockApp({ update: mockUpdateActivity });
+  it("calls continueConversation and updateActivity with correct params", async () => {
+    const mockUpdateActivity = vi.fn();
+    const mockContinueConversation = vi.fn(
+      async (_appId: string, _ref: unknown, logic: (ctx: unknown) => Promise<void>) => {
+        await logic({
+          sendActivity: vi.fn(),
+          updateActivity: mockUpdateActivity,
+          deleteActivity: vi.fn(),
+        });
+      },
+    );
     mockState.resolveMSTeamsSendContext.mockResolvedValue({
-      app: mockApp,
+      adapter: { continueConversation: mockContinueConversation },
       appId: "app-id",
       conversationId: "19:conversation@thread.tacv2",
       ref: {
@@ -473,7 +478,6 @@ describe("editMessageMSTeams", () => {
       },
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "personal",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: {},
     });
 
@@ -485,49 +489,37 @@ describe("editMessageMSTeams", () => {
     });
 
     expect(result.conversationId).toBe("19:conversation@thread.tacv2");
-
-    expect(mockState.updateMSTeamsActivityWithReference).toHaveBeenCalledWith(
-      mockApp,
-      expect.objectContaining({
-        conversation: { id: "19:conversation@thread.tacv2", conversationType: "personal" },
-        serviceUrl: "https://service.example.com",
-      }),
-      "activity-123",
-      {
-        type: "message",
-        id: "activity-123",
-        text: "Updated message text",
-      },
-      { serviceUrlBoundary: { cloud: "Public" } },
-    );
-  });
-
-  it("throws a descriptive error when update fails", async () => {
-    mockProactiveSendContextFailure("Service unavailable");
-
-    await expect(
-      editMessageMSTeams({
-        cfg: {} as OpenClawConfig,
-        to: "conversation:19:conversation@thread.tacv2",
-        activityId: "activity-123",
-        text: "Updated text",
-      }),
-    ).rejects.toThrow("msteams edit failed");
+    expect(mockContinueConversation).toHaveBeenCalledTimes(1);
+    const call = continueConversationCall(mockContinueConversation);
+    expect(call[0]).toBe("app-id");
+    expect(continueConversationRef(mockContinueConversation).activityId).toBeUndefined();
+    expect(typeof call[2]).toBe("function");
+    expect(mockUpdateActivity).toHaveBeenCalledWith({
+      type: "message",
+      id: "activity-123",
+      text: "Updated message text",
+    });
   });
 });
 
 describe("deleteMessageMSTeams", () => {
   beforeEach(() => {
     mockState.resolveMSTeamsSendContext.mockReset();
-    mockState.deleteMSTeamsActivityWithReference.mockReset();
-    mockState.deleteMSTeamsActivityWithReference.mockResolvedValue(undefined);
   });
 
-  it("deletes with the resolved Teams conversation reference", async () => {
-    const mockDeleteActivity = vi.fn(async () => {});
-    const mockApp = createMockApp({ delete: mockDeleteActivity });
+  it("calls continueConversation and deleteActivity with correct activityId", async () => {
+    const mockDeleteActivity = vi.fn();
+    const mockContinueConversation = vi.fn(
+      async (_appId: string, _ref: unknown, logic: (ctx: unknown) => Promise<void>) => {
+        await logic({
+          sendActivity: vi.fn(),
+          updateActivity: vi.fn(),
+          deleteActivity: mockDeleteActivity,
+        });
+      },
+    );
     mockState.resolveMSTeamsSendContext.mockResolvedValue({
-      app: mockApp,
+      adapter: { continueConversation: mockContinueConversation },
       appId: "app-id",
       conversationId: "19:conversation@thread.tacv2",
       ref: {
@@ -538,7 +530,6 @@ describe("deleteMessageMSTeams", () => {
       },
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "groupChat",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: {},
     });
 
@@ -549,35 +540,26 @@ describe("deleteMessageMSTeams", () => {
     });
 
     expect(result.conversationId).toBe("19:conversation@thread.tacv2");
+    expect(mockContinueConversation).toHaveBeenCalledTimes(1);
+    const call = continueConversationCall(mockContinueConversation);
+    expect(call[0]).toBe("app-id");
+    expect(continueConversationRef(mockContinueConversation).activityId).toBeUndefined();
+    expect(typeof call[2]).toBe("function");
+    expect(mockDeleteActivity).toHaveBeenCalledWith("activity-456");
+  });
 
-    expect(mockState.deleteMSTeamsActivityWithReference).toHaveBeenCalledWith(
-      mockApp,
-      expect.objectContaining({
-        conversation: { id: "19:conversation@thread.tacv2", conversationType: "groupChat" },
-        serviceUrl: "https://service.example.com",
-      }),
-      "activity-456",
-      { serviceUrlBoundary: { cloud: "Public" } },
+  it("passes the appId and proactive ref to continueConversation", async () => {
+    const mockContinueConversation = vi.fn(
+      async (_appId: string, _ref: unknown, logic: (ctx: unknown) => Promise<void>) => {
+        await logic({
+          sendActivity: vi.fn(),
+          updateActivity: vi.fn(),
+          deleteActivity: vi.fn(),
+        });
+      },
     );
-  });
-
-  it("throws a descriptive error when delete fails", async () => {
-    mockProactiveSendContextFailure("Not found");
-
-    await expect(
-      deleteMessageMSTeams({
-        cfg: {} as OpenClawConfig,
-        to: "conversation:19:conversation@thread.tacv2",
-        activityId: "activity-456",
-      }),
-    ).rejects.toThrow("msteams delete failed");
-  });
-
-  it("uses app from the resolved context for delete operations", async () => {
-    const mockDeleteActivity = vi.fn(async () => {});
-    const mockApp = createMockApp({ delete: mockDeleteActivity });
     mockState.resolveMSTeamsSendContext.mockResolvedValue({
-      app: mockApp,
+      adapter: { continueConversation: mockContinueConversation },
       appId: "my-app-id",
       conversationId: "19:conv@thread.tacv2",
       ref: {
@@ -589,7 +571,6 @@ describe("deleteMessageMSTeams", () => {
       },
       log: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
       conversationType: "personal",
-      sdkCloudOptions: { cloud: "Public" },
       tokenProvider: {},
     });
 
@@ -599,14 +580,9 @@ describe("deleteMessageMSTeams", () => {
       activityId: "activity-789",
     });
 
-    expect(mockState.deleteMSTeamsActivityWithReference).toHaveBeenCalledWith(
-      mockApp,
-      expect.objectContaining({
-        conversation: { id: "19:conv@thread.tacv2" },
-        serviceUrl: "https://service.example.com",
-      }),
-      "activity-789",
-      { serviceUrlBoundary: { cloud: "Public" } },
-    );
+    // appId should be forwarded correctly
+    expect(continueConversationCall(mockContinueConversation)[0]).toBe("my-app-id");
+    // activityId on the proactive ref should be cleared (undefined) — proactive pattern
+    expect(continueConversationRef(mockContinueConversation).activityId).toBeUndefined();
   });
 });

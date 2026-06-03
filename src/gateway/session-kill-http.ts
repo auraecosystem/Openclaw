@@ -1,5 +1,4 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   killControlledSubagentRun,
   killSubagentRunAdmin,
@@ -7,6 +6,7 @@ import {
 } from "../agents/subagent-control.js";
 import { getLatestSubagentRunByChildSessionKey } from "../agents/subagent-registry.js";
 import { getRuntimeConfig } from "../config/io.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import { isLocalDirectRequest, type ResolvedGatewayAuth } from "./auth.js";
 import {

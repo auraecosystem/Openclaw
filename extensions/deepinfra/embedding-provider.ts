@@ -6,24 +6,23 @@ import {
 } from "openclaw/plugin-sdk/memory-core-host-engine-embeddings";
 import {
   DEEPINFRA_BASE_URL,
-  DEEPINFRA_EMBED_FALLBACK_MODELS,
+  DEFAULT_DEEPINFRA_EMBEDDING_MODEL,
   normalizeDeepInfraModelRef,
 } from "./media-models.js";
 
-export const DEFAULT_DEEPINFRA_EMBEDDING_MODEL = DEEPINFRA_EMBED_FALLBACK_MODELS[0];
+export { DEFAULT_DEEPINFRA_EMBEDDING_MODEL };
 
 export async function createDeepInfraEmbeddingProvider(
-  options: MemoryEmbeddingProviderCreateOptions & { defaultModel?: string },
+  options: MemoryEmbeddingProviderCreateOptions,
 ): Promise<MemoryEmbeddingProviderCreateResult & { client: { model: string } }> {
-  const defaultModel = options.defaultModel ?? DEFAULT_DEEPINFRA_EMBEDDING_MODEL;
   const client = await resolveRemoteEmbeddingClient({
     provider: "deepinfra",
     options: {
       ...options,
-      model: normalizeDeepInfraModelRef(options.model, defaultModel),
+      model: normalizeDeepInfraModelRef(options.model, DEFAULT_DEEPINFRA_EMBEDDING_MODEL),
     },
     defaultBaseUrl: DEEPINFRA_BASE_URL,
-    normalizeModel: (model) => normalizeDeepInfraModelRef(model, defaultModel),
+    normalizeModel: (model) => normalizeDeepInfraModelRef(model, DEFAULT_DEEPINFRA_EMBEDDING_MODEL),
   });
   const provider = createRemoteEmbeddingProvider({
     id: "deepinfra",

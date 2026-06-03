@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { readPluginInstallIndex } from "../plugin-index-sqlite.mjs";
 
 const command = process.argv[2];
 const SCENARIOS = new Set([
@@ -52,21 +51,6 @@ function isPathInside(parent, child) {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
-function isPathInsideManagedNpmProjectPackageRoot(params) {
-  const relative = path.relative(path.join(params.stateDir, "npm", "projects"), params.installPath);
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return false;
-  }
-  const segments = relative.split(path.sep);
-  const packageSegments = params.packageName.split("/");
-  return (
-    segments.length === 2 + packageSegments.length &&
-    Boolean(segments[0]) &&
-    segments[1] === "node_modules" &&
-    packageSegments.every((segment, index) => segments[index + 2] === segment)
-  );
-}
-
 function write(file, contents) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, contents);
@@ -112,7 +96,7 @@ function acceptsIntent(coverage, id) {
 }
 
 function hasCoverage(coverage) {
-  return Boolean(coverage);
+  return !!coverage;
 }
 
 function seedState() {
@@ -407,9 +391,9 @@ function assertStateSurvived() {
 
 function readInstalledPluginIndex() {
   const stateDir = requireEnv("OPENCLAW_STATE_DIR");
-  const index = readPluginInstallIndex({ stateDir });
-  assert(index.installRecords, "installed plugin index missing");
-  return index;
+  const file = path.join(stateDir, "plugins", "installs.json");
+  assert(fs.existsSync(file), `installed plugin index missing: ${file}`);
+  return readJson(file);
 }
 
 function assertExternalPluginInstall(records, pluginId, packageName) {
@@ -443,10 +427,10 @@ function assertExternalPluginInstall(records, pluginId, packageName) {
     `configured external ${pluginId} package name changed: ${packageJson.name}`,
   );
   if (installedFromNpm) {
-    const stateDir = requireEnv("OPENCLAW_STATE_DIR");
+    const npmRoot = path.join(requireEnv("OPENCLAW_STATE_DIR"), "npm", "node_modules");
     assert(
-      isPathInsideManagedNpmProjectPackageRoot({ stateDir, installPath, packageName }),
-      `configured external ${pluginId} npm install path outside managed npm project root: ${installPath}`,
+      isPathInside(npmRoot, installPath),
+      `configured external ${pluginId} npm install path outside managed npm root: ${installPath}`,
     );
     assert(
       String(record.spec ?? record.resolvedSpec ?? "").startsWith(packageName),

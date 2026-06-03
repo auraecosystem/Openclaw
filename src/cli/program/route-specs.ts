@@ -50,7 +50,9 @@ export const routedCommands: RouteSpec[] = cliCommandCatalog
     ): entry is CliCommandCatalogEntry & { route: { id: keyof typeof routedCommandDefinitions } } =>
       Boolean(entry.route),
   )
-  .flatMap((entry) => {
-    const definition = routedCommandDefinitions[entry.route.id];
-    return definition ? [createParsedRoute({ entry, definition })] : [];
-  });
+  .map((entry) =>
+    createParsedRoute({
+      entry,
+      definition: routedCommandDefinitions[entry.route.id],
+    }),
+  );

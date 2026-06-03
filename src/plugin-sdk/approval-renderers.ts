@@ -1,6 +1,5 @@
-import { normalizeOptionalString } from "../../packages/normalization-core/src/string-coerce.js";
 import {
-  buildApprovalPresentation,
+  buildApprovalInteractiveReply,
   type ExecApprovalReplyDecision,
 } from "../infra/exec-approval-reply.js";
 import {
@@ -10,11 +9,11 @@ import {
   type PluginApprovalRequest,
   type PluginApprovalResolved,
 } from "../infra/plugin-approvals.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import type { ReplyPayload } from "./reply-payload.js";
 
 const DEFAULT_ALLOWED_DECISIONS = ["allow-once", "allow-always", "deny"] as const;
 
-/** Build a pending approval reply payload using the portable presentation API. */
 export function buildApprovalPendingReplyPayload(params: {
   approvalKind?: "exec" | "plugin";
   approvalId: string;
@@ -28,7 +27,7 @@ export function buildApprovalPendingReplyPayload(params: {
   const allowedDecisions = params.allowedDecisions ?? DEFAULT_ALLOWED_DECISIONS;
   return {
     text: params.text,
-    presentation: buildApprovalPresentation({
+    interactive: buildApprovalInteractiveReply({
       approvalId: params.approvalId,
       allowedDecisions,
     }),
@@ -47,7 +46,6 @@ export function buildApprovalPendingReplyPayload(params: {
   };
 }
 
-/** Build a resolved approval reply payload with approval metadata but no controls. */
 export function buildApprovalResolvedReplyPayload(params: {
   approvalId: string;
   approvalSlug: string;

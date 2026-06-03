@@ -6,7 +6,6 @@ import {
   type WebSearchProviderPlugin,
   type WebSearchProviderToolDefinition,
 } from "openclaw/plugin-sdk/provider-web-search-config-contract";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   resolveGeminiApiKey,
   resolveGeminiBaseUrl,
@@ -30,7 +29,7 @@ const GEMINI_TOOL_PARAMETERS = {
   properties: {
     query: { type: "string", description: "Search query string." },
     count: {
-      type: "integer",
+      type: "number",
       description: "Number of results to return (1-10).",
       minimum: 1,
       maximum: 10,
@@ -67,6 +66,10 @@ function createGeminiToolDefinition(
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function resolveGoogleModelProviderConfig(
   config?: OpenClawConfig,
 ): Record<string, unknown> | undefined {
@@ -92,25 +95,17 @@ function withGoogleModelProviderFallbacks(
     return searchConfig;
   }
   const gemini = isRecord(searchConfig?.gemini) ? { ...searchConfig.gemini } : {};
-  const mergedSearchConfig: Record<string, unknown> = searchConfig
-    ? Object.defineProperties({}, Object.getOwnPropertyDescriptors(searchConfig))
-    : {};
-  const geminiDescriptor = searchConfig
-    ? Object.getOwnPropertyDescriptor(searchConfig, "gemini")
-    : undefined;
+  const mergedSearchConfig = searchConfig ? { ...searchConfig } : {};
   if (provider.apiKey !== undefined) {
     gemini.providerApiKey = provider.apiKey;
   }
   if (provider.baseUrl !== undefined) {
     gemini.providerBaseUrl = provider.baseUrl;
   }
-  Object.defineProperty(mergedSearchConfig, "gemini", {
-    value: gemini,
-    enumerable: geminiDescriptor?.enumerable ?? false,
-    configurable: true,
-    writable: true,
-  });
-  return mergedSearchConfig;
+  return {
+    ...mergedSearchConfig,
+    gemini,
+  };
 }
 
 export function createGeminiWebSearchProvider(): WebSearchProviderPlugin {
@@ -148,10 +143,8 @@ export function createGeminiWebSearchProvider(): WebSearchProviderPlugin {
   };
 }
 
-export const testing = {
+export const __testing = {
   resolveGeminiApiKey,
   resolveGeminiBaseUrl,
   resolveGeminiModel,
-  withGoogleModelProviderFallbacks,
 } as const;
-export { testing as __testing };

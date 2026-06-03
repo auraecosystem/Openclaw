@@ -1,9 +1,8 @@
+import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
-import { getProviderEnvVars } from "../secrets/provider-env-vars.js";
+} from "../shared/string-coerce.js";
 import { normalizeProviderId } from "./model-selection.js";
 
 const KEY_SPLIT_RE = /[\s,;]+/g;
@@ -58,7 +57,10 @@ function parseKeyList(raw?: string | null): string[] {
   if (!raw) {
     return [];
   }
-  return normalizeStringEntries(raw.split(KEY_SPLIT_RE));
+  return raw
+    .split(KEY_SPLIT_RE)
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 function collectEnvPrefixedKeys(prefix: string, env: NodeJS.ProcessEnv): string[] {

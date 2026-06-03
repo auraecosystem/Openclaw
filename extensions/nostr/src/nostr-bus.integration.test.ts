@@ -167,19 +167,6 @@ describe("SeenTracker", () => {
 
       tracker.stop();
     });
-
-    it("keeps non-positive capacities usable", () => {
-      const tracker = createTracker({ maxEntries: 0 });
-
-      tracker.add("id1");
-      tracker.add("id2");
-
-      expect(tracker.size()).toBe(1);
-      expect(tracker.peek("id1")).toBe(false);
-      expect(tracker.peek("id2")).toBe(true);
-
-      tracker.stop();
-    });
   });
 
   describe("TTL expiration", () => {

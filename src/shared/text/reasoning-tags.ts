@@ -17,7 +17,6 @@ function applyTrim(value: string, mode: ReasoningTagTrim): string {
   return value.trim();
 }
 
-/** Detects whether a stray reasoning close tag separates two visible text regions. */
 export function hasOrphanReasoningCloseBoundary(params: {
   before: string;
   after: string;
@@ -25,7 +24,6 @@ export function hasOrphanReasoningCloseBoundary(params: {
   return params.before.trim().length > 0 && params.after.trim().length > 0;
 }
 
-/** Strips model reasoning/final tags from visible text while preserving literal code examples. */
 export function stripReasoningTagsFromText(
   text: string,
   options?: {
@@ -93,8 +91,6 @@ export function stripReasoningTagsFromText(
         const before = cleaned.slice(lastIndex, idx);
         const after = cleaned.slice(afterIndex);
         if (hasOrphanReasoningCloseBoundary({ before, after })) {
-          // A lone close tag after visible preamble means the hidden opening tag was
-          // probably truncated; drop the preamble so partial reasoning is not leaked.
           result = "";
         } else {
           result += before;

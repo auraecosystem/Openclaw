@@ -61,7 +61,7 @@ describe("google thinking policy", () => {
   ] as const)("maps Gemini 3 Flash budget %s to %s", (thinkingBudget, expected) => {
     expect(
       resolveGoogleGemini3ThinkingLevel({
-        modelId: "gemini-3.1-flash-lite",
+        modelId: "gemini-3.1-flash-lite-preview",
         thinkingBudget,
       }),
     ).toBe(expected);

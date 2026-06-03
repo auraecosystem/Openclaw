@@ -1,46 +1,33 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { writeCronStoreSnapshot } from "./service.issue-regressions.test-helpers.js";
 import { CronService } from "./service.js";
 import { createCronStoreHarness, createNoopLogger } from "./service.test-harness.js";
-import { loadCronStore, saveCronStore } from "./store.js";
 
 const noopLogger = createNoopLogger();
 const { makeStorePath } = createCronStoreHarness({ prefix: "openclaw-cron-issue-35195-" });
 
-async function pathExists(filePath: string): Promise<boolean> {
-  try {
-    await fs.stat(filePath);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return false;
-    }
-    throw error;
-  }
-}
-
 describe("cron backup timing for edit", () => {
-  it("updates SQLite cron jobs without creating a legacy migration archive", async () => {
+  it("keeps .bak as the pre-edit store even after later normalization persists", async () => {
     const store = await makeStorePath();
     const base = Date.now();
 
-    await saveCronStore(store.storePath, {
-      version: 1,
-      jobs: [
-        {
-          id: "job-35195",
-          name: "job-35195",
-          enabled: true,
-          createdAtMs: base,
-          updatedAtMs: base,
-          schedule: { kind: "every", everyMs: 60_000, anchorMs: base },
-          sessionTarget: "main",
-          wakeMode: "next-heartbeat",
-          payload: { kind: "systemEvent", text: "hello" },
-          state: {},
-        },
-      ],
-    });
+    await fs.mkdir(path.dirname(store.storePath), { recursive: true });
+    await writeCronStoreSnapshot(store.storePath, [
+      {
+        id: "job-35195",
+        name: "job-35195",
+        enabled: true,
+        createdAtMs: base,
+        updatedAtMs: base,
+        schedule: { kind: "every", everyMs: 60_000, anchorMs: base },
+        sessionTarget: "main",
+        wakeMode: "next-heartbeat",
+        payload: { kind: "systemEvent", text: "hello" },
+        state: {},
+      },
+    ]);
 
     const service = new CronService({
       storePath: store.storePath,
@@ -51,22 +38,44 @@ describe("cron backup timing for edit", () => {
       runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
     });
 
-    try {
-      await service.start();
+    await service.start();
 
-      await service.update("job-35195", {
-        payload: { kind: "systemEvent", text: "edited" },
-      });
+    const beforeEditRaw = await fs.readFile(store.storePath, "utf-8");
 
-      expect(await pathExists(`${store.storePath}.migrated`)).toBe(false);
-      const persistedAfterEdit = await loadCronStore(store.storePath);
-      expect(persistedAfterEdit.jobs[0]?.payload).toEqual({
-        kind: "systemEvent",
-        text: "edited",
-      });
-    } finally {
-      service.stop();
-      await store.cleanup();
-    }
+    await service.update("job-35195", {
+      payload: { kind: "systemEvent", text: "edited" },
+    });
+
+    const backupRaw = await fs.readFile(`${store.storePath}.bak`, "utf-8");
+    expect(JSON.parse(backupRaw)).toEqual(JSON.parse(beforeEditRaw));
+
+    const diskAfterEdit = JSON.parse(await fs.readFile(store.storePath, "utf-8"));
+    const normalizedJob = {
+      ...diskAfterEdit.jobs[0],
+      payload: {
+        ...diskAfterEdit.jobs[0].payload,
+        channel: "forum",
+      },
+    };
+
+    await writeCronStoreSnapshot(store.storePath, [normalizedJob]);
+
+    service.stop();
+    const service2 = new CronService({
+      storePath: store.storePath,
+      cronEnabled: true,
+      log: noopLogger,
+      enqueueSystemEvent: vi.fn(),
+      requestHeartbeat: vi.fn(),
+      runIsolatedAgentJob: vi.fn(async () => ({ status: "ok" as const })),
+    });
+
+    await service2.start();
+
+    const backupAfterNormalize = await fs.readFile(`${store.storePath}.bak`, "utf-8");
+    expect(JSON.parse(backupAfterNormalize)).toEqual(JSON.parse(beforeEditRaw));
+
+    service2.stop();
+    await store.cleanup();
   });
 });

@@ -12,13 +12,8 @@
       }
     }
   },
-  "setup": {
-    "providers": [
-      {
-        "id": "huggingface",
-        "envVars": ["HUGGINGFACE_HUB_TOKEN", "HF_TOKEN"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "huggingface": ["HUGGINGFACE_HUB_TOKEN", "HF_TOKEN"]
   },
   "providerAuthChoices": [
     {

@@ -1,11 +1,7 @@
 import type { Command } from "commander";
-import {
-  GATEWAY_CLIENT_MODES,
-  GATEWAY_CLIENT_NAMES,
-} from "../../../packages/gateway-protocol/src/client-info.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { callGateway } from "../../gateway/call.js";
-import { parseTimeoutMsWithFallback } from "../parse-timeout.js";
+import { GATEWAY_CLIENT_MODES, GATEWAY_CLIENT_NAMES } from "../../gateway/protocol/client-info.js";
 import { withProgress } from "../progress.js";
 
 export type GatewayRpcOpts = {
@@ -17,8 +13,6 @@ export type GatewayRpcOpts = {
   expectFinal?: boolean;
   json?: boolean;
 };
-
-const DEFAULT_GATEWAY_RPC_TIMEOUT_MS = 10_000;
 
 export const gatewayCallOpts = (cmd: Command) =>
   cmd
@@ -45,7 +39,7 @@ export const callGatewayCli = async (method: string, opts: GatewayRpcOpts, param
         method,
         params,
         expectFinal: Boolean(opts.expectFinal),
-        timeoutMs: parseTimeoutMsWithFallback(opts.timeout, DEFAULT_GATEWAY_RPC_TIMEOUT_MS),
+        timeoutMs: Number(opts.timeout ?? 10_000),
         clientName: GATEWAY_CLIENT_NAMES.CLI,
         mode: GATEWAY_CLIENT_MODES.CLI,
       }),

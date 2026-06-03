@@ -1,10 +1,8 @@
-import { isRecord, readStringValue as readString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import type { ClawdbotConfig, HistoryEntry, PluginRuntime, RuntimeEnv } from "../runtime-api.js";
+import type { ClawdbotConfig, HistoryEntry, RuntimeEnv } from "../runtime-api.js";
 import { handleFeishuMessage, type FeishuMessageEvent } from "./bot.js";
 import { maybeHandleFeishuQuickActionMenu } from "./card-ux-launcher.js";
 import {
   claimUnprocessedFeishuMessage,
-  forgetProcessedFeishuMessage,
   recordProcessedFeishuMessage,
   releaseFeishuMessageProcessing,
 } from "./dedup.js";
@@ -20,8 +18,16 @@ type FeishuBotMenuEvent = {
   };
 };
 
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
 function readStringOrNumber(value: unknown): string | number | undefined {
   return typeof value === "string" || typeof value === "number" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseFeishuBotMenuEvent(value: unknown): FeishuBotMenuEvent | null {
@@ -54,7 +60,6 @@ export function createFeishuBotMenuHandler(params: {
   cfg: ClawdbotConfig;
   accountId: string;
   runtime?: RuntimeEnv;
-  channelRuntime?: PluginRuntime["channel"];
   chatHistories: Map<string, HistoryEntry[]>;
   fireAndForget?: boolean;
   getBotOpenId?: (accountId: string) => string | undefined;
@@ -118,7 +123,6 @@ export function createFeishuBotMenuHandler(params: {
           botOpenId: getBotOpenId(accountId),
           botName: getBotName(accountId),
           runtime,
-          channelRuntime: params.channelRuntime,
           chatHistories,
           accountId,
           processingClaimHeld: true,
@@ -134,23 +138,21 @@ export function createFeishuBotMenuHandler(params: {
         .then(async (handledMenu) => {
           if (handledMenu) {
             await recordProcessedFeishuMessage(syntheticMessageId, accountId, log);
+            releaseFeishuMessageProcessing(syntheticMessageId, accountId);
             return;
           }
           return await handleLegacyMenu();
         })
-        .catch(async (err: unknown) => {
+        .catch(async (err) => {
           if (isFeishuRetryableSyntheticEventError(err)) {
-            await forgetProcessedFeishuMessage(syntheticMessageId, accountId, log);
+            releaseFeishuMessageProcessing(syntheticMessageId, accountId);
           } else {
             await recordProcessedFeishuMessage(syntheticMessageId, accountId, log);
           }
           throw err;
-        })
-        .finally(() => {
-          releaseFeishuMessageProcessing(syntheticMessageId, accountId);
         });
       if (fireAndForget) {
-        promise.catch((err: unknown) => {
+        promise.catch((err) => {
           error(`feishu[${accountId}]: error handling bot menu event: ${String(err)}`);
         });
         return;

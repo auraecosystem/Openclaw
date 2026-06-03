@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { testOnlyOpenAiHttp } from "./openai-http.js";
+import { __testOnlyOpenAiHttp } from "./openai-http.js";
 
-const { resolveChatCompletionUsage } = testOnlyOpenAiHttp;
+const { resolveChatCompletionUsage } = __testOnlyOpenAiHttp;
 
 describe("resolveChatCompletionUsage", () => {
   it("maps agentMeta.usage to OpenAI prompt/completion/total fields", () => {
@@ -17,7 +17,6 @@ describe("resolveChatCompletionUsage", () => {
       prompt_tokens: 130,
       completion_tokens: 42,
       total_tokens: 172,
-      prompt_tokens_details: { cached_tokens: 10 },
     });
   });
 

@@ -5,12 +5,7 @@ import type {
   SpeechProviderOverrides,
   SpeechProviderPlugin,
 } from "openclaw/plugin-sdk/speech-core";
-import {
-  asObject,
-  parseSpeechDirectiveNumberOverride,
-  trimToUndefined,
-} from "openclaw/plugin-sdk/speech-core";
-import { asFiniteNumberInRange } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { asFiniteNumber, asObject, trimToUndefined } from "openclaw/plugin-sdk/speech-core";
 import {
   DEFAULT_INWORLD_MODEL_ID,
   DEFAULT_INWORLD_VOICE_ID,
@@ -35,10 +30,6 @@ type InworldProviderOverrides = {
   temperature?: number;
 };
 
-function normalizeInworldTemperature(value: unknown): number | undefined {
-  return asFiniteNumberInRange(value, { min: 0, minExclusive: true, max: 2 });
-}
-
 function normalizeInworldProviderConfig(rawConfig: Record<string, unknown>): InworldProviderConfig {
   const providers = asObject(rawConfig.providers);
   const raw = asObject(providers?.inworld) ?? asObject(rawConfig.inworld);
@@ -50,7 +41,7 @@ function normalizeInworldProviderConfig(rawConfig: Record<string, unknown>): Inw
     baseUrl: normalizeInworldBaseUrl(trimToUndefined(raw?.baseUrl)),
     voiceId: trimToUndefined(raw?.voiceId) ?? DEFAULT_INWORLD_VOICE_ID,
     modelId: trimToUndefined(raw?.modelId) ?? DEFAULT_INWORLD_MODEL_ID,
-    temperature: normalizeInworldTemperature(raw?.temperature),
+    temperature: asFiniteNumber(raw?.temperature),
   };
 }
 
@@ -61,7 +52,7 @@ function readInworldProviderConfig(config: SpeechProviderConfig): InworldProvide
     baseUrl: normalizeInworldBaseUrl(trimToUndefined(config.baseUrl) ?? defaults.baseUrl),
     voiceId: trimToUndefined(config.voiceId) ?? defaults.voiceId,
     modelId: trimToUndefined(config.modelId) ?? defaults.modelId,
-    temperature: normalizeInworldTemperature(config.temperature) ?? defaults.temperature,
+    temperature: asFiniteNumber(config.temperature) ?? defaults.temperature,
   };
 }
 
@@ -74,7 +65,7 @@ function readInworldOverrides(
   return {
     voiceId: trimToUndefined(overrides.voiceId ?? overrides.voice),
     modelId: trimToUndefined(overrides.modelId ?? overrides.model),
-    temperature: normalizeInworldTemperature(overrides.temperature),
+    temperature: asFiniteNumber(overrides.temperature),
   };
 }
 
@@ -103,12 +94,14 @@ function parseDirectiveToken(ctx: SpeechDirectiveTokenParseContext): {
       }
       return { handled: true, overrides: { modelId: ctx.value } };
     case "temperature": {
-      return parseSpeechDirectiveNumberOverride({
-        ctx,
-        overrideKey: "temperature",
-        range: { min: 0, minExclusive: true, max: 2 },
-        warning: (value) => `invalid Inworld temperature "${value}"`,
-      });
+      if (!ctx.policy.allowVoiceSettings) {
+        return { handled: true };
+      }
+      const temperature = Number(ctx.value);
+      if (!Number.isFinite(temperature) || temperature < 0 || temperature > 2) {
+        return { handled: true, warnings: [`invalid Inworld temperature "${ctx.value}"`] };
+      }
+      return { handled: true, overrides: { temperature } };
     }
     default:
       return { handled: false };
@@ -120,7 +113,6 @@ export function buildInworldSpeechProvider(): SpeechProviderPlugin {
     id: "inworld",
     label: "Inworld",
     autoSelectOrder: 30,
-    defaultModel: DEFAULT_INWORLD_MODEL_ID,
     models: INWORLD_TTS_MODELS,
     resolveConfig: ({ rawConfig }) => normalizeInworldProviderConfig(rawConfig),
     parseDirectiveToken,
@@ -145,9 +137,9 @@ export function buildInworldSpeechProvider(): SpeechProviderPlugin {
         ...(trimToUndefined(talkProviderConfig.modelId) == null
           ? {}
           : { modelId: trimToUndefined(talkProviderConfig.modelId) }),
-        ...(normalizeInworldTemperature(talkProviderConfig.temperature) == null
+        ...(asFiniteNumber(talkProviderConfig.temperature) == null
           ? {}
-          : { temperature: normalizeInworldTemperature(talkProviderConfig.temperature) }),
+          : { temperature: asFiniteNumber(talkProviderConfig.temperature) }),
       };
     },
     resolveTalkOverrides: ({ params }) => ({
@@ -157,9 +149,9 @@ export function buildInworldSpeechProvider(): SpeechProviderPlugin {
       ...(trimToUndefined(params.modelId) == null
         ? {}
         : { modelId: trimToUndefined(params.modelId) }),
-      ...(normalizeInworldTemperature(params.temperature) == null
+      ...(asFiniteNumber(params.temperature) == null
         ? {}
-        : { temperature: normalizeInworldTemperature(params.temperature) }),
+        : { temperature: asFiniteNumber(params.temperature) }),
     }),
     listVoices: async (req) => {
       const config = req.providerConfig ? readInworldProviderConfig(req.providerConfig) : undefined;

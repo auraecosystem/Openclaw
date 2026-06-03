@@ -15,7 +15,7 @@
  * @module @openclaw/oc-path/universal
  */
 
-import { isMap, isScalar, isSeq, type Pair } from "yaml";
+import { isMap, isSeq } from "yaml";
 import type { MdAst } from "./ast.js";
 import { setMdOcPath } from "./edit.js";
 import type { JsoncAst, JsoncEntry, JsoncValue } from "./jsonc/ast.js";
@@ -32,7 +32,6 @@ import {
   hasWildcard,
   isQuotedSeg,
   OcPathError,
-  parseArrayIndexSegment,
   splitRespectingBrackets,
   unquoteSeg,
 } from "./oc-path.js";
@@ -98,10 +97,6 @@ export type SetResult =
         | "wildcard-not-allowed";
       readonly detail?: string;
     };
-
-export type SetOcPathOptions = {
-  readonly valueJson?: boolean;
-};
 
 /**
  * Insertion marker on the deepest path segment: `+`, `+<key>`, or
@@ -302,23 +297,9 @@ function yamlLine(ast: YamlAst, path: readonly string[]): number {
     if (node === null || typeof node !== "object") {
       break;
     }
-    if (isSeq(node)) {
-      const index = parseArrayIndexSegment(segment, node.items.length);
-      if (index === null) {
-        break;
-      }
-      node = node.items[index] ?? null;
-      continue;
-    }
-    if (isMap(node)) {
-      const pair = (node as { items: readonly Pair[] }).items.find((entry) => {
-        const key = isScalar(entry.key) ? entry.key.value : entry.key;
-        return String(key) === segment;
-      });
-      node = pair?.value ?? null;
-      continue;
-    }
-    break;
+    const getter = node as { get?: (key: string | number, keepScalar?: boolean) => unknown };
+    const index = Number(segment);
+    node = Number.isInteger(index) ? getter.get?.(index, true) : getter.get?.(segment, true);
   }
   const range = (node as { range?: readonly [number, number, number] } | null)?.range;
   if (range === undefined) {
@@ -428,12 +409,7 @@ function resolveYamlInsertion(ast: YamlAst, info: InsertionInfo): OcMatch | null
  * kind-appropriate content (JSON for jsonc/jsonl; raw text for md).
  * Sentinel-guard violations throw `OcEmitSentinelError`.
  */
-export function setOcPath(
-  ast: OcAst,
-  path: OcPath,
-  value: string,
-  options: SetOcPathOptions = {},
-): SetResult {
+export function setOcPath(ast: OcAst, path: OcPath, value: string): SetResult {
   if (hasWildcard(path)) {
     return {
       ok: false,
@@ -460,37 +436,21 @@ export function setOcPath(
       return r.ok ? { ok: true, ast: r.ast } : { ok: false, reason: r.reason };
     }
     case "jsonc":
-      return setStructuredLeaf(ast, path, value, options, resolveJsoncOcPath, setJsoncOcPath);
+      return setStructuredLeaf(ast, path, value, resolveJsoncOcPath, setJsoncOcPath);
     case "jsonl":
-      return setStructuredLeaf(
-        ast,
-        path,
-        value,
-        options,
-        resolveJsonlOcPath,
-        setJsonlOcPath,
-        () => {
-          // jsonl line replacement: value must be JSON for the whole line.
-          const parsed = tryParseJson(value);
-          if (parsed === undefined) {
-            return {
-              ok: false,
-              reason: "parse-error",
-              detail: "line replacement requires JSON value",
-            };
-          }
-          const parsedValue = jsonToJsoncValue(parsed);
-          if (parsedValue === null) {
-            return {
-              ok: false,
-              reason: "parse-error",
-              detail: "line replacement requires finite JSON value",
-            };
-          }
-          const r = setJsonlOcPath(ast, path, parsedValue);
-          return r.ok ? { ok: true, ast: r.ast } : { ok: false, reason: r.reason };
-        },
-      );
+      return setStructuredLeaf(ast, path, value, resolveJsonlOcPath, setJsonlOcPath, () => {
+        // jsonl line replacement: value must be JSON for the whole line.
+        const parsed = tryParseJson(value);
+        if (parsed === undefined) {
+          return {
+            ok: false,
+            reason: "parse-error",
+            detail: "line replacement requires JSON value",
+          };
+        }
+        const r = setJsonlOcPath(ast, path, jsonToJsoncValue(parsed));
+        return r.ok ? { ok: true, ast: r.ast } : { ok: false, reason: r.reason };
+      });
     case "yaml":
       return setYamlLeaf(ast, path, value);
   }
@@ -503,7 +463,6 @@ function setStructuredLeaf<A extends OcAst>(
   ast: A,
   path: OcPath,
   value: string,
-  options: SetOcPathOptions,
   resolve: (a: A, p: OcPath) => StructuredLeafMatch | null,
   set: (a: A, p: OcPath, c: JsoncValue) => SetOpResult<A>,
   onLine?: () => SetResult,
@@ -523,10 +482,7 @@ function setStructuredLeaf<A extends OcAst>(
     return onLine !== undefined ? onLine() : { ok: false, reason: "not-writable" };
   }
   const leafValue = existing.kind === "object-entry" ? existing.node.value : existing.node;
-  const coerced =
-    options.valueJson === true
-      ? parseJsoncReplacement(value, leafValue)
-      : coerceJsoncLeaf(value, leafValue);
+  const coerced = coerceJsoncLeaf(value, leafValue);
   if (coerced === null) {
     return {
       ok: false,
@@ -536,18 +492,6 @@ function setStructuredLeaf<A extends OcAst>(
   }
   const r = set(ast, path, coerced);
   return r.ok ? { ok: true, ast: r.ast } : { ok: false, reason: r.reason };
-}
-
-function parseJsoncReplacement(valueText: string, existing: JsoncValue): JsoncValue | null {
-  const parsed = tryParseJson(valueText);
-  if (parsed === undefined) {
-    return null;
-  }
-  const parsedValue = jsonToJsoncValue(parsed);
-  if (parsedValue === null) {
-    return null;
-  }
-  return existing.line === undefined ? parsedValue : { ...parsedValue, line: existing.line };
 }
 
 type StructuredLeafMatch =
@@ -651,13 +595,6 @@ function setJsoncInsertion(ast: JsoncAst, info: InsertionInfo, value: string): S
     return { ok: false, reason: "parse-error", detail: "jsonc insertion requires JSON value" };
   }
   const newJsoncValue = jsonToJsoncValue(parsed);
-  if (newJsoncValue === null) {
-    return {
-      ok: false,
-      reason: "parse-error",
-      detail: "jsonc insertion requires finite JSON value",
-    };
-  }
 
   if (containerMatch.kind !== "insertion-point") {
     return { ok: false, reason: "unresolved" };
@@ -719,15 +656,7 @@ function setJsonlInsertion(ast: JsonlAst, info: InsertionInfo, value: string): S
   if (parsed === undefined) {
     return { ok: false, reason: "parse-error", detail: "jsonl line append requires JSON value" };
   }
-  const parsedValue = jsonToJsoncValue(parsed);
-  if (parsedValue === null) {
-    return {
-      ok: false,
-      reason: "parse-error",
-      detail: "jsonl line append requires finite JSON value",
-    };
-  }
-  return { ok: true, ast: appendJsonlLine(ast, parsedValue) };
+  return { ok: true, ast: appendJsonlLine(ast, jsonToJsoncValue(parsed)) };
 }
 
 function setYamlLeaf(ast: YamlAst, path: OcPath, value: string): SetResult {
@@ -825,7 +754,7 @@ function tryParseJson(value: string): unknown {
   }
 }
 
-function jsonToJsoncValue(v: unknown): JsoncValue | null {
+function jsonToJsoncValue(v: unknown): JsoncValue {
   // Synthetic values omit `line` — only the parser sets line metadata.
   if (v === null) {
     return { kind: "null" };
@@ -834,38 +763,23 @@ function jsonToJsoncValue(v: unknown): JsoncValue | null {
     return { kind: "string", value: v };
   }
   if (typeof v === "number") {
-    if (!Number.isFinite(v)) {
-      return null;
-    }
     return { kind: "number", value: v };
   }
   if (typeof v === "boolean") {
     return { kind: "boolean", value: v };
   }
   if (Array.isArray(v)) {
-    const items = v.map(jsonToJsoncValue);
-    if (items.some((item) => item === null)) {
-      return null;
-    }
-    return { kind: "array", items: items as JsoncValue[] };
+    return { kind: "array", items: v.map(jsonToJsoncValue) };
   }
   if (typeof v === "object") {
     const obj = v as Record<string, unknown>;
-    const entries: JsoncEntry[] = [];
-    for (const [key, value] of Object.entries(obj)) {
-      const jsoncValue = jsonToJsoncValue(value);
-      if (jsoncValue === null) {
-        return null;
-      }
-      entries.push({
-        key,
-        value: jsoncValue,
-        line: 0,
-      });
-    }
     return {
       kind: "object",
-      entries,
+      entries: Object.entries(obj).map(([key, value]) => ({
+        key,
+        value: jsonToJsoncValue(value),
+        line: 0,
+      })),
     };
   }
   // JSON.parse never produces undefined / function / symbol.
@@ -938,8 +852,8 @@ function mutateAt(
     };
   }
   if (current.kind === "array") {
-    const idx = parseArrayIndexSegment(seg, current.items.length);
-    if (idx === null) {
+    const idx = Number(seg);
+    if (!Number.isInteger(idx) || idx < 0 || idx >= current.items.length) {
       return null;
     }
     const child = current.items[idx];

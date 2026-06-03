@@ -4,8 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const closeTrackedBrowserTabsForSessionsImpl = vi.hoisted(() => vi.fn());
-const canLoadActivatedBundledPluginPublicSurface = vi.hoisted(() => vi.fn());
-const tryLoadActivatedBundledPluginPublicSurfaceModuleSync = vi.hoisted(() => vi.fn());
+const loadBundledPluginPublicSurfaceModuleSync = vi.hoisted(() => vi.fn());
 const runExec = vi.hoisted(() => vi.fn());
 const realMkdirSync = fs.mkdirSync.bind(fs);
 const realMkdtempSync = fs.mkdtempSync.bind(fs);
@@ -13,9 +12,8 @@ const realRmSync = fs.rmSync.bind(fs);
 const realWriteFileSync = fs.writeFileSync.bind(fs);
 const realRealpathSyncNative = fs.realpathSync.native.bind(fs.realpathSync);
 
-vi.mock("./facade-runtime.js", () => ({
-  canLoadActivatedBundledPluginPublicSurface,
-  tryLoadActivatedBundledPluginPublicSurfaceModuleSync,
+vi.mock("./facade-loader.js", () => ({
+  loadBundledPluginPublicSurfaceModuleSync,
 }));
 
 vi.mock("../process/exec.js", () => ({
@@ -40,7 +38,6 @@ describe("browser maintenance", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.resetModules();
     testRoot = realRealpathSyncNative(
       realMkdtempSync(path.join(os.tmpdir(), "openclaw-browser-maintenance-")),
     );
@@ -49,8 +46,7 @@ describe("browser maintenance", () => {
     realMkdirSync(path.join(homeDir, ".Trash"), { recursive: true, mode: 0o700 });
     realMkdirSync(tmpDir, { recursive: true, mode: 0o700 });
     closeTrackedBrowserTabsForSessionsImpl.mockReset();
-    canLoadActivatedBundledPluginPublicSurface.mockReset();
-    tryLoadActivatedBundledPluginPublicSurfaceModuleSync.mockReset();
+    loadBundledPluginPublicSurfaceModuleSync.mockReset();
     runExec.mockReset();
     vi.spyOn(Date, "now").mockReturnValue(123);
     vi.spyOn(os, "homedir").mockReturnValue(homeDir);
@@ -58,8 +54,7 @@ describe("browser maintenance", () => {
     vi.spyOn(fs.realpathSync, "native").mockImplementation((candidate) =>
       realRealpathSyncNative(candidate),
     );
-    canLoadActivatedBundledPluginPublicSurface.mockReturnValue(true);
-    tryLoadActivatedBundledPluginPublicSurfaceModuleSync.mockReturnValue({
+    loadBundledPluginPublicSurfaceModuleSync.mockReturnValue({
       closeTrackedBrowserTabsForSessions: closeTrackedBrowserTabsForSessionsImpl,
     });
   });
@@ -81,39 +76,7 @@ describe("browser maintenance", () => {
     const { closeTrackedBrowserTabsForSessions } = await import("./browser-maintenance.js");
 
     await expect(closeTrackedBrowserTabsForSessions({ sessionKeys: [] })).resolves.toBe(0);
-    expect(tryLoadActivatedBundledPluginPublicSurfaceModuleSync).not.toHaveBeenCalled();
-  });
-
-  it("skips browser cleanup when the browser plugin is disabled", async () => {
-    canLoadActivatedBundledPluginPublicSurface.mockReturnValue(false);
-
-    const { closeTrackedBrowserTabsForSessions } = await import("./browser-maintenance.js");
-
-    await expect(
-      closeTrackedBrowserTabsForSessions({ sessionKeys: ["agent:main:test"] }),
-    ).resolves.toBe(0);
-    expect(canLoadActivatedBundledPluginPublicSurface).toHaveBeenCalledWith({
-      dirName: "browser",
-      artifactBasename: "browser-maintenance.js",
-    });
-    expect(tryLoadActivatedBundledPluginPublicSurfaceModuleSync).not.toHaveBeenCalled();
-    expect(closeTrackedBrowserTabsForSessionsImpl).not.toHaveBeenCalled();
-  });
-
-  it("rechecks plugin activation before using a cached browser cleanup surface", async () => {
-    closeTrackedBrowserTabsForSessionsImpl.mockResolvedValue(2);
-
-    const { closeTrackedBrowserTabsForSessions } = await import("./browser-maintenance.js");
-
-    await expect(
-      closeTrackedBrowserTabsForSessions({ sessionKeys: ["agent:main:test"] }),
-    ).resolves.toBe(2);
-    canLoadActivatedBundledPluginPublicSurface.mockReturnValue(false);
-    await expect(
-      closeTrackedBrowserTabsForSessions({ sessionKeys: ["agent:main:test"] }),
-    ).resolves.toBe(0);
-
-    expect(closeTrackedBrowserTabsForSessionsImpl).toHaveBeenCalledTimes(1);
+    expect(loadBundledPluginPublicSurfaceModuleSync).not.toHaveBeenCalled();
   });
 
   it("delegates cleanup through the browser maintenance surface", async () => {
@@ -124,7 +87,7 @@ describe("browser maintenance", () => {
     await expect(
       closeTrackedBrowserTabsForSessions({ sessionKeys: ["agent:main:test"] }),
     ).resolves.toBe(2);
-    expect(tryLoadActivatedBundledPluginPublicSurfaceModuleSync).toHaveBeenCalledWith({
+    expect(loadBundledPluginPublicSurfaceModuleSync).toHaveBeenCalledWith({
       dirName: "browser",
       artifactBasename: "browser-maintenance.js",
     });

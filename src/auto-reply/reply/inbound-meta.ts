@@ -1,10 +1,9 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { normalizeChatType } from "../../channels/chat-type.js";
 import { getLoadedChannelPluginById } from "../../channels/plugins/registry-loaded.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import { normalizeAnyChannelId } from "../../channels/registry.js";
 import { resolveSenderLabel } from "../../channels/sender-label.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { truncateUtf16Safe } from "../../utils.js";
 import type { EnvelopeFormatOptions } from "../envelope.js";
 import { formatEnvelopeTimestamp } from "../envelope.js";
@@ -14,8 +13,7 @@ import type { TemplateContext } from "../templating.js";
 const MAX_UNTRUSTED_JSON_STRING_CHARS = 2_000;
 const MAX_UNTRUSTED_HISTORY_ENTRIES = 20;
 const MAX_UNTRUSTED_TRANSCRIPT_FIELD_CHARS = 500;
-const MESSAGE_TOOL_DELIVERY_HINT =
-  "Delivery: Final assistant text is not automatically delivered in this run. Use the `message` tool to send user-visible output.";
+const MESSAGE_TOOL_DELIVERY_HINT = "Delivery: to send a message, use the `message` tool.";
 
 type InboundUserContextPrefixOptions = {
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
@@ -76,6 +74,10 @@ function sanitizeUntrustedJsonValue(value: unknown): unknown {
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [key, sanitizeUntrustedJsonValue(entry)]),
   );
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function truncateUntrustedTranscriptField(value: string): string {
@@ -467,8 +469,8 @@ export function buildInboundUserContextPrefix(
   const chatWindowCoversReplyContext =
     replyChainPayload.length > 0
       ? replyChainPayload.every((entry) => {
-          const messageIdLocal = normalizePromptMetadataString(entry["message_id"]);
-          return messageIdLocal ? chatWindowMessageIds.has(messageIdLocal) : false;
+          const messageId = normalizePromptMetadataString(entry["message_id"]);
+          return messageId ? chatWindowMessageIds.has(messageId) : false;
         })
       : Boolean(replyToId && chatWindowMessageIds.has(replyToId));
   const chatWindowCoversHistory = structuredContext.some(isChatWindowHistoryContext);

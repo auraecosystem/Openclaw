@@ -170,27 +170,6 @@ function expectSuccessfulSessionsUsage(
   return result.sessions;
 }
 
-async function withUsageState(
-  run: (writeSessionFile: (fileName: string) => string) => Promise<void>,
-) {
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
-  const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
-  const writeSessionFile = (fileName: string) => {
-    const sessionFile = path.join(agentSessionsDir, fileName);
-    fs.writeFileSync(sessionFile, "", "utf-8");
-    return sessionFile;
-  };
-
-  try {
-    await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
-      fs.mkdirSync(agentSessionsDir, { recursive: true });
-      await run(writeSessionFile);
-    });
-  } finally {
-    fs.rmSync(stateDir, { recursive: true, force: true });
-  }
-}
-
 describe("sessions.usage", () => {
   beforeEach(() => {
     vi.useRealTimers();
@@ -213,45 +192,6 @@ describe("sessions.usage", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0].key).toBe("agent:main:s-main");
     expect(sessions[0].agentId).toBe("main");
-  });
-
-  it("uses explicit all-agent scope for list-style usage queries", async () => {
-    const respond = await runSessionsUsage({ ...BASE_USAGE_RANGE, agentScope: "all" });
-
-    expect(vi.mocked(loadCombinedSessionStoreForGateway)).toHaveBeenCalledWith(
-      TEST_RUNTIME_CONFIG,
-      {},
-    );
-    expect(vi.mocked(discoverAllSessions)).toHaveBeenCalledTimes(2);
-    expect(
-      vi
-        .mocked(discoverAllSessions)
-        .mock.calls.map((call) => (call[0] as { agentId?: string }).agentId),
-    ).toEqual(["main", "opus"]);
-
-    const sessions = expectSuccessfulSessionsUsage(respond);
-    expect(sessions.map((session) => session.key)).toEqual([
-      "agent:opus:s-opus",
-      "agent:main:s-main",
-    ]);
-    expect(sessions.map((session) => session.agentId)).toEqual(["opus", "main"]);
-  });
-
-  it("rejects all-agent scope with a specific agent or key", async () => {
-    const withAgent = await runSessionsUsage({
-      ...BASE_USAGE_RANGE,
-      agentId: "opus",
-      agentScope: "all",
-    });
-    const withKey = await runSessionsUsage({
-      ...BASE_USAGE_RANGE,
-      key: "agent:opus:s-opus",
-      agentScope: "all",
-    });
-
-    expect(mockArg(withAgent, 0, 0)).toBe(false);
-    expect(mockArg(withKey, 0, 0)).toBe(false);
-    expect(vi.mocked(discoverAllSessions)).not.toHaveBeenCalled();
   });
 
   it("uses the requested agent for list-style usage queries", async () => {
@@ -392,41 +332,51 @@ describe("sessions.usage", () => {
   });
 
   it("uses the requested agent for legacy specific session keys", async () => {
-    await withUsageState(async (writeSessionFile) => {
-      const sessionFile = writeSessionFile("main.jsonl");
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
 
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          "agent:opus:main": {
-            sessionId: "main",
-            sessionFile: "main.jsonl",
-            label: "Opus main",
-            updatedAt: 999,
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        const sessionFile = path.join(agentSessionsDir, "main.jsonl");
+        fs.writeFileSync(sessionFile, "", "utf-8");
+
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            "agent:opus:main": {
+              sessionId: "main",
+              sessionFile: "main.jsonl",
+              label: "Opus main",
+              updatedAt: 999,
+            },
           },
-        },
-      });
+        });
 
-      const respond = await runSessionsUsage({
-        ...BASE_USAGE_RANGE,
-        key: "main",
-        agentId: "opus",
-      });
-
-      const sessions = expectSuccessfulSessionsUsage(respond);
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.key).toBe("agent:opus:main");
-      expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
-        expect.objectContaining({
+        const respond = await runSessionsUsage({
+          ...BASE_USAGE_RANGE,
+          key: "main",
           agentId: "opus",
-          sessionFile: fs.realpathSync(sessionFile),
-          sessionId: "main",
-        }),
-      );
-    });
+        });
+
+        const sessions = expectSuccessfulSessionsUsage(respond);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.key).toBe("agent:opus:main");
+        expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agentId: "opus",
+            sessionFile: fs.realpathSync(sessionFile),
+            sessionId: "main",
+          }),
+        );
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("keeps global session entries in requested-agent usage lookups", async () => {
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
     const config: OpenClawConfig = {
       agents: {
         list: [{ id: "main", default: true }, { id: "opus" }],
@@ -434,231 +384,274 @@ describe("sessions.usage", () => {
       session: { scope: "global" },
     };
 
-    await withUsageState(async (writeSessionFile) => {
-      const sessionFile = writeSessionFile("current.jsonl");
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        const sessionFile = path.join(agentSessionsDir, "current.jsonl");
+        fs.writeFileSync(sessionFile, "", "utf-8");
 
-      const sessionEntry = {
-        sessionId: "current",
-        sessionFile: "current.jsonl",
-        label: "Opus global",
-        updatedAt: 999,
-      };
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          global: sessionEntry,
-        },
-      });
-
-      const respond = await runSessionsUsage(
-        {
-          ...BASE_USAGE_RANGE,
-          key: "global",
-          agentId: "opus",
-        },
-        config,
-      );
-
-      const sessions = expectSuccessfulSessionsUsage(respond);
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.key).toBe("global");
-      expect(sessions[0]?.agentId).toBe("opus");
-      expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          agentId: "opus",
-          sessionEntry,
-          sessionFile: fs.realpathSync(sessionFile),
+        const sessionEntry = {
           sessionId: "current",
-        }),
-      );
-    });
+          sessionFile: "current.jsonl",
+          label: "Opus global",
+          updatedAt: 999,
+        };
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            global: sessionEntry,
+          },
+        });
+
+        const respond = await runSessionsUsage(
+          {
+            ...BASE_USAGE_RANGE,
+            key: "global",
+            agentId: "opus",
+          },
+          config,
+        );
+
+        const sessions = expectSuccessfulSessionsUsage(respond);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.key).toBe("global");
+        expect(sessions[0]?.agentId).toBe("opus");
+        expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agentId: "opus",
+            sessionEntry,
+            sessionFile: fs.realpathSync(sessionFile),
+            sessionId: "current",
+          }),
+        );
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("does not resolve specific usage keys through out-of-scope sessionId matches", async () => {
-    await withUsageState(async (writeSessionFile) => {
-      const sessionFile = writeSessionFile("shared.jsonl");
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
 
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          "agent:main:shared": {
-            sessionId: "shared",
-            sessionFile: "shared.jsonl",
-            label: "Main shared",
-            updatedAt: 999,
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        const sessionFile = path.join(agentSessionsDir, "shared.jsonl");
+        fs.writeFileSync(sessionFile, "", "utf-8");
+
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            "agent:main:shared": {
+              sessionId: "shared",
+              sessionFile: "shared.jsonl",
+              label: "Main shared",
+              updatedAt: 999,
+            },
           },
-        },
-      });
+        });
 
-      const respond = await runSessionsUsage({
-        ...BASE_USAGE_RANGE,
-        key: "shared",
-        agentId: "opus",
-      });
-
-      const sessions = expectSuccessfulSessionsUsage(respond);
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.key).toBe("agent:opus:shared");
-      expect(sessions[0]?.agentId).toBe("opus");
-      expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
-        expect.objectContaining({
+        const respond = await runSessionsUsage({
+          ...BASE_USAGE_RANGE,
+          key: "shared",
           agentId: "opus",
-          sessionEntry: undefined,
-          sessionFile: fs.realpathSync(sessionFile),
-          sessionId: "shared",
-        }),
-      );
-    });
+        });
+
+        const sessions = expectSuccessfulSessionsUsage(respond);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.key).toBe("agent:opus:shared");
+        expect(sessions[0]?.agentId).toBe("opus");
+        expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalledWith(
+          expect.objectContaining({
+            agentId: "opus",
+            sessionEntry: undefined,
+            sessionFile: fs.realpathSync(sessionFile),
+            sessionId: "shared",
+          }),
+        );
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("resolves store entries by sessionId when queried via discovered agent-prefixed key", async () => {
     const storeKey = "agent:opus:slack:dm:u123";
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
 
-    await withUsageState(async (writeSessionFile) => {
-      writeSessionFile("s-opus.jsonl");
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        const sessionFile = path.join(agentSessionsDir, "s-opus.jsonl");
+        fs.writeFileSync(sessionFile, "", "utf-8");
 
-      // Swap the store mock for this test: the canonical key differs from the discovered key
-      // but points at the same sessionId.
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          [storeKey]: {
-            sessionId: "s-opus",
-            sessionFile: "s-opus.jsonl",
-            label: "Named session",
-            updatedAt: 999,
+        // Swap the store mock for this test: the canonical key differs from the discovered key
+        // but points at the same sessionId.
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            [storeKey]: {
+              sessionId: "s-opus",
+              sessionFile: "s-opus.jsonl",
+              label: "Named session",
+              updatedAt: 999,
+            },
           },
-        },
-      });
+        });
 
-      // Query via discovered key: agent:<id>:<sessionId>
-      const respond = await runSessionsUsage({ ...BASE_USAGE_RANGE, key: "agent:opus:s-opus" });
-      const sessions = expectSuccessfulSessionsUsage(respond);
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.key).toBe(storeKey);
-      expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalled();
-      expect(
-        vi
-          .mocked(loadSessionCostSummaryFromCache)
-          .mock.calls.some((call) => call[0]?.agentId === "opus"),
-      ).toBe(true);
-      expect(
-        vi
-          .mocked(loadSessionCostSummaryFromCache)
-          .mock.calls.every((call) => call[0]?.refreshMode === "background"),
-      ).toBe(true);
-    });
+        // Query via discovered key: agent:<id>:<sessionId>
+        const respond = await runSessionsUsage({ ...BASE_USAGE_RANGE, key: "agent:opus:s-opus" });
+        const sessions = expectSuccessfulSessionsUsage(respond);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.key).toBe(storeKey);
+        expect(vi.mocked(loadSessionCostSummaryFromCache)).toHaveBeenCalled();
+        expect(
+          vi
+            .mocked(loadSessionCostSummaryFromCache)
+            .mock.calls.some((call) => call[0]?.agentId === "opus"),
+        ).toBe(true);
+        expect(
+          vi
+            .mocked(loadSessionCostSummaryFromCache)
+            .mock.calls.every((call) => call[0]?.refreshMode === "background"),
+        ).toBe(true);
+      });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("rolls up known session family ids when historical usage is requested", async () => {
     const storeKey = "agent:opus:main";
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
 
-    await withUsageState(async (writeSessionFile) => {
-      writeSessionFile("current.jsonl");
-      writeSessionFile("old.jsonl.reset.2026-02-01T00-00-00.000Z");
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        fs.writeFileSync(path.join(agentSessionsDir, "current.jsonl"), "", "utf-8");
+        fs.writeFileSync(
+          path.join(agentSessionsDir, "old.jsonl.reset.2026-02-01T00-00-00.000Z"),
+          "",
+          "utf-8",
+        );
 
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          [storeKey]: {
-            sessionId: "current",
-            sessionFile: "current.jsonl",
-            updatedAt: 1_000,
-            usageFamilyKey: storeKey,
-            usageFamilySessionIds: ["old", "current"],
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            [storeKey]: {
+              sessionId: "current",
+              sessionFile: "current.jsonl",
+              updatedAt: 1_000,
+              usageFamilyKey: storeKey,
+              usageFamilySessionIds: ["old", "current"],
+            },
           },
-        },
-      });
-      vi.mocked(loadSessionCostSummaryFromCache).mockImplementation(async ({ sessionId }) => ({
-        summary: {
-          input: sessionId === "old" ? 10 : 20,
-          output: 0,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: sessionId === "old" ? 10 : 20,
-          totalCost: sessionId === "old" ? 0.01 : 0.02,
-          inputCost: sessionId === "old" ? 0.01 : 0.02,
-          outputCost: 0,
-          cacheReadCost: 0,
-          cacheWriteCost: 0,
-          missingCostEntries: 0,
-          messageCounts: {
-            total: 1,
-            user: 1,
-            assistant: 0,
-            toolCalls: 0,
-            toolResults: 0,
-            errors: 0,
+        });
+        vi.mocked(loadSessionCostSummaryFromCache).mockImplementation(async ({ sessionId }) => ({
+          summary: {
+            input: sessionId === "old" ? 10 : 20,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: sessionId === "old" ? 10 : 20,
+            totalCost: sessionId === "old" ? 0.01 : 0.02,
+            inputCost: sessionId === "old" ? 0.01 : 0.02,
+            outputCost: 0,
+            cacheReadCost: 0,
+            cacheWriteCost: 0,
+            missingCostEntries: 0,
+            messageCounts: {
+              total: 1,
+              user: 1,
+              assistant: 0,
+              toolCalls: 0,
+              toolResults: 0,
+              errors: 0,
+            },
           },
-        },
-        cacheStatus: {
-          status: "fresh",
-          cachedFiles: 1,
-          pendingFiles: 0,
-          staleFiles: 0,
-        },
-      }));
+          cacheStatus: {
+            status: "fresh",
+            cachedFiles: 1,
+            pendingFiles: 0,
+            staleFiles: 0,
+          },
+        }));
 
-      const respond = await runSessionsUsage({
-        ...BASE_USAGE_RANGE,
-        key: storeKey,
-        groupBy: "family",
-        includeHistorical: true,
+        const respond = await runSessionsUsage({
+          ...BASE_USAGE_RANGE,
+          key: storeKey,
+          groupBy: "family",
+          includeHistorical: true,
+        });
+
+        expect(respond).toHaveBeenCalledTimes(1);
+        expect(mockArg(respond, 0, 0)).toBe(true);
+        const result = mockArg(respond, 0, 1) as {
+          sessions: Array<{
+            key: string;
+            scope?: string;
+            includedSessionIds?: string[];
+            usage?: { totalTokens: number; totalCost: number; messageCounts?: { total: number } };
+          }>;
+          totals: { totalTokens: number; totalCost: number };
+        };
+        expect(result.sessions).toHaveLength(1);
+        expect(result.sessions[0]?.key).toBe(storeKey);
+        expect(result.sessions[0]?.scope).toBe("family");
+        expect(result.sessions[0]?.includedSessionIds).toEqual(["current", "old"]);
+        expect(result.sessions[0]?.usage?.totalTokens).toBe(30);
+        expect(result.sessions[0]?.usage?.totalCost).toBeCloseTo(0.03);
+        expect(result.sessions[0]?.usage?.messageCounts?.total).toBe(2);
+        expect(result.totals.totalTokens).toBe(30);
+        expect(result.totals.totalCost).toBeCloseTo(0.03);
       });
-
-      expect(respond).toHaveBeenCalledTimes(1);
-      expect(mockArg(respond, 0, 0)).toBe(true);
-      const result = mockArg(respond, 0, 1) as {
-        sessions: Array<{
-          key: string;
-          scope?: string;
-          includedSessionIds?: string[];
-          usage?: { totalTokens: number; totalCost: number; messageCounts?: { total: number } };
-        }>;
-        totals: { totalTokens: number; totalCost: number };
-      };
-      expect(result.sessions).toHaveLength(1);
-      expect(result.sessions[0]?.key).toBe(storeKey);
-      expect(result.sessions[0]?.scope).toBe("family");
-      expect(result.sessions[0]?.includedSessionIds).toEqual(["current", "old"]);
-      expect(result.sessions[0]?.usage?.totalTokens).toBe(30);
-      expect(result.sessions[0]?.usage?.totalCost).toBeCloseTo(0.03);
-      expect(result.sessions[0]?.usage?.messageCounts?.total).toBe(2);
-      expect(result.totals.totalTokens).toBe(30);
-      expect(result.totals.totalCost).toBeCloseTo(0.03);
-    });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("prefers the deterministic store key when duplicate sessionIds exist", async () => {
     const preferredKey = "agent:opus:acp:run-dup";
+    const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-usage-test-"));
 
-    await withUsageState(async (writeSessionFile) => {
-      writeSessionFile("run-dup.jsonl");
+    try {
+      await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+        const agentSessionsDir = path.join(stateDir, "agents", "opus", "sessions");
+        fs.mkdirSync(agentSessionsDir, { recursive: true });
+        const sessionFile = path.join(agentSessionsDir, "run-dup.jsonl");
+        fs.writeFileSync(sessionFile, "", "utf-8");
 
-      vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
-        storePath: "(multiple)",
-        store: {
-          [preferredKey]: {
-            sessionId: "run-dup",
-            sessionFile: "run-dup.jsonl",
-            updatedAt: 1_000,
+        vi.mocked(loadCombinedSessionStoreForGateway).mockReturnValue({
+          storePath: "(multiple)",
+          store: {
+            [preferredKey]: {
+              sessionId: "run-dup",
+              sessionFile: "run-dup.jsonl",
+              updatedAt: 1_000,
+            },
+            "agent:other:main": {
+              sessionId: "run-dup",
+              sessionFile: "run-dup.jsonl",
+              updatedAt: 2_000,
+            },
           },
-          "agent:other:main": {
-            sessionId: "run-dup",
-            sessionFile: "run-dup.jsonl",
-            updatedAt: 2_000,
-          },
-        },
-      });
+        });
 
-      const respond = await runSessionsUsage({
-        ...BASE_USAGE_RANGE,
-        key: "agent:opus:run-dup",
+        const respond = await runSessionsUsage({
+          ...BASE_USAGE_RANGE,
+          key: "agent:opus:run-dup",
+        });
+        const sessions = expectSuccessfulSessionsUsage(respond);
+        expect(sessions).toHaveLength(1);
+        expect(sessions[0]?.key).toBe(preferredKey);
       });
-      const sessions = expectSuccessfulSessionsUsage(respond);
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.key).toBe(preferredKey);
-    });
+    } finally {
+      fs.rmSync(stateDir, { recursive: true, force: true });
+    }
   });
 
   it("rejects traversal-style keys in specific session usage lookups", async () => {

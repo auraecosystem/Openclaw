@@ -6,10 +6,6 @@
  */
 
 import type { IncomingMessage, ServerResponse } from "node:http";
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { isPrivateNetworkOptInEnabled } from "openclaw/plugin-sdk/ssrf-runtime";
 import type { ResolvedMattermostAccount } from "../mattermost/accounts.js";
@@ -213,14 +209,8 @@ export function clearMattermostSlashCommandValidationCacheForAccount(accountId: 
 }
 
 function sweepCommandValidationFailureCache(now = Date.now()): void {
-  const validNow = asDateTimestampMs(now);
-  if (validNow === undefined) {
-    commandValidationFailureCache.clear();
-    return;
-  }
   for (const [key, entry] of commandValidationFailureCache) {
-    const expiresAt = asDateTimestampMs(entry.expiresAt);
-    if (expiresAt === undefined || expiresAt <= validNow) {
+    if (entry.expiresAt <= now) {
       commandValidationFailureCache.delete(key);
     }
   }
@@ -235,16 +225,11 @@ function sweepCommandValidationFailureCache(now = Date.now()): void {
 
 function hasCachedCommandValidationFailure(key: string, now = Date.now()): boolean {
   sweepCommandValidationFailureCache(now);
-  const validNow = asDateTimestampMs(now);
-  if (validNow === undefined) {
-    return false;
-  }
   const cached = commandValidationFailureCache.get(key);
   if (!cached) {
     return false;
   }
-  const expiresAt = asDateTimestampMs(cached.expiresAt);
-  if (expiresAt !== undefined && expiresAt > validNow) {
+  if (cached.expiresAt > now) {
     return true;
   }
   commandValidationFailureCache.delete(key);
@@ -252,31 +237,17 @@ function hasCachedCommandValidationFailure(key: string, now = Date.now()): boole
 }
 
 function cacheCommandValidationFailure(key: string, accountId: string): void {
-  const now = Date.now();
-  sweepCommandValidationFailureCache(now);
-  const expiresAt = resolveExpiresAtMsFromDurationMs(COMMAND_VALIDATION_FAILURE_CACHE_MS, {
-    nowMs: now,
-  });
-  if (expiresAt === undefined) {
-    commandValidationFailureCache.delete(key);
-    return;
-  }
+  sweepCommandValidationFailureCache();
   commandValidationFailureCache.set(key, {
     accountId,
-    expiresAt,
+    expiresAt: Date.now() + COMMAND_VALIDATION_FAILURE_CACHE_MS,
   });
 }
 
 function sweepCommandValidationLookupRateLimit(now = Date.now()): void {
-  const validNow = asDateTimestampMs(now);
-  if (validNow === undefined) {
-    commandValidationLookupRateLimit.clear();
-    return;
-  }
   const staleAfterMs = COMMAND_VALIDATION_LOOKUP_REFILL_MS * COMMAND_VALIDATION_LOOKUP_BURST * 2;
   for (const [key, entry] of commandValidationLookupRateLimit) {
-    const updatedAt = asDateTimestampMs(entry.updatedAt);
-    if (updatedAt === undefined || validNow - updatedAt > staleAfterMs) {
+    if (now - entry.updatedAt > staleAfterMs) {
       commandValidationLookupRateLimit.delete(key);
     }
   }
@@ -294,12 +265,7 @@ function reserveCommandValidationLookup(params: {
   accountId: string;
   now?: number;
 }): { allowed: true } | { allowed: false; shouldLog: boolean } {
-  const rawNow = params.now ?? Date.now();
-  const now = asDateTimestampMs(rawNow);
-  if (now === undefined) {
-    commandValidationLookupRateLimit.clear();
-    return { allowed: true };
-  }
+  const now = params.now ?? Date.now();
   sweepCommandValidationLookupRateLimit(now);
   const existing = commandValidationLookupRateLimit.get(params.key);
   if (!existing) {

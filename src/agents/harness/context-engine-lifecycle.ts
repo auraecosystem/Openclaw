@@ -1,16 +1,12 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { MemoryCitationsMode } from "../../config/types.memory.js";
-import type {
-  AssembleResult,
-  ContextEngine,
-  ContextEngineRuntimeContext,
-} from "../../context-engine/types.js";
-import { runContextEngineMaintenance } from "../embedded-agent-runner/context-engine-maintenance.js";
+import type { ContextEngine, ContextEngineRuntimeContext } from "../../context-engine/types.js";
+import { stripRuntimeContextCustomMessages } from "../internal-runtime-context.js";
+import { runContextEngineMaintenance } from "../pi-embedded-runner/context-engine-maintenance.js";
 import {
   buildAfterTurnRuntimeContext,
   buildAfterTurnRuntimeContextFromUsage,
-} from "../embedded-agent-runner/run/attempt.prompt-helpers.js";
-import { stripRuntimeContextCustomMessages } from "../internal-runtime-context.js";
-import type { AgentMessage } from "../runtime/index.js";
+} from "../pi-embedded-runner/run/attempt.prompt-helpers.js";
 import type { SessionWriteLockAcquireTimeoutConfig } from "../session-write-lock.js";
 
 export type HarnessContextEngine = ContextEngine;
@@ -77,7 +73,7 @@ export async function assembleHarnessContextEngine(params: {
     return undefined;
   }
   const messages = stripRuntimeContextCustomMessages(params.messages);
-  const result = await params.contextEngine.assemble({
+  return await params.contextEngine.assemble({
     sessionId: params.sessionId,
     sessionKey: params.sessionKey,
     messages,
@@ -87,42 +83,6 @@ export async function assembleHarnessContextEngine(params: {
     model: params.modelId,
     ...(params.prompt !== undefined ? { prompt: params.prompt } : {}),
   });
-  return ensureAssembleResultShape(result, params.contextEngine.info.id);
-}
-
-/**
- * Validate that a context engine's assemble() return value matches the
- * AssembleResult contract before the runner consumes it. Engines that omit
- * `messages` or return a non-array previously crashed the runner downstream
- * when prompt assembly tried to read `activeSession.messages.length` (#75541).
- *
- * Throws a descriptive error so the runner's existing assemble try/catch can
- * log the offending engine id and fall back to the unmodified pipeline
- * messages instead of poisoning session state.
- */
-function ensureAssembleResultShape(result: unknown, engineId: string): AssembleResult {
-  if (!result || typeof result !== "object") {
-    throw new Error(
-      `context engine "${engineId}" assemble() returned an invalid result: expected an object with a "messages" array (got ${describeAssembleResultType(result)})`,
-    );
-  }
-  const candidate = result as { messages?: unknown };
-  if (!Array.isArray(candidate.messages)) {
-    throw new Error(
-      `context engine "${engineId}" assemble() returned an invalid result: expected an object with a "messages" array (got messages of type ${describeAssembleResultType(candidate.messages)})`,
-    );
-  }
-  return result as AssembleResult;
-}
-
-function describeAssembleResultType(value: unknown): string {
-  if (value === null) {
-    return "null";
-  }
-  if (Array.isArray(value)) {
-    return "array";
-  }
-  return typeof value;
 }
 
 /**

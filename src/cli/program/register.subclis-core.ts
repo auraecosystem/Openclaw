@@ -1,5 +1,4 @@
 import type { Command } from "commander";
-import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import { resolveCliArgvInvocation } from "../argv-invocation.js";
 import { resolveCliCommandPathPolicy } from "../command-path-policy.js";
 import {
@@ -30,16 +29,11 @@ export type SubCliRegistrationContext = {
   purpose?: "runtime" | "completion";
 };
 
-type PluginCliModule = typeof import("../../plugins/cli.js");
 type SubCliRegistrar = (
   program: Command,
   argv: string[],
   context: SubCliRegistrationContext,
 ) => Promise<void> | void;
-
-const pluginCliLoader = createLazyImportLoader<PluginCliModule>(
-  () => import("../../plugins/cli.js"),
-);
 
 function shouldRegisterGatewayRunOnly(name: string, argv: string[]): boolean {
   if (name !== "gateway") {
@@ -53,7 +47,7 @@ function shouldRegisterGatewayRunOnly(name: string, argv: string[]): boolean {
 }
 
 async function registerGatewayRunOnly(program: Command): Promise<void> {
-  const { addGatewayRunCommand } = await import("../gateway-cli/run-command.js");
+  const { addGatewayRunCommand } = await import("../gateway-cli/run.js");
   removeCommandByName(program, "gateway");
   const gateway = addGatewayRunCommand(
     program.command("gateway").description("Run, inspect, and query the WebSocket Gateway"),
@@ -65,21 +59,20 @@ async function registerGatewayRunOnly(program: Command): Promise<void> {
 
 async function registerSubCliWithPluginCommands(
   program: Command,
-  argv: string[],
   registerSubCli: () => Promise<void>,
   pluginCliPosition: "before" | "after",
 ) {
-  const invocation = resolveCliArgvInvocation(argv);
+  const invocation = resolveCliArgvInvocation(process.argv);
   const shouldRegisterPluginCommands =
     !invocation.hasHelpOrVersion &&
     resolveCliCommandPathPolicy(invocation.commandPath).loadPlugins !== "never";
   if (pluginCliPosition === "before" && shouldRegisterPluginCommands) {
-    const { registerPluginCliCommandsFromValidatedConfig } = await pluginCliLoader.load();
+    const { registerPluginCliCommandsFromValidatedConfig } = await import("../../plugins/cli.js");
     await registerPluginCliCommandsFromValidatedConfig(program);
   }
   await registerSubCli();
   if (pluginCliPosition === "after" && shouldRegisterPluginCommands) {
-    const { registerPluginCliCommandsFromValidatedConfig } = await pluginCliLoader.load();
+    const { registerPluginCliCommandsFromValidatedConfig } = await import("../../plugins/cli.js");
     await registerPluginCliCommandsFromValidatedConfig(program);
   }
 }
@@ -134,15 +127,11 @@ const entrySpecs: readonly CommandGroupDescriptorSpec<SubCliRegistrar>[] = [
       loadModule: () => import("../exec-policy-cli.js"),
       exportName: "registerExecPolicyCli",
     },
-  ]),
-  {
-    commandNames: ["nodes"],
-    register: async (program, argv) => {
-      const mod = await import("../nodes-cli.js");
-      await mod.registerNodesCli(program, argv);
+    {
+      commandNames: ["nodes"],
+      loadModule: () => import("../nodes-cli.js"),
+      exportName: "registerNodesCli",
     },
-  },
-  ...defineImportedProgramCommandGroupSpecs([
     {
       commandNames: ["devices"],
       loadModule: () => import("../devices-cli.js"),
@@ -211,10 +200,9 @@ const entrySpecs: readonly CommandGroupDescriptorSpec<SubCliRegistrar>[] = [
   ]),
   {
     commandNames: ["pairing"],
-    register: async (program, argv) => {
+    register: async (program) => {
       await registerSubCliWithPluginCommands(
         program,
-        argv,
         async () => {
           const mod = await import("../pairing-cli.js");
           mod.registerPairingCli(program);
@@ -225,10 +213,9 @@ const entrySpecs: readonly CommandGroupDescriptorSpec<SubCliRegistrar>[] = [
   },
   {
     commandNames: ["plugins"],
-    register: async (program, argv) => {
+    register: async (program) => {
       await registerSubCliWithPluginCommands(
         program,
-        argv,
         async () => {
           const mod = await import("../plugins-cli.js");
           mod.registerPluginsCli(program);

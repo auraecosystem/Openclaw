@@ -1,4 +1,3 @@
-import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
 import {
   decideChannelIngress,
   resolveChannelIngressState as resolveChannelIngressStateInternal,
@@ -24,6 +23,7 @@ import type {
   DmGroupAccessDecision,
   DmGroupAccessReasonCode,
 } from "../security/dm-policy-shared.js";
+import { normalizeStringEntries } from "../shared/string-normalization.js";
 
 export { decideChannelIngress };
 export type {

@@ -1,6 +1,5 @@
-import { normalizeOptionalStringifiedId } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalStringifiedId } from "../../shared/string-coerce.js";
 
-/** Normalizes channel thread/topic ids before outbound payload construction. */
 export function normalizeOutboundThreadId(value?: string | number | null): string | undefined {
   return normalizeOptionalStringifiedId(value);
 }

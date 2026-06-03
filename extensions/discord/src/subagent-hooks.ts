@@ -58,16 +58,7 @@ type DiscordSubagentDeliveryTargetEvent = {
 };
 
 type DiscordSubagentSpawningResult =
-  | {
-      status: "ok";
-      threadBindingReady?: boolean;
-      deliveryOrigin?: {
-        channel: "discord";
-        accountId?: string;
-        to: string;
-        threadId?: string | number;
-      };
-    }
+  | { status: "ok"; threadBindingReady?: boolean }
   | { status: "error"; error: string }
   | undefined;
 
@@ -151,16 +142,7 @@ export async function handleDiscordSubagentSpawning(
           "Unable to create or bind a Discord thread for this subagent session. Session mode is unavailable for this target.",
       };
     }
-    return {
-      status: "ok" as const,
-      threadBindingReady: true,
-      deliveryOrigin: {
-        channel: "discord",
-        accountId: account.accountId,
-        to: `channel:${binding.threadId}`,
-        threadId: binding.threadId,
-      },
-    };
+    return { status: "ok" as const, threadBindingReady: true };
   } catch (err) {
     return {
       status: "error" as const,

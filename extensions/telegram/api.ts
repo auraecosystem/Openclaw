@@ -42,6 +42,7 @@ export {
   buildTelegramThreadParams,
   buildTypingThreadParams,
   describeReplyTarget,
+  expandTextLinks,
   extractTelegramForumFlag,
   extractTelegramLocation,
   getTelegramTextParts,

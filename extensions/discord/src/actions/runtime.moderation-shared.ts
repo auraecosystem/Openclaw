@@ -1,5 +1,5 @@
 import { PermissionFlagsBits } from "discord-api-types/v10";
-import { readNonNegativeIntegerParam, readStringParam } from "../runtime-api.js";
+import { readNumberParam, readStringParam } from "../runtime-api.js";
 
 export type DiscordModerationAction = "timeout" | "kick" | "ban";
 
@@ -40,12 +40,9 @@ export function readDiscordModerationCommand(
     action,
     guildId: readStringParam(params, "guildId", { required: true }),
     userId: readStringParam(params, "userId", { required: true }),
-    durationMinutes: readNonNegativeIntegerParam(params, "durationMinutes"),
+    durationMinutes: readNumberParam(params, "durationMinutes", { integer: true }),
     until: readStringParam(params, "until"),
     reason: readStringParam(params, "reason"),
-    deleteMessageDays: readNonNegativeIntegerParam(params, "deleteMessageDays", {
-      max: 7,
-      message: "deleteMessageDays must be an integer from 0 to 7",
-    }),
+    deleteMessageDays: readNumberParam(params, "deleteMessageDays", { integer: true }),
   };
 }

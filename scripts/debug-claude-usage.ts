@@ -3,15 +3,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { normalizeOptionalString } from "../packages/normalization-core/src/string-coerce.js";
-import { readBoundedResponseText as readBoundedResponseTextWithLimit } from "./lib/bounded-response.ts";
-import {
-  maskIdentifier,
-  parseStrictIntegerOption,
-  previewForDevToolLog,
-  redactHomePath,
-} from "./lib/dev-tooling-safety.ts";
+import { normalizeOptionalString } from "../src/shared/string-coerce.ts";
 
 type Args = {
   agentId: string;
@@ -19,20 +11,13 @@ type Args = {
   sessionKey?: string;
 };
 
-type FetchOptions = {
-  fetchImpl?: typeof fetch;
-  timeoutMs?: number;
-};
-
-const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
-const FETCH_RESPONSE_MAX_BYTES = 256 * 1024;
-
 const mask = (value: string) => {
-  return maskIdentifier(
-    value,
-    value.trim().length >= 12 ? 6 : 4,
-    value.trim().length >= 12 ? 6 : 4,
-  );
+  const compact = value.trim();
+  if (!compact) {
+    return "missing";
+  }
+  const edge = compact.length >= 12 ? 6 : 4;
+  return `${compact.slice(0, edge)}…${compact.slice(-edge)}`;
 };
 
 const parseArgs = (): Args => {
@@ -72,11 +57,6 @@ const loadAuthProfiles = (agentId: string) => {
   return { authPath, store };
 };
 
-const CLAUDE_COOKIE_HOST_SQL =
-  "(host_key = 'claude.ai' OR host_key = '.claude.ai' OR host_key LIKE '%.claude.ai')";
-const CLAUDE_FIREFOX_COOKIE_HOST_SQL =
-  "(host = 'claude.ai' OR host = '.claude.ai' OR host LIKE '%.claude.ai')";
-
 const pickAnthropicTokens = (store: {
   profiles?: Record<string, { provider?: string; type?: string; token?: string; key?: string }>;
 }): Array<{ profileId: string; token: string }> => {
@@ -94,79 +74,17 @@ const pickAnthropicTokens = (store: {
   return found;
 };
 
-const resolveFetchTimeoutMs = (raw = process.env.OPENCLAW_DEBUG_CLAUDE_USAGE_FETCH_TIMEOUT_MS) => {
-  return parseStrictIntegerOption({
-    fallback: DEFAULT_FETCH_TIMEOUT_MS,
-    label: "OPENCLAW_DEBUG_CLAUDE_USAGE_FETCH_TIMEOUT_MS",
-    min: 1,
-    raw,
-  });
-};
-
-const withFetchTimeout = async <T>(
-  label: string,
-  timeoutMs: number,
-  run: (signal: AbortSignal) => Promise<T>,
-): Promise<T> => {
-  const controller = new AbortController();
-  let timeout: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = new Promise<T>((_resolve, reject) => {
-    timeout = setTimeout(() => {
-      const error = new Error(`${label} exceeded timeout of ${timeoutMs}ms`);
-      reject(error);
-      controller.abort(error);
-    }, timeoutMs);
-  });
-  try {
-    return await Promise.race([run(controller.signal), timeoutPromise]);
-  } finally {
-    if (timeout) {
-      clearTimeout(timeout);
-    }
-  }
-};
-
-const readBoundedResponseText = (
-  response: Response,
-  label: string,
-  signal: AbortSignal,
-  maxBytes = FETCH_RESPONSE_MAX_BYTES,
-): Promise<string> =>
-  readBoundedResponseTextWithLimit(response, label, maxBytes, {
-    createTooLargeError: (message) => new Error(message),
-    signal,
-  });
-
-const fetchText = async (
-  label: string,
-  url: string,
-  init: RequestInit,
-  options: FetchOptions = {},
-) => {
-  const fetchImpl = options.fetchImpl ?? fetch;
-  const timeoutMs = options.timeoutMs ?? resolveFetchTimeoutMs();
-  return await withFetchTimeout(label, timeoutMs, async (signal) => {
-    const res = await fetchImpl(url, { ...init, signal });
-    const text = await readBoundedResponseText(res, label, signal);
-    return { res, text };
-  });
-};
-
-const fetchAnthropicOAuthUsage = async (token: string, options: FetchOptions = {}) => {
-  const { res, text } = await fetchText(
-    "Anthropic OAuth usage request",
-    "https://api.anthropic.com/api/oauth/usage",
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/json",
-        "anthropic-version": "2023-06-01",
-        "anthropic-beta": "oauth-2025-04-20",
-        "User-Agent": "openclaw-debug",
-      },
+const fetchAnthropicOAuthUsage = async (token: string) => {
+  const res = await fetch("https://api.anthropic.com/api/oauth/usage", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "anthropic-version": "2023-06-01",
+      "anthropic-beta": "oauth-2025-04-20",
+      "User-Agent": "openclaw-debug",
     },
-    options,
-  );
+  });
+  const text = await res.text();
   return { status: res.status, contentType: res.headers.get("content-type"), text };
 };
 
@@ -273,7 +191,7 @@ const queryChromeCookieDb = (cookieDb: string): string | null => {
           SELECT
             COALESCE(NULLIF(value,''), hex(encrypted_value))
           FROM cookies
-          WHERE ${CLAUDE_COOKIE_HOST_SQL}
+          WHERE (host_key LIKE '%claude.ai%' OR host_key = '.claude.ai')
             AND name = 'sessionKey'
           LIMIT 1;
         `,
@@ -309,7 +227,7 @@ const queryFirefoxCookieDb = (cookieDb: string): string | null => {
         `
           SELECT value
           FROM moz_cookies
-          WHERE ${CLAUDE_FIREFOX_COOKIE_HOST_SQL}
+          WHERE (host LIKE '%claude.ai%' OR host = '.claude.ai')
             AND name = 'sessionKey'
           LIMIT 1;
         `,
@@ -321,8 +239,6 @@ const queryFirefoxCookieDb = (cookieDb: string): string | null => {
     return null;
   }
 };
-
-const browserRootLabel = (root: string): string => path.basename(root) || "browser";
 
 const findClaudeSessionKey = (): { sessionKey: string; source: string } | null => {
   if (process.platform !== "darwin") {
@@ -344,7 +260,7 @@ const findClaudeSessionKey = (): { sessionKey: string; source: string } | null =
       }
       const value = queryFirefoxCookieDb(db);
       if (value) {
-        return { sessionKey: value, source: `firefox:${entry}` };
+        return { sessionKey: value, source: `firefox:${db}` };
       }
     }
   }
@@ -371,7 +287,7 @@ const findClaudeSessionKey = (): { sessionKey: string; source: string } | null =
       }
       const value = queryChromeCookieDb(db);
       if (value) {
-        return { sessionKey: value, source: `chromium:${browserRootLabel(root)}/${profile}` };
+        return { sessionKey: value, source: `chromium:${db}` };
       }
     }
   }
@@ -379,19 +295,15 @@ const findClaudeSessionKey = (): { sessionKey: string; source: string } | null =
   return null;
 };
 
-const fetchClaudeWebUsage = async (sessionKey: string, options: FetchOptions = {}) => {
+const fetchClaudeWebUsage = async (sessionKey: string) => {
   const headers = {
     Cookie: `sessionKey=${sessionKey}`,
     Accept: "application/json",
     "User-Agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15",
   };
-  const { res: orgRes, text: orgText } = await fetchText(
-    "Claude organizations request",
-    "https://claude.ai/api/organizations",
-    { headers },
-    options,
-  );
+  const orgRes = await fetch("https://claude.ai/api/organizations", { headers });
+  const orgText = await orgRes.text();
   if (!orgRes.ok) {
     return { ok: false as const, step: "organizations", status: orgRes.status, body: orgText };
   }
@@ -401,12 +313,8 @@ const fetchClaudeWebUsage = async (sessionKey: string, options: FetchOptions = {
     return { ok: false as const, step: "organizations", status: 200, body: orgText };
   }
 
-  const { res: usageRes, text: usageText } = await fetchText(
-    "Claude usage request",
-    `https://claude.ai/api/organizations/${orgId}/usage`,
-    { headers },
-    options,
-  );
+  const usageRes = await fetch(`https://claude.ai/api/organizations/${orgId}/usage`, { headers });
+  const usageText = await usageRes.text();
   return usageRes.ok
     ? { ok: true as const, orgId, body: usageText }
     : { ok: false as const, step: "usage", status: usageRes.status, body: usageText };
@@ -415,7 +323,7 @@ const fetchClaudeWebUsage = async (sessionKey: string, options: FetchOptions = {
 const main = async () => {
   const opts = parseArgs();
   const { authPath, store } = loadAuthProfiles(opts.agentId);
-  console.log(`Auth file: ${redactHomePath(authPath)}`);
+  console.log(`Auth file: ${authPath}`);
 
   const keychain = readClaudeCliKeychain();
   if (keychain) {
@@ -426,7 +334,7 @@ const main = async () => {
     console.log(
       `OAuth usage (keychain): HTTP ${oauth.status} (${oauth.contentType ?? "no content-type"})`,
     );
-    console.log(previewForDevToolLog(oauth.text, 200));
+    console.log(oauth.text.slice(0, 200).replace(/\s+/g, " ").trim());
   } else {
     console.log("Claude Code CLI keychain: missing/unreadable");
   }
@@ -443,19 +351,20 @@ const main = async () => {
       console.log(
         `OAuth usage (${entry.profileId}): HTTP ${oauth.status} (${oauth.contentType ?? "no content-type"})`,
       );
-      console.log(previewForDevToolLog(oauth.text, 200));
+      console.log(oauth.text.slice(0, 200).replace(/\s+/g, " ").trim());
     }
   }
 
-  const envSessionKey =
-    process.env.CLAUDE_AI_SESSION_KEY?.trim() || process.env.CLAUDE_WEB_SESSION_KEY?.trim();
-  const discoveredSession = opts.sessionKey || envSessionKey ? null : findClaudeSessionKey();
-  const sessionKey = opts.sessionKey?.trim() || envSessionKey || discoveredSession?.sessionKey;
+  const sessionKey =
+    opts.sessionKey?.trim() ||
+    process.env.CLAUDE_AI_SESSION_KEY?.trim() ||
+    process.env.CLAUDE_WEB_SESSION_KEY?.trim() ||
+    findClaudeSessionKey()?.sessionKey;
   const source = opts.sessionKey
     ? "--session-key"
-    : envSessionKey
+    : process.env.CLAUDE_AI_SESSION_KEY || process.env.CLAUDE_WEB_SESSION_KEY
       ? "env"
-      : (discoveredSession?.source ?? "auto");
+      : (findClaudeSessionKey()?.source ?? "auto");
 
   if (!sessionKey) {
     console.log(
@@ -470,29 +379,11 @@ const main = async () => {
   const web = await fetchClaudeWebUsage(sessionKey);
   if (!web.ok) {
     console.log(`Claude web: ${web.step} HTTP ${web.status}`);
-    console.log(previewForDevToolLog(web.body, 400));
+    console.log(web.body.slice(0, 400).replace(/\s+/g, " ").trim());
     return;
   }
   console.log(`Claude web: org=${web.orgId} OK`);
-  console.log(previewForDevToolLog(web.body, 400));
+  console.log(web.body.slice(0, 400).replace(/\s+/g, " ").trim());
 };
 
-export const testing = {
-  CLAUDE_COOKIE_HOST_SQL,
-  CLAUDE_FIREFOX_COOKIE_HOST_SQL,
-  FETCH_RESPONSE_MAX_BYTES,
-  browserRootLabel,
-  fetchAnthropicOAuthUsage,
-  mask,
-  readBoundedResponseText,
-  resolveFetchTimeoutMs,
-};
-
-if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  await main().catch((error: unknown) => {
-    console.error(
-      previewForDevToolLog(error instanceof Error ? error.message : String(error), 800),
-    );
-    process.exitCode = 1;
-  });
-}
+await main();

@@ -1,14 +1,9 @@
 import { adaptScopedAccountAccessor } from "openclaw/plugin-sdk/channel-config-helpers";
-import type {
-  ChannelThreadingContext,
-  ChannelThreadingToolContext,
-} from "openclaw/plugin-sdk/channel-contract";
 import {
   createMessageReceiptFromOutboundResults,
   defineChannelMessageAdapter,
   type MessageReceiptPartKind,
-} from "openclaw/plugin-sdk/channel-outbound";
-import { sanitizeForPlainText } from "openclaw/plugin-sdk/channel-outbound";
+} from "openclaw/plugin-sdk/channel-message";
 import {
   composeAccountWarningCollectors,
   createAllowlistProviderOpenWarningCollector,
@@ -20,8 +15,11 @@ import {
 } from "openclaw/plugin-sdk/directory-runtime";
 import { createLazyRuntimeNamedExport } from "openclaw/plugin-sdk/lazy-runtime";
 import type { OutboundMediaLoadOptions } from "openclaw/plugin-sdk/outbound-media";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
-import { formatGoogleChatAllowFromEntry } from "./channel-base.js";
+import { sanitizeForPlainText } from "openclaw/plugin-sdk/outbound-runtime";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   type ResolvedGoogleChatAccount,
   chunkTextForOutbound,
@@ -65,7 +63,14 @@ function createGoogleChatSendReceipt(params: {
   });
 }
 
-export const formatAllowFromEntry = formatGoogleChatAllowFromEntry;
+export const formatAllowFromEntry = (entry: string) =>
+  normalizeLowercaseStringOrEmpty(
+    entry
+      .trim()
+      .replace(/^(googlechat|google-chat|gchat):/i, "")
+      .replace(/^user:/i, "")
+      .replace(/^users\//i, ""),
+  );
 
 const collectGoogleChatGroupPolicyWarnings =
   createAllowlistProviderOpenWarningCollector<ResolvedGoogleChatAccount>({
@@ -131,29 +136,6 @@ export const googlechatThreadingAdapter = {
       account.config.replyToMode,
     fallback: "off" as const,
   },
-  buildToolContext: ({
-    cfg,
-    accountId,
-    context,
-    hasRepliedRef,
-  }: {
-    cfg: OpenClawConfig;
-    accountId?: string | null;
-    context: ChannelThreadingContext;
-    hasRepliedRef?: { value: boolean };
-  }): ChannelThreadingToolContext => {
-    const currentChannelId = normalizeGoogleChatTarget(context.To);
-    const replyToId =
-      normalizeOptionalString(context.ReplyToIdFull) ?? normalizeOptionalString(context.ReplyToId);
-
-    return {
-      currentChannelId,
-      currentMessageId: replyToId,
-      currentThreadTs: replyToId,
-      replyToMode: resolveGoogleChatAccount({ cfg, accountId }).config.replyToMode,
-      hasRepliedRef,
-    };
-  },
 };
 
 export const googlechatPairingTextAdapter = {
@@ -171,7 +153,7 @@ export const googlechatPairingTextAdapter = {
     message: string;
     accountId?: string | null;
   }) => {
-    const account = resolveGoogleChatAccount({ cfg, accountId });
+    const account = resolveGoogleChatAccount({ cfg: cfg, accountId });
     if (account.credentialSource === "none") {
       return;
     }
@@ -232,7 +214,7 @@ export const googlechatOutboundAdapter = {
       threadId?: string | number | null;
     }) => {
       const account = resolveGoogleChatAccount({
-        cfg,
+        cfg: cfg,
         accountId,
       });
       const space = await resolveGoogleChatOutboundSpace({ account, target: to });
@@ -279,21 +261,21 @@ export const googlechatOutboundAdapter = {
         throw new Error("Google Chat mediaUrl is required.");
       }
       const account = resolveGoogleChatAccount({
-        cfg,
+        cfg: cfg,
         accountId,
       });
       const space = await resolveGoogleChatOutboundSpace({ account, target: to });
       const thread =
         typeof threadId === "number" ? String(threadId) : (threadId ?? replyToId ?? undefined);
       const maxBytes = resolveChannelMediaMaxBytes({
-        cfg,
-        resolveChannelLimitMb: ({ cfg: cfgLocal, accountId: accountIdLocal }) =>
+        cfg: cfg,
+        resolveChannelLimitMb: ({ cfg, accountId }) =>
           (
-            cfgLocal.channels?.googlechat as
+            cfg.channels?.googlechat as
               | { accounts?: Record<string, { mediaMaxMb?: number }>; mediaMaxMb?: number }
               | undefined
-          )?.accounts?.[accountIdLocal]?.mediaMaxMb ??
-          (cfgLocal.channels?.googlechat as { mediaMaxMb?: number } | undefined)?.mediaMaxMb,
+          )?.accounts?.[accountId]?.mediaMaxMb ??
+          (cfg.channels?.googlechat as { mediaMaxMb?: number } | undefined)?.mediaMaxMb,
         accountId,
       });
       const effectiveMaxBytes = maxBytes ?? (account.config.mediaMaxMb ?? 20) * 1024 * 1024;

@@ -2,12 +2,7 @@
 import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-const rawArgs = process.argv.slice(2);
-if (rawArgs.includes("--help") || rawArgs.includes("-h")) {
-  usage("", 0);
-}
-
-const args = parseArgs(rawArgs);
+const args = parseArgs(process.argv.slice(2));
 if (!args.report) {
   usage("missing --report");
 }
@@ -43,9 +38,9 @@ if (args.output) {
   process.stdout.write(markdown);
 }
 
-function renderSummary(reportLocal, options) {
+function renderSummary(report, options) {
   const lines = [];
-  const statuses = reportLocal.summary?.statuses || {};
+  const statuses = report.summary?.statuses || {};
   const statusText =
     Object.entries(statuses)
       .map(([status, count]) => `${status}: ${value(count)}`)
@@ -54,11 +49,11 @@ function renderSummary(reportLocal, options) {
   lines.push(`# OpenClaw Performance Report`);
   lines.push("");
   lines.push(`- Lane: ${options.lane}`);
-  lines.push(`- Run: ${value(reportLocal.runId)}`);
-  lines.push(`- Generated: ${value(reportLocal.generatedAt)}`);
-  lines.push(`- Target: ${value(reportLocal.target)}`);
+  lines.push(`- Run: ${value(report.runId)}`);
+  lines.push(`- Generated: ${value(report.generatedAt)}`);
+  lines.push(`- Target: ${value(report.target)}`);
   lines.push(`- Statuses: ${statusText}`);
-  lines.push(`- Repeat: ${value(reportLocal.performance?.repeat)}`);
+  lines.push(`- Repeat: ${value(report.performance?.repeat)}`);
   if (options.reportUrl) {
     lines.push(`- Published report: ${options.reportUrl}`);
   }
@@ -67,9 +62,7 @@ function renderSummary(reportLocal, options) {
   }
   lines.push("");
 
-  const groups = Array.isArray(reportLocal.performance?.groups)
-    ? reportLocal.performance.groups
-    : [];
+  const groups = Array.isArray(report.performance?.groups) ? report.performance.groups : [];
   if (groups.length > 0) {
     lines.push("## Key metrics");
     lines.push("");
@@ -99,7 +92,7 @@ function renderSummary(reportLocal, options) {
     lines.push("");
   }
 
-  const violations = collectViolations(reportLocal.records);
+  const violations = collectViolations(report.records);
   if (violations.length > 0) {
     lines.push("## Threshold violations");
     lines.push("");
@@ -126,7 +119,7 @@ function renderSummary(reportLocal, options) {
     lines.push("");
   }
 
-  const records = Array.isArray(reportLocal.records) ? reportLocal.records : [];
+  const records = Array.isArray(report.records) ? report.records : [];
   if (records.length > 0) {
     lines.push("## Records");
     lines.push("");
@@ -196,11 +189,11 @@ function parseArgs(argv) {
       usage(`unexpected argument: ${arg}`);
     }
     const key = arg.slice(2).replaceAll("-", "");
-    const valueLocal = argv[index + 1];
-    if (!valueLocal || valueLocal.startsWith("--")) {
+    const value = argv[index + 1];
+    if (!value || value.startsWith("--")) {
       usage(`${arg} requires a value`);
     }
-    parsed[key] = valueLocal;
+    parsed[key] = value;
     index += 1;
   }
   return {
@@ -212,16 +205,12 @@ function parseArgs(argv) {
   };
 }
 
-function usage(message, status = 2) {
-  const text =
-    "usage: node scripts/kova-ci-summary.mjs --report <report.json> [--output <summary.md>] [--lane <name>]\n";
+function usage(message) {
   if (message) {
     console.error(`error: ${message}`);
   }
-  if (status === 0 && !message) {
-    process.stdout.write(text);
-  } else {
-    process.stderr.write(text);
-  }
-  process.exit(status);
+  console.error(
+    "usage: node scripts/kova-ci-summary.mjs --report <report.json> [--output <summary.md>] [--lane <name>]",
+  );
+  process.exit(2);
 }

@@ -1,4 +1,3 @@
-import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { resolveCodexAppServerAuthProfileIdForAgent } from "./auth-bridge.js";
 import type { CodexAppServerClient } from "./client.js";
 import type { CodexAppServerStartOptions } from "./config.js";
@@ -74,13 +73,10 @@ async function withCodexAppServerModelClient<T>(
 ): Promise<T> {
   const timeoutMs = options.timeoutMs ?? 2500;
   const useSharedClient = options.sharedClient !== false;
-  const {
-    createIsolatedCodexAppServerClient,
-    getLeasedSharedCodexAppServerClient,
-    releaseLeasedSharedCodexAppServerClient,
-  } = await import("./shared-client.js");
+  const { createIsolatedCodexAppServerClient, getSharedCodexAppServerClient } =
+    await import("./shared-client.js");
   const client = useSharedClient
-    ? await getLeasedSharedCodexAppServerClient({
+    ? await getSharedCodexAppServerClient({
         startOptions: options.startOptions,
         timeoutMs,
         authProfileId: options.authProfileId,
@@ -97,9 +93,7 @@ async function withCodexAppServerModelClient<T>(
   try {
     return await run({ client, timeoutMs });
   } finally {
-    if (useSharedClient) {
-      releaseLeasedSharedCodexAppServerClient(client);
-    } else {
+    if (!useSharedClient) {
       client.close();
     }
   }
@@ -162,7 +156,7 @@ function readReasoningEfforts(value: CodexReasoningEffortOption[]): string[] {
   const efforts = value
     .map((entry) => readNonEmptyString(entry.reasoningEffort))
     .filter((entry): entry is string => entry !== undefined);
-  return uniqueStrings(efforts);
+  return [...new Set(efforts)];
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

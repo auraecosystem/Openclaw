@@ -4,10 +4,10 @@ import { PASSTHROUGH_GEMINI_REPLAY_HOOKS } from "openclaw/plugin-sdk/provider-mo
 import { applyOpencodeGoConfig, OPENCODE_GO_DEFAULT_MODEL_REF } from "./api.js";
 import { opencodeGoMediaUnderstandingProvider } from "./media-understanding-provider.js";
 import {
-  listOpencodeGoModelCatalogEntries,
+  listOpencodeGoSupplementalModelCatalogEntries,
   normalizeOpencodeGoBaseUrl,
   normalizeOpencodeGoResolvedModel,
-  resolveOpencodeGoModel,
+  resolveOpencodeGoSupplementalModel,
 } from "./provider-catalog.js";
 import { createOpencodeGoWrapper } from "./stream.js";
 
@@ -81,17 +81,17 @@ export default definePluginEntry({
         }
         return baseUrlNormalized !== model ? baseUrlNormalized : undefined;
       },
-      normalizeTransport: ({ api: apiLocal, baseUrl }) => {
-        const normalizedBaseUrl = normalizeOpencodeGoBaseUrl({ api: apiLocal, baseUrl });
+      normalizeTransport: ({ api, baseUrl }) => {
+        const normalizedBaseUrl = normalizeOpencodeGoBaseUrl({ api, baseUrl });
         return normalizedBaseUrl && normalizedBaseUrl !== baseUrl
           ? {
-              api: apiLocal,
+              api,
               baseUrl: normalizedBaseUrl,
             }
           : undefined;
       },
-      resolveDynamicModel: ({ modelId }) => resolveOpencodeGoModel(modelId),
-      augmentModelCatalog: () => listOpencodeGoModelCatalogEntries(),
+      resolveDynamicModel: ({ modelId }) => resolveOpencodeGoSupplementalModel(modelId),
+      augmentModelCatalog: () => listOpencodeGoSupplementalModelCatalogEntries(),
       ...PASSTHROUGH_GEMINI_REPLAY_HOOKS,
       wrapStreamFn: (ctx) => createOpencodeGoWrapper(ctx.streamFn, ctx.thinkingLevel),
       isModernModelRef: () => true,

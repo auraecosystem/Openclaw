@@ -28,7 +28,7 @@ export function clearNodeWakeState(nodeId: string): void {
 // early-return paths. Mirrors the pattern used in agent-wait-dedupe.ts:223
 // and agents.ts:78 — keep production surface untouched and do not expose the
 // underlying Map reference.
-export const testing = {
+export const __testing = {
   getNodeWakeByIdSize(): number {
     return nodeWakeById.size;
   },
@@ -40,4 +40,3 @@ export const testing = {
     nodeWakeNudgeById.clear();
   },
 };
-export { testing as __testing };

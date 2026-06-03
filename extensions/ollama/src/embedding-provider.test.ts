@@ -1,27 +1,20 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/provider-auth";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { fetchConfiguredLocalOriginWithSsrFGuardMock } = vi.hoisted(() => ({
-  fetchConfiguredLocalOriginWithSsrFGuardMock: vi.fn(
-    async ({ init, url }: { init?: RequestInit; url: string }) => ({
-      response: await fetch(url, init),
-      release: async () => {},
-    }),
-  ),
+const { fetchWithSsrFGuardMock } = vi.hoisted(() => ({
+  fetchWithSsrFGuardMock: vi.fn(async ({ init, url }: { init?: RequestInit; url: string }) => ({
+    response: await fetch(url, init),
+    release: async () => {},
+  })),
 }));
 
 vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  fetchWithSsrFGuard: vi.fn(),
+  fetchWithSsrFGuard: fetchWithSsrFGuardMock,
   formatErrorMessage: (error: unknown) => (error instanceof Error ? error.message : String(error)),
-  ssrfPolicyFromHttpBaseUrlAllowedOrigin: (baseUrl: string) => {
+  ssrfPolicyFromHttpBaseUrlAllowedHostname: (baseUrl: string) => {
     const parsed = new URL(baseUrl);
-    return { allowedOrigins: [parsed.origin] };
+    return { allowedHostnames: [parsed.hostname] };
   },
-}));
-
-// Import-resolution gating for this private helper is covered in sdk-alias.test.ts.
-vi.mock("openclaw/plugin-sdk/ssrf-runtime-internal", () => ({
-  fetchConfiguredLocalOriginWithSsrFGuard: fetchConfiguredLocalOriginWithSsrFGuardMock,
 }));
 
 let createOllamaEmbeddingProvider: typeof import("./embedding-provider.js").createOllamaEmbeddingProvider;
@@ -33,7 +26,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  fetchConfiguredLocalOriginWithSsrFGuardMock.mockClear();
+  fetchWithSsrFGuardMock.mockClear();
 });
 
 afterEach(() => {
@@ -72,14 +65,6 @@ function readFirstEmbeddingInput(fetchMock: ReturnType<typeof mockEmbeddingFetch
   const init = firstFetchInit(fetchMock);
   const body = readEmbeddingRequestBody(init);
   return body.input;
-}
-
-function firstGuardedFetchCall(): Record<string, unknown> {
-  const call = fetchConfiguredLocalOriginWithSsrFGuardMock.mock.calls[0]?.[0];
-  if (!call || typeof call !== "object") {
-    throw new Error("expected guarded fetch call");
-  }
-  return call as Record<string, unknown>;
 }
 
 function expectEmbeddingFetch(
@@ -122,50 +107,6 @@ describe("ollama embedding provider", () => {
     });
     expect(vector[0]).toBeCloseTo(0.6, 5);
     expect(vector[1]).toBeCloseTo(0.8, 5);
-  });
-
-  it("marks the configured Ollama origin for managed-proxy direct routing", async () => {
-    const fetchMock = mockEmbeddingFetch([1, 0]);
-
-    const { provider } = await createOllamaEmbeddingProvider({
-      config: {} as OpenClawConfig,
-      provider: "ollama",
-      model: "nomic-embed-text",
-      fallback: "none",
-      remote: { baseUrl: "http://127.0.0.1:11434/v1" },
-    });
-
-    await provider.embedQuery("hello");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(firstGuardedFetchCall()).toMatchObject({
-      url: "http://127.0.0.1:11434/api/embed",
-      policy: { allowedOrigins: ["http://127.0.0.1:11434"] },
-      configuredLocalOriginBaseUrl: "http://127.0.0.1:11434",
-      auditContext: "ollama-memory-embedding",
-    });
-  });
-
-  it("passes cloud Ollama origins through the guarded fetch contract", async () => {
-    const fetchMock = mockEmbeddingFetch([1, 0]);
-
-    const { provider } = await createOllamaEmbeddingProvider({
-      config: {} as OpenClawConfig,
-      provider: "ollama",
-      model: "nomic-embed-text",
-      fallback: "none",
-      remote: { baseUrl: "https://ollama.com" },
-    });
-
-    await provider.embedQuery("hello");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(firstGuardedFetchCall()).toMatchObject({
-      url: "https://ollama.com/api/embed",
-      policy: { allowedOrigins: ["https://ollama.com"] },
-      configuredLocalOriginBaseUrl: "https://ollama.com",
-      auditContext: "ollama-memory-embedding",
-    });
   });
 
   it("resolves configured base URL and headers without sending local marker auth", async () => {
@@ -308,12 +249,6 @@ describe("ollama embedding provider", () => {
     await expect(provider.embedBatch(["a", "bb", "ccc"])).resolves.toHaveLength(3);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(inputs).toEqual([["a", "bb", "ccc"]]);
-    expect(firstGuardedFetchCall()).toMatchObject({
-      url: "http://127.0.0.1:11434/api/embed",
-      policy: { allowedOrigins: ["http://127.0.0.1:11434"] },
-      configuredLocalOriginBaseUrl: "http://127.0.0.1:11434",
-      auditContext: "ollama-memory-embedding",
-    });
   });
 
   it("reports malformed embed JSON with a provider-owned error", async () => {

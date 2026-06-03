@@ -1,16 +1,16 @@
 import { readFile } from "node:fs/promises";
 import {
+  buildSessionContext,
+  migrateSessionEntries,
+  parseSessionEntries,
+  type SessionEntry as PiSessionEntry,
+} from "@earendil-works/pi-coding-agent";
+import {
   resolveSessionFilePath,
   resolveSessionFilePathOptions,
   type SessionEntry as StoredSessionEntry,
 } from "../config/sessions.js";
 import { diagnosticLogger as diag } from "../logging/diagnostic.js";
-import {
-  buildSessionContext,
-  migrateSessionEntries,
-  parseSessionEntries,
-  type SessionEntry as AgentSessionEntry,
-} from "./sessions/session-manager.js";
 
 export function resolveBtwSessionTranscriptPath(params: {
   sessionId: string;
@@ -33,12 +33,12 @@ export function resolveBtwSessionTranscriptPath(params: {
   }
 }
 
-function readSessionEntryId(entry: AgentSessionEntry): string | undefined {
+function readSessionEntryId(entry: PiSessionEntry): string | undefined {
   const id = (entry as { id?: unknown }).id;
   return typeof id === "string" && id.trim().length > 0 ? id : undefined;
 }
 
-function readSessionEntryParentId(entry: AgentSessionEntry): string | null | undefined {
+function readSessionEntryParentId(entry: PiSessionEntry): string | null | undefined {
   const parentId = (entry as { parentId?: unknown }).parentId;
   if (parentId === null) {
     return null;
@@ -46,25 +46,25 @@ function readSessionEntryParentId(entry: AgentSessionEntry): string | null | und
   return typeof parentId === "string" && parentId.trim().length > 0 ? parentId : undefined;
 }
 
-function hasParentLinkedEntries(entries: AgentSessionEntry[]): boolean {
+function hasParentLinkedEntries(entries: PiSessionEntry[]): boolean {
   return entries.some((entry) => Boolean(readSessionEntryId(entry) && "parentId" in entry));
 }
 
 function buildSessionBranchEntries(
-  entries: AgentSessionEntry[],
+  entries: PiSessionEntry[],
   leafId: string | undefined,
-): AgentSessionEntry[] | undefined {
+): PiSessionEntry[] | undefined {
   if (!leafId) {
     return undefined;
   }
-  const byId = new Map<string, AgentSessionEntry>();
+  const byId = new Map<string, PiSessionEntry>();
   for (const entry of entries) {
     const id = readSessionEntryId(entry);
     if (id) {
       byId.set(id, entry);
     }
   }
-  const branch: AgentSessionEntry[] = [];
+  const branch: PiSessionEntry[] = [];
   const seen = new Set<string>();
   let currentId: string | undefined = leafId;
   while (currentId) {
@@ -82,7 +82,7 @@ function buildSessionBranchEntries(
   return branch.toReversed();
 }
 
-function readDefaultLeafId(entries: AgentSessionEntry[]): string | undefined {
+function readDefaultLeafId(entries: PiSessionEntry[]): string | undefined {
   for (let index = entries.length - 1; index >= 0; index -= 1) {
     const id = readSessionEntryId(entries[index]);
     if (id) {
@@ -92,7 +92,7 @@ function readDefaultLeafId(entries: AgentSessionEntry[]): string | undefined {
   return undefined;
 }
 
-function isTrailingUserMessage(entry: AgentSessionEntry | undefined): boolean {
+function isTrailingUserMessage(entry: PiSessionEntry | undefined): boolean {
   return (
     entry?.type === "message" &&
     (entry as { message?: { role?: unknown } }).message?.role === "user"
@@ -108,7 +108,7 @@ export async function readBtwTranscriptMessages(params: {
     const entries = parseSessionEntries(await readFile(params.sessionFile, "utf-8"));
     migrateSessionEntries(entries);
     const sessionEntries = entries.filter(
-      (entry): entry is AgentSessionEntry => entry.type !== "session",
+      (entry): entry is PiSessionEntry => entry.type !== "session",
     );
     if (!hasParentLinkedEntries(sessionEntries)) {
       return buildSessionContext(sessionEntries).messages;

@@ -1,24 +1,16 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { withTempDir } from "../test-helpers/temp-dir.js";
 import {
   ackSessionDelivery,
   enqueueSessionDelivery,
   failSessionDelivery,
   loadPendingSessionDeliveries,
+  resolveSessionDeliveryQueueDir,
 } from "./session-delivery-queue.js";
 
 describe("session-delivery queue storage", () => {
-  function readSessionQueueStatus(tempDir: string, id: string): string | undefined {
-    const { db } = openOpenClawStateDatabase({
-      env: { ...process.env, OPENCLAW_STATE_DIR: tempDir },
-    });
-    const row = db
-      .prepare("SELECT status FROM delivery_queue_entries WHERE queue_name = 'session' AND id = ?")
-      .get(id) as { status?: string } | undefined;
-    return row?.status;
-  }
-
   it("dedupes entries when an idempotency key is reused", async () => {
     await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
       const firstId = await enqueueSessionDelivery(
@@ -68,9 +60,9 @@ describe("session-delivery queue storage", () => {
     });
   });
 
-  it("moves entries out of pending retry state", async () => {
+  it("cleans up orphaned temporary queue files during load", async () => {
     await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
-      const id = await enqueueSessionDelivery(
+      await enqueueSessionDelivery(
         {
           kind: "systemEvent",
           sessionKey: "agent:main:main",
@@ -78,10 +70,26 @@ describe("session-delivery queue storage", () => {
         },
         tempDir,
       );
+      const tmpPath = path.join(resolveSessionDeliveryQueueDir(tempDir), "orphan-entry.tmp");
+      fs.writeFileSync(tmpPath, "stale tmp");
+      const staleAt = new Date(Date.now() - 60_000);
+      fs.utimesSync(tmpPath, staleAt, staleAt);
 
-      await ackSessionDelivery(id, tempDir);
+      await loadPendingSessionDeliveries(tempDir);
 
-      expect(readSessionQueueStatus(tempDir, id)).toBeUndefined();
+      expect(fs.existsSync(tmpPath)).toBe(false);
+    });
+  });
+
+  it("keeps fresh temporary queue files while a write may still be in flight", async () => {
+    await withTempDir({ prefix: "openclaw-session-delivery-" }, async (tempDir) => {
+      const tmpPath = path.join(resolveSessionDeliveryQueueDir(tempDir), "active-entry.tmp");
+      fs.mkdirSync(path.dirname(tmpPath), { recursive: true });
+      fs.writeFileSync(tmpPath, "active tmp");
+
+      await loadPendingSessionDeliveries(tempDir);
+
+      expect(fs.existsSync(tmpPath)).toBe(true);
     });
   });
 });

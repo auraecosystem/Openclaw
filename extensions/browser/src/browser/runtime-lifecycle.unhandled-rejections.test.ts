@@ -25,14 +25,14 @@ const {
   stopKnownBrowserProfilesMock,
   trackedTabCleanupMock,
 } = vi.hoisted(() => {
-  const trackedTabCleanupMockLocal = vi.fn();
+  const trackedTabCleanupMock = vi.fn();
   return {
     ensureExtensionRelayForProfilesMock: vi.fn(async () => {}),
     getPwAiModuleMock: vi.fn(),
     isPwAiLoadedMock: vi.fn(() => false),
-    startTrackedBrowserTabCleanupTimerMock: vi.fn(() => trackedTabCleanupMockLocal),
+    startTrackedBrowserTabCleanupTimerMock: vi.fn(() => trackedTabCleanupMock),
     stopKnownBrowserProfilesMock: vi.fn(async () => {}),
-    trackedTabCleanupMock: trackedTabCleanupMockLocal,
+    trackedTabCleanupMock,
   };
 });
 

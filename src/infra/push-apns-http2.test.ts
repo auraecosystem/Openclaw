@@ -1,9 +1,8 @@
 import type http2 from "node:http2";
-import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HttpConnectTunnelParams } from "./net/http-connect-tunnel.js";
 import {
-  resetActiveManagedProxyStateForTests,
+  _resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
   stopActiveManagedProxyRegistration,
 } from "./net/proxy/active-proxy-state.js";
@@ -44,34 +43,34 @@ const { connectSpy, tunnelSpy, fakeRequest, fakeSession, fakeTlsSocket } = vi.ho
     }
   }
 
-  const fakeRequestLocal = Object.assign(new FakeEmitter(), {
+  const fakeRequest = Object.assign(new FakeEmitter(), {
     setEncoding: vi.fn(),
     end: vi.fn(() => {
       queueMicrotask(() => {
-        fakeRequestLocal.emit("response", { ":status": 403 });
-        fakeRequestLocal.emit("data", '{"reason":"InvalidProviderToken"}');
-        fakeRequestLocal.emit("end");
+        fakeRequest.emit("response", { ":status": 403 });
+        fakeRequest.emit("data", '{"reason":"InvalidProviderToken"}');
+        fakeRequest.emit("end");
       });
     }),
   });
-  const fakeSessionLocal = Object.assign(new FakeEmitter(), {
+  const fakeSession = Object.assign(new FakeEmitter(), {
     closed: false,
     destroyed: false,
     close: vi.fn(() => {
-      fakeSessionLocal.closed = true;
+      fakeSession.closed = true;
     }),
     destroy: vi.fn(() => {
-      fakeSessionLocal.destroyed = true;
+      fakeSession.destroyed = true;
     }),
-    request: vi.fn(() => fakeRequestLocal),
+    request: vi.fn(() => fakeRequest),
   });
-  const fakeTlsSocketLocal = { encrypted: true };
+  const fakeTlsSocket = { encrypted: true };
   return {
-    fakeRequest: fakeRequestLocal,
-    fakeSession: fakeSessionLocal,
-    fakeTlsSocket: fakeTlsSocketLocal,
-    connectSpy: vi.fn(() => fakeSessionLocal),
-    tunnelSpy: vi.fn(async (_params: HttpConnectTunnelParams) => fakeTlsSocketLocal),
+    fakeRequest,
+    fakeSession,
+    fakeTlsSocket,
+    connectSpy: vi.fn(() => fakeSession),
+    tunnelSpy: vi.fn(async (_params: HttpConnectTunnelParams) => fakeTlsSocket),
   };
 });
 
@@ -116,7 +115,7 @@ describe("connectApnsHttp2Session", () => {
     fakeSession.close.mockClear();
     fakeSession.destroy.mockClear();
     fakeSession.request.mockClear();
-    resetActiveManagedProxyStateForTests();
+    _resetActiveManagedProxyStateForTests();
   });
   it("uses direct http2.connect when managed proxy is inactive", async () => {
     const { connectApnsHttp2Session } = await import("./push-apns-http2.js");
@@ -194,21 +193,6 @@ describe("connectApnsHttp2Session", () => {
     expect(createConnection?.(new URL("https://api.push.apple.com"), {})).toBe(fakeTlsSocket);
   });
 
-  it("caps oversized managed proxy timeouts before opening the APNs tunnel", async () => {
-    const registration = registerActiveManagedProxyUrl(new URL("https://proxy.example:8443"), {
-      loopbackMode: "gateway-only",
-    });
-    const { connectApnsHttp2Session } = await import("./push-apns-http2.js");
-
-    await connectApnsHttp2Session({
-      authority: "https://api.push.apple.com",
-      timeoutMs: Number.MAX_SAFE_INTEGER,
-    });
-    stopActiveManagedProxyRegistration(registration);
-
-    expect(lastTunnelCall().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-  });
-
   it("ignores ambient proxy env when managed proxy is inactive", async () => {
     const originalHttpsProxy = process.env["HTTPS_PROXY"];
     process.env["HTTPS_PROXY"] = "http://ambient.example:8080";
@@ -266,18 +250,6 @@ describe("connectApnsHttp2Session", () => {
       "apns-priority": "10",
     });
     expect(fakeSession.close).toHaveBeenCalledOnce();
-  });
-
-  it("caps oversized explicit proxy probe timeouts", async () => {
-    const { probeApnsHttp2ReachabilityViaProxy } = await import("./push-apns-http2.js");
-
-    await probeApnsHttp2ReachabilityViaProxy({
-      authority: "https://api.sandbox.push.apple.com",
-      proxyUrl: "http://proxy.example:8080",
-      timeoutMs: Number.MAX_SAFE_INTEGER,
-    });
-
-    expect(lastTunnelCall().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
   });
 
   it("rejects non-APNs authorities", async () => {

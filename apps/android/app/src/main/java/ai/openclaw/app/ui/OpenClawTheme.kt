@@ -13,9 +13,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
-/**
- * App theme wrapper that installs dynamic Material colors and legacy mobile color tokens.
- */
 @Composable
 fun OpenClawTheme(content: @Composable () -> Unit) {
   val context = LocalContext.current
@@ -38,9 +35,6 @@ fun OpenClawTheme(content: @Composable () -> Unit) {
   }
 }
 
-/**
- * Overlay background token tuned for panels floating over the mobile canvas.
- */
 @Composable
 fun overlayContainerColor(): Color {
   val scheme = MaterialTheme.colorScheme
@@ -50,8 +44,5 @@ fun overlayContainerColor(): Color {
   return if (isDark) base else base.copy(alpha = 0.88f)
 }
 
-/**
- * Overlay icon token kept next to overlayContainerColor for callers outside the design package.
- */
 @Composable
 fun overlayIconColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant

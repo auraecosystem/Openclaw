@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HookRunner } from "../../plugins/hooks.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import {
@@ -47,11 +47,8 @@ function createContinueDirectivesResult() {
 }
 
 describe("getReplyFromConfig before_agent_reply wiring", () => {
-  beforeAll(async () => {
+  beforeEach(async () => {
     await loadGetReplyRuntimeForTest();
-  });
-
-  beforeEach(() => {
     vi.stubEnv("OPENCLAW_ALLOW_SLOW_REPLY_TESTS", "1");
     mocks.resolveReplyDirectives.mockReset();
     mocks.handleInlineActions.mockReset();

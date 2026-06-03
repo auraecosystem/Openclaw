@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  testApi,
+  __test,
   loadSessionLogs,
   loadSessionTimeSeries,
   loadUsage,
@@ -21,8 +21,6 @@ function createState(request: RequestFn, overrides: Partial<UsageState> = {}): U
     usageStartDate: "2026-02-16",
     usageEndDate: "2026-02-16",
     usageScope: "family",
-    usageAgentId: null,
-    usageQuery: "",
     usageSelectedSessions: [],
     usageSelectedDays: [],
     usageTimeSeries: null,
@@ -40,7 +38,6 @@ function expectSpecificTimezoneCalls(request: ReturnType<typeof vi.fn>, startCal
   expect(request).toHaveBeenNthCalledWith(startCall, "sessions.usage", {
     startDate: "2026-02-16",
     endDate: "2026-02-16",
-    agentScope: "all",
     mode: "specific",
     utcOffset: "UTC+5:30",
     groupBy: "family",
@@ -51,7 +48,6 @@ function expectSpecificTimezoneCalls(request: ReturnType<typeof vi.fn>, startCal
   expect(request).toHaveBeenNthCalledWith(startCall + 1, "usage.cost", {
     startDate: "2026-02-16",
     endDate: "2026-02-16",
-    agentScope: "all",
     mode: "specific",
     utcOffset: "UTC+5:30",
   });
@@ -59,7 +55,7 @@ function expectSpecificTimezoneCalls(request: ReturnType<typeof vi.fn>, startCal
 
 describe("usage controller date interpretation params", () => {
   beforeEach(() => {
-    testApi.resetLegacyUsageDateParamsCache();
+    __test.resetLegacyUsageDateParamsCache();
   });
 
   afterEach(() => {
@@ -67,9 +63,9 @@ describe("usage controller date interpretation params", () => {
   });
 
   it("formats UTC offsets for whole and half-hour timezones", () => {
-    expect(testApi.formatUtcOffset(240)).toBe("UTC-4");
-    expect(testApi.formatUtcOffset(-330)).toBe("UTC+5:30");
-    expect(testApi.formatUtcOffset(0)).toBe("UTC+0");
+    expect(__test.formatUtcOffset(240)).toBe("UTC-4");
+    expect(__test.formatUtcOffset(-330)).toBe("UTC+5:30");
+    expect(__test.formatUtcOffset(0)).toBe("UTC+0");
   });
 
   it("sends specific mode with browser offset when usage timezone is local", async () => {
@@ -91,7 +87,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(1, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       mode: "utc",
       groupBy: "family",
       includeHistorical: true,
@@ -101,60 +96,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(2, "usage.cost", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
-      mode: "utc",
-    });
-  });
-
-  it("requests all-agent sessions and costs by default", async () => {
-    const request = vi.fn(async () => ({}));
-    const state = createState(request, {
-      usageTimeZone: "utc",
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentScope: "all",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(2, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentScope: "all",
-      mode: "utc",
-    });
-  });
-
-  it("passes selected agent as sessions and cost agentId", async () => {
-    const request = vi.fn(async () => ({}));
-    const state = createState(request, {
-      usageAgentId: "research",
-      usageTimeZone: "utc",
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentId: "research",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(2, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentId: "research",
       mode: "utc",
     });
   });
@@ -171,7 +112,7 @@ describe("usage controller date interpretation params", () => {
   });
 
   it("serializes non-Error objects without object-to-string coercion", () => {
-    expect(testApi.toErrorMessage({ reason: "nope" })).toBe('{"reason":"nope"}');
+    expect(__test.toErrorMessage({ reason: "nope" })).toBe('{"reason":"nope"}');
   });
 
   it("falls back and remembers compatibility when sessions.usage rejects mode/utcOffset", async () => {
@@ -203,7 +144,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       groupBy: "family",
       includeHistorical: true,
       limit: 1000,
@@ -212,7 +152,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(4, "usage.cost", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
     });
 
     // Subsequent loads for the same gateway should skip mode/utcOffset immediately.
@@ -221,7 +160,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       groupBy: "family",
       includeHistorical: true,
       limit: 1000,
@@ -230,12 +168,11 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(6, "usage.cost", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
     });
 
     // Persisted flag should survive cache resets (simulating app reload).
-    testApi.resetLegacyUsageDateParamsCache();
-    expect(testApi.shouldSendLegacyDateInterpretation(state)).toBe(false);
+    __test.resetLegacyUsageDateParamsCache();
+    expect(__test.shouldSendLegacyDateInterpretation(state)).toBe(false);
 
     vi.unstubAllGlobals();
   });
@@ -269,7 +206,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       mode: "specific",
       utcOffset: "UTC+5:30",
       limit: 1000,
@@ -278,7 +214,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(4, "usage.cost", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       mode: "specific",
       utcOffset: "UTC+5:30",
     });
@@ -289,7 +224,6 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       mode: "specific",
       utcOffset: "UTC+5:30",
       limit: 1000,
@@ -298,149 +232,9 @@ describe("usage controller date interpretation params", () => {
     expect(request).toHaveBeenNthCalledWith(6, "usage.cost", {
       startDate: "2026-02-16",
       endDate: "2026-02-16",
-      agentScope: "all",
       mode: "specific",
       utcOffset: "UTC+5:30",
     });
-
-    vi.unstubAllGlobals();
-  });
-
-  it("falls back and remembers compatibility when sessions.usage rejects agentId", async () => {
-    const storage = createStorageMock();
-    vi.stubGlobal("localStorage", storage as unknown as Storage);
-
-    const request = vi.fn(async (method: string, params?: unknown) => {
-      if (method === "sessions.usage") {
-        const record = (params ?? {}) as Record<string, unknown>;
-        if ("agentId" in record) {
-          throw new Error("invalid sessions.usage params: at root: unexpected property 'agentId'");
-        }
-        return { sessions: [] };
-      }
-      return {};
-    });
-
-    const state = createState(request, {
-      settings: { gatewayUrl: "ws://127.0.0.1:18789" },
-      usageAgentId: "research",
-      usageTimeZone: "utc",
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentId: "research",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(2, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentId: "research",
-      mode: "utc",
-    });
-    expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(4, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(6, "usage.cost", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-    });
-
-    testApi.resetLegacyUsageDateParamsCache();
-    expect(testApi.shouldSendLegacyUsageAgentParams(state)).toBe(false);
-
-    vi.unstubAllGlobals();
-  });
-
-  it("falls back and remembers compatibility when sessions.usage rejects agentScope", async () => {
-    const storage = createStorageMock();
-    vi.stubGlobal("localStorage", storage as unknown as Storage);
-
-    const request = vi.fn(async (method: string, params?: unknown) => {
-      if (method === "sessions.usage") {
-        const record = (params ?? {}) as Record<string, unknown>;
-        if ("agentScope" in record) {
-          throw new Error(
-            "invalid sessions.usage params: at root: unexpected property 'agentScope'",
-          );
-        }
-        return { sessions: [] };
-      }
-      return {};
-    });
-
-    const state = createState(request, {
-      settings: { gatewayUrl: "ws://127.0.0.1:18789" },
-      usageTimeZone: "utc",
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(1, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      agentScope: "all",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-    expect(request).toHaveBeenNthCalledWith(3, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-
-    await loadUsage(state);
-
-    expect(request).toHaveBeenNthCalledWith(5, "sessions.usage", {
-      startDate: "2026-02-16",
-      endDate: "2026-02-16",
-      mode: "utc",
-      groupBy: "family",
-      includeHistorical: true,
-      limit: 1000,
-      includeContextWeight: true,
-    });
-
-    testApi.resetLegacyUsageDateParamsCache();
-    expect(testApi.shouldSendLegacyUsageAgentScope(state)).toBe(false);
 
     vi.unstubAllGlobals();
   });

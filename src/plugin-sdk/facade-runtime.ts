@@ -159,10 +159,6 @@ function loadFacadeActivationCheckRuntime(): FacadeActivationCheckRuntimeModule 
   throw new Error("Unable to load facade activation check runtime");
 }
 
-function setFacadeActivationCheckRuntimeForTest(module: FacadeActivationCheckRuntimeModule): void {
-  facadeActivationCheckRuntimeModule = module;
-}
-
 function loadFacadeModuleAtLocationSync<T extends object>(params: {
   location: FacadeModuleLocation;
   trackedPluginId: string | (() => string);
@@ -255,8 +251,7 @@ export function resetFacadeRuntimeStateForTest(): void {
   facadeActivationCheckRuntimeLoaders.clear();
 }
 
-export const testing = {
-  setFacadeActivationCheckRuntimeForTest,
+export const __testing = {
   loadFacadeModuleAtLocationSync,
   resolveRegistryPluginModuleLocationFromRegistry: resolveRegistryPluginModuleLocationFromRecords,
   resolveFacadeModuleLocation,
@@ -299,4 +294,3 @@ export const testing = {
       buildFacadeActivationCheckParams(params),
     )) as (params: BundledPluginPublicSurfaceParams) => string,
 };
-export { testing as __testing };

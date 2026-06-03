@@ -2,8 +2,8 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { normalizeOptionalString } from "../../packages/normalization-core/src/string-coerce.js";
 import { validateExternalCodePluginPackageJson } from "../../packages/plugin-package-contract/src/index.ts";
+import { normalizeOptionalString } from "../../src/shared/string-coerce.ts";
 import { parseReleaseVersion } from "../openclaw-npm-release-check.ts";
 import { resolveNpmPublishPlan } from "./npm-publish-plan.mjs";
 
@@ -83,8 +83,11 @@ export type PublishablePluginPackageCandidate<
 
 export const OPENCLAW_PLUGIN_NPM_REPOSITORY_URL = "https://github.com/openclaw/openclaw";
 
-function readPluginPackageJson(path: string): unknown {
-  return JSON.parse(readFileSync(path, "utf8"));
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Release helper preserves caller-specific package.json shape.
+function readPluginPackageJson<TPackageJson extends PluginPackageJson = PluginPackageJson>(
+  path: string,
+): TPackageJson {
+  return JSON.parse(readFileSync(path, "utf8")) as TPackageJson;
 }
 
 export function collectExtensionPackageJsonCandidates<
@@ -104,7 +107,7 @@ export function collectExtensionPackageJsonCandidates<
       candidates.push({
         extensionId: dir.name,
         packageDir,
-        packageJson: readPluginPackageJson(packageJsonPath) as TPackageJson,
+        packageJson: readPluginPackageJson<TPackageJson>(packageJsonPath),
       });
     } catch {
       continue;

@@ -1,7 +1,6 @@
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
-import { isBundledPluginInsideDevSourceRoot } from "./dev-source-root.js";
 import type { PluginCandidate } from "./discovery.js";
 import { loadInstalledPluginIndexInstallRecordsSync } from "./installed-plugin-index-records.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
@@ -76,14 +75,18 @@ export function buildProvenanceIndex(params: {
   }
 
   const installRules = new Map<string, InstallTrackingRule>();
-  const installs =
-    params.installRecords ?? loadInstalledPluginIndexInstallRecordsSync({ env: params.env });
+  const installs = {
+    ...loadInstalledPluginIndexInstallRecordsSync({ env: params.env }),
+    ...params.installRecords,
+  };
   for (const [pluginId, install] of Object.entries(installs)) {
     const rule: InstallTrackingRule = {
       trackedWithoutPaths: false,
       matcher: createPathMatcher(),
     };
-    const trackedPaths = normalizeTrimmedStringList([install.installPath, install.sourcePath]);
+    const trackedPaths = [install.installPath, install.sourcePath]
+      .map((entry) => normalizeOptionalString(entry))
+      .filter((entry): entry is string => Boolean(entry));
     if (trackedPaths.length === 0) {
       rule.trackedWithoutPaths = true;
     } else {
@@ -153,26 +156,17 @@ function resolveCandidateDuplicateRank(params: {
   if (params.candidate.origin === "config") {
     return 0;
   }
-  if (
-    params.candidate.origin === "bundled" &&
-    isBundledPluginInsideDevSourceRoot({
-      rootDir: params.candidate.rootDir,
-      env: params.env,
-    })
-  ) {
-    return 1;
-  }
   if (params.candidate.origin === "global" && isExplicitInstall) {
-    return 2;
+    return 1;
   }
   if (params.candidate.origin === "bundled") {
     // Bundled plugin ids stay reserved unless the operator configured an override.
-    return 3;
+    return 2;
   }
   if (params.candidate.origin === "workspace") {
-    return 4;
+    return 3;
   }
-  return 5;
+  return 4;
 }
 
 export function compareDuplicateCandidateOrder(params: {

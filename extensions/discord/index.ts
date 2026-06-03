@@ -1,6 +1,5 @@
 import { defineBundledChannelEntry } from "openclaw/plugin-sdk/channel-entry-contract";
 import { registerDiscordSubagentHooks } from "./subagent-hooks-api.js";
-import { discordVoiceTranscriptsSourceProvider } from "./transcripts-source-api.js";
 
 export default defineBundledChannelEntry({
   id: "discord",
@@ -21,6 +20,5 @@ export default defineBundledChannelEntry({
   },
   registerFull(api) {
     registerDiscordSubagentHooks(api);
-    api.registerTranscriptSourceProvider(discordVoiceTranscriptsSourceProvider);
   },
 });

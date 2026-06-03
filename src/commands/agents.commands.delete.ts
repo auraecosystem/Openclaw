@@ -1,9 +1,5 @@
 import { findOverlappingWorkspaceAgentIds } from "../agents/agent-delete-safety.js";
 import { resolveAgentDir, resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
-import {
-  resolveWorkspaceAttestationPaths,
-  shouldRemoveWorkspaceAttestation,
-} from "../agents/workspace.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { replaceConfigFile } from "../config/config.js";
 import { logConfigUpdated } from "../config/logging.js";
@@ -11,11 +7,7 @@ import {
   purgeAgentSessionStoreEntries,
   resolveSessionTranscriptsDirForAgent,
 } from "../config/sessions.js";
-import {
-  callGateway,
-  isGatewayCredentialsRequiredError,
-  isGatewayTransportError,
-} from "../gateway/call.js";
+import { callGateway, isGatewayTransportError } from "../gateway/call.js";
 import { DEFAULT_AGENT_ID, normalizeAgentId } from "../routing/session-key.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { defaultRuntime } from "../runtime.js";
@@ -53,7 +45,7 @@ async function maybeDeleteAgentThroughGateway(params: {
       requiredMethods: ["agents.delete"],
     });
   } catch (error) {
-    if (isGatewayTransportError(error) || isGatewayCredentialsRequiredError(error)) {
+    if (isGatewayTransportError(error)) {
       return null;
     }
     throw error;
@@ -168,13 +160,6 @@ export async function agentsDeleteCommand(
     );
   } else {
     await moveToTrash(workspaceDir, quietRuntime);
-    for (const [index, attestationPath] of resolveWorkspaceAttestationPaths(
-      workspaceDir,
-    ).entries()) {
-      if (await shouldRemoveWorkspaceAttestation(attestationPath, { trustUnknown: index === 0 })) {
-        await moveToTrash(attestationPath, quietRuntime);
-      }
-    }
   }
   await moveToTrash(agentDir, quietRuntime);
   await moveToTrash(sessionsDir, quietRuntime);

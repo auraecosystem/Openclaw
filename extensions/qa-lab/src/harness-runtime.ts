@@ -84,9 +84,9 @@ export function createQaRunnerRuntime(): PluginRuntime {
           });
         },
       },
-      inbound: {
-        async dispatchReply(
-          params: Parameters<PluginRuntime["channel"]["inbound"]["dispatchReply"]>[0],
+      turn: {
+        async runAssembled(
+          params: Parameters<PluginRuntime["channel"]["turn"]["runAssembled"]>[0],
         ) {
           const sessionKey =
             typeof params.ctxPayload.SessionKey === "string"

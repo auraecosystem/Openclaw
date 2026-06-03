@@ -2,17 +2,13 @@
 // Imports packaged dist modules so the Docker lane verifies the npm tarball,
 // while this small test driver stays mounted from the checkout.
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
-import {
-  runCli,
-  shouldStartCrestodianForModernOnboard,
-  shouldStartOnboardingForFreshInstall,
-} from "../../dist/cli/run-main.js";
+import { runCli, shouldStartCrestodianForBareRoot } from "../../dist/cli/run-main.js";
 import { clearConfigCache } from "../../dist/config/config.js";
 import type { OpenClawConfig } from "../../dist/config/types.openclaw.js";
 import { runCrestodian } from "../../dist/crestodian/crestodian.js";
 import type { RuntimeEnv } from "../../dist/runtime.js";
-import { createE2eStateDir } from "./lib/temp-state-dir.ts";
 
 type CrestodianFirstRunCommand = {
   id: string;
@@ -67,9 +63,9 @@ function renderCommandTemplate(template: string, vars: Record<string, string>): 
 
 async function main() {
   const spec = await readFirstRunSpec();
-  const tempState = await createE2eStateDir("openclaw-crestodian-first-run-");
-  tempState.registerExitCleanup();
-  const stateDir = tempState.stateDir;
+  const stateDir =
+    process.env.OPENCLAW_STATE_DIR ??
+    (await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-crestodian-first-run-")));
   const configPath = process.env.OPENCLAW_CONFIG_PATH ?? path.join(stateDir, "openclaw.json");
   process.env.OPENCLAW_STATE_DIR = stateDir;
   process.env.OPENCLAW_CONFIG_PATH = configPath;
@@ -78,12 +74,8 @@ async function main() {
   clearConfigCache();
 
   assert(
-    await shouldStartOnboardingForFreshInstall(["node", "openclaw"]),
-    "fresh bare OpenClaw invocation did not route to onboarding",
-  );
-  assert(
-    shouldStartCrestodianForModernOnboard(["node", "openclaw", "onboard", "--modern"]),
-    "modern onboard invocation did not route to Crestodian",
+    shouldStartCrestodianForBareRoot(["node", "openclaw"]),
+    "bare openclaw invocation did not route to Crestodian",
   );
   process.exitCode = undefined;
   await runCli(["node", "openclaw", "onboard", "--modern", "--non-interactive", "--json"]);
@@ -177,7 +169,7 @@ async function main() {
   console.log("Crestodian first-run Docker E2E passed");
 }
 
-main().catch((err: unknown) => {
+main().catch((err) => {
   console.error(err);
   process.exit(1);
 });

@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { logInfo } from "openclaw/plugin-sdk/logging-core";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import { danger, info, success } from "openclaw/plugin-sdk/runtime-env";
 import { defaultRuntime, type RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
@@ -56,22 +55,12 @@ type LoginQrRaceResult =
   | { outcome: "failed"; message: string };
 
 function waitForNextTask(): Promise<void> {
-  return new Promise((resolve) => {
-    setImmediate(resolve);
-  });
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 const ACTIVE_LOGIN_TTL_MS = 3 * 60_000;
 const MAX_QR_RENDER_CHASES = 10;
 const activeLogins = new Map<string, ActiveLogin>();
-
-function resolveWhatsAppLoginTimeoutMs(
-  value: number | undefined,
-  fallbackMs: number,
-  minMs: number,
-): number {
-  return resolveTimerTimeoutMs(value, fallbackMs, minMs);
-}
 
 function closeSocket(sock: WaSocket) {
   closeWaSocket(sock);
@@ -198,7 +187,6 @@ function attachLoginWaiter(accountId: string, login: ActiveLogin) {
         return;
       }
       const qrVersion = updateLoginQrState(current, qr);
-      notifyQrUpdate(current);
       renderLatestQrDataUrlInBackground({
         accountId,
         loginId: login.id,
@@ -229,7 +217,7 @@ function attachLoginWaiter(accountId: string, login: ActiveLogin) {
       current.error = result.message;
       current.errorStatus = result.statusCode;
     })
-    .catch((err: unknown) => {
+    .catch((err) => {
       const current = activeLogins.get(accountId);
       if (current?.id !== login.id) {
         return;
@@ -246,7 +234,7 @@ async function waitForQrOrRecoveredLogin(params: {
 }): Promise<LoginQrRaceResult> {
   const qrResult = params.qrPromise.then(
     (qr) => ({ outcome: "qr", qr }) as const,
-    (err: unknown) =>
+    (err) =>
       ({
         outcome: "failed",
         message: `Failed to get QR: ${String(err)}`,
@@ -281,29 +269,8 @@ async function waitForQrOrRecoveredLogin(params: {
       message: latest.error ? `WhatsApp login failed: ${latest.error}` : "WhatsApp login failed.",
     } as const;
   });
-  const qrUpdateResult = params.login.qrUpdatePromise.then(() => {
-    const current = activeLogins.get(params.accountId);
-    if (current?.id !== params.login.id) {
-      return {
-        outcome: "failed",
-        message: "WhatsApp login was replaced by a newer request.",
-      } as const;
-    }
-    if (current.qr) {
-      return { outcome: "qr", qr: current.qr } as const;
-    }
-    if (current.connected) {
-      return { outcome: "connected" } as const;
-    }
-    return {
-      outcome: "failed",
-      message: current.error
-        ? `WhatsApp login failed: ${current.error}`
-        : "WhatsApp QR update ended without an active QR.",
-    } as const;
-  });
 
-  return await Promise.race([qrResult, loginResult, qrUpdateResult]);
+  return await Promise.race([qrResult, loginResult]);
 }
 
 export async function startWebLoginWithQr(
@@ -355,7 +322,7 @@ export async function startWebLoginWithQr(
     () => {
       rejectQr?.(new Error("Timed out waiting for WhatsApp QR"));
     },
-    resolveWhatsAppLoginTimeoutMs(opts.timeoutMs, 30_000, 5000),
+    Math.max(opts.timeoutMs ?? 30_000, 5000),
   );
 
   let sock: WaSocket;
@@ -503,7 +470,7 @@ export async function waitForWebLogin(
       message: "The login QR expired. Ask me to generate a new one.",
     };
   }
-  const timeoutMs = resolveWhatsAppLoginTimeoutMs(opts.timeoutMs, 120_000, 1000);
+  const timeoutMs = Math.max(opts.timeoutMs ?? 120_000, 1000);
   const deadline = Date.now() + timeoutMs;
   const currentQrDataUrl = opts.currentQrDataUrl;
 
@@ -543,9 +510,9 @@ export async function waitForWebLogin(
         message: "Still waiting for the QR scan. Let me know when you’ve scanned it.",
       };
     }
-    const timeout = new Promise<"timeout">((resolve) => {
-      setTimeout(() => resolve("timeout"), remaining);
-    });
+    const timeout = new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), remaining),
+    );
     const result = await Promise.race([
       login.waitPromise.then(() => "done" as const),
       login.qrUpdatePromise.then(() => "qr-update" as const),

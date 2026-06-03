@@ -1,5 +1,4 @@
 import { fileURLToPath } from "node:url";
-import { parsePositiveInt } from "./lib/numeric-options.mjs";
 
 const BASELINE_SHARDED_LANES = new Set(["published-upgrade-survivor", "update-migration"]);
 
@@ -12,6 +11,17 @@ function splitTokens(raw) {
         .filter(Boolean),
     ),
   ];
+}
+
+function parsePositiveInt(raw, fallback, label) {
+  const parsed = Number.parseInt(String(raw ?? ""), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  if (parsed < 1) {
+    throw new Error(`${label} must be a positive integer. Got: ${JSON.stringify(raw)}`);
+  }
+  return parsed;
 }
 
 function sanitizeLabel(value) {
@@ -33,7 +43,7 @@ export function planTargetedDockerLaneGroups({
     throw new Error("docker_lanes is required when planning targeted Docker lane groups.");
   }
 
-  const parsedGroupSize = parsePositiveInt(groupSize, "groupSize");
+  const parsedGroupSize = parsePositiveInt(groupSize, 1, "groupSize");
   const baselineSpecs = splitTokens(upgradeSurvivorBaselines);
   const groups = [];
   let pendingLanes = [];

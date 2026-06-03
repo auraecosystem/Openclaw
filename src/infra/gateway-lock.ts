@@ -4,11 +4,6 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
-import {
-  resolvePositiveTimerTimeoutMs,
-  resolveTimerTimeoutMs,
-  resolveTimestampMsToIsoString,
-} from "@openclaw/normalization-core/number-coercion";
 import { z } from "zod";
 import { resolveConfigPath, resolveGatewayLockDir, resolveStateDir } from "../config/paths.js";
 import { isPidAlive } from "../shared/pid-alive.js";
@@ -260,21 +255,14 @@ export async function acquireGatewayLock(
     return null;
   }
 
-  const timeoutMs = resolveTimerTimeoutMs(opts.timeoutMs, DEFAULT_TIMEOUT_MS, 0);
-  const pollIntervalMs = resolvePositiveTimerTimeoutMs(
-    opts.pollIntervalMs,
-    DEFAULT_POLL_INTERVAL_MS,
-  );
-  const staleMs = resolveTimerTimeoutMs(opts.staleMs, DEFAULT_STALE_MS, 0);
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const pollIntervalMs = opts.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
   const platform = opts.platform ?? process.platform;
   const port = opts.port;
   const now = opts.now ?? Date.now;
   const sleep =
-    opts.sleep ??
-    (async (ms: number) =>
-      await new Promise((resolve) => {
-        setTimeout(resolve, ms);
-      }));
+    opts.sleep ?? (async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms)));
   const { lockPath, configPath } = resolveGatewayLockPath(env, opts.lockDir);
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
 
@@ -287,7 +275,7 @@ export async function acquireGatewayLock(
       const startTime = platform === "linux" ? readLinuxStartTime(process.pid) : null;
       const payload: LockPayload = {
         pid: process.pid,
-        createdAt: resolveTimestampMsToIsoString(now()),
+        createdAt: new Date(now()).toISOString(),
         configPath,
       };
       if (typeof startTime === "number" && Number.isFinite(startTime)) {
@@ -347,11 +335,7 @@ export async function acquireGatewayLock(
         }
       }
 
-      const remainingMs = timeoutMs - (now() - startedAt);
-      if (remainingMs <= 0) {
-        break;
-      }
-      await sleep(Math.min(pollIntervalMs, remainingMs));
+      await sleep(pollIntervalMs);
     }
   }
 

@@ -1,6 +1,5 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import type { SpeechVoiceOption } from "openclaw/plugin-sdk/speech";
 import {
   normalizeLowercaseStringOrEmpty,
@@ -9,7 +8,7 @@ import {
 import { resolveActiveTalkProviderConfig } from "openclaw/plugin-sdk/talk-config-runtime";
 import { definePluginEntry, type OpenClawPluginApi } from "./api.js";
 
-function mask(s: string, keep = 6): string {
+function mask(s: string, keep: number = 6): string {
   const trimmed = s.trim();
   if (trimmed.length <= keep) {
     return "***";
@@ -97,10 +96,6 @@ function asTrimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function parsePositiveIntegerToken(value: unknown): number | undefined {
-  return parseStrictPositiveInteger(value);
-}
-
 function resolveCommandLabel(channel: string): string {
   return channel === "discord" ? "/talkvoice" : "/voice";
 }
@@ -168,7 +163,7 @@ export default definePluginEntry({
         }
 
         if (action === "list") {
-          const limit = parsePositiveIntegerToken(tokens[1]) ?? 12;
+          const limit = Number.parseInt(tokens[1] ?? "12", 10);
           try {
             const voices = await api.runtime.tts.listVoices({
               provider: providerId,
@@ -177,7 +172,7 @@ export default definePluginEntry({
               baseUrl,
             });
             return {
-              text: formatVoiceList(voices, limit, providerId),
+              text: formatVoiceList(voices, Number.isFinite(limit) ? limit : 12, providerId),
             };
           } catch (error) {
             const message = formatErrorMessage(error);

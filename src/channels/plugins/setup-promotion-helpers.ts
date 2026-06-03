@@ -1,16 +1,45 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { DEFAULT_ACCOUNT_ID, normalizeAccountId } from "../../routing/session-key.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { getBundledChannelPlugin, hasBundledChannelPackageSetupFeature } from "./bundled.js";
 import { getLoadedChannelPlugin } from "./registry.js";
-import {
-  collectSingleAccountPromotionEntries,
-  isCommonSingleAccountPromotionKey,
-} from "./setup-promotion-keys.js";
 
 type ChannelSectionBase = {
   defaultAccount?: string;
   accounts?: Record<string, Record<string, unknown>>;
 };
+
+const COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE = new Set([
+  "name",
+  "token",
+  "tokenFile",
+  "botToken",
+  "appToken",
+  "account",
+  "signalNumber",
+  "authDir",
+  "cliPath",
+  "dbPath",
+  "httpUrl",
+  "httpHost",
+  "httpPort",
+  "webhookPath",
+  "webhookUrl",
+  "webhookSecret",
+  "service",
+  "region",
+  "homeserver",
+  "userId",
+  "accessToken",
+  "password",
+  "deviceName",
+  "url",
+  "code",
+  "dmPolicy",
+  "allowFrom",
+  "groupPolicy",
+  "groupAllowFrom",
+  "defaultTo",
+]);
 
 type ChannelSetupPromotionSurface = {
   singleAccountKeysToMove?: readonly string[];
@@ -39,11 +68,15 @@ function getBundledChannelSetupPromotionSurface(
   return asPromotionSurface(getBundledChannelPlugin(channelKey)?.setup);
 }
 
+function isStaticSingleAccountPromotionKey(key: string): boolean {
+  return COMMON_SINGLE_ACCOUNT_KEYS_TO_MOVE.has(key);
+}
+
 export function shouldMoveSingleAccountChannelKey(params: {
   channelKey: string;
   key: string;
 }): boolean {
-  if (isCommonSingleAccountPromotionKey(params.key)) {
+  if (isStaticSingleAccountPromotionKey(params.key)) {
     return true;
   }
   const loadedContractKeys = getLoadedChannelSetupPromotionSurface(
@@ -65,7 +98,15 @@ export function resolveSingleAccountKeysToMove(params: {
   channelKey: string;
   channel: Record<string, unknown>;
 }): string[] {
-  const { entries, hasNamedAccounts } = collectSingleAccountPromotionEntries(params.channel);
+  const hasNamedAccounts = Object.keys(
+    (params.channel.accounts as Record<string, unknown>) ?? {},
+  ).some(Boolean);
+  const entries = Object.entries(params.channel)
+    .filter(
+      ([key, value]) =>
+        key !== "accounts" && key !== "defaultAccount" && key !== "enabled" && value !== undefined,
+    )
+    .map(([key]) => key);
   if (entries.length === 0) {
     return [];
   }
@@ -82,7 +123,7 @@ export function resolveSingleAccountKeysToMove(params: {
   };
 
   const keysToMove = entries.filter((key) => {
-    if (isCommonSingleAccountPromotionKey(key)) {
+    if (isStaticSingleAccountPromotionKey(key)) {
       return true;
     }
     return Boolean(

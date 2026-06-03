@@ -3,32 +3,26 @@
 // Accepts scheduler summary.json or lane-timings.json so agents can see the
 // slowest lanes and phase critical path before deciding what to rerun.
 import fs from "node:fs";
-import { parsePositiveInt } from "./lib/numeric-options.mjs";
 
 function usage() {
   return "Usage: node scripts/docker-e2e-timings.mjs <summary.json|lane-timings.json> [--limit N]";
 }
 
 function parseArgs(argv) {
-  const options = { file: "", help: false, limit: 12 };
+  const options = { file: "", limit: 12 };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-    if (arg === "--help" || arg === "-h") {
-      options.help = true;
-    } else if (arg === "--limit") {
-      options.limit = parsePositiveInt(argv[(index += 1)], "--limit");
+    if (arg === "--limit") {
+      options.limit = Number(argv[(index += 1)] ?? "");
     } else if (arg?.startsWith("--limit=")) {
-      options.limit = parsePositiveInt(arg.slice("--limit=".length), "--limit");
+      options.limit = Number(arg.slice("--limit=".length));
     } else if (!options.file) {
       options.file = arg;
     } else {
       throw new Error(`unknown argument: ${arg}\n${usage()}`);
     }
   }
-  if (options.help) {
-    return options;
-  }
-  if (!options.file) {
+  if (!options.file || !Number.isInteger(options.limit) || options.limit < 1) {
     throw new Error(usage());
   }
   return options;
@@ -125,25 +119,12 @@ function summarizeTimingStore(store, limit) {
   }
 }
 
-function main() {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.help) {
-    console.log(usage());
-    return;
-  }
-  const payload = readJson(options.file);
-  if (Array.isArray(payload.lanes)) {
-    summarizeSummary(payload, options.limit);
-  } else if (payload.lanes && typeof payload.lanes === "object") {
-    summarizeTimingStore(payload, options.limit);
-  } else {
-    throw new Error(`Unsupported Docker E2E timing artifact: ${options.file}`);
-  }
-}
-
-try {
-  main();
-} catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+const options = parseArgs(process.argv.slice(2));
+const payload = readJson(options.file);
+if (Array.isArray(payload.lanes)) {
+  summarizeSummary(payload, options.limit);
+} else if (payload.lanes && typeof payload.lanes === "object") {
+  summarizeTimingStore(payload, options.limit);
+} else {
+  throw new Error(`Unsupported Docker E2E timing artifact: ${options.file}`);
 }

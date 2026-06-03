@@ -1,5 +1,3 @@
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
-
 /**
  * Normalize optional gateway URL-input hostname allowlists.
  *
@@ -13,6 +11,6 @@ export function normalizeInputHostnameAllowlist(
   if (!values || values.length === 0) {
     return undefined;
   }
-  const normalized = normalizeTrimmedStringList(values);
+  const normalized = values.map((value) => value.trim()).filter((value) => value.length > 0);
   return normalized.length > 0 ? normalized : undefined;
 }

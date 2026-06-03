@@ -81,12 +81,11 @@ export async function createOpenAiEmbeddingProvider(
       ...(typeof OPENAI_MAX_INPUT_TOKENS[client.model] === "number"
         ? { maxInputTokens: OPENAI_MAX_INPUT_TOKENS[client.model] }
         : {}),
-      embedQuery: async (text, optionsValue) => {
-        const [vec] = await embed([text], "query", optionsValue?.signal);
+      embedQuery: async (text, options) => {
+        const [vec] = await embed([text], "query", options?.signal);
         return vec ?? [];
       },
-      embedBatch: async (texts, optionsLocal) =>
-        await embed(texts, "document", optionsLocal?.signal),
+      embedBatch: async (texts, options) => await embed(texts, "document", options?.signal),
     },
     client,
   };
@@ -96,7 +95,7 @@ async function resolveOpenAiEmbeddingClient(
   options: MemoryEmbeddingProviderCreateOptions,
 ): Promise<OpenAiEmbeddingClient> {
   const client = await resolveRemoteEmbeddingClient({
-    provider: options.provider ?? "openai",
+    provider: "openai",
     options,
     defaultBaseUrl: DEFAULT_OPENAI_BASE_URL,
     normalizeModel: normalizeOpenAiModel,

@@ -7,7 +7,7 @@ import {
 } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import {
-  testing,
+  __testing,
   getSessionBindingService,
   isSessionBindingError,
   registerSessionBindingAdapter,
@@ -120,7 +120,7 @@ function expectConversationFields(value: unknown, fields: Record<string, unknown
 
 describe("session binding service", () => {
   beforeEach(() => {
-    testing.resetSessionBindingAdaptersForTests();
+    __testing.resetSessionBindingAdaptersForTests();
     setMinimalCurrentConversationRegistry();
   });
 
@@ -215,14 +215,13 @@ describe("session binding service", () => {
         },
         placement: "child",
       })
-      .catch((error: unknown) => error);
+      .catch((error) => error);
 
     expect(isSessionBindingError(rejected)).toBe(true);
-    const rejectedRecord = requireRecord(rejected, "session binding error");
-    expectRecordFields(rejectedRecord, {
+    expectRecordFields(requireRecord(rejected, "session binding error"), {
       code: "BINDING_CAPABILITY_UNSUPPORTED",
     });
-    expectRecordFields(requireRecord(rejectedRecord.details, "session binding details"), {
+    expectRecordFields(requireRecord(rejected.details, "session binding details"), {
       placement: "child",
     });
   });
@@ -547,11 +546,11 @@ describe("session binding service", () => {
       resolveByConversation: () => null,
     };
 
-    first.testing.resetSessionBindingAdaptersForTests();
+    first.__testing.resetSessionBindingAdaptersForTests();
     first.registerSessionBindingAdapter(firstAdapter);
     second.registerSessionBindingAdapter(secondAdapter);
 
-    expect(second.testing.getRegisteredAdapterKeys()).toEqual(["demo-binding:default"]);
+    expect(second.__testing.getRegisteredAdapterKeys()).toEqual(["demo-binding:default"]);
 
     const secondBound = await second.getSessionBindingService().bind({
       targetSessionKey: "agent:main:subagent:child-1",
@@ -612,6 +611,6 @@ describe("session binding service", () => {
       "BINDING_ADAPTER_UNAVAILABLE",
     );
 
-    first.testing.resetSessionBindingAdaptersForTests();
+    first.__testing.resetSessionBindingAdaptersForTests();
   });
 });

@@ -18,9 +18,7 @@ export async function readLatestSubagentOutputWithRetryUsing<Outcome = unknown>(
       break;
     }
     const sleepMs = Math.min(params.retryIntervalMs, remainingMs);
-    await new Promise((resolve) => {
-      setTimeout(resolve, sleepMs);
-    });
+    await new Promise((resolve) => setTimeout(resolve, sleepMs));
     waitedMs += sleepMs;
   }
   return result;

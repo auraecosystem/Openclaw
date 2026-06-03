@@ -7,11 +7,11 @@ import {
   buildSearchCacheKey,
   buildUnsupportedSearchFilterResponse,
   DEFAULT_SEARCH_COUNT,
-  MAX_SEARCH_COUNT,
-  parseWebSearchTimeFilters,
+  normalizeFreshness,
+  parseIsoDateRange,
   readCachedSearchPayload,
   readConfiguredSecretString,
-  readPositiveIntegerParam,
+  readNumberParam,
   readProviderEnvValue,
   readStringParam,
   resolveCitationRedirectUrl,
@@ -23,7 +23,6 @@ import {
   wrapWebContent,
   writeCachedSearchPayload,
 } from "openclaw/plugin-sdk/provider-web-search";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   resolveGeminiConfig,
   resolveGeminiBaseUrl,
@@ -61,6 +60,10 @@ type GeminiGroundingResponse = {
   };
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function throwMalformedGeminiResponse(): never {
   throw new Error("Gemini API error: malformed JSON response");
 }
@@ -72,16 +75,6 @@ const GEMINI_FRESHNESS_DAYS: Record<GeminiFreshness, number> = {
   year: 365,
 };
 
-// Gemini's google_search.time_range_filter accepts second-precision RFC 3339
-// only. Despite the underlying google.protobuf.Timestamp type accepting "0, 3,
-// 6 or 9 fractional digits", the Search grounding endpoint rejects any
-// non-zero fractional component with
-//   "[FIELD_INVALID] Granularity of nano is not supported".
-// Strip the fractional-second component before serializing.
-function toGeminiTimeRangeTimestamp(date: Date): string {
-  return date.toISOString().replace(/\.\d+Z$/, "Z");
-}
-
 function isoDateStart(value: string): string {
   return `${value}T00:00:00Z`;
 }
@@ -89,13 +82,13 @@ function isoDateStart(value: string): string {
 function isoDateExclusiveEnd(value: string): string {
   const end = new Date(`${value}T00:00:00Z`);
   end.setUTCDate(end.getUTCDate() + 1);
-  return toGeminiTimeRangeTimestamp(end);
+  return end.toISOString();
 }
 
 function freshnessStartTime(freshness: GeminiFreshness, now: Date): string {
   const start = new Date(now);
   start.setUTCDate(start.getUTCDate() - GEMINI_FRESHNESS_DAYS[freshness]);
-  return toGeminiTimeRangeTimestamp(start);
+  return start.toISOString();
 }
 
 function resolveGeminiTimeRangeFilter(
@@ -113,33 +106,49 @@ function resolveGeminiTimeRangeFilter(
       docs: string;
     } {
   const rawFreshness = readStringParam(args, "freshness");
+  const freshness = rawFreshness
+    ? (normalizeFreshness(rawFreshness, "perplexity") as GeminiFreshness | undefined)
+    : undefined;
+  if (rawFreshness && !freshness) {
+    return {
+      error: "invalid_freshness",
+      message: "freshness must be day, week, month, year, or the shortcuts pd, pw, pm, py.",
+      docs: "https://docs.openclaw.ai/tools/web",
+    };
+  }
+
   const rawDateAfter = readStringParam(args, "date_after");
   const rawDateBefore = readStringParam(args, "date_before");
-  const parsedTimeFilters = parseWebSearchTimeFilters({
+  if (rawFreshness && (rawDateAfter || rawDateBefore)) {
+    return {
+      error: "conflicting_time_filters",
+      message:
+        "freshness and date_after/date_before cannot be used together. Use either freshness (day/week/month/year) or a date range (date_after/date_before), not both.",
+      docs: "https://docs.openclaw.ai/tools/web",
+    };
+  }
+
+  const parsedDateRange = parseIsoDateRange({
     rawDateAfter,
     rawDateBefore,
-    rawFreshness,
-    freshnessProvider: "perplexity",
-    invalidFreshnessMessage:
-      "freshness must be day, week, month, year, or the shortcuts pd, pw, pm, py.",
     invalidDateAfterMessage: "date_after must be YYYY-MM-DD format.",
     invalidDateBeforeMessage: "date_before must be YYYY-MM-DD format.",
     invalidDateRangeMessage: "date_after must be before date_before.",
   });
-  if ("error" in parsedTimeFilters) {
-    return parsedTimeFilters;
+  if ("error" in parsedDateRange) {
+    return parsedDateRange;
   }
 
-  const { freshness, dateAfter, dateBefore } = parsedTimeFilters;
   if (freshness) {
     return {
       timeRangeFilter: {
         startTime: freshnessStartTime(freshness, now),
-        endTime: toGeminiTimeRangeTimestamp(now),
+        endTime: now.toISOString(),
       },
     };
   }
 
+  const { dateAfter, dateBefore } = parsedDateRange;
   if (!dateAfter && !dateBefore) {
     return {};
   }
@@ -147,7 +156,7 @@ function resolveGeminiTimeRangeFilter(
   return {
     timeRangeFilter: {
       startTime: dateAfter ? isoDateStart(dateAfter) : "1970-01-01T00:00:00Z",
-      endTime: dateBefore ? isoDateExclusiveEnd(dateBefore) : toGeminiTimeRangeTimestamp(now),
+      endTime: dateBefore ? isoDateExclusiveEnd(dateBefore) : now.toISOString(),
     },
   };
 }
@@ -302,12 +311,7 @@ export async function executeGeminiSearch(
 
   const query = readStringParam(args, "query", { required: true });
   const count =
-    readPositiveIntegerParam(args, "count", {
-      max: MAX_SEARCH_COUNT,
-      message: `count must be an integer from 1 to ${MAX_SEARCH_COUNT}.`,
-    }) ??
-    searchConfig?.maxResults ??
-    undefined;
+    readNumberParam(args, "count", { integer: true }) ?? searchConfig?.maxResults ?? undefined;
   const model = resolveGeminiModel(geminiConfig);
   const baseUrl = resolveGeminiBaseUrl(geminiConfig);
   const cacheKey = buildSearchCacheKey([

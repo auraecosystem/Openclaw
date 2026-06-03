@@ -20,6 +20,7 @@ export type OpenClawPluginToolOptions = {
   modelId?: string;
   requesterSenderId?: string | null;
   requesterAgentIdOverride?: string;
+  senderIsOwner?: boolean;
   sessionId?: string;
   sandboxBrowserBridgeUrl?: string;
   allowHostBrowserControl?: boolean;
@@ -81,6 +82,7 @@ export function resolveOpenClawPluginToolInputs(params: {
       agentAccountId: options?.agentAccountId,
       deliveryContext,
       requesterSenderId: options?.requesterSenderId ?? undefined,
+      senderIsOwner: options?.senderIsOwner ?? undefined,
       sandboxed: options?.sandboxed,
     },
     allowGatewaySubagentBinding: options?.allowGatewaySubagentBinding,

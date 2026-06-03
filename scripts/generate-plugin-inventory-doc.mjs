@@ -25,12 +25,11 @@ const PLUGIN_DOC_ALIASES = new Map([
   ["exa", "/tools/exa-search"],
   ["firecrawl", "/tools/firecrawl"],
   ["perplexity", "/tools/perplexity-search"],
-  ["policy", "/cli/policy"],
   ["tavily", "/tools/tavily"],
   ["tokenjuice", "/tools/tokenjuice"],
 ]);
-const MANUAL_SECTION_START = "<!-- openclaw-plugin-reference:manual-start -->";
-const MANUAL_SECTION_END = "<!-- openclaw-plugin-reference:manual-end -->";
+/** @type {ReadonlyMap<string, string>} */
+const PLUGIN_REFERENCE_EXTRA_SECTIONS = new Map();
 
 function readJson(relativePath) {
   return JSON.parse(fs.readFileSync(path.join(ROOT, relativePath), "utf8"));
@@ -114,7 +113,6 @@ function humanizeId(value) {
     ["opencode", "OpenCode"],
     ["openrouter", "OpenRouter"],
     ["otel", "OpenTelemetry"],
-    ["pixverse", "PixVerse"],
     ["qa", "QA"],
     ["qqbot", "QQ Bot"],
     ["qwen", "Qwen"],
@@ -377,48 +375,9 @@ function renderRelatedDocs(record) {
 ${record.docs.map((link) => `- ${docLink(link)}`).join("\n")}`;
 }
 
-function extractManualReferenceSections(content) {
-  const markerStart = content.indexOf(MANUAL_SECTION_START);
-  if (markerStart !== -1) {
-    const contentStart = markerStart + MANUAL_SECTION_START.length;
-    const markerEnd = content.indexOf(MANUAL_SECTION_END, contentStart);
-    if (markerEnd !== -1) {
-      return content.slice(contentStart, markerEnd).trim();
-    }
-  }
-
-  const surfaceMatch = /\n## Surface\n\n[^\n]*(?:\n|$)/u.exec(content);
-  if (!surfaceMatch?.index) {
-    return "";
-  }
-  const manualStart = surfaceMatch.index + surfaceMatch[0].length;
-  const relatedDocsStart = content.indexOf("\n## Related docs\n", manualStart);
-  const manualEnd = relatedDocsStart === -1 ? content.length : relatedDocsStart;
-  return content.slice(manualStart, manualEnd).trim();
-}
-
-function readManualReferenceSections(relativePath) {
-  const fullPath = path.join(ROOT, relativePath);
-  if (!fs.existsSync(fullPath)) {
-    return "";
-  }
-  return extractManualReferenceSections(fs.readFileSync(fullPath, "utf8"));
-}
-
-function renderManualReferenceSections(manualSections) {
-  if (!manualSections) {
-    return "";
-  }
-  return `${MANUAL_SECTION_START}
-
-${manualSections}
-
-${MANUAL_SECTION_END}`;
-}
-
-function renderReferencePage(record, manualSections = "") {
+function renderReferencePage(record) {
   const relatedDocs = renderRelatedDocs(record);
-  const manualBlock = renderManualReferenceSections(manualSections);
+  const extraSections = PLUGIN_REFERENCE_EXTRA_SECTIONS.get(record.id) ?? "";
   return `---
 summary: "${record.description.replaceAll('"', '\\"')}"
 read_when:
@@ -437,7 +396,7 @@ ${record.description}
 
 ## Surface
 
-${record.surface}${manualBlock ? `\n\n${manualBlock}` : ""}${relatedDocs ? `\n\n${relatedDocs}` : ""}
+${record.surface}${extraSections ? `\n\n${extraSections}` : ""}${relatedDocs ? `\n\n${relatedDocs}` : ""}
 `;
 }
 
@@ -532,11 +491,9 @@ function collectPluginRecords() {
 function writeGeneratedDocs(records) {
   fs.mkdirSync(path.join(ROOT, REFERENCE_DIR), { recursive: true });
   for (const record of records) {
-    const relativePath = path.join(REFERENCE_DIR, `${record.id}.md`);
-    const manualSections = readManualReferenceSections(relativePath);
     fs.writeFileSync(
-      path.join(ROOT, relativePath),
-      renderReferencePage(record, manualSections),
+      path.join(ROOT, REFERENCE_DIR, `${record.id}.md`),
+      renderReferencePage(record),
       "utf8",
     );
   }
@@ -546,10 +503,10 @@ function writeGeneratedDocs(records) {
 function readGeneratedDocs(records) {
   return [
     [REFERENCE_INDEX_PATH, renderReferenceIndex(records)],
-    ...records.map((record) => {
-      const relativePath = path.join(REFERENCE_DIR, `${record.id}.md`);
-      return [relativePath, renderReferencePage(record, readManualReferenceSections(relativePath))];
-    }),
+    ...records.map((record) => [
+      path.join(REFERENCE_DIR, `${record.id}.md`),
+      renderReferencePage(record),
+    ]),
   ];
 }
 

@@ -1,19 +1,33 @@
-import type { AnyAgentTool } from "openclaw/plugin-sdk/agent-harness-runtime";
+import crypto from "node:crypto";
+import {
+  callGatewayTool,
+  listNodes,
+  resolveNodeIdFromList,
+  type AnyAgentTool,
+  type NodeListNode,
+} from "openclaw/plugin-sdk/agent-harness-runtime";
 import { appendFileTransferAudit } from "../shared/audit.js";
-import { readClampedInt } from "../shared/params.js";
+import { throwFromNodePayload } from "../shared/errors.js";
+import { readClampedInt, readGatewayCallOptions, readTrimmedString } from "../shared/params.js";
 import {
   DIR_LIST_DEFAULT_MAX_ENTRIES,
   DIR_LIST_HARD_MAX_ENTRIES,
   DIR_LIST_TOOL_DESCRIPTOR,
 } from "./descriptors.js";
-import { invokeNodeToolPayload, readRequiredNodePath } from "./node-tool-invoke.js";
 
 export function createDirListTool(): AnyAgentTool {
   return {
     ...DIR_LIST_TOOL_DESCRIPTOR,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
-      const { node, requestedPath: dirPath } = readRequiredNodePath(params);
+      const node = readTrimmedString(params, "node");
+      const dirPath = readTrimmedString(params, "path");
+      if (!node) {
+        throw new Error("node required");
+      }
+      if (!dirPath) {
+        throw new Error("path required");
+      }
 
       const maxEntries = readClampedInt({
         input: params,
@@ -28,17 +42,55 @@ export function createDirListTool(): AnyAgentTool {
           ? params.pageToken.trim()
           : undefined;
 
-      const { nodeId, nodeDisplayName, payload, startedAt } = await invokeNodeToolPayload({
-        node,
-        params,
+      const gatewayOpts = readGatewayCallOptions(params);
+      const nodes: NodeListNode[] = await listNodes(gatewayOpts);
+      const nodeId = resolveNodeIdFromList(nodes, node, false);
+      const nodeMeta = nodes.find((n) => n.nodeId === nodeId);
+      const nodeDisplayName = nodeMeta?.displayName ?? node;
+      const startedAt = Date.now();
+
+      const raw = await callGatewayTool<{ payload: unknown }>("node.invoke", gatewayOpts, {
+        nodeId,
         command: "dir.list",
-        commandParams: {
+        params: {
           path: dirPath,
           pageToken,
           maxEntries,
         },
-        requestedPath: dirPath,
+        idempotencyKey: crypto.randomUUID(),
       });
+
+      const payload =
+        raw?.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
+          ? (raw.payload as Record<string, unknown>)
+          : null;
+      if (!payload) {
+        await appendFileTransferAudit({
+          op: "dir.list",
+          nodeId,
+          nodeDisplayName,
+          requestedPath: dirPath,
+          decision: "error",
+          errorMessage: "invalid payload",
+          durationMs: Date.now() - startedAt,
+        });
+        throw new Error("invalid dir.list payload");
+      }
+      if (payload.ok === false) {
+        await appendFileTransferAudit({
+          op: "dir.list",
+          nodeId,
+          nodeDisplayName,
+          requestedPath: dirPath,
+          canonicalPath:
+            typeof payload.canonicalPath === "string" ? payload.canonicalPath : undefined,
+          decision: "error",
+          errorCode: typeof payload.code === "string" ? payload.code : undefined,
+          errorMessage: typeof payload.message === "string" ? payload.message : undefined,
+          durationMs: Date.now() - startedAt,
+        });
+        throwFromNodePayload("dir.list", payload);
+      }
 
       const canonicalPath = typeof payload.path === "string" ? payload.path : dirPath;
 

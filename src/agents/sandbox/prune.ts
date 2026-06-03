@@ -1,7 +1,6 @@
 import { getRuntimeConfig } from "../../config/config.js";
 import { stopBrowserBridgeServer } from "../../plugin-sdk/browser-bridge.js";
 import { defaultRuntime } from "../../runtime.js";
-import { asDateTimestampMs } from "../../shared/number-coercion.js";
 import { getSandboxBackendManager } from "./backend.js";
 import { BROWSER_BRIDGES } from "./browser-bridges.js";
 import { dockerSandboxBackendManager } from "./docker-backend.js";
@@ -28,11 +27,8 @@ function shouldPruneSandboxEntry(cfg: SandboxConfig, now: number, entry: Pruneab
   if (idleHours === 0 && maxAgeDays === 0) {
     return false;
   }
-  const nowMs = asDateTimestampMs(now) ?? 0;
-  const lastUsedAtMs = asDateTimestampMs(entry.lastUsedAtMs) ?? 0;
-  const createdAtMs = asDateTimestampMs(entry.createdAtMs) ?? 0;
-  const idleMs = nowMs - lastUsedAtMs;
-  const ageMs = nowMs - createdAtMs;
+  const idleMs = now - entry.lastUsedAtMs;
+  const ageMs = now - entry.createdAtMs;
   return (
     (idleHours > 0 && idleMs > idleHours * 60 * 60 * 1000) ||
     (maxAgeDays > 0 && ageMs > maxAgeDays * 24 * 60 * 60 * 1000)

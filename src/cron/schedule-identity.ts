@@ -1,22 +1,13 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { coerceFiniteScheduleNumber } from "./schedule-number.js";
-import { normalizeCronStaggerMs } from "./stagger.js";
-
-type CronScheduleIdentityInput = { schedule?: unknown; enabled?: unknown } & Record<
-  string,
-  unknown
->;
+import type { CronJob } from "./types.js";
 
 function readString(record: Record<string, unknown>, key: string): string | undefined {
-  return normalizeOptionalString(record[key]);
+  const value = record[key];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
 function readNumber(record: Record<string, unknown>, key: string): number | undefined {
-  return coerceFiniteScheduleNumber(record[key]);
-}
-
-function readStaggerMs(record: Record<string, unknown>): number | undefined {
-  return normalizeCronStaggerMs(record.staggerMs);
+  const value = record[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function schedulePayloadFromRecord(
@@ -27,16 +18,17 @@ function schedulePayloadFromRecord(
   | { kind: "cron"; expr: string; tz?: string; staggerMs?: number }
   | undefined {
   const rawKind = readString(schedule, "kind")?.toLowerCase();
-  const expr = readString(schedule, "expr");
+  const expr = readString(schedule, "expr") ?? readString(schedule, "cron");
   const at = readString(schedule, "at");
+  const atMs = readNumber(schedule, "atMs");
   const everyMs = readNumber(schedule, "everyMs");
   const anchorMs = readNumber(schedule, "anchorMs");
   const tz = readString(schedule, "tz");
-  const staggerMs = readStaggerMs(schedule);
+  const staggerMs = readNumber(schedule, "staggerMs");
   const kind =
     rawKind === "at" || rawKind === "every" || rawKind === "cron"
       ? rawKind
-      : at
+      : at || atMs !== undefined
         ? "at"
         : everyMs !== undefined
           ? "every"
@@ -45,7 +37,11 @@ function schedulePayloadFromRecord(
             : undefined;
 
   if (kind === "at") {
-    return at ? { kind: "at", at } : undefined;
+    return at
+      ? { kind: "at", at }
+      : atMs !== undefined
+        ? { kind: "at", at: String(atMs) }
+        : undefined;
   }
   if (kind === "every" && everyMs !== undefined) {
     return { kind: "every", everyMs, anchorMs };
@@ -57,16 +53,17 @@ function schedulePayloadFromRecord(
 }
 
 function resolveSchedulePayload(
-  job: CronScheduleIdentityInput,
+  job: { schedule?: unknown } & Record<string, unknown>,
 ): ReturnType<typeof schedulePayloadFromRecord> {
   if (job.schedule && typeof job.schedule === "object" && !Array.isArray(job.schedule)) {
     return schedulePayloadFromRecord(job.schedule as Record<string, unknown>);
   }
-  return undefined;
+  return schedulePayloadFromRecord(job);
 }
 
-/** Builds a stable scheduling identity for deciding whether stored timer state is still valid. */
-export function tryCronScheduleIdentity(job: CronScheduleIdentityInput): string | undefined {
+export function tryCronScheduleIdentity(
+  job: { schedule?: unknown; enabled?: unknown } & Record<string, unknown>,
+): string | undefined {
   const schedule = resolveSchedulePayload(job);
   if (!schedule) {
     return undefined;
@@ -78,13 +75,12 @@ export function tryCronScheduleIdentity(job: CronScheduleIdentityInput): string 
   });
 }
 
-/** Compares two cron jobs by the normalized inputs that affect next-run computation. */
 export function cronSchedulingInputsEqual(
-  previous: CronScheduleIdentityInput,
-  next: CronScheduleIdentityInput,
+  previous: Pick<CronJob, "schedule"> & { enabled?: unknown },
+  next: Pick<CronJob, "schedule"> & { enabled?: unknown },
 ): boolean {
-  const previousIdentity = tryCronScheduleIdentity(previous);
-  const nextIdentity = tryCronScheduleIdentity(next);
+  const previousIdentity = tryCronScheduleIdentity(previous as Record<string, unknown>);
+  const nextIdentity = tryCronScheduleIdentity(next as Record<string, unknown>);
   return (
     previousIdentity !== undefined &&
     nextIdentity !== undefined &&

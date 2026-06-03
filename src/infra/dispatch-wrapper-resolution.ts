@@ -1,12 +1,10 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   envInvocationUsesModifiers,
   parseEnvInvocationPrelude,
   unwrapEnvInvocation,
 } from "./command-carriers.js";
 import { normalizeExecutableToken } from "./exec-wrapper-tokens.js";
-import { parseInlineOptionToken } from "./inline-option-token.js";
 
 export { unwrapEnvInvocation } from "./command-carriers.js";
 
@@ -134,7 +132,7 @@ export function extractEnvAssignmentKeysFromDispatchWrappers(
     }
     current = unwrap.argv;
   }
-  return sortUniqueStrings(assignmentKeys);
+  return Array.from(new Set(assignmentKeys)).toSorted((a, b) => a.localeCompare(b));
 }
 
 function unwrapDashOptionInvocation(
@@ -150,7 +148,7 @@ function unwrapDashOptionInvocation(
       if (!token.startsWith("-") || token === "-") {
         return "stop";
       }
-      const { name: flag } = parseInlineOptionToken(lower);
+      const [flag] = lower.split("=", 2);
       return params.onFlag(flag, lower);
     },
     adjustCommandIndex: params.adjustCommandIndex,
@@ -236,44 +234,12 @@ function unwrapTimeInvocation(argv: string[]): string[] | null {
   });
 }
 
-function timeInvocationWritesOutputFile(argv: string[]): boolean {
-  let expectsOptionValue = false;
-  for (let idx = 1; idx < argv.length; idx += 1) {
-    const token = argv[idx]?.trim() ?? "";
-    if (!token) {
-      continue;
-    }
-    if (expectsOptionValue) {
-      expectsOptionValue = false;
-      continue;
-    }
-    if (token === "--") {
-      return false;
-    }
-    if (!token.startsWith("-") || token === "-") {
-      return false;
-    }
-    const lower = normalizeLowercaseStringOrEmpty(token);
-    const { name: flag } = parseInlineOptionToken(lower);
-    if (flag === "-o" || flag === "--output") {
-      return true;
-    }
-    if (TIME_OPTIONS_WITH_VALUE.has(flag) && !lower.includes("=")) {
-      expectsOptionValue = true;
-    }
-  }
-  return false;
-}
-
 function supportsScriptPositionalCommand(platform: NodeJS.Platform = process.platform): boolean {
   return platform === "darwin" || platform === "freebsd";
 }
 
-function unwrapScriptInvocation(
-  argv: string[],
-  platform: NodeJS.Platform = process.platform,
-): string[] | null {
-  if (!supportsScriptPositionalCommand(platform)) {
+function unwrapScriptInvocation(argv: string[]): string[] | null {
+  if (!supportsScriptPositionalCommand()) {
     return null;
   }
   return scanWrapperInvocation(argv, {
@@ -282,7 +248,7 @@ function unwrapScriptInvocation(
       if (!lower.startsWith("-") || lower === "-") {
         return "stop";
       }
-      const { name: flag } = parseInlineOptionToken(token);
+      const [flag] = token.split("=", 2);
       if (BSD_SCRIPT_OPTIONS_WITH_VALUE.has(flag)) {
         return token.includes("=") ? "continue" : "consume-next";
       }
@@ -401,16 +367,12 @@ const DISPATCH_WRAPPER_SPECS: readonly DispatchWrapperSpec[] = [
   { name: "nice", unwrap: unwrapNiceInvocation, transparentUsage: true },
   { name: "nohup", unwrap: unwrapNohupInvocation, transparentUsage: true },
   { name: "sandbox-exec", unwrap: unwrapSandboxExecInvocation, transparentUsage: true },
-  { name: "script", unwrap: unwrapScriptInvocation, transparentUsage: false },
+  { name: "script", unwrap: unwrapScriptInvocation, transparentUsage: true },
   { name: "setsid" },
   { name: "stdbuf", unwrap: unwrapStdbufInvocation, transparentUsage: true },
   { name: "sudo" },
   { name: "taskset" },
-  {
-    name: "time",
-    unwrap: unwrapTimeInvocation,
-    transparentUsage: (argv) => !timeInvocationWritesOutputFile(argv),
-  },
+  { name: "time", unwrap: unwrapTimeInvocation, transparentUsage: true },
   { name: "timeout", unwrap: unwrapTimeoutInvocation, transparentUsage: true },
   {
     name: "xcrun",

@@ -23,7 +23,7 @@ struct ContextRootMenuLabelView: View {
 
                 if self.usesStackedLayout {
                     self.subtitleText
-                        .lineLimit(5)
+                        .lineLimit(3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }

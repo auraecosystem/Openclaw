@@ -1,17 +1,24 @@
 import { createHash } from "node:crypto";
-import type { ChatType } from "../channels/chat-type.js";
+import path from "node:path";
 import {
-  deleteDeliveryQueueEntry,
-  loadDeliveryQueueEntries,
-  loadDeliveryQueueEntry,
-  moveDeliveryQueueEntryToFailed,
-  updateDeliveryQueueEntry,
-  upsertDeliveryQueueEntry,
-  type DeliveryQueueRowMetadata,
-} from "./delivery-queue-sqlite.js";
+  ackJsonDurableQueueEntry,
+  ensureJsonDurableQueueDirs,
+  jsonDurableQueueEntryExists,
+  loadJsonDurableQueueEntry,
+  loadPendingJsonDurableQueueEntries,
+  moveJsonDurableQueueEntryToFailed,
+  readJsonDurableQueueEntry,
+  resolveJsonDurableQueueEntryPaths,
+  writeJsonDurableQueueEntry,
+} from "@openclaw/fs-safe/store";
+import type { ChatType } from "../channels/chat-type.js";
+import { resolveStateDir } from "../config/paths.js";
 import { generateSecureUuid } from "./secure-random.js";
 
-const QUEUE_NAME = "session";
+const QUEUE_DIRNAME = "session-delivery-queue";
+const FAILED_DIRNAME = "failed";
+const TMP_SWEEP_MAX_AGE_MS = 5_000;
+const QUEUE_TEMP_PREFIX = ".session-delivery-queue";
 
 type SessionDeliveryContext = {
   channel?: string;
@@ -46,7 +53,6 @@ export type QueuedSessionDeliveryPayload =
       sessionKey: string;
       message: string;
       messageId: string;
-      expectedSessionId?: string;
       route?: SessionDeliveryRoute;
       deliveryContext?: SessionDeliveryContext;
       idempotencyKey?: string;
@@ -67,44 +73,71 @@ function buildEntryId(idempotencyKey?: string): string {
   return createHash("sha256").update(idempotencyKey).digest("hex");
 }
 
-function queuedSessionDeliveryMetadata(entry: QueuedSessionDelivery): DeliveryQueueRowMetadata {
-  const route = entry.kind === "agentTurn" ? entry.route : undefined;
-  return {
-    entryKind: entry.kind,
-    sessionKey: entry.sessionKey,
-    channel: route?.channel ?? entry.deliveryContext?.channel,
-    target: route?.to ?? entry.deliveryContext?.to,
-    accountId: route?.accountId ?? entry.deliveryContext?.accountId,
-  };
+async function writeQueueEntry(filePath: string, entry: QueuedSessionDelivery): Promise<void> {
+  await writeJsonDurableQueueEntry({
+    filePath,
+    entry,
+    tempPrefix: QUEUE_TEMP_PREFIX,
+  });
+}
+
+async function readQueueEntry(filePath: string): Promise<QueuedSessionDelivery> {
+  return await readJsonDurableQueueEntry<QueuedSessionDelivery>(filePath);
+}
+
+export function resolveSessionDeliveryQueueDir(stateDir?: string): string {
+  const base = stateDir ?? resolveStateDir();
+  return path.join(base, QUEUE_DIRNAME);
+}
+
+function resolveFailedDir(stateDir?: string): string {
+  return path.join(resolveSessionDeliveryQueueDir(stateDir), FAILED_DIRNAME);
+}
+
+function resolveQueueEntryPaths(
+  id: string,
+  stateDir?: string,
+): {
+  jsonPath: string;
+  deliveredPath: string;
+} {
+  return resolveJsonDurableQueueEntryPaths(resolveSessionDeliveryQueueDir(stateDir), id);
+}
+
+async function ensureSessionDeliveryQueueDir(stateDir?: string): Promise<string> {
+  const queueDir = resolveSessionDeliveryQueueDir(stateDir);
+  await ensureJsonDurableQueueDirs({
+    queueDir,
+    failedDir: resolveFailedDir(stateDir),
+  });
+  return queueDir;
 }
 
 export async function enqueueSessionDelivery(
   params: QueuedSessionDeliveryPayload,
   stateDir?: string,
 ): Promise<string> {
+  const queueDir = await ensureSessionDeliveryQueueDir(stateDir);
   const id = buildEntryId(params.idempotencyKey);
+  const filePath = path.join(queueDir, `${id}.json`);
 
-  if (params.idempotencyKey && loadDeliveryQueueEntry(QUEUE_NAME, id, stateDir)) {
-    return id;
+  if (params.idempotencyKey) {
+    if (await jsonDurableQueueEntryExists(filePath)) {
+      return id;
+    }
   }
 
-  const entry: QueuedSessionDelivery = {
+  await writeQueueEntry(filePath, {
     ...params,
     id,
     enqueuedAt: Date.now(),
     retryCount: 0,
-  };
-  upsertDeliveryQueueEntry({
-    queueName: QUEUE_NAME,
-    entry,
-    metadata: queuedSessionDeliveryMetadata(entry),
-    stateDir,
   });
   return id;
 }
 
 export async function ackSessionDelivery(id: string, stateDir?: string): Promise<void> {
-  deleteDeliveryQueueEntry(QUEUE_NAME, id, stateDir);
+  await ackJsonDurableQueueEntry(resolveQueueEntryPaths(id, stateDir));
 }
 
 export async function failSessionDelivery(
@@ -112,30 +145,38 @@ export async function failSessionDelivery(
   error: string,
   stateDir?: string,
 ): Promise<void> {
-  updateDeliveryQueueEntry(QUEUE_NAME, id, stateDir, (entry) => {
-    const queued = entry as QueuedSessionDelivery;
-    return {
-      ...queued,
-      retryCount: queued.retryCount + 1,
-      lastAttemptAt: Date.now(),
-      lastError: error,
-    };
-  });
+  const filePath = path.join(resolveSessionDeliveryQueueDir(stateDir), `${id}.json`);
+  const entry = await readQueueEntry(filePath);
+  entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
+  entry.lastError = error;
+  await writeQueueEntry(filePath, entry);
 }
 
 export async function loadPendingSessionDelivery(
   id: string,
   stateDir?: string,
 ): Promise<QueuedSessionDelivery | null> {
-  return loadDeliveryQueueEntry(QUEUE_NAME, id, stateDir) as QueuedSessionDelivery | null;
+  return await loadJsonDurableQueueEntry({
+    paths: resolveQueueEntryPaths(id, stateDir),
+    tempPrefix: QUEUE_TEMP_PREFIX,
+  });
 }
 
 export async function loadPendingSessionDeliveries(
   stateDir?: string,
 ): Promise<QueuedSessionDelivery[]> {
-  return loadDeliveryQueueEntries(QUEUE_NAME, stateDir) as QueuedSessionDelivery[];
+  return await loadPendingJsonDurableQueueEntries({
+    queueDir: resolveSessionDeliveryQueueDir(stateDir),
+    tempPrefix: QUEUE_TEMP_PREFIX,
+    cleanupTmpMaxAgeMs: TMP_SWEEP_MAX_AGE_MS,
+  });
 }
 
 export async function moveSessionDeliveryToFailed(id: string, stateDir?: string): Promise<void> {
-  moveDeliveryQueueEntryToFailed(QUEUE_NAME, id, stateDir);
+  await moveJsonDurableQueueEntryToFailed({
+    queueDir: resolveSessionDeliveryQueueDir(stateDir),
+    failedDir: resolveFailedDir(stateDir),
+    id,
+  });
 }

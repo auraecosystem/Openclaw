@@ -1,34 +1,59 @@
-import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
-import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
-import type { Model } from "openclaw/plugin-sdk/llm";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { completeSimple, type Api, type Model } from "@earendil-works/pi-ai";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { describe, expect, it } from "vitest";
 import { getRuntimeConfig } from "../config/config.js";
-import { discoverAuthStorage, discoverModels } from "./agent-model-discovery.js";
 import { resolveDefaultAgentDir } from "./agent-scope.js";
-import { sanitizeSessionHistory } from "./embedded-agent-runner/replay-history.js";
-import {
-  completeSimpleWithTimeout,
-  isLiveProfileKeyModeEnabled,
-  isLiveTestEnabled,
-  logLiveProgress,
-  requiresLiveProfileCredential,
-  resolveLiveCredentialPrecedence,
-} from "./live-test-helpers.js";
+import { isLiveProfileKeyModeEnabled, isLiveTestEnabled } from "./live-test-helpers.js";
 import { getApiKeyForModel, requireApiKey } from "./model-auth.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
+import { sanitizeSessionHistory } from "./pi-embedded-runner/replay-history.js";
+import { discoverAuthStorage, discoverModels } from "./pi-model-discovery.js";
 
 const LIVE = isLiveTestEnabled();
 const REQUIRE_PROFILE_KEYS = isLiveProfileKeyModeEnabled();
-const DEFAULT_TARGET_MODEL_REF = "openai/gpt-5.4-mini";
+const LIVE_CREDENTIAL_PRECEDENCE = REQUIRE_PROFILE_KEYS ? "profile-first" : "env-first";
+const DEFAULT_TARGET_MODEL_REF = "openai-codex/gpt-5.1-codex-mini";
 const TARGET_MODEL_REF =
   process.env.OPENCLAW_LIVE_OPENAI_REASONING_COMPAT_MODEL?.trim() || DEFAULT_TARGET_MODEL_REF;
 const describeLive = LIVE ? describe : describe.skip;
 
-const logProgress = logLiveProgress;
+function logProgress(message: string): void {
+  process.stderr.write(`[live] ${message}\n`);
+}
+
+async function completeSimpleWithTimeout<TApi extends Api>(
+  model: Model<TApi>,
+  context: Parameters<typeof completeSimple<TApi>>[1],
+  options: Parameters<typeof completeSimple<TApi>>[2],
+  timeoutMs: number,
+): Promise<Awaited<ReturnType<typeof completeSimple<TApi>>>> {
+  const controller = new AbortController();
+  const abortTimer = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  abortTimer.unref?.();
+  try {
+    return await Promise.race([
+      completeSimple(model, context, {
+        ...options,
+        signal: controller.signal,
+      }),
+      new Promise<never>((_, reject) => {
+        const hardTimer = setTimeout(() => {
+          reject(new Error(`model call timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+        hardTimer.unref?.();
+      }),
+    ]);
+  } finally {
+    clearTimeout(abortTimer);
+  }
+}
 
 async function completeReplyWithRetry(params: {
-  model: Model;
+  model: Model<Api>;
   apiKey: string;
   message: string;
 }): Promise<{ text: string; errorMessage?: string }> {
@@ -105,7 +130,7 @@ describeLive("openai reasoning compat live", () => {
       const agentDir = resolveDefaultAgentDir(cfg);
       const authStorage = discoverAuthStorage(agentDir);
       const modelRegistry = discoverModels(authStorage, agentDir);
-      const model = modelRegistry.find(provider, modelId) as Model | null;
+      const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
 
       if (!model) {
         logProgress(`[openai-reasoning-compat] model missing from registry: ${TARGET_MODEL_REF}`);
@@ -117,20 +142,14 @@ describeLive("openai reasoning compat live", () => {
         apiKeyInfo = await getApiKeyForModel({
           model,
           cfg,
-          credentialPrecedence: resolveLiveCredentialPrecedence(
-            model.provider,
-            REQUIRE_PROFILE_KEYS,
-          ),
+          credentialPrecedence: LIVE_CREDENTIAL_PRECEDENCE,
         });
       } catch (error) {
         logProgress(`[openai-reasoning-compat] skip (${String(error)})`);
         return;
       }
 
-      if (
-        requiresLiveProfileCredential(model.provider, REQUIRE_PROFILE_KEYS) &&
-        !apiKeyInfo.source.startsWith("profile:")
-      ) {
+      if (REQUIRE_PROFILE_KEYS && !apiKeyInfo.source.startsWith("profile:")) {
         logProgress(
           `[openai-reasoning-compat] skip (non-profile credential source: ${apiKeyInfo.source})`,
         );
@@ -165,7 +184,7 @@ describeLive("openai reasoning compat live", () => {
       const agentDir = resolveDefaultAgentDir(cfg);
       const authStorage = discoverAuthStorage(agentDir);
       const modelRegistry = discoverModels(authStorage, agentDir);
-      const model = modelRegistry.find(provider, modelId) as Model | null;
+      const model = modelRegistry.find(provider, modelId) as Model<Api> | null;
 
       if (!model) {
         logProgress(`[openai-reasoning-compat] model missing from registry: ${TARGET_MODEL_REF}`);
@@ -177,20 +196,14 @@ describeLive("openai reasoning compat live", () => {
         apiKeyInfo = await getApiKeyForModel({
           model,
           cfg,
-          credentialPrecedence: resolveLiveCredentialPrecedence(
-            model.provider,
-            REQUIRE_PROFILE_KEYS,
-          ),
+          credentialPrecedence: LIVE_CREDENTIAL_PRECEDENCE,
         });
       } catch (error) {
         logProgress(`[openai-reasoning-compat] skip (${String(error)})`);
         return;
       }
 
-      if (
-        requiresLiveProfileCredential(model.provider, REQUIRE_PROFILE_KEYS) &&
-        !apiKeyInfo.source.startsWith("profile:")
-      ) {
+      if (REQUIRE_PROFILE_KEYS && !apiKeyInfo.source.startsWith("profile:")) {
         logProgress(
           `[openai-reasoning-compat] skip (non-profile credential source: ${apiKeyInfo.source})`,
         );
@@ -237,7 +250,7 @@ describeLive("openai reasoning compat live", () => {
         provider: model.provider,
         modelId: model.id,
         sessionManager: SessionManager.inMemory(),
-        sessionId: "openai-chatgpt-tool-replay-live",
+        sessionId: "openai-codex-tool-replay-live",
       });
 
       expect(sanitized.map((message) => message.role)).toEqual([

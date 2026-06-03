@@ -1,6 +1,5 @@
 export {
-  testApi as _test,
-  testApi,
+  _test,
   buildTtsSystemPromptHint,
   getLastTtsAttempt,
   getResolvedSpeechProviderConfig,

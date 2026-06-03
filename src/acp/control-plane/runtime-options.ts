@@ -1,11 +1,10 @@
 import { isAbsolute } from "node:path";
-import { normalizeText } from "@openclaw/acp-core/normalize-text";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { AcpSessionRuntimeOptions, SessionAcpMeta } from "../../config/sessions/types.js";
-import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
+import { normalizeText } from "../normalize-text.js";
 import { AcpRuntimeError } from "../runtime/errors.js";
 
-export { normalizeText } from "@openclaw/acp-core/normalize-text";
+export { normalizeText } from "../normalize-text.js";
 
 const MAX_RUNTIME_MODE_LENGTH = 64;
 const MAX_MODEL_LENGTH = 200;
@@ -135,7 +134,7 @@ export function parseRuntimeTimeoutSecondsInput(rawTimeout: unknown): number {
   if (!normalized || !/^\d+$/.test(normalized)) {
     failInvalidOption("Timeout must be a positive integer in seconds.");
   }
-  return validateRuntimeTimeoutSecondsInput(parseStrictPositiveInteger(normalized) ?? 0);
+  return validateRuntimeTimeoutSecondsInput(Number.parseInt(normalized, 10));
 }
 
 export function validateRuntimeConfigOptionInput(

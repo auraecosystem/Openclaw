@@ -18,6 +18,7 @@ struct MenuContent: View {
     private let nodesStore = NodesStore.shared
     @Bindable private var pairingPrompter = NodePairingApprovalPrompter.shared
     @Bindable private var devicePairingPrompter = DevicePairingApprovalPrompter.shared
+    @Environment(\.openSettings) private var openSettings
     @State private var availableMics: [AudioInputDevice] = []
     @State private var loadingMics = false
     @State private var micObserver = AudioInputDeviceObserver()
@@ -110,19 +111,28 @@ struct MenuContent: View {
                 self.voiceWakeMicMenu
             }
             Divider()
-            Button {
-                AppNavigationActions.openDashboard()
-            } label: {
+            Link(destination: URL(string: "openclaw://dashboard")!) {
                 Label("Open Dashboard", systemImage: "gauge")
             }
             Button {
-                AppNavigationActions.openChat()
+                Task { @MainActor in
+                    let sessionKey = await WebChatManager.shared.preferredSessionKey()
+                    WebChatManager.shared.show(sessionKey: sessionKey)
+                }
             } label: {
                 Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
             }
             if self.state.canvasEnabled {
                 Button {
-                    AppNavigationActions.toggleCanvas()
+                    Task { @MainActor in
+                        if self.state.canvasPanelVisible {
+                            CanvasManager.shared.hideAll()
+                        } else {
+                            let sessionKey = await GatewayConnection.shared.mainSessionKey()
+                            // Don't force a navigation on re-open: preserve the current web view state.
+                            _ = try? CanvasManager.shared.show(sessionKey: sessionKey, path: nil)
+                        }
+                    }
                 } label: {
                     Label(
                         self.state.canvasPanelVisible ? "Close Canvas" : "Open Canvas",
@@ -171,6 +181,9 @@ struct MenuContent: View {
             self.micRefreshTask?.cancel()
             self.micRefreshTask = nil
             self.micObserver.stop()
+        }
+        .task { @MainActor in
+            SettingsWindowOpener.shared.register(openSettings: self.openSettings)
         }
     }
 
@@ -317,7 +330,12 @@ struct MenuContent: View {
     }
 
     private func open(tab: SettingsTab) {
-        AppNavigationActions.openSettings(tab: tab)
+        SettingsTabRouter.request(tab)
+        NSApp.activate(ignoringOtherApps: true)
+        self.openSettings()
+        DispatchQueue.main.async {
+            NotificationCenter.default.post(name: .openclawSelectSettingsTab, object: tab)
+        }
     }
 
     private var macNodeStatus: (label: String, color: Color)? {

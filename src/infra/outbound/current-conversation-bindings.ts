@@ -1,17 +1,12 @@
 import fs from "node:fs";
 import path from "node:path";
-import {
-  asDateTimestampMs,
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { normalizeConversationText } from "../../acp/conversation-id.js";
 import { normalizeAnyChannelId } from "../../channels/registry.js";
 import { resolveStateDir } from "../../config/paths.js";
 import { loadJsonFile } from "../../infra/json-file.js";
 import { saveJsonFile } from "../../plugin-sdk/json-store.js";
 import { getActivePluginChannelRegistryFromState } from "../../plugins/runtime-channel-state.js";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { normalizeConversationRef } from "./session-binding-normalization.js";
 import type {
   ConversationRef,
@@ -51,15 +46,9 @@ function resolveBindingsFilePath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 function isBindingExpired(record: SessionBindingRecord, now = Date.now()): boolean {
-  if (record.expiresAt === undefined) {
-    return false;
-  }
-  const expiresAt = asDateTimestampMs(record.expiresAt);
-  if (expiresAt === undefined) {
-    return true;
-  }
-  const nowMs = asDateTimestampMs(now);
-  return nowMs !== undefined && !isFutureDateTimestampMs(expiresAt, { nowMs });
+  return typeof record.expiresAt === "number" && Number.isFinite(record.expiresAt)
+    ? record.expiresAt <= now
+    : false;
 }
 
 function toPersistedFile(): PersistedCurrentConversationBindingsFile {
@@ -145,7 +134,6 @@ function resolveChannelSupportsCurrentConversationBinding(channel: string): bool
   return false;
 }
 
-/** Reports generic current-conversation binding support for plugin-owned channels. */
 export function getGenericCurrentConversationBindingCapabilities(params: {
   channel: string;
   accountId: string;
@@ -162,7 +150,6 @@ export function getGenericCurrentConversationBindingCapabilities(params: {
   };
 }
 
-/** Stores or replaces the current-conversation binding for a normalized conversation ref. */
 export async function bindGenericCurrentConversation(
   input: SessionBindingBindInput,
 ): Promise<SessionBindingRecord | null> {
@@ -172,24 +159,11 @@ export async function bindGenericCurrentConversation(
     return null;
   }
   loadBindingsIntoMemory();
-  const rawNow = Date.now();
-  const now = asDateTimestampMs(rawNow);
-  if (now === undefined) {
-    return null;
-  }
+  const now = Date.now();
   const ttlMs =
     typeof input.ttlMs === "number" && Number.isFinite(input.ttlMs)
       ? Math.max(0, Math.floor(input.ttlMs))
       : undefined;
-  const expiresAt =
-    ttlMs === undefined
-      ? undefined
-      : ttlMs === 0
-        ? now
-        : resolveExpiresAtMsFromDurationMs(ttlMs, { nowMs: rawNow });
-  if (ttlMs !== undefined && expiresAt === undefined) {
-    return null;
-  }
   const key = buildConversationKey(conversation);
   const existing = pruneExpiredBinding(key);
   const record: SessionBindingRecord = {
@@ -199,7 +173,7 @@ export async function bindGenericCurrentConversation(
     conversation,
     status: "active",
     boundAt: now,
-    ...(expiresAt !== undefined ? { expiresAt } : {}),
+    ...(ttlMs != null ? { expiresAt: now + ttlMs } : {}),
     metadata: {
       ...existing?.metadata,
       ...input.metadata,
@@ -211,14 +185,12 @@ export async function bindGenericCurrentConversation(
   return record;
 }
 
-/** Resolves a current-conversation binding and prunes it if its TTL has expired. */
 export function resolveGenericCurrentConversationBinding(
   ref: ConversationRef,
 ): SessionBindingRecord | null {
   return pruneExpiredBinding(buildConversationKey(ref));
 }
 
-/** Lists non-expired current-conversation bindings owned by one target session. */
 export function listGenericCurrentConversationBindingsBySession(
   targetSessionKey: string,
 ): SessionBindingRecord[] {
@@ -234,7 +206,6 @@ export function listGenericCurrentConversationBindingsBySession(
   return results;
 }
 
-/** Persists last-activity metadata for an existing generic current-conversation binding. */
 export function touchGenericCurrentConversationBinding(bindingId: string, at = Date.now()): void {
   loadBindingsIntoMemory();
   if (!bindingId.startsWith(CURRENT_BINDINGS_ID_PREFIX)) {
@@ -255,7 +226,6 @@ export function touchGenericCurrentConversationBinding(bindingId: string, at = D
   persistBindingsToDisk();
 }
 
-/** Removes generic current-conversation bindings by binding id or target session key. */
 export async function unbindGenericCurrentConversationBindings(
   input: SessionBindingUnbindInput,
 ): Promise<SessionBindingRecord[]> {
@@ -290,7 +260,7 @@ export async function unbindGenericCurrentConversationBindings(
   return removed;
 }
 
-export const testing = {
+export const __testing = {
   resetCurrentConversationBindingsForTests(params?: {
     deletePersistedFile?: boolean;
     env?: NodeJS.ProcessEnv;
@@ -308,4 +278,3 @@ export const testing = {
   },
   resolveBindingsFilePath,
 };
-export { testing as __testing };

@@ -9,15 +9,14 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 export function resolveConfigWriteDeniedText(params: {
   cfg: OpenClawConfig;
   channel?: string | null;
-  originChannelId: ChannelId | null;
-  originAccountId?: string;
+  channelId: ChannelId | null;
+  accountId?: string;
   gatewayClientScopes?: string[];
   target: Parameters<typeof authorizeConfigWrite>[0]["target"];
-  fallbackChannelId?: ChannelId | null;
 }): string | null {
   const writeAuth = authorizeConfigWrite({
     cfg: params.cfg,
-    origin: { channelId: params.originChannelId, accountId: params.originAccountId },
+    origin: { channelId: params.channelId, accountId: params.accountId },
     target: params.target,
     allowBypass: canBypassConfigWritePolicy({
       channel: params.channel ?? "",
@@ -29,6 +28,6 @@ export function resolveConfigWriteDeniedText(params: {
   }
   return formatConfigWriteDeniedMessage({
     result: writeAuth,
-    fallbackChannelId: params.fallbackChannelId ?? params.originChannelId,
+    fallbackChannelId: params.channelId,
   });
 }

@@ -31,8 +31,6 @@ vi.spyOn(toolAccountModule, "resolveAnyEnabledFeishuToolsConfig").mockReturnValu
   drive: false,
   perm: false,
   scopes: false,
-  bitable: false,
-  base: false,
 });
 vi.spyOn(toolAccountModule, "resolveFeishuToolAccount").mockImplementation((...args) =>
   resolveFeishuToolAccountMock(...args),
@@ -276,7 +274,7 @@ describe("feishu_doc image fetch hardening", () => {
 
     const call = blockDescendantCreateMock.mock.calls[0]?.[0];
     expect(call?.data.children_id).toEqual(["h1", "p1", "h2", "list1"]);
-    expect((call!.data.descendants as Array<{ block_id: string }>).map((b) => b.block_id)).toEqual([
+    expect((call?.data.descendants as Array<{ block_id: string }>).map((b) => b.block_id)).toEqual([
       "h1",
       "p1",
       "h2",

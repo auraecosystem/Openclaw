@@ -8,7 +8,6 @@ import type { DiscordConfig } from "./types.discord.js";
 import type { GoogleChatConfig } from "./types.googlechat.js";
 import type { IMessageConfig } from "./types.imessage.js";
 import type { IrcConfig } from "./types.irc.js";
-import type { MentionPatternsPolicyConfig } from "./types.messages.js";
 import type { MSTeamsConfig } from "./types.msteams.js";
 import type { SignalConfig } from "./types.signal.js";
 import type { SlackConfig } from "./types.slack.js";
@@ -38,16 +37,6 @@ export type ExtensionNestedPolicyConfig = {
   [key: string]: unknown;
 };
 
-export type ExtensionAccountConfig = ExtensionNestedPolicyConfig & {
-  defaultTo?: string | number;
-  dmPolicy?: string;
-  dm?: ExtensionNestedPolicyConfig;
-  mediaMaxMb?: number;
-  configWrites?: boolean;
-};
-
-type OpenWorldChannelConfig = ReturnType<typeof JSON.parse>;
-
 /**
  * Base type for extension channel config sections.
  * Extensions can use this as a starting point for their channel config.
@@ -61,7 +50,6 @@ export type ExtensionChannelConfig = {
   defaultAccount?: string;
   dmPolicy?: string;
   groupPolicy?: GroupPolicy;
-  mentionPatterns?: MentionPatternsPolicyConfig | string[];
   contextVisibility?: ContextVisibilityMode;
   healthMonitor?: ChannelHealthMonitorConfig;
   dm?: ExtensionNestedPolicyConfig;
@@ -84,7 +72,7 @@ export type ExtensionChannelConfig = {
   botLoopProtection?: ChannelBotLoopProtectionConfig;
   spawnSubagentSessions?: boolean;
   dangerouslyAllowPrivateNetwork?: boolean;
-  accounts?: Record<string, ExtensionAccountConfig>;
+  accounts?: Record<string, unknown>;
   [key: string]: unknown;
 };
 
@@ -103,7 +91,8 @@ export interface ChannelsConfig {
   whatsapp?: WhatsAppConfig;
   /**
    * Channel sections are plugin-owned and keyed by arbitrary channel ids.
-   * Open-world config keeps SDK/plugin-owned sections ergonomic for dynamic ids.
+   * Keep the lookup permissive so augmented channel configs remain ergonomic at call sites.
    */
-  [key: string]: OpenWorldChannelConfig;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any;
 }

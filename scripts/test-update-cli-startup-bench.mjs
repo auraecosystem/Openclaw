@@ -64,7 +64,7 @@ const args = [
   opts.out,
 ];
 
-const run = spawnSync(process.execPath, args, {
+const run = spawnSync("node", args, {
   cwd: process.cwd(),
   stdio: "inherit",
   env: process.env,

@@ -11,17 +11,18 @@ const manifestAuthChoices = vi.hoisted(() => [
   },
   {
     pluginId: "openai",
-    providerId: "openai",
-    methodId: "oauth",
-    choiceId: "openai",
-    choiceLabel: "ChatGPT Login",
+    providerId: "openai-codex",
+    methodId: "cli",
+    choiceId: "openai-codex-cli",
+    choiceLabel: "OpenAI Codex CLI",
+    deprecatedChoiceIds: ["codex-cli"],
   },
 ]);
 
 vi.mock("../plugins/provider-auth-choices.js", () => ({
   resolveManifestProviderAuthChoices: () => manifestAuthChoices,
   resolveManifestDeprecatedProviderAuthChoice: (choiceId: string) =>
-    manifestAuthChoices.find((choice) => choice.deprecatedChoiceIds?.includes(choiceId) === true),
+    manifestAuthChoices.find((choice) => choice.deprecatedChoiceIds.includes(choiceId)),
 }));
 
 import {
@@ -56,15 +57,7 @@ describe("auth choice legacy aliases", () => {
   it("sources deprecated cli aliases from plugin manifests", () => {
     expect(resolveLegacyAuthChoiceAliasesForCli({ env: authChoiceManifestEnv() })).toEqual([
       "claude-cli",
-    ]);
-  });
-
-  it("does not keep retired Codex setup choices alive outside doctor", () => {
-    expect(normalizeLegacyOnboardAuthChoice("codex-cli", { env: authChoiceManifestEnv() })).toBe(
       "codex-cli",
-    );
-    expect(
-      resolveDeprecatedAuthChoiceReplacement("codex-cli", { env: authChoiceManifestEnv() }),
-    ).toBeUndefined();
+    ]);
   });
 });

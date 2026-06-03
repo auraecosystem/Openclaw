@@ -19,18 +19,10 @@ describe("slack native streaming defaults", () => {
     expect(isSlackStreamingEnabled({ mode: "partial", nativeStreaming: true })).toBe(true);
   });
 
-  it("keeps native progress task cards opt-in while preserving partial native streaming", () => {
+  it("is disabled outside partial mode or when native streaming is off", () => {
     expect(isSlackStreamingEnabled({ mode: "partial", nativeStreaming: false })).toBe(false);
     expect(isSlackStreamingEnabled({ mode: "block", nativeStreaming: true })).toBe(false);
     expect(isSlackStreamingEnabled({ mode: "progress", nativeStreaming: true })).toBe(false);
-    expect(
-      isSlackStreamingEnabled({
-        mode: "progress",
-        nativeStreaming: true,
-        nativeProgressTaskCards: true,
-      }),
-    ).toBe(true);
-    expect(isSlackStreamingEnabled({ mode: "progress", nativeStreaming: false })).toBe(false);
     expect(isSlackStreamingEnabled({ mode: "off", nativeStreaming: true })).toBe(false);
   });
 });

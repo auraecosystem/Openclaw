@@ -1,4 +1,3 @@
-import { uniqueValues } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { CDPSession, Page } from "playwright-core";
 
 type PageCdpSend = (method: string, params?: Record<string, unknown>) => Promise<unknown>;
@@ -73,7 +72,7 @@ export async function markBackendDomRefsOnPage(opts: {
 
     await send("DOM.enable").catch(() => {});
 
-    const backendNodeIds = uniqueValues(refs.map((entry) => Math.floor(entry.backendDOMNodeId)));
+    const backendNodeIds = [...new Set(refs.map((entry) => Math.floor(entry.backendDOMNodeId)))];
     const pushed = (await send("DOM.pushNodesByBackendIdsToFrontend", {
       backendNodeIds,
     }).catch(() => ({}))) as { nodeIds?: number[] };

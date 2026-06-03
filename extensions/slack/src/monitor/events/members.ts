@@ -12,17 +12,17 @@ export function registerSlackMemberEvents(params: {
 }) {
   const { ctx, trackEvent } = params;
 
-  const handleMemberChannelEvent = async (paramsLocal: {
+  const handleMemberChannelEvent = async (params: {
     verb: "joined" | "left";
     event: SlackMemberChannelEvent;
     body: unknown;
   }) => {
     try {
-      if (ctx.shouldDropMismatchedSlackEvent(paramsLocal.body)) {
+      if (ctx.shouldDropMismatchedSlackEvent(params.body)) {
         return;
       }
       trackEvent?.();
-      const payload = paramsLocal.event;
+      const payload = params.event;
       const channelId = payload.channel;
       const channelInfo = channelId ? await ctx.resolveChannelName(channelId) : {};
       const channelType = payload.channel_type ?? channelInfo?.type;
@@ -31,23 +31,20 @@ export function registerSlackMemberEvents(params: {
         senderId: payload.user,
         channelId,
         channelType,
-        eventKind: `member-${paramsLocal.verb}`,
+        eventKind: `member-${params.verb}`,
       });
       if (!ingressContext) {
         return;
       }
       const userInfo = payload.user ? await ctx.resolveUserName(payload.user) : {};
       const userLabel = userInfo?.name ?? payload.user ?? "someone";
-      enqueueSystemEvent(
-        `Slack: ${userLabel} ${paramsLocal.verb} ${ingressContext.channelLabel}.`,
-        {
-          sessionKey: ingressContext.sessionKey,
-          contextKey: `slack:member:${paramsLocal.verb}:${channelId ?? "unknown"}:${payload.user ?? "unknown"}`,
-        },
-      );
+      enqueueSystemEvent(`Slack: ${userLabel} ${params.verb} ${ingressContext.channelLabel}.`, {
+        sessionKey: ingressContext.sessionKey,
+        contextKey: `slack:member:${params.verb}:${channelId ?? "unknown"}:${payload.user ?? "unknown"}`,
+      });
     } catch (err) {
       ctx.runtime.error?.(
-        danger(`slack ${paramsLocal.verb} handler failed: ${formatErrorMessage(err)}`),
+        danger(`slack ${params.verb} handler failed: ${formatErrorMessage(err)}`),
       );
     }
   };

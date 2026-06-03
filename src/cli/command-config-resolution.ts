@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
   type CommandSecretResolutionMode,
+  type CommandSecretsProviderOverrides,
   resolveCommandSecretRefsViaGateway,
 } from "./command-secret-gateway.js";
 
@@ -12,8 +13,7 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
   targetIds: Set<string>;
   mode?: CommandSecretResolutionMode;
   allowedPaths?: Set<string>;
-  forcedActivePaths?: Set<string>;
-  optionalActivePaths?: Set<string>;
+  providerOverrides?: CommandSecretsProviderOverrides;
   runtime?: RuntimeEnv;
   autoEnable?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -28,12 +28,11 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
     targetIds: params.targetIds,
     ...(params.mode ? { mode: params.mode } : {}),
     ...(params.allowedPaths ? { allowedPaths: params.allowedPaths } : {}),
-    ...(params.forcedActivePaths ? { forcedActivePaths: params.forcedActivePaths } : {}),
-    ...(params.optionalActivePaths ? { optionalActivePaths: params.optionalActivePaths } : {}),
+    ...(params.providerOverrides ? { providerOverrides: params.providerOverrides } : {}),
   });
   if (params.runtime) {
     for (const entry of diagnostics) {
-      params.runtime.error(`[secrets] ${entry}`);
+      params.runtime.log(`[secrets] ${entry}`);
     }
   }
   const effectiveConfig = params.autoEnable

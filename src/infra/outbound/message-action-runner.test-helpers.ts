@@ -28,14 +28,6 @@ export const directChatConfig = {
 
 export const directOutbound: ChannelOutboundAdapter = { deliveryMode: "direct" };
 
-function hasChannelBotToken(channelConfig: unknown): boolean {
-  if (channelConfig == null || typeof channelConfig !== "object" || Array.isArray(channelConfig)) {
-    return false;
-  }
-  const token = (channelConfig as Record<string, unknown>).botToken;
-  return typeof token === "string" && Boolean(token.trim());
-}
-
 export const runDryAction = (params: {
   cfg: OpenClawConfig;
   action: ChannelMessageActionName;
@@ -127,7 +119,7 @@ function createConfiguredTestPlugin(params: {
 
 export const workspaceTestPlugin = createConfiguredTestPlugin({
   id: "workspace",
-  isConfigured: (cfg) => hasChannelBotToken(cfg.channels?.workspace),
+  isConfigured: (cfg) => Boolean(cfg.channels?.workspace?.botToken?.trim()),
   normalizeTarget: (raw) => normalizeWorkspaceTarget(raw) || undefined,
   resolveTarget: (input) => {
     const normalized = normalizeWorkspaceTarget(input);
@@ -144,7 +136,7 @@ export const workspaceTestPlugin = createConfiguredTestPlugin({
 
 export const forumTestPlugin = createConfiguredTestPlugin({
   id: "forum",
-  isConfigured: (cfg) => hasChannelBotToken(cfg.channels?.forum),
+  isConfigured: (cfg) => Boolean(cfg.channels?.forum?.botToken?.trim()),
   normalizeTarget: (raw) => raw.trim() || undefined,
   resolveTarget: (input) => {
     const normalized = input.trim();

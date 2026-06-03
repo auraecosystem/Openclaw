@@ -60,12 +60,8 @@ describe("cli program (smoke)", () => {
 
   it("runs tui with explicit timeout override", async () => {
     await runProgram(["tui", "--timeout-ms", "45000"]);
-    const options = firstMockArg(runTui) as {
-      timeoutMs?: number;
-      forceProcessExitOnReturn?: boolean;
-    };
+    const options = firstMockArg(runTui) as { timeoutMs?: number };
     expect(options?.timeoutMs).toBe(45000);
-    expect(options?.forceProcessExitOnReturn).toBe(true);
   });
 
   it("runs crestodian one-shot requests", async () => {
@@ -85,14 +81,6 @@ describe("cli program (smoke)", () => {
     expect(runtime.error).toHaveBeenCalledWith('warning: invalid --timeout-ms "nope"; ignoring');
     const options = firstMockArg(runTui) as { timeoutMs?: number };
     expect(options?.timeoutMs).toBeUndefined();
-  });
-
-  it("rejects partial tui history limits", async () => {
-    await expect(runProgram(["tui", "--history-limit", "10x"])).rejects.toThrow("exit");
-    expect(runtime.error).toHaveBeenCalledWith(
-      "Error: --history-limit must be a positive integer.",
-    );
-    expect(runTui).not.toHaveBeenCalled();
   });
 
   it("runs setup wizard when wizard flags are present", async () => {

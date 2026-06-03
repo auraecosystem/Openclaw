@@ -16,9 +16,7 @@ type SubmitHarness = {
   onSubmit: (text: string) => void;
 };
 
-export function createSubmitHarness(params?: {
-  canSubmitMessage?: (value: string) => boolean;
-}): SubmitHarness {
+export function createSubmitHarness(params?: { canSubmitMessage?: () => boolean }): SubmitHarness {
   const editor = {
     setText: vi.fn(),
     addToHistory: vi.fn(),

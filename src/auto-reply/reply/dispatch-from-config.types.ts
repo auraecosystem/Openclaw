@@ -10,8 +10,6 @@ export type DispatchFromConfigResult = {
   counts: Record<ReplyDispatchKind, number>;
   failedCounts?: Partial<Record<ReplyDispatchKind, number>>;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
-  sendPolicyDenied?: boolean;
-  noVisibleReplyFallbackEligible?: boolean;
   beforeAgentRunBlocked?: boolean;
 };
 

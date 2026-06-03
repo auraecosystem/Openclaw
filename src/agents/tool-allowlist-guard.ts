@@ -1,5 +1,4 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
-import { normalizeToolList, normalizeToolName } from "./tool-policy.js";
+import { normalizeToolName } from "./tool-policy.js";
 
 type ExplicitToolAllowlistSource = {
   label: string;
@@ -11,7 +10,7 @@ export function collectExplicitToolAllowlistSources(
   sources: Array<{ label: string; allow?: string[]; enforceWhenToolsDisabled?: boolean }>,
 ): ExplicitToolAllowlistSource[] {
   return sources.flatMap((source) => {
-    const entries = normalizeStringEntries(source.allow);
+    const entries = (source.allow ?? []).map((entry) => entry.trim()).filter(Boolean);
     if (entries.length === 0) {
       return [];
     }
@@ -35,7 +34,7 @@ export function buildEmptyExplicitToolAllowlistError(params: {
     params.disableTools === true
       ? params.sources.filter((source) => source.enforceWhenToolsDisabled === true)
       : params.sources;
-  const callableToolNames = normalizeToolList(params.callableToolNames);
+  const callableToolNames = params.callableToolNames.map(normalizeToolName).filter(Boolean);
   if (sources.length === 0 || callableToolNames.length > 0) {
     return null;
   }

@@ -1,7 +1,3 @@
-import {
-  normalizeTrimmedStringList,
-  uniqueStrings,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
 import { QA_BASE_RUNTIME_PLUGIN_IDS } from "../qa-gateway-config.js";
 import type { QaProviderMode } from "./index.js";
 import { getQaProvider } from "./index.js";
@@ -19,7 +15,9 @@ function splitModelProviderId(modelRef: string) {
 }
 
 function uniqueNonEmpty(values: readonly (string | null | undefined)[]) {
-  return uniqueStrings(normalizeTrimmedStringList(values));
+  return [
+    ...new Set(values.map((value) => value?.trim()).filter((value): value is string => !!value)),
+  ];
 }
 
 export function buildQaImageGenerationConfigPatch(input: QaImageGenerationPatchInput) {

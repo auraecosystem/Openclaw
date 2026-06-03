@@ -19,14 +19,11 @@ import { lineSetupWizard } from "./setup-surface.js";
 import { lineStatusAdapter } from "./status.js";
 
 const { getBotInfoMock, MessagingApiClientMock } = vi.hoisted(() => {
-  const getBotInfoMockLocal = vi.fn();
-  const MessagingApiClientMockLocal = vi.fn(function () {
-    return { getBotInfo: getBotInfoMockLocal };
+  const getBotInfoMock = vi.fn();
+  const MessagingApiClientMock = vi.fn(function () {
+    return { getBotInfo: getBotInfoMock };
   });
-  return {
-    getBotInfoMock: getBotInfoMockLocal,
-    MessagingApiClientMock: MessagingApiClientMockLocal,
-  };
+  return { getBotInfoMock, MessagingApiClientMock };
 });
 
 vi.mock("@line/bot-sdk", () => ({

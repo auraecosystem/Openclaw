@@ -6,6 +6,18 @@ const getMSTeamsRuntimeMock = vi.hoisted(() => vi.fn());
 const enqueueSystemEventMock = vi.hoisted(() => vi.fn());
 const renderReplyPayloadsToMessagesMock = vi.hoisted(() => vi.fn(() => []));
 const sendMSTeamsMessagesMock = vi.hoisted(() => vi.fn(async () => []));
+const streamInstances = vi.hoisted(
+  () =>
+    [] as Array<{
+      hasContent: boolean;
+      isFinalized: boolean;
+      isFailed: boolean;
+      streamedLength: number;
+      sendInformativeUpdate: ReturnType<typeof vi.fn>;
+      update: ReturnType<typeof vi.fn>;
+      finalize: ReturnType<typeof vi.fn>;
+    }>,
+);
 
 vi.mock("../runtime-api.js", () => ({
   createChannelMessageReplyPipeline: createChannelMessageReplyPipelineMock,
@@ -33,27 +45,23 @@ vi.mock("./revoked-context.js", () => ({
   withRevokedProxyFallback: async ({ run }: { run: () => Promise<unknown> }) => await run(),
 }));
 
-/**
- * Mock for the SDK's `ctx.stream` (IStreamer). The migration uses
- * `ctx.stream.update()` for informative status, `.emit()` for token chunks,
- * and `.close()` to flush the final activity. Replaces the deleted
- * `TeamsHttpStream` mock pattern.
- */
-type StreamMock = {
-  update: ReturnType<typeof vi.fn>;
-  emit: ReturnType<typeof vi.fn>;
-  close: ReturnType<typeof vi.fn>;
-  canceled: boolean;
-};
+vi.mock("./streaming-message.js", () => ({
+  TeamsHttpStream: class {
+    hasContent = false;
+    isFinalized = false;
+    isFailed = false;
+    streamedLength = 0;
+    sendInformativeUpdate = vi.fn(async () => {});
+    update = vi.fn();
+    finalize = vi.fn(async function (this: { isFinalized: boolean }) {
+      this.isFinalized = true;
+    });
 
-function createStreamMock(): StreamMock {
-  return {
-    update: vi.fn(),
-    emit: vi.fn(),
-    close: vi.fn(async () => ({ id: "stream-final" })),
-    canceled: false,
-  };
-}
+    constructor() {
+      streamInstances.push(this);
+    }
+  },
+}));
 
 import { createMSTeamsReplyDispatcher, pickInformativeStatusText } from "./reply-dispatcher.js";
 
@@ -66,7 +74,7 @@ describe("createMSTeamsReplyDispatcher", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    lastStreamMock = undefined;
+    streamInstances.length = 0;
 
     typingCallbacks = {
       onReplyStart: vi.fn(async () => {}),
@@ -105,28 +113,26 @@ describe("createMSTeamsReplyDispatcher", () => {
 
   let lastCreatedDispatcher: ReturnType<typeof createMSTeamsReplyDispatcher> | undefined;
   let lastContextSendActivity: ReturnType<typeof vi.fn> | undefined;
-  let lastStreamMock: StreamMock | undefined;
 
   function createDispatcher(
-    conversationType = "personal",
+    conversationType: string = "personal",
     msteamsConfig: Record<string, unknown> = {},
     extraParams: { onSentMessageIds?: (ids: string[]) => void } = {},
   ) {
     const contextSendActivity = vi.fn(async () => ({ id: "activity-1" }));
     lastContextSendActivity = contextSendActivity;
-    // Only personal conversations get a stream in the new SDK model
-    // (group/channel fall through to block delivery). Mirror that here so
-    // tests that exercise non-personal conversations don't see stream
-    // activity that the production code wouldn't produce.
-    const streamMock = conversationType === "personal" ? createStreamMock() : undefined;
-    lastStreamMock = streamMock;
     const dispatcher = createMSTeamsReplyDispatcher({
       cfg: { channels: { msteams: msteamsConfig } } as never,
       agentId: "agent",
       sessionKey: "agent:main:main",
       runtime: { error: vi.fn() } as never,
       log: { debug: vi.fn(), error: vi.fn(), warn: vi.fn() } as never,
-      app: { send: vi.fn(async () => ({})) } as never,
+      adapter: {
+        continueConversation: vi.fn(),
+        process: vi.fn(),
+        updateActivity: vi.fn(),
+        deleteActivity: vi.fn(),
+      } as never,
       appId: "app",
       conversationRef: {
         conversation: { id: "conv", conversationType },
@@ -137,7 +143,6 @@ describe("createMSTeamsReplyDispatcher", () => {
       } as never,
       context: {
         sendActivity: contextSendActivity,
-        ...(streamMock ? { stream: streamMock } : {}),
       } as never,
       replyStyle: "thread",
       textLimit: 4000,
@@ -145,13 +150,6 @@ describe("createMSTeamsReplyDispatcher", () => {
     });
     lastCreatedDispatcher = dispatcher;
     return dispatcher;
-  }
-
-  function getStreamMock(): StreamMock {
-    if (!lastStreamMock) {
-      throw new Error("createDispatcher must be called with a personal conversation first");
-    }
-    return lastStreamMock;
   }
 
   function getContextSendActivity(): ReturnType<typeof vi.fn> {
@@ -217,14 +215,12 @@ describe("createMSTeamsReplyDispatcher", () => {
     const dispatcher = createDispatcher("personal", { streaming: { mode: "progress" } });
     const options = dispatcherOptions();
 
-    // onReplyStart renders the initial informative line. Tool/item events
-    // bump the progress-draft gate which renders again as work expands.
     await options.onReplyStart?.();
     await dispatcher.replyOptions.onToolStart?.({ name: "exec" });
     await dispatcher.replyOptions.onItemEvent?.({ progressText: "done" });
 
-    const stream = getStreamMock();
-    expect(stream.update).toHaveBeenCalled();
+    expect(streamInstances).toHaveLength(1);
+    expect(streamInstances[0]?.sendInformativeUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("starts the typing keepalive in personal chats so the TurnContext survives long tool chains", async () => {
@@ -245,6 +241,7 @@ describe("createMSTeamsReplyDispatcher", () => {
 
     await options.onReplyStart?.();
 
+    expect(streamInstances[0]?.sendInformativeUpdate).not.toHaveBeenCalled();
     expect(typingCallbacks.onReplyStart).not.toHaveBeenCalled();
   });
 
@@ -286,35 +283,32 @@ describe("createMSTeamsReplyDispatcher", () => {
     expect(contextSendActivity).not.toHaveBeenCalled();
   });
 
-  it("resumes typing keepalive sends once the stream is canceled (e.g. user Stop)", async () => {
+  it("resumes typing keepalive sends once the stream finalizes between tool rounds", async () => {
     createDispatcher("personal");
     const sendTyping = pipelineTypingStart();
 
     // First segment: tokens flow, stream is active, typing is gated off.
     await triggerPartialReply("first segment tokens");
-    const stream = getStreamMock();
+    const stream = streamInstances[0];
+    if (!stream) {
+      throw new Error("expected a Teams stream instance to be created");
+    }
     const contextSendActivity = getContextSendActivity();
     contextSendActivity.mockClear();
     await sendTyping();
     expect(contextSendActivity).not.toHaveBeenCalled();
 
-    // After the user presses Stop (Teams returns 403 → SDK flips canceled),
-    // the controller's isStreamActive() returns false so typing-keepalive
-    // resumes. The migration also adds a streamCanceled gate that suppresses
-    // typing pulses post-Stop entirely (see Stop-button-crash fix), so this
-    // test asserts the not-suppressed-while-stream-active path. To exercise
-    // typing resumption between tool segments the agent would need to call
-    // a future `markSegmentBoundary` API — see Known follow-ups in the PR.
-    stream.canceled = true;
+    // First segment complete: the stream is finalized ahead of the tool
+    // chain. Mirror what preparePayload does by flipping the mocked stream's
+    // finalized flag. The controller's isStreamActive check reads this via
+    // the real stream controller wired into the dispatcher.
+    stream.isFinalized = true;
 
+    // During the tool chain the loop should be allowed to fire again so
+    // the Bot Framework proxy stays warm. See #59731.
     contextSendActivity.mockClear();
     await sendTyping();
-    // streamCanceled gate suppresses typing post-cancel — that's intentional
-    // (we don't want zombie typing after the user hit Stop). So the typing
-    // does NOT fire in the new architecture. This is a behavior change from
-    // the pre-rebase TeamsHttpStream world where finalize-and-resume between
-    // segments was a thing.
-    expect(contextSendActivity).not.toHaveBeenCalled();
+    expect(contextSendActivity).toHaveBeenCalledWith({ type: "typing" });
   });
 
   it("fires native typing in group chats (no stream) because the gate never applies", async () => {
@@ -347,8 +341,7 @@ describe("createMSTeamsReplyDispatcher", () => {
 
     await options.onReplyStart?.();
 
-    // Channel conversations don't get a stream in the new model.
-    expect(lastStreamMock).toBeUndefined();
+    expect(streamInstances).toHaveLength(0);
     expect(typingCallbacks.onReplyStart).toHaveBeenCalledTimes(1);
   });
 
@@ -361,53 +354,27 @@ describe("createMSTeamsReplyDispatcher", () => {
     expect(typingCallbacks.onReplyStart).not.toHaveBeenCalled();
   });
 
-  it("delays the informative status update until the progress-draft gate fires", async () => {
+  it("delays the informative status update until work expands", async () => {
     const dispatcher = createDispatcher("personal", { streaming: { mode: "progress" } });
-    const stream = getStreamMock();
 
-    // The progress-draft gate (createChannelProgressDraftGate) gates updates
-    // by waiting for a configured initial-delay before the first onStart fires.
-    // Until then, work-noting calls don't render the informative line.
     await dispatcher.replyOptions.onToolStart?.({ name: "exec" });
-    // Note: pre-rebase tests asserted exact call counts at specific gate
-    // boundaries. The new gate timing is shape-equivalent but driven by the
-    // plugin-sdk default, so we just assert that work events flow through to
-    // the controller without throwing.
-    expect(stream.update).toBeDefined();
+    expect(streamInstances[0]?.sendInformativeUpdate).not.toHaveBeenCalled();
+
+    await dispatcher.replyOptions.onItemEvent?.({ progressText: "done" });
+    await dispatcher.replyOptions.onPatchSummary?.({ phase: "end", summary: "patched" });
+
+    expect(streamInstances[0]?.sendInformativeUpdate).toHaveBeenCalledTimes(2);
   });
 
-  it("forwards partial replies into the Teams stream via emit()", async () => {
+  it("forwards partial replies into the Teams stream", () => {
     const dispatcher = createDispatcher("personal");
 
     dispatcher.replyOptions.onPartialReply?.({ text: "partial response" });
 
-    // Migration uses ctx.stream.emit(text) for chunks (vs the deleted
-    // TeamsHttpStream.update). The SDK's HttpStream accumulates the text
-    // and flushes the closing activity at stream.close().
-    expect(getStreamMock().emit).toHaveBeenCalledWith("partial response");
+    expect(streamInstances[0]?.update).toHaveBeenCalledWith("partial response");
   });
 
-  it("falls back to normal Teams delivery when native stream close returns no final activity", async () => {
-    renderReplyPayloadsToMessagesMock.mockReturnValue([{ content: "fallback" }] as never);
-    sendMSTeamsMessagesMock.mockResolvedValue(["fallback-id"] as never);
-    const dispatcher = createDispatcher("personal");
-    const options = dispatcherOptions();
-    getStreamMock().close.mockResolvedValueOnce(undefined);
-
-    dispatcher.replyOptions.onPartialReply?.({ text: "streamed" });
-    await options.deliver({ text: "streamed final" });
-    await dispatcher.markDispatchIdle();
-
-    expect(renderReplyPayloadsToMessagesMock).toHaveBeenCalledWith(
-      [{ text: "streamed final" }],
-      expect.any(Object),
-    );
-    expect(sendMSTeamsMessagesMock).toHaveBeenCalledWith(
-      expect.objectContaining({ messages: [{ content: "fallback" }] }),
-    );
-  });
-
-  it("sets suppressDefaultToolProgressMessages when progress tool lines are enabled", async () => {
+  it("surfaces Teams progress tool lines through native stream updates", async () => {
     const dispatcher = createDispatcher("personal", {
       streaming: {
         mode: "progress",
@@ -418,70 +385,17 @@ describe("createMSTeamsReplyDispatcher", () => {
     });
 
     expect(dispatcher.replyOptions.suppressDefaultToolProgressMessages).toBe(true);
-    // Tool-progress wiring in the dispatcher pushes through to the stream
-    // controller's pushProgressLine, which renders informative-text updates
-    // via stream.update(). Exact line formatting is exercised by
-    // channel-streaming's own unit tests.
-    await dispatcher.replyOptions.onToolStart?.({ name: "exec" });
     await dispatcher.replyOptions.onToolStart?.({ name: "web_search" });
-    expect(getStreamMock().update).toHaveBeenCalled();
+    expect(streamInstances[0]?.sendInformativeUpdate).not.toHaveBeenCalled();
+
+    await dispatcher.replyOptions.onToolStart?.({ name: "exec" });
+
+    expect(streamInstances[0]?.sendInformativeUpdate).toHaveBeenCalledWith(
+      "Working\n🔎 Web Search\n🛠️ Exec",
+    );
   });
 
-  it("replaces reasoning progress snapshots in progress mode", async () => {
-    const dispatcher = createDispatcher("personal", {
-      streaming: {
-        mode: "progress",
-        progress: {
-          label: "Working",
-        },
-      },
-    });
-
-    await dispatcher.replyOptions.onReasoningStream?.({
-      text: "Checking",
-      isReasoningSnapshot: true,
-    });
-    await dispatcher.replyOptions.onReasoningStream?.({
-      text: "Checking files",
-      isReasoningSnapshot: true,
-    });
-
-    const stream = getStreamMock();
-    expect(stream.update).toHaveBeenLastCalledWith("Working\n\n- Checking files");
-    const updates = stream.update.mock.calls.map((call) => call[0]).join("\n");
-    expect(updates).not.toContain("- Checking\n- Checking files");
-  });
-
-  it("keeps appending delta reasoning progress in progress mode", async () => {
-    const dispatcher = createDispatcher("personal", {
-      streaming: {
-        mode: "progress",
-        progress: {
-          label: "Working",
-        },
-      },
-    });
-
-    await dispatcher.replyOptions.onReasoningStream?.({ text: "Checking" });
-    await dispatcher.replyOptions.onReasoningStream?.({ text: "files" });
-
-    expect(getStreamMock().update).toHaveBeenLastCalledWith("Working\n\n- Checking\n- files");
-  });
-
-  it("does not suppress default tool progress messages in partial stream mode", () => {
-    const dispatcher = createDispatcher("personal", {
-      streaming: {
-        mode: "partial",
-        progress: {
-          toolProgress: true,
-        },
-      },
-    });
-
-    expect(dispatcher.replyOptions.suppressDefaultToolProgressMessages).toBeUndefined();
-  });
-
-  it("does not set suppressDefaultToolProgressMessages when toolProgress=false", async () => {
+  it("suppresses standalone Teams progress messages when progress tool lines are disabled", async () => {
     const dispatcher = createDispatcher("personal", {
       streaming: {
         mode: "progress",
@@ -491,16 +405,21 @@ describe("createMSTeamsReplyDispatcher", () => {
       },
     });
 
-    // With toolProgress disabled, the previewToolProgressEnabled gate flips
-    // false so we don't claim to suppress the agent's default messages —
-    // they should flow through openclaw's normal block delivery instead.
-    expect(dispatcher.replyOptions.suppressDefaultToolProgressMessages).toBeUndefined();
+    expect(dispatcher.replyOptions.suppressDefaultToolProgressMessages).toBe(true);
+    await dispatcher.replyOptions.onToolStart?.({ name: "web_search" });
+    expect(streamInstances[0]?.sendInformativeUpdate).not.toHaveBeenCalled();
+
+    await dispatcher.replyOptions.onToolStart?.({ name: "exec" });
+
+    expect(streamInstances[0]?.sendInformativeUpdate).toHaveBeenCalledWith(
+      pickInformativeStatusText({ seed: "default:conv" }),
+    );
   });
 
   it("does not create a stream for channel conversations", () => {
     createDispatcher("channel");
 
-    expect(lastStreamMock).toBeUndefined();
+    expect(streamInstances).toHaveLength(0);
   });
 
   it("sets disableBlockStreaming=false when blockStreaming=true", () => {
@@ -518,10 +437,7 @@ describe("createMSTeamsReplyDispatcher", () => {
 
     await options.deliver({ text: "block content" });
 
-    // streaming.mode=block disables native streaming entirely; the dispatcher
-    // doesn't expose onPartialReply and the controller's stream is unused.
-    const stream = getStreamMock();
-    expect(stream.emit).not.toHaveBeenCalled();
+    expect(streamInstances).toHaveLength(0);
     expect(dispatcher.replyOptions.onPartialReply).toBeUndefined();
     expect(dispatcher.replyOptions.disableBlockStreaming).toBe(false);
     expect(sendMSTeamsMessagesMock).toHaveBeenCalledTimes(1);
@@ -613,8 +529,8 @@ describe("createMSTeamsReplyDispatcher", () => {
 
 describe("pickInformativeStatusText", () => {
   it("selects a deterministic status line for a fixed random source", () => {
-    expect(pickInformativeStatusText(() => 0)).toBe("Working");
-    expect(pickInformativeStatusText(() => 0.99)).toBe("Surfacing");
+    expect(pickInformativeStatusText(() => 0)).toBe("Thinking...");
+    expect(pickInformativeStatusText(() => 0.99)).toBe("Surfacing...");
   });
 
   it("honors disabled progress labels", () => {

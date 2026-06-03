@@ -32,7 +32,7 @@ interface ParsedTarget {
  * @throws {Error} When the target format is invalid.
  */
 export function parseTarget(to: string): ParsedTarget {
-  const id = to.replace(/^qqbot:/i, "");
+  let id = to.replace(/^qqbot:/i, "");
 
   if (id.startsWith("c2c:")) {
     const userId = id.slice(4);

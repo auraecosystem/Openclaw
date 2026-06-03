@@ -1,4 +1,3 @@
-import { colorize, isRich, theme } from "../../../packages/terminal-core/src/theme.js";
 import { resolveIsNixMode } from "../../config/paths.js";
 import {
   resolveGatewayLaunchAgentLabel,
@@ -11,7 +10,7 @@ import {
   buildPlatformRuntimeLogHints,
   buildPlatformServiceStartHints,
 } from "../../daemon/runtime-hints.js";
-import { parseInlineOptionToken } from "../../infra/inline-option-token.js";
+import { colorize, isRich, theme } from "../../terminal/theme.js";
 import { formatCliCommand } from "../command-format.js";
 import { parsePort } from "../shared/parse-port.js";
 import { createDaemonActionContext } from "./response.js";
@@ -77,8 +76,7 @@ export function parsePortFromArgs(programArguments: string[] | undefined): numbe
       }
     }
     if (arg?.startsWith("--port=")) {
-      const option = parseInlineOptionToken(arg);
-      const parsed = parsePort(option.hasInlineValue ? option.inlineValue : undefined);
+      const parsed = parsePort(arg.split("=", 2)[1]);
       if (parsed) {
         return parsed;
       }

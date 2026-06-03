@@ -14,26 +14,8 @@ const configMocks = vi.hoisted(() => ({
   isNixMode: { value: false },
 }));
 const pluginManifestRegistry = vi.hoisted(() => ({ plugins: [], diagnostics: [] }));
-const pluginMetadataSnapshot = vi.hoisted((): PluginMetadataSnapshot => {
-  const emptyOwners = {
-    channels: new Map(),
-    channelConfigs: new Map(),
-    providers: new Map(),
-    modelCatalogProviders: new Map(),
-    cliBackends: new Map(),
-    setupProviders: new Map(),
-    commandAliases: new Map(),
-    contracts: new Map(),
-  };
-  const zeroMetrics = {
-    registrySnapshotMs: 0,
-    manifestRegistryMs: 0,
-    ownerMapsMs: 0,
-    totalMs: 0,
-    indexPluginCount: 0,
-    manifestPluginCount: 0,
-  };
-  return {
+const pluginMetadataSnapshot = vi.hoisted(
+  (): PluginMetadataSnapshot => ({
     policyHash: "policy",
     index: {
       version: 1,
@@ -52,10 +34,26 @@ const pluginMetadataSnapshot = vi.hoisted((): PluginMetadataSnapshot => {
     diagnostics: [],
     byPluginId: new Map(),
     normalizePluginId: (pluginId) => pluginId,
-    owners: emptyOwners,
-    metrics: zeroMetrics,
-  };
-});
+    owners: {
+      channels: new Map(),
+      channelConfigs: new Map(),
+      providers: new Map(),
+      modelCatalogProviders: new Map(),
+      cliBackends: new Map(),
+      setupProviders: new Map(),
+      commandAliases: new Map(),
+      contracts: new Map(),
+    },
+    metrics: {
+      registrySnapshotMs: 0,
+      manifestRegistryMs: 0,
+      ownerMapsMs: 0,
+      totalMs: 0,
+      indexPluginCount: 0,
+      manifestPluginCount: 0,
+    },
+  }),
+);
 vi.mock("../config/io.js", () => ({
   readConfigFileSnapshot: vi.fn(),
   readConfigFileSnapshotWithPluginMetadata: vi.fn(),
@@ -86,8 +84,6 @@ let configIo: typeof import("../config/io.js");
 let configMutate: typeof import("../config/mutate.js");
 
 const configPath = "/tmp/openclaw-startup-recovery.json";
-const telegramAutoEnableChange = "Telegram configured, enabled automatically.";
-const runtimeOnlyAutoEnableLog = `gateway: auto-enabled plugins for this runtime without writing config:\n- ${telegramAutoEnableChange}`;
 const validConfig = {
   gateway: {
     mode: "local",
@@ -134,147 +130,6 @@ function buildDefaultSnapshot(): ConfigFileSnapshot {
     raw: `${JSON.stringify(validConfig)}\n`,
     config: validConfig,
   });
-}
-
-function buildRuntimeSnapshot(
-  sourceConfig: OpenClawConfig,
-  runtimeConfig: OpenClawConfig = sourceConfig,
-): ConfigFileSnapshot {
-  return {
-    ...buildTestConfigSnapshot({
-      path: configPath,
-      exists: true,
-      raw: `${JSON.stringify(sourceConfig)}\n`,
-      parsed: sourceConfig,
-      valid: true,
-      config: runtimeConfig,
-      issues: [],
-      legacyIssues: [],
-    }),
-    sourceConfig,
-    resolved: sourceConfig,
-    runtimeConfig,
-    config: runtimeConfig,
-  } satisfies ConfigFileSnapshot;
-}
-
-function mockStartupSnapshot(snapshot: ConfigFileSnapshot) {
-  vi.mocked(configIo.readConfigFileSnapshotWithPluginMetadata).mockResolvedValueOnce({
-    snapshot,
-    pluginMetadataSnapshot,
-  });
-}
-
-async function expectStartupResult(params: {
-  snapshot: ConfigFileSnapshot;
-  log?: ReturnType<typeof testStartupLog>;
-  initialSnapshotRead?: Parameters<
-    typeof loadGatewayStartupConfigSnapshot
-  >[0]["initialSnapshotRead"];
-}) {
-  await expect(
-    loadTestStartup({
-      minimalTestGateway: false,
-      log: params.log,
-      initialSnapshotRead: params.initialSnapshotRead,
-    }),
-  ).resolves.toEqual({
-    snapshot: params.snapshot,
-    wroteConfig: false,
-    pluginMetadataSnapshot,
-  });
-}
-
-function expectPluginAutoEnableFor(config: OpenClawConfig) {
-  expect(applyPluginAutoEnable).toHaveBeenCalledWith({
-    config,
-    env: process.env,
-    manifestRegistry: pluginManifestRegistry,
-  });
-}
-
-function mockRuntimeAutoEnable(config: OpenClawConfig) {
-  applyPluginAutoEnable.mockReturnValueOnce({
-    config,
-    changes: [telegramAutoEnableChange],
-    autoEnabledReasons: {},
-  });
-}
-
-function expectRuntimeOnlyAutoEnableLogged(log: ReturnType<typeof testStartupLog>) {
-  expect(log.info).toHaveBeenCalledWith(runtimeOnlyAutoEnableLog);
-  expect(log.warn).not.toHaveBeenCalled();
-}
-
-function withRuntimeConfig(
-  snapshot: ConfigFileSnapshot,
-  runtimeConfig: OpenClawConfig,
-): ConfigFileSnapshot {
-  return {
-    ...snapshot,
-    runtimeConfig,
-    config: runtimeConfig,
-  };
-}
-
-function buildInvalidConfigSnapshot(params: {
-  rawConfig: unknown;
-  config?: OpenClawConfig;
-  issues: ConfigFileSnapshot["issues"];
-  warnings?: ConfigFileSnapshot["warnings"];
-  legacyIssues?: ConfigFileSnapshot["legacyIssues"];
-}) {
-  return buildTestConfigSnapshot({
-    path: configPath,
-    exists: true,
-    raw: `${JSON.stringify(params.rawConfig)}\n`,
-    parsed: params.rawConfig,
-    valid: false,
-    config: params.config ?? (params.rawConfig as OpenClawConfig),
-    issues: params.issues,
-    warnings: params.warnings,
-    legacyIssues: params.legacyIssues ?? [],
-  });
-}
-
-function pluginSlotRawConfig(gatewayMode: string) {
-  return {
-    gateway: { mode: gatewayMode },
-    plugins: { slots: { memory: "source-only-pack" } },
-  };
-}
-
-function enabledPluginRawConfig(gatewayMode: string) {
-  return {
-    gateway: { mode: gatewayMode },
-    plugins: {
-      entries: {
-        feishu: { enabled: true },
-      },
-    },
-  };
-}
-
-function testStartupLog() {
-  return { info: vi.fn(), warn: vi.fn() };
-}
-
-function loadTestStartup(params: {
-  minimalTestGateway?: boolean;
-  log?: ReturnType<typeof testStartupLog>;
-  initialSnapshotRead?: Parameters<
-    typeof loadGatewayStartupConfigSnapshot
-  >[0]["initialSnapshotRead"];
-}) {
-  return loadGatewayStartupConfigSnapshot({
-    minimalTestGateway: params.minimalTestGateway ?? true,
-    log: params.log ?? testStartupLog(),
-    initialSnapshotRead: params.initialSnapshotRead,
-  });
-}
-
-async function expectStartupRejects(message: string | RegExp, minimalTestGateway = true) {
-  await expect(loadTestStartup({ minimalTestGateway })).rejects.toThrow(message);
 }
 
 function installConfigIoMockDefaults() {
@@ -346,14 +201,45 @@ describe("gateway startup config validation", () => {
         },
       },
     } as OpenClawConfig;
-    const snapshot = buildRuntimeSnapshot(sourceConfig, runtimeConfig);
-    mockStartupSnapshot(snapshot);
-    const log = testStartupLog();
+    const snapshot = {
+      ...buildTestConfigSnapshot({
+        path: configPath,
+        exists: true,
+        raw: `${JSON.stringify(sourceConfig)}\n`,
+        parsed: sourceConfig,
+        valid: true,
+        config: runtimeConfig,
+        issues: [],
+        legacyIssues: [],
+      }),
+      sourceConfig,
+      resolved: sourceConfig,
+      runtimeConfig,
+      config: runtimeConfig,
+    } satisfies ConfigFileSnapshot;
+    vi.mocked(configIo.readConfigFileSnapshotWithPluginMetadata).mockResolvedValueOnce({
+      snapshot,
+      pluginMetadataSnapshot,
+    });
+    const log = { info: vi.fn(), warn: vi.fn() };
 
-    await expectStartupResult({ snapshot, log });
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: false,
+        log,
+      }),
+    ).resolves.toEqual({
+      snapshot,
+      wroteConfig: false,
+      pluginMetadataSnapshot,
+    });
 
     expect(configIo.readConfigFileSnapshotWithPluginMetadata).toHaveBeenCalledTimes(1);
-    expectPluginAutoEnableFor(sourceConfig);
+    expect(applyPluginAutoEnable).toHaveBeenCalledWith({
+      config: sourceConfig,
+      env: process.env,
+      manifestRegistry: pluginManifestRegistry,
+    });
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
     expect(log.info).not.toHaveBeenCalled();
   });
@@ -369,19 +255,29 @@ describe("gateway startup config validation", () => {
       issues: [],
       legacyIssues: [],
     });
-    const log = testStartupLog();
+    const log = { info: vi.fn(), warn: vi.fn() };
 
-    await expectStartupResult({
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: false,
+        log,
+        initialSnapshotRead: {
+          snapshot,
+          pluginMetadataSnapshot,
+        },
+      }),
+    ).resolves.toEqual({
       snapshot,
-      log,
-      initialSnapshotRead: {
-        snapshot,
-        pluginMetadataSnapshot,
-      },
+      wroteConfig: false,
+      pluginMetadataSnapshot,
     });
 
     expect(configIo.readConfigFileSnapshotWithPluginMetadata).not.toHaveBeenCalled();
-    expectPluginAutoEnableFor(validConfig);
+    expect(applyPluginAutoEnable).toHaveBeenCalledWith({
+      config: validConfig,
+      env: process.env,
+      manifestRegistry: pluginManifestRegistry,
+    });
   });
 
   it("preserves empty model allowlist entries through runtime-only startup auto-enable", async () => {
@@ -414,17 +310,53 @@ describe("gateway startup config validation", () => {
         telegram: { enabled: true },
       },
     } as unknown as OpenClawConfig;
-    const initialSnapshot = buildRuntimeSnapshot(sourceConfig);
-    mockStartupSnapshot(initialSnapshot);
-    mockRuntimeAutoEnable(autoEnabledConfig);
-    const log = testStartupLog();
+    const initialSnapshot = {
+      ...buildTestConfigSnapshot({
+        path: configPath,
+        exists: true,
+        raw: `${JSON.stringify(sourceConfig)}\n`,
+        parsed: sourceConfig,
+        valid: true,
+        config: sourceConfig,
+        issues: [],
+        legacyIssues: [],
+      }),
+      sourceConfig,
+      resolved: sourceConfig,
+      runtimeConfig: sourceConfig,
+      config: sourceConfig,
+    } satisfies ConfigFileSnapshot;
+    vi.mocked(configIo.readConfigFileSnapshotWithPluginMetadata).mockResolvedValueOnce({
+      snapshot: initialSnapshot,
+      pluginMetadataSnapshot,
+    });
+    applyPluginAutoEnable.mockReturnValueOnce({
+      config: autoEnabledConfig,
+      changes: ["Telegram configured, enabled automatically."],
+      autoEnabledReasons: {},
+    });
+    const log = { info: vi.fn(), warn: vi.fn() };
 
-    await expectStartupResult({
-      snapshot: withRuntimeConfig(initialSnapshot, autoEnabledConfig),
-      log,
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: false,
+        log,
+      }),
+    ).resolves.toEqual({
+      snapshot: {
+        ...initialSnapshot,
+        runtimeConfig: autoEnabledConfig,
+        config: autoEnabledConfig,
+      },
+      wroteConfig: false,
+      pluginMetadataSnapshot,
     });
 
-    expectPluginAutoEnableFor(sourceConfig);
+    expect(applyPluginAutoEnable).toHaveBeenCalledWith({
+      config: sourceConfig,
+      env: process.env,
+      manifestRegistry: pluginManifestRegistry,
+    });
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
     expect(configIo.readConfigFileSnapshotWithPluginMetadata).toHaveBeenCalledTimes(1);
     expect(initialSnapshot.sourceConfig.agents?.defaults?.models).toEqual({
@@ -439,7 +371,10 @@ describe("gateway startup config validation", () => {
     expect(autoEnabledConfig.channels?.telegram).toEqual({
       enabled: true,
     });
-    expectRuntimeOnlyAutoEnableLogged(log);
+    expect(log.info).toHaveBeenCalledWith(
+      "gateway: auto-enabled plugins for this runtime without writing config:\n- Telegram configured, enabled automatically.",
+    );
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it("keeps plugin auto-enable runtime-only in Nix mode", async () => {
@@ -457,94 +392,82 @@ describe("gateway startup config validation", () => {
         allow: ["telegram"],
       },
     } as unknown as OpenClawConfig;
-    const snapshot = buildRuntimeSnapshot(sourceConfig);
-    mockStartupSnapshot(snapshot);
-    mockRuntimeAutoEnable(autoEnabledConfig);
+    const snapshot = {
+      ...buildTestConfigSnapshot({
+        path: configPath,
+        exists: true,
+        raw: `${JSON.stringify(sourceConfig)}\n`,
+        parsed: sourceConfig,
+        valid: true,
+        config: sourceConfig,
+        issues: [],
+        legacyIssues: [],
+      }),
+      sourceConfig,
+      resolved: sourceConfig,
+      runtimeConfig: sourceConfig,
+      config: sourceConfig,
+    } satisfies ConfigFileSnapshot;
+    vi.mocked(configIo.readConfigFileSnapshotWithPluginMetadata).mockResolvedValueOnce({
+      snapshot,
+      pluginMetadataSnapshot,
+    });
+    applyPluginAutoEnable.mockReturnValueOnce({
+      config: autoEnabledConfig,
+      changes: ["Telegram configured, enabled automatically."],
+      autoEnabledReasons: {},
+    });
     configMocks.isNixMode.value = true;
-    const log = testStartupLog();
+    const log = { info: vi.fn(), warn: vi.fn() };
 
-    await expectStartupResult({
-      snapshot: withRuntimeConfig(snapshot, autoEnabledConfig),
-      log,
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: false,
+        log,
+      }),
+    ).resolves.toEqual({
+      snapshot: {
+        ...snapshot,
+        runtimeConfig: autoEnabledConfig,
+        config: autoEnabledConfig,
+      },
+      wroteConfig: false,
+      pluginMetadataSnapshot,
     });
 
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
     expect(configIo.readConfigFileSnapshotWithPluginMetadata).toHaveBeenCalledTimes(1);
-    expectRuntimeOnlyAutoEnableLogged(log);
+    expect(log.info).toHaveBeenCalledWith(
+      "gateway: auto-enabled plugins for this runtime without writing config:\n- Telegram configured, enabled automatically.",
+    );
+    expect(log.warn).not.toHaveBeenCalled();
   });
 
   it("rejects invalid config before startup without automatic recovery", async () => {
     const invalidSnapshot = buildSnapshot({ valid: false, raw: "{ invalid json" });
     vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
 
-    await expectStartupRejects(
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: true,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(
       `Invalid config at ${configPath}.\ngateway.mode: Expected 'local' or 'remote'\nRun "openclaw doctor --fix" to repair, then retry.\nIf startup is still blocked, inspect the adjacent .bak backup before restoring it manually.`,
     );
   });
 
-  it("does not suggest doctor repair for plugin packaging compiled-output failures", async () => {
-    const rawConfig = pluginSlotRawConfig("local");
-    const invalidSnapshot = buildInvalidConfigSnapshot({
-      rawConfig,
-      config: rawConfig as OpenClawConfig,
-      issues: [
-        {
-          path: "plugins.slots.memory",
-          message: "plugin not found: source-only-pack",
-        },
-      ],
-      warnings: [
-        {
-          path: "plugins",
-          message:
-            "plugin source-only-pack: installed plugin package requires compiled runtime output for TypeScript entry index.ts: expected ./dist/index.js. This is a plugin packaging issue, not a local config problem.",
-        },
-      ],
-    });
-    vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
-
-    const start = loadTestStartup({});
-    await expect(start).rejects.toThrow(
-      `Invalid config at ${configPath}.\nplugins.slots.memory: plugin not found: source-only-pack\nThis is a plugin packaging issue, not a local config problem.\nUpdate or reinstall the plugin after the publisher ships compiled JavaScript, or disable/uninstall the plugin until then.`,
-    );
-    await start.catch((error: unknown) => {
-      expect(String(error)).not.toContain("openclaw doctor --fix");
-    });
-  });
-
-  it("keeps doctor repair guidance for mixed plugin packaging and core invalidity", async () => {
-    const rawConfig = pluginSlotRawConfig("invalid");
-    const invalidSnapshot = buildInvalidConfigSnapshot({
-      rawConfig,
-      config: rawConfig as unknown as OpenClawConfig,
-      issues: [
-        {
-          path: "plugins.slots.memory",
-          message: "plugin not found: source-only-pack",
-        },
-        {
-          path: "gateway.mode",
-          message: "Expected 'local' or 'remote'",
-        },
-      ],
-      warnings: [
-        {
-          path: "plugins",
-          message:
-            "plugin source-only-pack: installed plugin package requires compiled runtime output for TypeScript entry index.ts: expected ./dist/index.js.",
-        },
-      ],
-    });
-    vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
-
-    await expectStartupRejects('Run "openclaw doctor --fix" to repair, then retry.');
-  });
-
   it("rejects legacy config entries in Nix mode", async () => {
-    const legacySnapshot = buildInvalidConfigSnapshot({
-      rawConfig: {
+    const legacySnapshot = buildTestConfigSnapshot({
+      path: configPath,
+      exists: true,
+      raw: `${JSON.stringify({
+        heartbeat: { model: "anthropic/claude-3-5-haiku-20241022", every: "30m" },
+      })}\n`,
+      parsed: {
         heartbeat: { model: "anthropic/claude-3-5-haiku-20241022", every: "30m" },
       },
+      valid: false,
       config: {} as OpenClawConfig,
       issues: [
         {
@@ -561,19 +484,51 @@ describe("gateway startup config validation", () => {
         },
       ],
     });
-    mockStartupSnapshot(legacySnapshot);
+    vi.mocked(configIo.readConfigFileSnapshotWithPluginMetadata).mockResolvedValueOnce({
+      snapshot: legacySnapshot,
+      pluginMetadataSnapshot,
+    });
     configMocks.isNixMode.value = true;
 
-    await expectStartupRejects(
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: true,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(
       "Legacy config entries detected while running in Nix mode. Update your Nix config to the latest schema and restart.",
     );
   });
 
   it("rejects plugin-local startup invalidity without degraded startup", async () => {
-    const rawConfig = enabledPluginRawConfig("local");
-    const invalidSnapshot = buildInvalidConfigSnapshot({
-      rawConfig,
-      config: rawConfig as OpenClawConfig,
+    const invalidSnapshot = buildTestConfigSnapshot({
+      path: configPath,
+      exists: true,
+      raw: `${JSON.stringify({
+        gateway: { mode: "local" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      })}\n`,
+      parsed: {
+        gateway: { mode: "local" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      },
+      valid: false,
+      config: {
+        gateway: { mode: "local" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      } as OpenClawConfig,
       issues: [
         {
           path: "plugins.entries.feishu",
@@ -581,16 +536,46 @@ describe("gateway startup config validation", () => {
             "plugin feishu: plugin requires OpenClaw >=2026.4.23, but this host is 2026.4.22; skipping load",
         },
       ],
+      legacyIssues: [],
     });
     vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
-    await expectStartupRejects(`Invalid config at ${configPath}.`);
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: true,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(`Invalid config at ${configPath}.`);
   });
 
   it("keeps mixed plugin and core startup invalidity fatal", async () => {
-    const rawConfig = enabledPluginRawConfig("invalid");
-    const invalidSnapshot = buildInvalidConfigSnapshot({
-      rawConfig,
-      config: rawConfig as unknown as OpenClawConfig,
+    const invalidSnapshot = buildTestConfigSnapshot({
+      path: configPath,
+      exists: true,
+      raw: `${JSON.stringify({
+        gateway: { mode: "invalid" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      })}\n`,
+      parsed: {
+        gateway: { mode: "invalid" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      },
+      valid: false,
+      config: {
+        gateway: { mode: "invalid" },
+        plugins: {
+          entries: {
+            feishu: { enabled: true },
+          },
+        },
+      } as unknown as OpenClawConfig,
       issues: [
         {
           path: "gateway.mode",
@@ -601,10 +586,16 @@ describe("gateway startup config validation", () => {
           message: "invalid config: must be string",
         },
       ],
+      legacyIssues: [],
     });
     vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
 
-    await expectStartupRejects(`Invalid config at ${configPath}.`);
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: true,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(`Invalid config at ${configPath}.`);
   });
 
   it("rejects stale model provider api enum values during startup", async () => {
@@ -636,24 +627,34 @@ describe("gateway startup config validation", () => {
         },
       },
     } as unknown as OpenClawConfig;
-    const invalidSnapshot = buildInvalidConfigSnapshot({
-      rawConfig: config,
+    const invalidSnapshot = buildTestConfigSnapshot({
+      path: configPath,
+      exists: true,
+      raw: `${JSON.stringify(config)}\n`,
+      parsed: config,
+      valid: false,
       config,
       issues: [
         {
           path: "models.providers.openrouter.api",
           message:
-            'Invalid option: expected one of "openai-completions"|"openai-responses"|"openai-chatgpt-responses"|"anthropic-messages"|"google-generative-ai"|"github-copilot"|"bedrock-converse-stream"|"ollama"|"azure-openai-responses"',
+            'Invalid option: expected one of "openai-completions"|"openai-responses"|"openai-codex-responses"|"anthropic-messages"|"google-generative-ai"|"github-copilot"|"bedrock-converse-stream"|"ollama"|"azure-openai-responses"',
         },
         {
           path: "models.providers.openrouter.models.0.api",
           message:
-            'Invalid option: expected one of "openai-completions"|"openai-responses"|"openai-chatgpt-responses"|"anthropic-messages"|"google-generative-ai"|"github-copilot"|"bedrock-converse-stream"|"ollama"|"azure-openai-responses"',
+            'Invalid option: expected one of "openai-completions"|"openai-responses"|"openai-codex-responses"|"anthropic-messages"|"google-generative-ai"|"github-copilot"|"bedrock-converse-stream"|"ollama"|"azure-openai-responses"',
         },
       ],
+      legacyIssues: [],
     });
     vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
-    await expectStartupRejects(`Invalid config at ${configPath}.`, false);
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: false,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(`Invalid config at ${configPath}.`);
 
     expect(configMutate.replaceConfigFile).not.toHaveBeenCalled();
   });
@@ -665,6 +666,11 @@ describe("gateway startup config validation", () => {
     });
     vi.mocked(configIo.readConfigFileSnapshot).mockResolvedValueOnce(invalidSnapshot);
 
-    await expectStartupRejects(`Invalid config at ${configPath}.`);
+    await expect(
+      loadGatewayStartupConfigSnapshot({
+        minimalTestGateway: true,
+        log: { info: vi.fn(), warn: vi.fn() },
+      }),
+    ).rejects.toThrow(`Invalid config at ${configPath}.`);
   });
 });

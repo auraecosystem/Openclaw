@@ -1,5 +1,5 @@
 ---
-summary: "OpenClaw Twitch channel plugin for chat and moderation workflows."
+summary: "Adds the Twitch channel surface for sending and receiving OpenClaw messages."
 read_when:
   - You are installing, configuring, or auditing the twitch plugin
 title: "Twitch plugin"
@@ -7,7 +7,7 @@ title: "Twitch plugin"
 
 # Twitch plugin
 
-OpenClaw Twitch channel plugin for chat and moderation workflows.
+Adds the Twitch channel surface for sending and receiving OpenClaw messages.
 
 ## Distribution
 

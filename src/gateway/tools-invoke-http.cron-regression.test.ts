@@ -35,11 +35,11 @@ vi.mock("../logger.js", () => ({
   logWarn: noWarnLog,
 }));
 
-vi.mock("../agents/agent-tools.js", () => ({
+vi.mock("../agents/pi-tools.js", () => ({
   resolveToolLoopDetectionConfig,
 }));
 
-vi.mock("../agents/agent-tools.before-tool-call.js", () => ({
+vi.mock("../agents/pi-tools.before-tool-call.js", () => ({
   runBeforeToolCallHook,
 }));
 
@@ -89,7 +89,7 @@ beforeAll(async () => {
       }
       res.statusCode = 404;
       res.end("not found");
-    })().catch((err: unknown) => {
+    })().catch((err) => {
       res.statusCode = 500;
       res.end(String(err));
     });
@@ -108,9 +108,7 @@ afterAll(async () => {
   if (!server) {
     return;
   }
-  await new Promise<void>((resolve) => {
-    server?.close(() => resolve());
-  });
+  await new Promise<void>((resolve) => server?.close(() => resolve()));
   server = undefined;
 });
 

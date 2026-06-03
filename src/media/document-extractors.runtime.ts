@@ -1,4 +1,3 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type {
   DocumentExtractionRequest,
@@ -6,6 +5,7 @@ import type {
 } from "../plugins/document-extractor-types.js";
 import { resolvePluginDocumentExtractors } from "../plugins/document-extractors.runtime.js";
 import { createConfigScopedPromiseLoader } from "../plugins/plugin-cache-primitives.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 const documentExtractorLoader = createConfigScopedPromiseLoader((config?: OpenClawConfig) =>
   resolvePluginDocumentExtractors(config ? { config } : undefined),
@@ -24,7 +24,6 @@ export async function extractDocumentContent(
     maxPages: params.maxPages,
     maxPixels: params.maxPixels,
     minTextChars: params.minTextChars,
-    ...(params.password ? { password: params.password } : {}),
     ...(params.pageNumbers ? { pageNumbers: params.pageNumbers } : {}),
     ...(params.onImageExtractionError
       ? { onImageExtractionError: params.onImageExtractionError }

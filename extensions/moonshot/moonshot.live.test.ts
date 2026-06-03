@@ -45,26 +45,12 @@ describeLive("moonshot plugin live", () => {
       }
     }
     if (lastError) {
-      throw toLintErrorObject(lastError, "Non-Error thrown");
+      throw lastError;
     }
 
     expect(result?.provider).toBe("kimi");
     expect(typeof result?.content).toBe("string");
-    expect((result!.content as string).length).toBeGreaterThan(20);
+    expect((result?.content as string).length).toBeGreaterThan(20);
     expect(Array.isArray(result?.citations)).toBe(true);
   }, 180_000);
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

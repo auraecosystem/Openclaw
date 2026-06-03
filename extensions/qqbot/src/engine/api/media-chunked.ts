@@ -202,8 +202,7 @@ export class ChunkedMediaApi {
 
       // 3. Upload-cache fast path: the md5 hash is already a strong content
       // identifier, so we can short-circuit before even calling upload_prepare.
-      const canUseUploadCache = opts.fileType !== MediaFileType.FILE;
-      if (this.cache && canUseUploadCache) {
+      if (this.cache) {
         const cached = this.cache.get(hashes.md5, opts.scope, opts.targetId, opts.fileType);
         if (cached) {
           this.logger?.info?.(
@@ -294,7 +293,7 @@ export class ChunkedMediaApi {
       this.logger?.info?.(`${prefix} completed: file_uuid=${result.file_uuid} ttl=${result.ttl}s`);
 
       // 7. Populate the shared upload cache so subsequent sends skip re-uploading.
-      if (this.cache && canUseUploadCache && result.file_info && result.ttl > 0) {
+      if (this.cache && result.file_info && result.ttl > 0) {
         this.cache.set(
           hashes.md5,
           opts.scope,
@@ -641,7 +640,5 @@ async function runWithConcurrency(
 }
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

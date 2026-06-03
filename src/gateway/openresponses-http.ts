@@ -8,10 +8,9 @@
 
 import { createHash, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { resolveIntegerOption } from "@openclaw/normalization-core/number-coercion";
-import { isClientToolNameConflictError } from "../agents/agent-tool-definition-adapter.js";
 import type { ImageContent } from "../agents/command/types.js";
-import type { ClientToolDefinition } from "../agents/embedded-agent-runner/run/params.js";
+import type { ClientToolDefinition } from "../agents/pi-embedded-runner/run/params.js";
+import { isClientToolNameConflictError } from "../agents/pi-tool-definition-adapter.js";
 import { createDefaultDeps } from "../cli/deps.js";
 import type { CliDeps } from "../cli/deps.types.js";
 import { agentCommandFromIngress } from "../commands/agent.js";
@@ -45,6 +44,7 @@ import {
   resolveGatewayRequestContext,
   resolveOpenAiCompatModelOverride,
   resolveOpenAiCompatibleHttpOperatorScopes,
+  resolveOpenAiCompatibleHttpSenderIsOwner,
 } from "./http-utils.js";
 import { normalizeInputHostnameAllowlist } from "./input-allowlist.js";
 import {
@@ -56,12 +56,6 @@ import {
   type Usage,
 } from "./open-responses.schema.js";
 import { resolveOpenAiCompatError } from "./openai-compat-errors.js";
-import {
-  isToolChoiceConstraintSatisfied,
-  resolveUnsatisfiedToolChoiceMessage,
-  toolChoiceConstraintPrompt,
-  type ToolChoiceConstraint,
-} from "./openai-tool-choice.js";
 import { wrapUntrustedFileContent } from "./openresponses-file-content.js";
 import { buildAgentPrompt } from "./openresponses-prompt.js";
 import { createAssistantOutputItem, createFunctionCallOutputItem } from "./openresponses-shape.js";
@@ -204,7 +198,7 @@ function lookupResponseSession(
   return entry.sessionKey;
 }
 
-export const testing = {
+export const __testing = {
   resetResponseSessionState() {
     responseSessionMap.clear();
   },
@@ -227,7 +221,6 @@ export const testing = {
   getResponseSessionIds() {
     return [...responseSessionMap.keys()];
   },
-  resolveResponsesLimits,
 };
 
 function writeSseEvent(res: ServerResponse, event: StreamingEvent) {
@@ -250,7 +243,10 @@ function resolveResponsesLimits(
   const fileLimits = resolveInputFileLimits(files);
   return {
     maxBodyBytes: config?.maxBodyBytes ?? DEFAULT_BODY_BYTES,
-    maxUrlParts: resolveIntegerOption(config?.maxUrlParts, DEFAULT_MAX_URL_PARTS, { min: 0 }),
+    maxUrlParts:
+      typeof config?.maxUrlParts === "number"
+        ? Math.max(0, Math.floor(config.maxUrlParts))
+        : DEFAULT_MAX_URL_PARTS,
     files: {
       ...fileLimits,
       urlAllowlist: normalizeInputHostnameAllowlist(files?.urlAllowlist),
@@ -282,11 +278,7 @@ function extractClientTools(body: CreateResponseBody): ClientToolDefinition[] {
 function applyToolChoice(params: {
   tools: ClientToolDefinition[];
   toolChoice: CreateResponseBody["tool_choice"];
-}): {
-  tools: ClientToolDefinition[];
-  extraSystemPrompt?: string;
-  constraint?: ToolChoiceConstraint;
-} {
+}): { tools: ClientToolDefinition[]; extraSystemPrompt?: string } {
   const { tools, toolChoice } = params;
   if (!toolChoice) {
     return { tools };
@@ -300,24 +292,24 @@ function applyToolChoice(params: {
     if (tools.length === 0) {
       throw new Error("tool_choice=required but no tools were provided");
     }
-    const constraint: ToolChoiceConstraint = { type: "required" };
-    return { tools, extraSystemPrompt: toolChoiceConstraintPrompt(constraint), constraint };
+    return {
+      tools,
+      extraSystemPrompt: "You must call one of the available tools before responding.",
+    };
   }
 
   if (typeof toolChoice === "object" && toolChoice.type === "function") {
-    const targetName = ("name" in toolChoice ? toolChoice.name : toolChoice.function.name).trim();
+    const targetName = toolChoice.function?.name?.trim();
     if (!targetName) {
-      throw new Error("tool_choice.name is required");
+      throw new Error("tool_choice.function.name is required");
     }
     const matched = tools.filter((tool) => tool.function?.name === targetName);
     if (matched.length === 0) {
       throw new Error(`tool_choice requested unknown tool: ${targetName}`);
     }
-    const constraint: ToolChoiceConstraint = { type: "function", name: targetName };
     return {
       tools: matched,
-      extraSystemPrompt: toolChoiceConstraintPrompt(constraint),
-      constraint,
+      extraSystemPrompt: `You must call the ${targetName} tool before responding.`,
     };
   }
 
@@ -409,6 +401,7 @@ async function runResponsesAgentCommand(params: {
   sessionKey: string;
   runId: string;
   messageChannel: string;
+  senderIsOwner: boolean;
   deps: CliDeps;
   abortSignal?: AbortSignal;
 }) {
@@ -425,6 +418,7 @@ async function runResponsesAgentCommand(params: {
       deliver: false,
       messageChannel: params.messageChannel,
       bestEffortDeliver: false,
+      senderIsOwner: params.senderIsOwner,
       allowModelOverride: true,
       abortSignal: params.abortSignal,
     },
@@ -462,6 +456,10 @@ export async function handleOpenResponsesHttpRequest(
   if (!handled) {
     return true;
   }
+  // On the compat surface, shared-secret bearer auth is also treated as an
+  // owner sender so owner-only tool policy matches the documented contract.
+  const senderIsOwner = resolveOpenAiCompatibleHttpSenderIsOwner(req, handled.requestAuth);
+
   // Validate request body with Zod
   const parseResult = CreateResponseBodySchema.safeParse(handled.body);
   if (!parseResult.success) {
@@ -492,7 +490,7 @@ export async function handleOpenResponsesHttpRequest(
 
   // Extract images + files from input (Phase 2)
   let images: ImageContent[] = [];
-  const fileContexts: string[] = [];
+  let fileContexts: string[] = [];
   let urlParts = 0;
   const markUrlPart = () => {
     urlParts += 1;
@@ -607,7 +605,6 @@ export async function handleOpenResponsesHttpRequest(
 
   const clientTools = extractClientTools(payload);
   let toolChoicePrompt: string | undefined;
-  let toolChoiceConstraint: ToolChoiceConstraint | undefined;
   let resolvedClientTools = clientTools;
   try {
     const toolChoiceResult = applyToolChoice({
@@ -616,7 +613,6 @@ export async function handleOpenResponsesHttpRequest(
     });
     resolvedClientTools = toolChoiceResult.tools;
     toolChoicePrompt = toolChoiceResult.extraSystemPrompt;
-    toolChoiceConstraint = toolChoiceResult.constraint;
   } catch (err) {
     logWarn(`openresponses: tool configuration failed: ${String(err)}`);
     sendJson(res, 400, {
@@ -705,6 +701,7 @@ export async function handleOpenResponsesHttpRequest(
         sessionKey,
         runId: responseId,
         messageChannel,
+        senderIsOwner,
         deps,
         abortSignal: abortController.signal,
       });
@@ -717,29 +714,6 @@ export async function handleOpenResponsesHttpRequest(
       const usage = extractUsageFromResult(result);
       const meta = (result as { meta?: unknown } | null)?.meta;
       const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
-
-      // A `required`/pinned `tool_choice` must reject a text-only turn instead
-      // of returning ordinary assistant prose, mirroring /v1/chat/completions.
-      // Shared satisfaction check lives in openai-tool-choice.ts.
-      if (
-        toolChoiceConstraint &&
-        !isToolChoiceConstraintSatisfied({ constraint: toolChoiceConstraint, pendingToolCalls })
-      ) {
-        const failed = createResponseResource({
-          id: responseId,
-          model,
-          status: "failed",
-          output: [],
-          error: {
-            code: "api_error",
-            message: resolveUnsatisfiedToolChoiceMessage(toolChoiceConstraint),
-          },
-          usage,
-        });
-        rememberResponseSession();
-        sendJson(res, 502, failed);
-        return true;
-      }
 
       // If the agent invoked client tools, return one `function_call`
       // output item per call (in arrival order) plus any assistant text the
@@ -994,16 +968,6 @@ export async function handleOpenResponsesHttpRequest(
         return;
       }
 
-      // Hold assistant prose until the tool-choice contract is confirmed. A
-      // `required`/pinned request must reject text-only turns, so streaming
-      // deltas now could leak output we may have to fail. Buffered text is
-      // still flushed as commentary if a matching tool call arrives, matching
-      // the openai-http.ts streaming buffer.
-      if (toolChoiceConstraint) {
-        accumulatedText += content;
-        return;
-      }
-
       sawAssistantDelta = true;
       accumulatedText += content;
 
@@ -1044,6 +1008,7 @@ export async function handleOpenResponsesHttpRequest(
         sessionKey,
         runId: responseId,
         messageChannel,
+        senderIsOwner,
         deps,
         abortSignal: abortController.signal,
       });
@@ -1055,35 +1020,6 @@ export async function handleOpenResponsesHttpRequest(
       const resultAny = result as { payloads?: Array<{ text?: string }>; meta?: unknown };
       const meta = resultAny.meta;
       const { stopReason, pendingToolCalls } = resolveStopReasonAndPendingToolCalls(meta);
-
-      // Reject an unsatisfied `required`/pinned `tool_choice` before any
-      // buffered prose is flushed, mirroring the non-streaming path and
-      // /v1/chat/completions. Closes the stream with a `response.failed` event.
-      if (
-        !closed &&
-        toolChoiceConstraint &&
-        !isToolChoiceConstraintSatisfied({ constraint: toolChoiceConstraint, pendingToolCalls })
-      ) {
-        const failed = createResponseResource({
-          id: responseId,
-          model,
-          status: "failed",
-          output: [],
-          error: {
-            code: "api_error",
-            message: resolveUnsatisfiedToolChoiceMessage(toolChoiceConstraint),
-          },
-          usage: finalUsage ?? createEmptyUsage(),
-        });
-        closed = true;
-        stopWatchingDisconnect();
-        unsubscribe();
-        rememberResponseSession();
-        writeSseEvent(res, { type: "response.failed", response: failed });
-        writeDone(res);
-        res.end();
-        return;
-      }
 
       if (
         !closed &&
@@ -1101,16 +1037,6 @@ export async function handleOpenResponsesHttpRequest(
                 .join("\n\n")
             : "");
 
-        if (toolChoiceConstraint && accumulatedText) {
-          sawAssistantDelta = true;
-          writeSseEvent(res, {
-            type: "response.output_text.delta",
-            item_id: outputItemId,
-            output_index: 0,
-            content_index: 0,
-            delta: accumulatedText,
-          });
-        }
         writeSseEvent(res, {
           type: "response.output_text.done",
           item_id: outputItemId,
@@ -1298,4 +1224,3 @@ export async function handleOpenResponsesHttpRequest(
 
   return true;
 }
-export { testing as __testing };

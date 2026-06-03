@@ -1,5 +1,5 @@
-import Foundation
 import OpenClawKit
+import Foundation
 import Testing
 
 @Suite struct ShareToAgentDeepLinkTests {
@@ -37,14 +37,12 @@ import Testing
     }
 
     @Test func buildURLReturnsNilWhenPayloadEmpty() {
-        ShareToAgentSettings.saveDefaultInstruction(nil)
         let payload = SharedContentPayload(title: nil, url: nil, text: nil)
         #expect(ShareToAgentDeepLink.buildURL(from: payload) == nil)
     }
 
     @Test func shareInstructionSettingsRoundTrip() {
         let value = "Focus on booking constraints and alternatives."
-        ShareToAgentSettings.saveDefaultInstruction(nil)
         ShareToAgentSettings.saveDefaultInstruction(value)
         defer { ShareToAgentSettings.saveDefaultInstruction(nil) }
 

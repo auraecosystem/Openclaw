@@ -1,7 +1,3 @@
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "@openclaw/normalization-core/number-coercion";
 import { resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { getRuntimeConfig } from "../config/io.js";
 import type { SessionEntry } from "../config/sessions.js";
@@ -48,17 +44,9 @@ function setResolvedSessionKeyCache(
       resolvedSessionKeyByRunId.delete(oldest);
     }
   }
-  let expiresAt: number | null = null;
-  if (sessionKey === null) {
-    const missExpiresAt = resolveExpiresAtMsFromDurationMs(RUN_LOOKUP_MISS_TTL_MS);
-    if (missExpiresAt === undefined) {
-      return;
-    }
-    expiresAt = missExpiresAt;
-  }
   resolvedSessionKeyByRunId.set(cacheKey, {
     sessionKey,
-    expiresAt,
+    expiresAt: sessionKey === null ? Date.now() + RUN_LOOKUP_MISS_TTL_MS : null,
   });
 }
 
@@ -102,9 +90,7 @@ export function resolveSessionKeyForRun(runId: string, opts: { agentId?: string 
     if (cachedLookup.sessionKey !== null) {
       return cachedLookup.sessionKey;
     }
-    const expiresAt = asDateTimestampMs(cachedLookup.expiresAt);
-    const now = asDateTimestampMs(Date.now());
-    if (expiresAt !== undefined && now !== undefined && expiresAt > now) {
+    if ((cachedLookup.expiresAt ?? 0) > Date.now()) {
       return undefined;
     }
     resolvedSessionKeyByRunId.delete(cacheKey);

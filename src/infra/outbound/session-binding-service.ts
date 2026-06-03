@@ -1,7 +1,6 @@
-import { uniqueValues } from "@openclaw/normalization-core/string-normalization";
 import { resolveGlobalMap } from "../../shared/global-singleton.js";
 import {
-  testing as genericCurrentConversationBindingTesting,
+  __testing as genericCurrentConversationBindingTesting,
   bindGenericCurrentConversation,
   getGenericCurrentConversationBindingCapabilities,
   listGenericCurrentConversationBindingsBySession,
@@ -98,7 +97,7 @@ function resolveAdapterPlacements(adapter: SessionBindingAdapter): SessionBindin
     Boolean(value),
   );
   if (placements && placements.length > 0) {
-    return uniqueValues(placements);
+    return [...new Set(placements)];
   }
   return ["current", "child"];
 }
@@ -395,7 +394,7 @@ export function getSessionBindingService(): SessionBindingService {
   return DEFAULT_SESSION_BINDING_SERVICE;
 }
 
-export const testing = {
+export const __testing = {
   resetSessionBindingAdaptersForTests() {
     ADAPTERS_BY_CHANNEL_ACCOUNT.clear();
     genericCurrentConversationBindingTesting.resetCurrentConversationBindingsForTests({
@@ -406,4 +405,3 @@ export const testing = {
     return [...ADAPTERS_BY_CHANNEL_ACCOUNT.keys()];
   },
 };
-export { testing as __testing };

@@ -12,23 +12,23 @@ type AbortResponsePayload = {
 };
 type AbortRespond = Awaited<ReturnType<typeof invokeChatAbortHandler>>;
 
-async function invokeAbort({
+async function invokeSingleRunAbort({
   context,
-  runId,
+  runId = "run-1",
   connId,
   deviceId,
-  scopes = ["operator.write"],
+  scopes,
 }: {
   context: ReturnType<typeof createChatAbortContext>;
   runId?: string;
   connId: string;
   deviceId: string;
-  scopes?: string[];
+  scopes: string[];
 }) {
   return await invokeChatAbortHandler({
     handler: chatHandlers["chat.abort"],
     context,
-    request: { sessionKey: "main", ...(runId ? { runId } : {}) },
+    request: { sessionKey: "main", runId },
     client: {
       connId,
       connect: { device: { id: deviceId }, scopes },
@@ -56,22 +56,12 @@ function requireLastRespondCall(respond: AbortRespond) {
   return call;
 }
 
-function expectAbortPayload(
-  payload: unknown,
-  expected: { aborted: boolean; runIds: string[] },
-): void {
-  const abortPayload = payload as AbortResponsePayload | undefined;
-  expect(abortPayload?.aborted).toBe(expected.aborted);
-  expect(abortPayload?.runIds).toEqual(expected.runIds);
-}
-
 describe("chat.abort authorization", () => {
   it("rejects explicit run aborts from other clients", async () => {
     const context = createSingleAbortContext();
 
-    const respond = await invokeAbort({
+    const respond = await invokeSingleRunAbort({
       context,
-      runId: "run-1",
       connId: "conn-other",
       deviceId: "dev-other",
       scopes: ["operator.write"],
@@ -92,36 +82,22 @@ describe("chat.abort authorization", () => {
       ]),
     });
 
-    const respond = await invokeAbort({
+    const respond = await invokeChatAbortHandler({
+      handler: chatHandlers["chat.abort"],
       context,
-      runId: "run-1",
-      connId: "conn-new",
-      deviceId: "dev-1",
+      request: { sessionKey: "main", runId: "run-1" },
+      client: {
+        connId: "conn-new",
+        connect: { device: { id: "dev-1" }, scopes: ["operator.write"] },
+      },
     });
 
     const [ok, payload] = requireLastRespondCall(respond);
     expect(ok).toBe(true);
-    expectAbortPayload(payload, { aborted: true, runIds: ["run-1"] });
+    const abortPayload = payload as AbortResponsePayload | undefined;
+    expect(abortPayload?.aborted).toBe(true);
+    expect(abortPayload?.runIds).toEqual(["run-1"]);
     expect(context.chatAbortControllers.has("run-1")).toBe(false);
-  });
-
-  it("does not abort hidden internal runs by visible session key", async () => {
-    const context = createChatAbortContext({
-      chatAbortControllers: new Map([
-        ["run-hidden", createActiveRun("main", { controlUiVisible: false })],
-      ]),
-    });
-
-    const respond = await invokeAbort({
-      context,
-      connId: "conn-owner",
-      deviceId: "dev-owner",
-    });
-
-    const [ok, payload] = requireLastRespondCall(respond);
-    expect(ok).toBe(true);
-    expectAbortPayload(payload, { aborted: false, runIds: [] });
-    expect(context.chatAbortControllers.has("run-hidden")).toBe(true);
   });
 
   it("clears agent text throttle state through the real abort caller", async () => {
@@ -146,11 +122,14 @@ describe("chat.abort authorization", () => {
       ]),
     });
 
-    const respond = await invokeAbort({
+    const respond = await invokeChatAbortHandler({
+      handler: chatHandlers["chat.abort"],
       context,
-      runId: "run-1",
-      connId: "conn-owner",
-      deviceId: "dev-1",
+      request: { sessionKey: "main", runId: "run-1" },
+      client: {
+        connId: "conn-owner",
+        connect: { device: { id: "dev-1" }, scopes: ["operator.write"] },
+      },
     });
 
     const [ok, payload] = respond.mock.calls.at(-1) ?? [];
@@ -168,15 +147,21 @@ describe("chat.abort authorization", () => {
       ]),
     });
 
-    const respond = await invokeAbort({
+    const respond = await invokeChatAbortHandler({
+      handler: chatHandlers["chat.abort"],
       context,
-      connId: "conn-1",
-      deviceId: "dev-1",
+      request: { sessionKey: "main" },
+      client: {
+        connId: "conn-1",
+        connect: { device: { id: "dev-1" }, scopes: ["operator.write"] },
+      },
     });
 
     const [ok, payload] = requireLastRespondCall(respond);
     expect(ok).toBe(true);
-    expectAbortPayload(payload, { aborted: true, runIds: ["run-mine"] });
+    const abortPayload = payload as AbortResponsePayload | undefined;
+    expect(abortPayload?.aborted).toBe(true);
+    expect(abortPayload?.runIds).toEqual(["run-mine"]);
     expect(context.chatAbortControllers.has("run-mine")).toBe(false);
     expect(context.chatAbortControllers.has("run-other")).toBe(true);
   });
@@ -184,9 +169,8 @@ describe("chat.abort authorization", () => {
   it("allows operator.admin clients to bypass owner checks", async () => {
     const context = createSingleAbortContext();
 
-    const respond = await invokeAbort({
+    const respond = await invokeSingleRunAbort({
       context,
-      runId: "run-1",
       connId: "conn-admin",
       deviceId: "dev-admin",
       scopes: ["operator.admin"],
@@ -194,6 +178,8 @@ describe("chat.abort authorization", () => {
 
     const [ok, payload] = requireLastRespondCall(respond);
     expect(ok).toBe(true);
-    expectAbortPayload(payload, { aborted: true, runIds: ["run-1"] });
+    const abortPayload = payload as AbortResponsePayload | undefined;
+    expect(abortPayload?.aborted).toBe(true);
+    expect(abortPayload?.runIds).toEqual(["run-1"]);
   });
 });

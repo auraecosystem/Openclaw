@@ -1,4 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 type PreambleResult = {
   command: string;
@@ -30,7 +30,9 @@ export function splitShellWords(input: string | undefined, maxWords = 48): strin
   let quote: '"' | "'" | undefined;
   let escaped = false;
 
-  for (const char of input) {
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+
     if (escaped) {
       current += char;
       escaped = false;

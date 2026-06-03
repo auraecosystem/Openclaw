@@ -13,7 +13,7 @@ export type ChatItem =
       action?: { kind: "session-checkpoints"; label: string };
       timestamp: number;
     }
-  | { kind: "stream"; key: string; text: string; startedAt: number; isStreaming: boolean }
+  | { kind: "stream"; key: string; text: string; startedAt: number }
   | { kind: "reading-indicator"; key: string };
 
 /** A group of consecutive messages from the same role (Slack-style layout) */
@@ -77,8 +77,6 @@ export type ToolCard = {
   args?: unknown;
   inputText?: string;
   outputText?: string;
-  isError?: boolean;
-  messageId?: string;
   preview?: {
     kind: "canvas";
     surface: "assistant_message";

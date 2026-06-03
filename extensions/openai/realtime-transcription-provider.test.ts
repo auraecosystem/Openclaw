@@ -179,24 +179,6 @@ describe("buildOpenAIRealtimeTranscriptionProvider", () => {
     expect(resolved?.vadThreshold).toBe(0);
   });
 
-  it("drops malformed VAD timing settings", () => {
-    const provider = buildOpenAIRealtimeTranscriptionProvider();
-    const resolved = provider.resolveConfig?.({
-      cfg: {} as never,
-      rawConfig: {
-        providers: {
-          openai: {
-            silenceDurationMs: -1,
-            vadThreshold: 1.5,
-          },
-        },
-      },
-    });
-
-    expect(resolved?.silenceDurationMs).toBeUndefined();
-    expect(resolved?.vadThreshold).toBeUndefined();
-  });
-
   it("accepts the legacy openai-realtime alias", () => {
     const provider = buildOpenAIRealtimeTranscriptionProvider();
     expect(provider.aliases).toContain("openai-realtime");
@@ -204,12 +186,12 @@ describe("buildOpenAIRealtimeTranscriptionProvider", () => {
 
   it("treats a Codex OAuth profile as configured when no API key is present", () => {
     const provider = buildOpenAIRealtimeTranscriptionProvider();
-    const cfg = { auth: { order: { openai: ["openai:default"] } } };
+    const cfg = { auth: { order: { "openai-codex": ["openai-codex:default"] } } };
     providerAuthMocks.isProviderAuthProfileConfigured.mockReturnValue(true);
 
     expect(provider.isConfigured({ cfg: cfg as never, providerConfig: {} })).toBe(true);
     expect(providerAuthMocks.isProviderAuthProfileConfigured).toHaveBeenCalledWith({
-      provider: "openai",
+      provider: "openai-codex",
       cfg,
     });
   });
@@ -222,7 +204,7 @@ describe("buildOpenAIRealtimeTranscriptionProvider", () => {
       response: new Response(JSON.stringify({ value: "ek-test" }), { status: 200 }),
       release,
     });
-    const cfg = { auth: { order: { openai: ["openai:default"] } } };
+    const cfg = { auth: { order: { "openai-codex": ["openai-codex:default"] } } };
     const session = provider.createSession({
       cfg: cfg as never,
       providerConfig: {},
@@ -233,7 +215,7 @@ describe("buildOpenAIRealtimeTranscriptionProvider", () => {
 
     expect(socket.headers?.Authorization).toBe("Bearer ek-test");
     expect(providerAuthMocks.resolveProviderAuthProfileApiKey).toHaveBeenCalledWith({
-      provider: "openai",
+      provider: "openai-codex",
       cfg,
     });
     const request = mockCallArg(ssrfMocks.fetchWithSsrFGuard);

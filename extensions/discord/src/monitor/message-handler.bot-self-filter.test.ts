@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   createDiscordMessageHandler,
   preflightDiscordMessageMock,
@@ -51,10 +51,8 @@ describe("createDiscordMessageHandler bot-self filter", () => {
     preflightDiscordMessageMock.mockReset();
     processDiscordMessageMock.mockReset();
     preflightDiscordMessageMock.mockImplementation(
-      async (params: { data: { channel_id: string } }) => ({
-        ...params,
-        ...createPreflightContext(params.data.channel_id),
-      }),
+      async (params: { data: { channel_id: string } }) =>
+        createPreflightContext(params.data.channel_id),
     );
 
     const handler = createDiscordMessageHandler(createDiscordHandlerParams());
@@ -64,9 +62,7 @@ describe("createDiscordMessageHandler bot-self filter", () => {
     ).resolves.toBeUndefined();
 
     await flushAsyncWork();
-    await vi.waitFor(() => {
-      expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(1);
-      expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
-    });
+    expect(preflightDiscordMessageMock).toHaveBeenCalledTimes(1);
+    expect(processDiscordMessageMock).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,16 +1,9 @@
 import { execFile } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
-import {
-  resolveExpiresAtMsFromDurationSeconds,
-  resolveTimestampMsToIsoString,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 const execFileAsync = promisify(execFile);
-const LIVE_CRON_PROBE_DELAY_SECONDS = 7 * 24 * 60 * 60;
-const OPENCLAW_CLI_GATEWAY_TIMEOUT_MS = 30_000;
-const OPENCLAW_CLI_CHILD_TIMEOUT_MS = OPENCLAW_CLI_GATEWAY_TIMEOUT_MS + 45_000;
 
 type CronListCliResult = {
   jobs?: Array<{
@@ -71,9 +64,7 @@ export function createLiveCronProbeSpec(
   const normalizedNonce = normalizeOptionalLowercaseString(nonce) ?? "";
   const name = `live-mcp-${normalizedNonce}`;
   const message = `probe-${normalizedNonce}`;
-  const at = resolveTimestampMsToIsoString(
-    resolveExpiresAtMsFromDurationSeconds(LIVE_CRON_PROBE_DELAY_SECONDS) ?? Date.now(),
-  );
+  const at = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const argsJson = JSON.stringify({
     action: "add",
     job: {
@@ -137,13 +128,10 @@ export async function runOpenClawCliJson<T>(args: string[], env: NodeJS.ProcessE
   delete childEnv.VITEST_MODE;
   delete childEnv.VITEST_POOL_ID;
   delete childEnv.VITEST_WORKER_ID;
-  const cliArgs = args.includes("--timeout")
-    ? args
-    : [...args, "--timeout", String(OPENCLAW_CLI_GATEWAY_TIMEOUT_MS)];
-  const { stdout, stderr } = await execFileAsync(process.execPath, ["openclaw.mjs", ...cliArgs], {
+  const { stdout, stderr } = await execFileAsync(process.execPath, ["openclaw.mjs", ...args], {
     cwd: process.cwd(),
     env: childEnv,
-    timeout: OPENCLAW_CLI_CHILD_TIMEOUT_MS,
+    timeout: 30_000,
     maxBuffer: 1024 * 1024,
   });
   const trimmed = stdout.trim();

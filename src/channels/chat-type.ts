@@ -1,4 +1,4 @@
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 export type ChatType = "direct" | "group" | "channel";
 

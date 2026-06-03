@@ -1,6 +1,6 @@
 import * as crypto from "node:crypto";
 import type * as Lark from "@larksuiteoapi/node-sdk";
-import type { ClawdbotConfig, PluginRuntime, RuntimeEnv, HistoryEntry } from "../runtime-api.js";
+import type { ClawdbotConfig, RuntimeEnv, HistoryEntry } from "../runtime-api.js";
 import { raceWithTimeoutAndAbort } from "./async.js";
 import {
   handleFeishuMessage,
@@ -164,7 +164,6 @@ function normalizeFeishuChatType(value: unknown): FeishuChatType | undefined {
 type RegisterEventHandlersContext = {
   cfg: ClawdbotConfig;
   accountId: string;
-  channelRuntime: PluginRuntime["channel"];
   runtime?: RuntimeEnv;
   chatHistories: Map<string, HistoryEntry[]>;
   fireAndForget?: boolean;
@@ -267,12 +266,12 @@ function registerEventHandlers(
   eventDispatcher: Lark.EventDispatcher,
   context: RegisterEventHandlersContext,
 ): void {
-  const { cfg, accountId, channelRuntime, runtime, chatHistories, fireAndForget } = context;
+  const { cfg, accountId, runtime, chatHistories, fireAndForget } = context;
   const log = runtime?.log ?? console.log;
   const error = runtime?.error ?? console.error;
   const runFeishuHandler = async (params: { task: () => Promise<void>; errorMessage: string }) => {
     if (fireAndForget) {
-      void params.task().catch((err: unknown) => {
+      void params.task().catch((err) => {
         error(`${params.errorMessage}: ${String(err)}`);
       });
       return;
@@ -287,7 +286,7 @@ function registerEventHandlers(
   eventDispatcher.register({
     "im.message.receive_v1": createFeishuMessageReceiveHandler({
       cfg,
-      channelRuntime,
+      core: getFeishuRuntime(),
       accountId,
       runtime,
       chatHistories,
@@ -354,7 +353,6 @@ function registerEventHandlers(
             botOpenId: myBotId,
             botName: botNames.get(accountId),
             runtime,
-            channelRuntime,
             chatHistories,
             accountId,
           });
@@ -385,7 +383,6 @@ function registerEventHandlers(
             botOpenId: myBotId,
             botName: botNames.get(accountId),
             runtime,
-            channelRuntime,
             chatHistories,
             accountId,
           });
@@ -399,7 +396,6 @@ function registerEventHandlers(
       runtime,
       chatHistories,
       fireAndForget,
-      channelRuntime,
     }),
     "card.action.trigger": async (data: unknown) => {
       try {
@@ -413,11 +409,10 @@ function registerEventHandlers(
           event,
           botOpenId: botOpenIds.get(accountId),
           runtime,
-          channelRuntime,
           accountId,
         });
         if (fireAndForget) {
-          promise.catch((err: unknown) => {
+          promise.catch((err) => {
             error(`feishu[${accountId}]: error handling card action: ${String(err)}`);
           });
         } else {
@@ -437,7 +432,6 @@ export type BotOpenIdSource =
 export type MonitorSingleAccountParams = {
   cfg: ClawdbotConfig;
   account: ResolvedFeishuAccount;
-  channelRuntime?: PluginRuntime["channel"];
   runtime?: RuntimeEnv;
   abortSignal?: AbortSignal;
   botOpenIdSource?: BotOpenIdSource;
@@ -474,17 +468,15 @@ export async function monitorSingleAccount(params: MonitorSingleAccountParams): 
     log(`feishu[${accountId}]: dedup warmup loaded ${warmupCount} entries from disk`);
   }
 
-  let threadBindingManager: ReturnType<typeof createFeishuThreadBindingManager> | null | undefined;
+  let threadBindingManager: ReturnType<typeof createFeishuThreadBindingManager> | null = null;
   try {
     const eventDispatcher = createEventDispatcher(account);
     const chatHistories = new Map<string, HistoryEntry[]>();
     threadBindingManager = createFeishuThreadBindingManager({ accountId, cfg });
-    const channelRuntime = params.channelRuntime ?? getFeishuRuntime().channel;
 
     registerEventHandlers(eventDispatcher, {
       cfg,
       accountId,
-      channelRuntime,
       runtime,
       chatHistories,
       fireAndForget: params.fireAndForget ?? true,

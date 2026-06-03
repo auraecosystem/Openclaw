@@ -1,14 +1,19 @@
-import { parseFiniteNumber } from "openclaw/plugin-sdk/number-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { formatErrorMessage } from "../infra/errors.js";
 import { parseRoleRef } from "./pw-role-snapshot.js";
 
 let nextUploadArmId = 0;
+let nextDialogArmId = 0;
 let nextDownloadArmId = 0;
 
 export function bumpUploadArmId(): number {
   nextUploadArmId += 1;
   return nextUploadArmId;
+}
+
+export function bumpDialogArmId(): number {
+  nextDialogArmId += 1;
+  return nextDialogArmId;
 }
 
 export function bumpDownloadArmId(): number {
@@ -41,9 +46,8 @@ export function requireRefOrSelector(
   };
 }
 
-export function normalizeTimeoutMs(timeoutMs: number | undefined, fallback: number): number {
-  const parsed = parseFiniteNumber(timeoutMs);
-  return Math.max(500, Math.min(120_000, Math.floor(parsed ?? fallback)));
+export function normalizeTimeoutMs(timeoutMs: number | undefined, fallback: number) {
+  return Math.max(500, Math.min(120_000, timeoutMs ?? fallback));
 }
 
 export function toAIFriendlyError(error: unknown, selector: string): Error {

@@ -56,13 +56,11 @@ describe("iMessage monitor attachment policy", () => {
     readChannelAllowFromStoreMock.mockResolvedValue([]);
 
     const attachmentPath = "/Users/openclaw/Library/Messages/Attachments/AA/BB/photo.heic";
-    let onNotification:
-      | ((message: { method: string; params: unknown }) => void | Promise<void>)
-      | undefined;
+    let onNotification: ((message: { method: string; params: unknown }) => void) | undefined;
     const client = {
       request: vi.fn(async () => ({ subscription: 1 })),
       waitForClose: vi.fn(async () => {
-        void onNotification?.({
+        onNotification?.({
           method: "message",
           params: {
             message: {
@@ -111,7 +109,7 @@ describe("iMessage monitor attachment policy", () => {
       } as never,
     });
 
-    await vi.waitFor(() => expect(readChannelAllowFromStoreMock).toHaveBeenCalled());
+    expect(readChannelAllowFromStoreMock).toHaveBeenCalled();
     expect(stageIMessageAttachmentsMock).not.toHaveBeenCalled();
   });
 });

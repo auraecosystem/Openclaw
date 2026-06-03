@@ -84,7 +84,9 @@ describe("resolveZaloToken", () => {
     const cfg = {
       tokenFile: tokenLink,
     } as ZaloConfig;
-    expect(() => resolveZaloToken(cfg)).toThrow(/Zalo token file.*must not be a symlink/);
+    const res = resolveZaloToken(cfg);
+    expect(res.token).toBe("");
+    expect(res.source).toBe("none");
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });

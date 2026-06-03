@@ -1,5 +1,3 @@
-import { resolveSafeTimeoutDelayMs } from "../../../gateway-client/src/timeouts.js";
-
 export type RetryConfig = {
   attempts?: number;
   minDelayMs?: number;
@@ -30,9 +28,7 @@ const DEFAULT_RETRY_CONFIG = {
 };
 
 function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function asFiniteNumber(value: unknown): number | undefined {
@@ -52,28 +48,18 @@ function clampNumber(value: unknown, fallback: number, min?: number, max?: numbe
   return Math.min(Math.max(next, floor), ceiling);
 }
 
-function resolveAttempts(value: unknown, fallback: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value)) {
-    return fallback;
-  }
-  return Math.max(1, value);
-}
-
 export function resolveRetryConfig(
   defaults: Required<RetryConfig> = DEFAULT_RETRY_CONFIG,
   overrides?: RetryConfig,
 ): Required<RetryConfig> {
-  const attempts = resolveAttempts(overrides?.attempts, defaults.attempts);
-  const minDelayMs = resolveSafeTimeoutDelayMs(
+  const attempts = Math.max(1, Math.round(clampNumber(overrides?.attempts, defaults.attempts, 1)));
+  const minDelayMs = Math.max(
+    0,
     Math.round(clampNumber(overrides?.minDelayMs, defaults.minDelayMs, 0)),
-    { minMs: 0 },
   );
   const maxDelayMs = Math.max(
     minDelayMs,
-    resolveSafeTimeoutDelayMs(
-      Math.round(clampNumber(overrides?.maxDelayMs, defaults.maxDelayMs, 0)),
-      { minMs: 0 },
-    ),
+    Math.round(clampNumber(overrides?.maxDelayMs, defaults.maxDelayMs, 0)),
   );
   const jitter = clampNumber(overrides?.jitter, defaults.jitter, 0, 1);
   return { attempts, minDelayMs, maxDelayMs, jitter };
@@ -93,7 +79,7 @@ export async function retryAsync<T>(
   initialDelayMs = 300,
 ): Promise<T> {
   if (typeof attemptsOrOptions === "number") {
-    const attempts = resolveAttempts(attemptsOrOptions, DEFAULT_RETRY_CONFIG.attempts);
+    const attempts = Math.max(1, Math.round(attemptsOrOptions));
     let lastErr: unknown;
     for (let i = 0; i < attempts; i += 1) {
       try {
@@ -103,10 +89,10 @@ export async function retryAsync<T>(
         if (i === attempts - 1) {
           break;
         }
-        await sleep(resolveSafeTimeoutDelayMs(initialDelayMs * 2 ** i, { minMs: 0 }));
+        await sleep(initialDelayMs * 2 ** i);
       }
     }
-    throw toLintErrorObject(lastErr ?? new Error("Retry failed"), "Non-Error thrown");
+    throw lastErr ?? new Error("Retry failed");
   }
 
   const options = attemptsOrOptions;
@@ -132,8 +118,8 @@ export async function retryAsync<T>(
       const retryAfterMs = options.retryAfterMs?.(err);
       const hasRetryAfter = typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs);
       const baseDelay = hasRetryAfter
-        ? Math.max(resolveSafeTimeoutDelayMs(retryAfterMs, { minMs: 0 }), minDelayMs)
-        : resolveSafeTimeoutDelayMs(minDelayMs * 2 ** (attempt - 1), { minMs: 0 });
+        ? Math.max(retryAfterMs, minDelayMs)
+        : minDelayMs * 2 ** (attempt - 1);
       let delay = Math.min(baseDelay, maxDelayMs);
       delay = applyJitter(delay, resolved.jitter);
       delay = Math.min(Math.max(delay, minDelayMs), maxDelayMs);
@@ -151,19 +137,5 @@ export async function retryAsync<T>(
     }
   }
 
-  throw toLintErrorObject(lastErr ?? new Error("Retry failed"), "Non-Error thrown");
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
+  throw lastErr ?? new Error("Retry failed");
 }

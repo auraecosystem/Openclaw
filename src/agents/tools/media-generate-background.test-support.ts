@@ -2,7 +2,6 @@ import { expect, vi } from "vitest";
 
 type MockWithReset = {
   mockReset(): void;
-  mockResolvedValue?(value: unknown): void;
 };
 
 export const taskExecutorMocks = {
@@ -23,8 +22,6 @@ export const taskDeliveryRuntimeMocks = {
 type TaskExecutorBackgroundMocks = {
   createRunningTaskRun: MockWithReset;
   recordTaskRunProgressByRunId: MockWithReset;
-  completeTaskRunByRunId: MockWithReset;
-  failTaskRunByRunId: MockWithReset;
 };
 
 type TaskDeliveryBackgroundMocks = {
@@ -131,33 +128,24 @@ export function createMediaCompletionFixture({
 }
 
 export function resetMediaBackgroundMocks({
-  taskExecutorMocks: taskExecutorMocksResult,
-  taskDeliveryRuntimeMocks: taskDeliveryRuntimeMocksLocal,
-  announceDeliveryMocks: announceDeliveryMocksLocal,
+  taskExecutorMocks,
+  taskDeliveryRuntimeMocks,
+  announceDeliveryMocks,
 }: MediaBackgroundResetMocks): void {
-  taskExecutorMocksResult.createRunningTaskRun.mockReset();
-  taskExecutorMocksResult.recordTaskRunProgressByRunId.mockReset();
-  taskExecutorMocksResult.completeTaskRunByRunId.mockReset();
-  taskExecutorMocksResult.failTaskRunByRunId.mockReset();
-  taskDeliveryRuntimeMocksLocal.sendMessage.mockReset();
-  taskDeliveryRuntimeMocksLocal.sendMessage.mockResolvedValue?.({
-    channel: "discord",
-    to: "channel:1",
-    via: "direct",
-    mediaUrl: null,
-    result: { messageId: "msg-1" },
-  });
-  announceDeliveryMocksLocal.deliverSubagentAnnouncement.mockReset();
+  taskExecutorMocks.createRunningTaskRun.mockReset();
+  taskExecutorMocks.recordTaskRunProgressByRunId.mockReset();
+  taskDeliveryRuntimeMocks.sendMessage.mockReset();
+  announceDeliveryMocks.deliverSubagentAnnouncement.mockReset();
 }
 
 export function expectQueuedTaskRun({
-  taskExecutorMocks: taskExecutorMocksValue,
+  taskExecutorMocks,
   taskKind,
   sourceId,
   progressSummary,
 }: QueuedTaskExpectation): void {
   const params = requireMockFirstParam(
-    taskExecutorMocksValue.createRunningTaskRun,
+    taskExecutorMocks.createRunningTaskRun,
     "createRunningTaskRun params",
   );
   expect(params.taskKind).toBe(taskKind);
@@ -166,12 +154,12 @@ export function expectQueuedTaskRun({
 }
 
 export function expectRecordedTaskProgress({
-  taskExecutorMocks: taskExecutorMocksLocal,
+  taskExecutorMocks,
   runId,
   progressSummary,
 }: ProgressExpectation): void {
   const params = requireMockFirstParam(
-    taskExecutorMocksLocal.recordTaskRunProgressByRunId,
+    taskExecutorMocks.recordTaskRunProgressByRunId,
     "recordTaskRunProgressByRunId params",
   );
   expect(params.runId).toBe(runId);
@@ -224,5 +212,5 @@ export function expectFallbackMediaAnnouncement({
   expect(event.status).toBe("ok");
   expect(String(event.result)).toContain(resultMediaPath);
   expect(event.mediaUrls).toEqual(mediaUrls);
-  expect(String(event.replyInstruction)).toContain("visible-reply contract");
+  expect(String(event.replyInstruction)).toContain("message-tool delivery");
 }

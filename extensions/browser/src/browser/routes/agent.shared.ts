@@ -1,4 +1,3 @@
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveBrowserNavigationProxyMode } from "../browser-proxy-mode.js";
 import { toBrowserErrorResponse } from "../errors.js";
 import {
@@ -10,6 +9,10 @@ import { getPwAiModule as getPwAiModuleBase } from "../pw-ai-module.js";
 import type { BrowserRouteContext, ProfileContext } from "../server-context.js";
 import type { BrowserRequest, BrowserResponse } from "./types.js";
 import { getProfileContext, jsonError } from "./utils.js";
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
 
 export const SELECTOR_UNSUPPORTED_MESSAGE = [
   "Error: 'selector' is not supported. Use 'ref' from snapshot instead.",
@@ -62,18 +65,6 @@ export function resolveProfileContext(
     return null;
   }
   return profileCtx;
-}
-
-export function browserNavigationPolicyForProfile(
-  ctx: BrowserRouteContext,
-  profileCtx: ProfileContext,
-) {
-  return withBrowserNavigationPolicy(ctx.state().resolved.ssrfPolicy, {
-    browserProxyMode: resolveBrowserNavigationProxyMode({
-      resolved: ctx.state().resolved,
-      profile: profileCtx.profile,
-    }),
-  });
 }
 
 export async function getPwAiModule(): Promise<PwAiModule | null> {
@@ -136,7 +127,12 @@ export async function withRouteTabContext<T>(
     if (params.enforceCurrentUrlAllowed) {
       await assertBrowserNavigationResultAllowed({
         url: tab.url,
-        ...browserNavigationPolicyForProfile(params.ctx, profileCtx),
+        ...withBrowserNavigationPolicy(params.ctx.state().resolved.ssrfPolicy, {
+          browserProxyMode: resolveBrowserNavigationProxyMode({
+            resolved: params.ctx.state().resolved,
+            profile: profileCtx.profile,
+          }),
+        }),
       });
     }
     return await params.run({
@@ -176,7 +172,12 @@ export async function resolveSafeRouteTabUrl(params: {
   try {
     await assertBrowserNavigationResultAllowed({
       url: candidateUrl,
-      ...browserNavigationPolicyForProfile(params.ctx, params.profileCtx),
+      ...withBrowserNavigationPolicy(params.ctx.state().resolved.ssrfPolicy, {
+        browserProxyMode: resolveBrowserNavigationProxyMode({
+          resolved: params.ctx.state().resolved,
+          profile: params.profileCtx.profile,
+        }),
+      }),
     });
     return candidateUrl;
   } catch {

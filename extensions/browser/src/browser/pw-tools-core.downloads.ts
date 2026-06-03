@@ -3,16 +3,15 @@ import path from "node:path";
 import type { Page } from "playwright-core";
 import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { writeExternalFileWithinOutputRoot } from "./output-files.js";
-import { resolveStrictExistingUploadPaths } from "./paths.js";
+import { DEFAULT_UPLOAD_DIR, resolveStrictExistingPathsWithinRoot } from "./paths.js";
 import {
-  armObservedDialogResponseOnPage,
   ensurePageState,
   getPageForTargetId,
   refLocator,
-  respondToObservedDialogOnPage,
   restoreRoleRefsForTarget,
 } from "./pw-session.js";
 import {
+  bumpDialogArmId,
   bumpDownloadArmId,
   bumpUploadArmId,
   normalizeTimeoutMs,
@@ -135,7 +134,7 @@ export async function armFileUploadViaPlaywright(opts: {
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
   const state = ensurePageState(page);
-  const timeout = normalizeTimeoutMs(opts.timeoutMs, 120_000);
+  const timeout = Math.max(500, Math.min(120_000, opts.timeoutMs ?? 120_000));
 
   state.armIdUpload = bumpUploadArmId();
   const armId = state.armIdUpload;
@@ -155,8 +154,10 @@ export async function armFileUploadViaPlaywright(opts: {
         }
         return;
       }
-      const uploadPathsResult = await resolveStrictExistingUploadPaths({
+      const uploadPathsResult = await resolveStrictExistingPathsWithinRoot({
+        rootDir: DEFAULT_UPLOAD_DIR,
         requestedPaths: opts.paths,
+        scopeLabel: `uploads directory (${DEFAULT_UPLOAD_DIR})`,
       });
       if (!uploadPathsResult.ok) {
         try {
@@ -190,34 +191,32 @@ export async function armFileUploadViaPlaywright(opts: {
 export async function armDialogViaPlaywright(opts: {
   cdpUrl: string;
   targetId?: string;
-  dialogId?: string;
   accept: boolean;
   promptText?: string;
   timeoutMs?: number;
 }): Promise<void> {
   const page = await getPageForTargetId(opts);
+  const state = ensurePageState(page);
   const timeout = normalizeTimeoutMs(opts.timeoutMs, 120_000);
-  try {
-    await respondToObservedDialogOnPage({
-      page,
-      accept: opts.accept,
-      closedBy: "agent",
-      ...(opts.dialogId !== undefined ? { dialogId: opts.dialogId } : {}),
-      ...(opts.promptText !== undefined ? { promptText: opts.promptText } : {}),
-    });
-    return;
-  } catch (err) {
-    if (opts.dialogId || (err instanceof Error && !err.message.includes("No dialog is pending"))) {
-      throw err;
-    }
-  }
 
-  armObservedDialogResponseOnPage({
-    page,
-    accept: opts.accept,
-    timeoutMs: timeout,
-    ...(opts.promptText !== undefined ? { promptText: opts.promptText } : {}),
-  });
+  state.armIdDialog = bumpDialogArmId();
+  const armId = state.armIdDialog;
+
+  void page
+    .waitForEvent("dialog", { timeout })
+    .then(async (dialog) => {
+      if (state.armIdDialog !== armId) {
+        return;
+      }
+      if (opts.accept) {
+        await dialog.accept(opts.promptText);
+      } else {
+        await dialog.dismiss();
+      }
+    })
+    .catch(() => {
+      // Ignore timeouts; the dialog may never appear.
+    });
 }
 
 export async function waitForDownloadViaPlaywright(opts: {

@@ -59,7 +59,7 @@ export function queueInitialDiscordAckReaction(params: {
   if (!params.shouldSendAckReaction || !params.ackReaction) {
     return;
   }
-  void params.reactionAdapter.setReaction(params.ackReaction).catch((err: unknown) => {
+  void params.reactionAdapter.setReaction(params.ackReaction).catch((err) => {
     logAckFailure({
       log: logVerbose,
       channel: "discord",

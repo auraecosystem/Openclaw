@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { asDateTimestampMs } from "../../shared/number-coercion.js";
 import {
   resolveSessionFilePath,
   resolveSessionFilePathOptions,
@@ -13,8 +12,7 @@ type SessionLifecycleEntry = Pick<
 >;
 
 function resolveTimestamp(value: number | undefined): number | undefined {
-  const timestampMs = asDateTimestampMs(value);
-  return timestampMs !== undefined && timestampMs >= 0 ? timestampMs : undefined;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function parseTimestampMs(value: unknown): number | undefined {
@@ -25,7 +23,7 @@ function parseTimestampMs(value: unknown): number | undefined {
     return undefined;
   }
   const parsed = Date.parse(value);
-  return resolveTimestamp(parsed);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
 }
 
 function readFirstLine(filePath: string): string | undefined {

@@ -19,7 +19,7 @@ const DEFAULT_CLI_COMMAND_PATH_POLICY: CliCommandPathPolicy = {
 };
 
 export function resolveCliCommandPathPolicy(commandPath: string[]): CliCommandPathPolicy {
-  const resolvedPolicy: CliCommandPathPolicy = { ...DEFAULT_CLI_COMMAND_PATH_POLICY };
+  let resolvedPolicy: CliCommandPathPolicy = { ...DEFAULT_CLI_COMMAND_PATH_POLICY };
   for (const entry of cliCommandCatalog) {
     if (!entry.policy) {
       continue;

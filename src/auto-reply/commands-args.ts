@@ -1,7 +1,7 @@
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "../../packages/normalization-core/src/string-coerce.js";
+} from "../shared/string-coerce.js";
 import type { CommandArgValues } from "./commands-registry.types.js";
 
 type CommandArgsFormatter = (values: CommandArgValues) => string | undefined;

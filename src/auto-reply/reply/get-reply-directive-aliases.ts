@@ -1,9 +1,9 @@
+import type { SkillCommandSpec } from "../../agents/skills.js";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { SkillCommandSpec } from "../../skills/types.js";
+} from "../../shared/string-coerce.js";
 
 export function reserveSkillCommandNames(params: {
   reservedCommands: Set<string>;

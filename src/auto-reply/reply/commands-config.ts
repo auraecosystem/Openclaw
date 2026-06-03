@@ -1,20 +1,14 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { resolveConfigWriteTargetFromPath } from "../../channels/plugins/config-writes.js";
 import { normalizeChannelId } from "../../channels/registry.js";
-import {
-  getConfigValueAtPath,
-  parseConfigPath,
-  setConfigValueAtPath,
-} from "../../config/config-paths.js";
+import { getConfigValueAtPath, parseConfigPath } from "../../config/config-paths.js";
 import { readConfigFileSnapshot } from "../../config/config.js";
-import { redactConfigObject, redactConfigSnapshot } from "../../config/redact-snapshot.js";
 import {
   getConfigOverrides,
   resetConfigOverrides,
   setConfigOverride,
   unsetConfigOverride,
 } from "../../config/runtime-overrides.js";
-import { loadGatewayRuntimeConfigSchema } from "../../config/runtime-schema.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import { resolveChannelAccountId } from "./channel-context.js";
 import {
@@ -32,20 +26,6 @@ import {
 } from "./config-mutations.js";
 import { resolveConfigWriteDeniedText } from "./config-write-authorization.js";
 import { parseDebugCommand } from "./debug-commands.js";
-
-function formatConfigSetValueLabel(params: {
-  path: string[];
-  value: unknown;
-  uiHints: ReturnType<typeof loadGatewayRuntimeConfigSchema>["uiHints"];
-}): string {
-  const previewRoot: Record<string, unknown> = {};
-  setConfigValueAtPath(previewRoot, params.path, params.value);
-  const redactedRoot = redactConfigObject(previewRoot, params.uiHints);
-  const redactedValue = getConfigValueAtPath(redactedRoot, params.path);
-  return typeof redactedValue === "string"
-    ? `"${redactedValue}"`
-    : (JSON.stringify(redactedValue) ?? "null");
-}
 
 export const handleConfigCommand: CommandHandler = async (params, allowTextCommands) => {
   if (!allowTextCommands) {
@@ -101,8 +81,8 @@ export const handleConfigCommand: CommandHandler = async (params, allowTextComma
     const deniedText = resolveConfigWriteDeniedText({
       cfg: params.cfg,
       channel: params.command.channel,
-      originChannelId: channelId,
-      originAccountId: resolveChannelAccountId({
+      channelId,
+      accountId: resolveChannelAccountId({
         cfg: params.cfg,
         ctx: params.ctx,
         command: params.command,
@@ -129,9 +109,7 @@ export const handleConfigCommand: CommandHandler = async (params, allowTextComma
       },
     };
   }
-  const schema = loadGatewayRuntimeConfigSchema();
-  const redactedSnapshot = redactConfigSnapshot(snapshot, schema.uiHints);
-  const parsedBase = structuredClone(redactedSnapshot.parsed as Record<string, unknown>);
+  const parsedBase = structuredClone(snapshot.parsed as Record<string, unknown>);
 
   if (configCommand.action === "show") {
     const pathRaw = normalizeOptionalString(configCommand.path);
@@ -193,11 +171,10 @@ export const handleConfigCommand: CommandHandler = async (params, allowTextComma
       }
       throw error;
     }
-    const valueLabel = formatConfigSetValueLabel({
-      path,
-      value: configCommand.value,
-      uiHints: schema.uiHints,
-    });
+    const valueLabel =
+      typeof configCommand.value === "string"
+        ? `"${configCommand.value}"`
+        : JSON.stringify(configCommand.value);
     return {
       shouldContinue: false,
       reply: {

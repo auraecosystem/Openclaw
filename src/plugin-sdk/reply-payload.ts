@@ -1,31 +1,18 @@
-import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
-import { normalizeStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
 import type { ReplyPayload as InternalReplyPayload } from "../auto-reply/reply-payload.js";
 import type { ChannelOutboundAdapter } from "../channels/plugins/outbound.types.js";
-import { normalizeOutboundReplyPayload as normalizeCoreOutboundReplyPayload } from "../infra/outbound/reply-payload-normalize.js";
 import { createReplyToFanout } from "../infra/outbound/reply-policy.js";
 import { hasReplyPayloadContent } from "../interactive/payload.js";
+import { normalizeLowercaseStringOrEmpty, readStringValue } from "../shared/string-coerce.js";
 
 export type { MediaPayload, MediaPayloadInput } from "../channels/plugins/media-payload.js";
 export { buildMediaPayload } from "../channels/plugins/media-payload.js";
 export type ReplyPayload = Omit<InternalReplyPayload, "trustedLocalMedia">;
-export type { ReplyPayloadTtsSupplement } from "../auto-reply/reply-payload.js";
-export {
-  buildTtsSupplementMediaPayload,
-  getReplyPayloadTtsSupplement,
-  isReplyPayloadNonTerminalToolErrorWarning,
-  isReplyPayloadTtsSupplement,
-  markReplyPayloadAsTtsSupplement,
-} from "../auto-reply/reply-payload.js";
 
 export type OutboundReplyPayload = {
   text?: string;
   mediaUrls?: string[];
   mediaUrl?: string;
   presentation?: InternalReplyPayload["presentation"];
-  /**
-   * @deprecated Use presentation. Runtime support remains for legacy producers.
-   */
   interactive?: InternalReplyPayload["interactive"];
   channelData?: InternalReplyPayload["channelData"];
   sensitiveMedia?: boolean;
@@ -54,7 +41,11 @@ type SendPayloadAdapter = Pick<
   "sendMedia" | "sendText" | "chunker" | "textChunkLimit"
 >;
 
-const REASONING_PREFIX_RE = /^(?:reasoning:|thinking\.{0,3}(?=\s*(?:>\s*)?_))/u;
+const REASONING_PREFIX = "reasoning:";
+
+function readObjectValue(value: unknown): object | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : undefined;
+}
 
 function trimLeadingMarkdownQuoteMarkers(text: string): string {
   let candidate = text.trimStart();
@@ -73,18 +64,42 @@ export function isReasoningReplyPayload(payload: ReasoningReplyPayload): boolean
     return false;
   }
   const normalized = normalizeLowercaseStringOrEmpty(text.trimStart());
-  if (REASONING_PREFIX_RE.test(normalized)) {
+  if (normalized.startsWith(REASONING_PREFIX)) {
     return true;
   }
-  const unquoted = normalizeLowercaseStringOrEmpty(trimLeadingMarkdownQuoteMarkers(text));
-  return REASONING_PREFIX_RE.test(unquoted);
+  return normalizeLowercaseStringOrEmpty(trimLeadingMarkdownQuoteMarkers(text)).startsWith(
+    REASONING_PREFIX,
+  );
 }
 
 /** Extract the supported outbound reply fields from loose tool or agent payload objects. */
 export function normalizeOutboundReplyPayload(
   payload: Record<string, unknown>,
 ): OutboundReplyPayload {
-  return normalizeCoreOutboundReplyPayload(payload);
+  const text = readStringValue(payload.text);
+  const mediaUrls = Array.isArray(payload.mediaUrls)
+    ? payload.mediaUrls.filter(
+        (entry): entry is string => typeof entry === "string" && entry.length > 0,
+      )
+    : undefined;
+  const mediaUrl = readStringValue(payload.mediaUrl);
+  const presentation = readObjectValue(
+    payload.presentation,
+  ) as OutboundReplyPayload["presentation"];
+  const interactive = readObjectValue(payload.interactive) as OutboundReplyPayload["interactive"];
+  const channelData = readObjectValue(payload.channelData) as OutboundReplyPayload["channelData"];
+  const sensitiveMedia = payload.sensitiveMedia === true ? true : undefined;
+  const replyToId = readStringValue(payload.replyToId);
+  return {
+    text,
+    mediaUrls,
+    mediaUrl,
+    presentation,
+    interactive,
+    channelData,
+    sensitiveMedia,
+    replyToId,
+  };
 }
 
 /** Wrap a deliverer so callers can hand it arbitrary payloads while channels receive normalized data. */
@@ -157,7 +172,9 @@ export function resolveSendableOutboundReplyParts(
 ): SendableOutboundReplyParts {
   const text = options?.text ?? payload.text ?? "";
   const trimmedText = text.trim();
-  const mediaUrls = normalizeStringEntries(resolveOutboundMediaUrls(payload));
+  const mediaUrls = resolveOutboundMediaUrls(payload)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
   const mediaCount = mediaUrls.length;
   const hasText = Boolean(trimmedText);
   const hasMedia = mediaCount > 0;
@@ -302,10 +319,10 @@ export async function sendTextMediaPayload(params: {
     const lastResult = await sendPayloadMediaSequence({
       text,
       mediaUrls: urls,
-      send: async ({ text: textLocal, mediaUrl }) =>
+      send: async ({ text, mediaUrl }) =>
         await params.adapter.sendMedia!({
           ...params.ctx,
-          text: textLocal,
+          text,
           mediaUrl,
           ...(audioAsVoice === undefined ? {} : { audioAsVoice }),
           replyToId: nextReplyToId(),

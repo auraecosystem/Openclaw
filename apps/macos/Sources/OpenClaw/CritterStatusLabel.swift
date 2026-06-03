@@ -10,7 +10,6 @@ struct CritterStatusLabel: View {
     var gatewayStatus: GatewayProcessManager.Status
     var animationsEnabled: Bool
     var iconState: IconState
-    var voiceWakeMeterActive: Bool = false
 
     @State var blinkAmount: CGFloat = 0
     @State var nextBlink = Date().addingTimeInterval(Double.random(in: 3.5...8.5))

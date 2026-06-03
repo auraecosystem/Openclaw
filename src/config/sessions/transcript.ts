@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { AgentMessage } from "../../agents/runtime/index.js";
-import type { SessionManager } from "../../agents/sessions/session-manager.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { redactTranscriptMessage } from "../../agents/transcript-redact.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { emitSessionTranscriptUpdate } from "../../sessions/transcript-events.js";
@@ -17,27 +17,43 @@ import { resolveAndPersistSessionFile } from "./session-file.js";
 import { loadSessionStore, resolveSessionStoreEntry } from "./store.js";
 import { parseSessionThreadInfo } from "./thread-info.js";
 import { appendSessionTranscriptMessage } from "./transcript-append.js";
-import { createSessionTranscriptHeader } from "./transcript-header.js";
-import { writeJsonlEntry } from "./transcript-jsonl.js";
 import { resolveMirroredTranscriptText } from "./transcript-mirror.js";
-import { streamSessionTranscriptLinesReverse } from "./transcript-stream.js";
 import {
-  runWithOwnedSessionTranscriptWriteLock,
-  runWithOwnedSessionTranscriptWritePublication,
-} from "./transcript-write-context.js";
+  streamSessionTranscriptLines,
+  streamSessionTranscriptLinesReverse,
+} from "./transcript-stream.js";
 import type { SessionEntry } from "./types.js";
+
+let piCodingAgentModulePromise: Promise<typeof import("@earendil-works/pi-coding-agent")> | null =
+  null;
+
+async function loadPiCodingAgentModule(): Promise<
+  typeof import("@earendil-works/pi-coding-agent")
+> {
+  piCodingAgentModulePromise ??= import("@earendil-works/pi-coding-agent");
+  return await piCodingAgentModulePromise;
+}
 
 async function ensureSessionHeader(params: {
   sessionFile: string;
   sessionId: string;
-  cwd?: string;
 }): Promise<void> {
   if (fs.existsSync(params.sessionFile)) {
     return;
   }
+  const { CURRENT_SESSION_VERSION } = await loadPiCodingAgentModule();
   await fs.promises.mkdir(path.dirname(params.sessionFile), { recursive: true });
-  const header = createSessionTranscriptHeader({ sessionId: params.sessionId, cwd: params.cwd });
-  await writeJsonlEntry(params.sessionFile, header, { mode: 0o600 });
+  const header = {
+    type: "session",
+    version: CURRENT_SESSION_VERSION,
+    id: params.sessionId,
+    timestamp: new Date().toISOString(),
+    cwd: process.cwd(),
+  };
+  await fs.promises.writeFile(params.sessionFile, `${JSON.stringify(header)}\n`, {
+    encoding: "utf-8",
+    mode: 0o600,
+  });
 }
 
 export type SessionTranscriptAppendResult =
@@ -59,24 +75,13 @@ type AssistantTranscriptText = {
 export type LatestAssistantTranscriptText = AssistantTranscriptText;
 export type TailAssistantTranscriptText = AssistantTranscriptText;
 
-function parseAssistantTranscriptText(
-  line: string,
-  options?: { excludeTranscriptOnlyOpenClawAssistant?: boolean },
-): AssistantTranscriptText | undefined {
+function parseAssistantTranscriptText(line: string): AssistantTranscriptText | undefined {
   const parsed = JSON.parse(line) as {
     id?: unknown;
     message?: unknown;
   };
-  const message = parsed.message as
-    | { role?: unknown; timestamp?: unknown; provider?: unknown; model?: unknown }
-    | undefined;
+  const message = parsed.message as { role?: unknown; timestamp?: unknown } | undefined;
   if (!message || message.role !== "assistant") {
-    return undefined;
-  }
-  if (
-    options?.excludeTranscriptOnlyOpenClawAssistant &&
-    isTranscriptOnlyOpenClawAssistantMessage(message)
-  ) {
     return undefined;
   }
   const text = extractAssistantVisibleText(message)?.trim();
@@ -90,16 +95,6 @@ function parseAssistantTranscriptText(
       ? { timestamp: message.timestamp }
       : {}),
   };
-}
-
-function isTranscriptOnlyOpenClawAssistantMessage(message: {
-  provider?: unknown;
-  model?: unknown;
-}): boolean {
-  return (
-    message.provider === "openclaw" &&
-    (message.model === "delivery-mirror" || message.model === "gateway-injected")
-  );
 }
 
 export async function resolveSessionTranscriptFile(params: {
@@ -156,9 +151,7 @@ export async function readLatestAssistantTextFromSessionTranscript(
 
   for await (const line of streamSessionTranscriptLinesReverse(sessionFile)) {
     try {
-      const assistantText = parseAssistantTranscriptText(line, {
-        excludeTranscriptOnlyOpenClawAssistant: true,
-      });
+      const assistantText = parseAssistantTranscriptText(line);
       if (assistantText) {
         return assistantText;
       }
@@ -178,16 +171,6 @@ export async function readTailAssistantTextFromSessionTranscript(
 
   for await (const line of streamSessionTranscriptLinesReverse(sessionFile)) {
     try {
-      const parsed = JSON.parse(line) as { message?: unknown };
-      // Skip non-message entries (e.g. `openclaw.cache-ttl` custom events) so
-      // a metadata line emitted after the canonical assistant turn doesn't
-      // make the tail reader fall through to "no assistant tail" and cause
-      // persistTextTurnTranscript to append a duplicate. Stop at any real
-      // message entry — a user turn means a new turn has started and a
-      // matching reply is a legitimate repeat, not a gap-fill duplicate.
-      if (!parsed.message || typeof parsed.message !== "object") {
-        continue;
-      }
       return parseAssistantTranscriptText(line);
     } catch {
       continue;
@@ -297,69 +280,80 @@ export async function appendExactAssistantMessageToSessionTranscript(params: {
     };
   }
 
-  return await runWithOwnedSessionTranscriptWriteLock(
-    { sessionFile, sessionKey: resolved.normalizedKey },
-    async () => {
-      const explicitIdempotencyKey =
-        params.idempotencyKey ??
-        ((params.message as { idempotencyKey?: unknown }).idempotencyKey as string | undefined);
-      const latestEquivalentAssistantId = isRedundantDeliveryMirror(params.message)
-        ? await findLatestEquivalentAssistantMessageId(sessionFile, params.message, params.config)
-        : undefined;
-      if (latestEquivalentAssistantId) {
-        return { ok: true, sessionFile, messageId: latestEquivalentAssistantId };
-      }
-      const message = {
-        ...params.message,
-        ...(explicitIdempotencyKey ? { idempotencyKey: explicitIdempotencyKey } : {}),
-      } as Parameters<SessionManager["appendMessage"]>[0];
-      const {
-        messageId,
-        message: appendedMessage,
-        appended,
-      } = await runWithOwnedSessionTranscriptWritePublication(
-        { sessionFile, sessionKey: resolved.normalizedKey },
-        async () => {
-          await ensureSessionHeader({
-            sessionFile,
-            sessionId: entry.sessionId,
-            cwd: entry.spawnedCwd,
-          });
-          return await appendSessionTranscriptMessage({
-            transcriptPath: sessionFile,
-            message,
-            ...(explicitIdempotencyKey ? { idempotencyLookup: "scan" } : {}),
-            config: params.config,
-          });
-        },
-      );
-      if (!appended) {
-        return { ok: true, sessionFile, messageId };
-      }
+  await ensureSessionHeader({ sessionFile, sessionId: entry.sessionId });
 
-      switch (params.updateMode ?? "inline") {
-        case "inline":
-          emitSessionTranscriptUpdate({
-            sessionFile,
-            sessionKey,
-            ...(params.agentId ? { agentId: params.agentId } : {}),
-            message: appendedMessage,
-            messageId,
-          });
-          break;
-        case "file-only":
-          emitSessionTranscriptUpdate({
-            sessionFile,
-            sessionKey,
-            ...(params.agentId ? { agentId: params.agentId } : {}),
-          });
-          break;
-        case "none":
-          break;
+  const explicitIdempotencyKey =
+    params.idempotencyKey ??
+    ((params.message as { idempotencyKey?: unknown }).idempotencyKey as string | undefined);
+  const existingMessageId = explicitIdempotencyKey
+    ? await transcriptHasIdempotencyKey(sessionFile, explicitIdempotencyKey)
+    : undefined;
+  if (existingMessageId) {
+    return {
+      ok: true,
+      sessionFile,
+      messageId: existingMessageId === true ? (explicitIdempotencyKey ?? "") : existingMessageId,
+    };
+  }
+
+  const latestEquivalentAssistantId = isRedundantDeliveryMirror(params.message)
+    ? await findLatestEquivalentAssistantMessageId(sessionFile, params.message, params.config)
+    : undefined;
+  if (latestEquivalentAssistantId) {
+    return { ok: true, sessionFile, messageId: latestEquivalentAssistantId };
+  }
+  const message = {
+    ...params.message,
+    ...(explicitIdempotencyKey ? { idempotencyKey: explicitIdempotencyKey } : {}),
+  } as Parameters<SessionManager["appendMessage"]>[0];
+  const { messageId, message: appendedMessage } = await appendSessionTranscriptMessage({
+    transcriptPath: sessionFile,
+    message,
+    config: params.config,
+  });
+
+  switch (params.updateMode ?? "inline") {
+    case "inline":
+      emitSessionTranscriptUpdate({ sessionFile, sessionKey, message: appendedMessage, messageId });
+      break;
+    case "file-only":
+      emitSessionTranscriptUpdate({ sessionFile, sessionKey });
+      break;
+    case "none":
+      break;
+  }
+  return { ok: true, sessionFile, messageId };
+}
+
+async function transcriptHasIdempotencyKey(
+  transcriptPath: string,
+  idempotencyKey: string,
+): Promise<string | true | undefined> {
+  try {
+    for await (const line of streamSessionTranscriptLines(transcriptPath)) {
+      try {
+        const parsed = JSON.parse(line) as {
+          id?: unknown;
+          message?: { idempotencyKey?: unknown };
+        };
+        if (
+          parsed.message?.idempotencyKey === idempotencyKey &&
+          typeof parsed.id === "string" &&
+          parsed.id
+        ) {
+          return parsed.id;
+        }
+        if (parsed.message?.idempotencyKey === idempotencyKey) {
+          return true;
+        }
+      } catch {
+        continue;
       }
-      return { ok: true, sessionFile, messageId };
-    },
-  );
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
 }
 
 function isRedundantDeliveryMirror(message: SessionTranscriptAssistantMessage): boolean {

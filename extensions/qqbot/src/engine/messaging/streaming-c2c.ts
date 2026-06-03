@@ -79,7 +79,7 @@ class FlushController {
   private pendingFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private lastUpdateTime = 0;
   private isCompleted = false;
-  private isReady = false;
+  private _ready = false;
 
   constructor(doFlush: () => Promise<void>) {
     this.doFlush = doFlush;
@@ -103,9 +103,7 @@ class FlushController {
     if (!this.flushInProgress) {
       return Promise.resolve();
     }
-    return new Promise<void>((resolve) => {
-      this.flushResolvers.push(resolve);
-    });
+    return new Promise<void>((resolve) => this.flushResolvers.push(resolve));
   }
 
   /** 取消所有 pending timer + 等待正在执行的 flush 完成，确保 flush 活动彻底停止 */
@@ -120,14 +118,14 @@ class FlushController {
 
   /** 标记流式会话就绪（首次 API 调用成功后） */
   setReady(ready: boolean): void {
-    this.isReady = ready;
+    this._ready = ready;
     if (ready) {
       this.lastUpdateTime = Date.now();
     }
   }
 
   get ready(): boolean {
-    return this.isReady;
+    return this._ready;
   }
 
   /** 重置为初始状态（用于流式会话恢复） */
@@ -139,12 +137,12 @@ class FlushController {
     this.needsReflush = false;
     this.lastUpdateTime = 0;
     this.isCompleted = false;
-    this.isReady = false;
+    this._ready = false;
   }
 
   /** 执行一次 flush（互斥锁 + 冲突时 reflush） */
   async flush(): Promise<void> {
-    if (!this.isReady || this.flushInProgress || this.isCompleted) {
+    if (!this._ready || this.flushInProgress || this.isCompleted) {
       if (this.flushInProgress && !this.isCompleted) {
         this.needsReflush = true;
       }
@@ -179,7 +177,7 @@ class FlushController {
 
   /** 节流入口：根据 throttleMs 控制 flush 频率 */
   async throttledUpdate(throttleMs: number): Promise<void> {
-    if (!this.isReady) {
+    if (!this._ready) {
       return;
     }
 
@@ -275,7 +273,7 @@ export class StreamingController {
    * 后续回调传入的 text 都会自动加上此前缀来还原完整文本。
    * 为 null 表示当前没有发生过边界拼接。
    */
-  private boundaryPrefix: string | null = null;
+  private _boundaryPrefix: string | null = null;
   /**
    * 在 lastNormalizedFull 中已经"消费"到的位置。
    * "消费"包括：已通过流式发送并终结的文本段、已处理的媒体标签。
@@ -294,7 +292,7 @@ export class StreamingController {
 
   // ---- 串行队列：确保 onPartialReply / onIdle 严格按序执行 ----
   /** Promise 链，回调的实际逻辑都挂到链尾，保证串行 */
-  private callbackChain: Promise<void> = Promise.resolve();
+  private _callbackChain: Promise<void> = Promise.resolve();
 
   // ---- 互斥：首个到达的回调锁定控制权 ----
   /**
@@ -478,19 +476,19 @@ export class StreamingController {
     }
 
     // 将实际逻辑挂到 Promise 链尾部，保证串行执行
-    this.callbackChain = this.callbackChain.then(
-      () => this.handlePartialReply(payload),
-      (err: unknown) => {
+    this._callbackChain = this._callbackChain.then(
+      () => this._doPartialReply(payload),
+      (err) => {
         // 上一次如果异常，不阻塞后续调用
         this.logError(`onPartialReply chain error: ${formatStreamErr(err)}`);
-        return this.handlePartialReply(payload);
+        return this._doPartialReply(payload);
       },
     );
-    return this.callbackChain;
+    return this._callbackChain;
   }
 
-  /** onPartialReply 的实际逻辑（由 callbackChain 保证串行调用） */
-  private async handlePartialReply(payload: { text?: string }): Promise<void> {
+  /** onPartialReply 的实际逻辑（由 _callbackChain 保证串行调用） */
+  private async _doPartialReply(payload: { text?: string }): Promise<void> {
     this.logDebug(
       `onPartialReply: rawLen=${payload.text?.length ?? 0}, phase=${this.phase}, streamMsgId=${this.streamMsgId}, sentIndex=${this.sentIndex}, firstCB=${this.firstCallbackSource}`,
     );
@@ -506,7 +504,7 @@ export class StreamingController {
     }
 
     // ★ 如果之前已发生过边界拼接，将前缀加上还原完整文本
-    const fullText = this.boundaryPrefix !== null ? this.boundaryPrefix + text : text;
+    const fullText = this._boundaryPrefix !== null ? this._boundaryPrefix + text : text;
 
     // ★ 回复边界检测：用原始文本做前缀比较，避免 normalizeMediaTags 对未闭合标签
     //   的不稳定处理导致误判（normalize 后的文本在 partial reply 的不同阶段可能产生
@@ -518,8 +516,8 @@ export class StreamingController {
       );
 
       // 记住拼接前缀：之前的全部内容 + "\n\n"，后续回调的 text 都会自动加上此前缀
-      this.boundaryPrefix = this.lastRawFull + "\n\n";
-      const merged = this.boundaryPrefix + text;
+      this._boundaryPrefix = this.lastRawFull + "\n\n";
+      const merged = this._boundaryPrefix + text;
       this.lastRawFull = merged;
       this.lastNormalizedFull = normalizeMediaTags(merged);
 
@@ -569,7 +567,7 @@ export class StreamingController {
   /**
    * 处理 onIdle 回调（分发完成时调用）
    *
-   * ★ 挂到 callbackChain 上，保证在所有 onPartialReply 执行完之后才执行。
+   * ★ 挂到 _callbackChain 上，保证在所有 onPartialReply 执行完之后才执行。
    *
    * onIdle 会传入最终的全量文本。如果该文本**包含**之前存储的 lastNormalizedFull，
    * 说明一致，继续处理剩余内容；否则忽略（防止 onIdle 修改文本导致的不一致）。
@@ -584,18 +582,18 @@ export class StreamingController {
     }
 
     // 挂到串行队列尾部，等所有 onPartialReply 执行完再处理
-    this.callbackChain = this.callbackChain.then(
-      () => this.handleIdle(payload),
-      (err: unknown) => {
+    this._callbackChain = this._callbackChain.then(
+      () => this._doIdle(payload),
+      (err) => {
         this.logError(`onIdle chain error: ${formatStreamErr(err)}`);
-        return this.handleIdle(payload);
+        return this._doIdle(payload);
       },
     );
-    return this.callbackChain;
+    return this._callbackChain;
   }
 
-  /** onIdle 的实际逻辑（由 callbackChain 保证在 onPartialReply 之后执行） */
-  private async handleIdle(payload?: { text?: string }): Promise<void> {
+  /** onIdle 的实际逻辑（由 _callbackChain 保证在 onPartialReply 之后执行） */
+  private async _doIdle(payload?: { text?: string }): Promise<void> {
     this.logDebug(
       `onIdle: dispatchFullyComplete=${this.dispatchFullyComplete}, phase=${this.phase}, streamChunks=${this.sentStreamChunkCount}, mediaCount=${this.sentMediaCount}, sentIndex=${this.sentIndex}`,
     );
@@ -908,10 +906,10 @@ export class StreamingController {
       }
     } else if (safeText && safeText.trim()) {
       // 没有活跃流式会话，但有非空白文本未发送 → 启动流式 → 立即终结
-      // 先临时存储到 pendingSessionText 以便 doStartStreaming 使用
-      this.pendingSessionText = safeText;
+      // 先临时存储到 _pendingSessionText 以便 doStartStreaming 使用
+      this._pendingSessionText = safeText;
       await this.ensureStreamingStarted(textEndInFull);
-      this.pendingSessionText = null;
+      this._pendingSessionText = null;
       if (this.isTerminalPhase) {
         return;
       }
@@ -931,7 +929,7 @@ export class StreamingController {
   }
 
   /** 临时存储 endCurrentStreamIfNeeded 需要立即发送的文本（用于 doStartStreaming） */
-  private pendingSessionText: string | null = null;
+  private _pendingSessionText: string | null = null;
 
   /**
    * 重置流式会话状态（用于媒体中断后恢复）
@@ -985,10 +983,10 @@ export class StreamingController {
   private async doStartStreaming(textEndInFull: number): Promise<void> {
     try {
       // 计算当前会话要发送的文本
-      // 优先使用 pendingSessionText（endCurrentStreamIfNeeded 需要立即发送的文本）
+      // 优先使用 _pendingSessionText（endCurrentStreamIfNeeded 需要立即发送的文本）
       // 否则使用调用处预先确定的 sentIndex → textEndInFull 范围
       const sessionText =
-        this.pendingSessionText ?? this.lastNormalizedFull.slice(this.sentIndex, textEndInFull);
+        this._pendingSessionText ?? this.lastNormalizedFull.slice(this.sentIndex, textEndInFull);
       const [safeText] = stripIncompleteMediaTag(sessionText);
 
       // 全空白文本 → 不开启流式，退回 idle

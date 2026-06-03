@@ -1,8 +1,3 @@
-import {
-  resolveIntegerOption,
-  resolveNonNegativeIntegerOption,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH } from "../config/agent-limits.js";
 import { loadSessionStore, resolveStorePath } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -11,6 +6,7 @@ import {
   isSubagentSessionKey,
   parseAgentSessionKey,
 } from "../routing/session-key.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import {
   normalizeInheritedToolAllowlist,
   normalizeInheritedToolDenylist,
@@ -149,12 +145,11 @@ function resolveSubagentRoleForDepth(params: {
   depth: number;
   maxSpawnDepth?: number;
 }): SubagentSessionRole {
-  const depth = resolveNonNegativeIntegerOption(params.depth, 0);
-  const maxSpawnDepth = resolveIntegerOption(
-    params.maxSpawnDepth,
-    DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH,
-    { min: 1 },
-  );
+  const depth = Number.isInteger(params.depth) ? Math.max(0, params.depth) : 0;
+  const maxSpawnDepth =
+    typeof params.maxSpawnDepth === "number" && Number.isFinite(params.maxSpawnDepth)
+      ? Math.max(1, Math.floor(params.maxSpawnDepth))
+      : DEFAULT_SUBAGENT_MAX_SPAWN_DEPTH;
   if (depth <= 0) {
     return "main";
   }
@@ -166,11 +161,10 @@ function resolveSubagentControlScopeForRole(role: SubagentSessionRole): Subagent
 }
 
 export function resolveSubagentCapabilities(params: { depth: number; maxSpawnDepth?: number }) {
-  const depth = resolveNonNegativeIntegerOption(params.depth, 0);
   const role = resolveSubagentRoleForDepth(params);
   const controlScope = resolveSubagentControlScopeForRole(role);
   return {
-    depth,
+    depth: Math.max(0, Math.floor(params.depth)),
     role,
     controlScope,
     canSpawn: role === "main" || role === "orchestrator",

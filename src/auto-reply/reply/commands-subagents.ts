@@ -21,10 +21,19 @@ const actionHelpLoader = createLazyImportLoader(
 const actionInfoLoader = createLazyImportLoader(
   () => import("./commands-subagents/action-info.js"),
 );
+const actionKillLoader = createLazyImportLoader(
+  () => import("./commands-subagents/action-kill.js"),
+);
 const actionListLoader = createLazyImportLoader(
   () => import("./commands-subagents/action-list.js"),
 );
 const actionLogLoader = createLazyImportLoader(() => import("./commands-subagents/action-log.js"));
+const actionSendLoader = createLazyImportLoader(
+  () => import("./commands-subagents/action-send.js"),
+);
+const actionSpawnLoader = createLazyImportLoader(
+  () => import("./commands-subagents/action-spawn.js"),
+);
 const actionUnfocusLoader = createLazyImportLoader(
   () => import("./commands-subagents/action-unfocus.js"),
 );
@@ -48,12 +57,24 @@ function loadInfoAction() {
   return actionInfoLoader.load();
 }
 
+function loadKillAction() {
+  return actionKillLoader.load();
+}
+
 function loadListAction() {
   return actionListLoader.load();
 }
 
 function loadLogAction() {
   return actionLogLoader.load();
+}
+
+function loadSendAction() {
+  return actionSendLoader.load();
+}
+
+function loadSpawnAction() {
+  return actionSpawnLoader.load();
 }
 
 function loadUnfocusAction() {
@@ -89,7 +110,12 @@ export const handleSubagentsCommand: CommandHandler = async (params, allowTextCo
     return (await loadHelpAction()).handleSubagentsHelpAction();
   }
 
-  const requesterKey = resolveRequesterSessionKey(params);
+  const requesterKey =
+    action === "spawn"
+      ? resolveRequesterSessionKey(params, {
+          preferCommandTarget: true,
+        })
+      : resolveRequesterSessionKey(params);
   if (!requesterKey) {
     return stopWithText("⚠️ Missing session key.");
   }
@@ -113,10 +139,18 @@ export const handleSubagentsCommand: CommandHandler = async (params, allowTextCo
       return await (await loadUnfocusAction()).handleSubagentsUnfocusAction(ctx);
     case "list":
       return (await loadListAction()).handleSubagentsListAction(ctx);
+    case "kill":
+      return await (await loadKillAction()).handleSubagentsKillAction(ctx);
     case "info":
       return (await loadInfoAction()).handleSubagentsInfoAction(ctx);
     case "log":
       return await (await loadLogAction()).handleSubagentsLogAction(ctx);
+    case "send":
+      return await (await loadSendAction()).handleSubagentsSendAction(ctx, false);
+    case "steer":
+      return await (await loadSendAction()).handleSubagentsSendAction(ctx, true);
+    case "spawn":
+      return await (await loadSpawnAction()).handleSubagentsSpawnAction(ctx);
     default:
       return (await loadHelpAction()).handleSubagentsHelpAction();
   }

@@ -81,6 +81,8 @@ describe("registerSlackChannelEvents", () => {
     expect(enqueueSystemEventMock).toHaveBeenCalledWith("Slack channel created: #general.", {
       sessionKey: "agent:main:main",
       contextKey: "slack:channel:created:C1",
+      forceSenderIsOwnerFalse: true,
+      trusted: false,
     });
   });
 });

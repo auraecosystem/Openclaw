@@ -1,6 +1,5 @@
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { pruneMapToMaxSize } from "./map-size.js";
-import { resolveNonNegativeIntegerOption } from "./numeric-options.js";
 
 export type DedupeCache = {
   check: (key: string | undefined | null, now?: number) => boolean;
@@ -15,12 +14,9 @@ export type DedupeCacheOptions = {
   maxSize: number;
 };
 
-/** @deprecated Use resolveNonNegativeIntegerOption for new internal numeric option normalization. */
-export { resolveNonNegativeIntegerOption as resolveDedupeNonNegativeInteger };
-
 export function createDedupeCache(options: DedupeCacheOptions): DedupeCache {
-  const ttlMs = resolveNonNegativeIntegerOption(options.ttlMs, 0);
-  const maxSize = resolveNonNegativeIntegerOption(options.maxSize, 0);
+  const ttlMs = Math.max(0, options.ttlMs);
+  const maxSize = Math.max(0, Math.floor(options.maxSize));
   const cache = new Map<string, number>();
 
   const touch = (key: string, now: number) => {

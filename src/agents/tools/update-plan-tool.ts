@@ -11,22 +11,22 @@ const PLAN_STEP_STATUSES = ["pending", "in_progress", "completed"] as const;
 const UpdatePlanToolSchema = Type.Object({
   explanation: Type.Optional(
     Type.String({
-      description: "Short note: what changed.",
+      description: "Optional short note explaining what changed in the plan.",
     }),
   ),
   plan: Type.Array(
     Type.Object(
       {
-        step: Type.String({ description: "Short step." }),
+        step: Type.String({ description: "Short plan step." }),
         status: stringEnum(PLAN_STEP_STATUSES, {
-          description: "pending | in_progress | completed.",
+          description: 'One of "pending", "in_progress", or "completed".',
         }),
       },
       { additionalProperties: true },
     ),
     {
       minItems: 1,
-      description: "Ordered steps; max one in_progress.",
+      description: "Ordered list of plan steps. At most one step may be in_progress.",
     },
   ),
 });

@@ -115,9 +115,6 @@ export async function resolveSlackChannelType(params: {
   return (await resolveSlackConversationInfo(params)).type;
 }
 
-export function resetSlackChannelTypeCacheForTest(): void {
+export function __resetSlackChannelTypeCacheForTest(): void {
   SLACK_CONVERSATION_INFO_CACHE.clear();
 }
-
-/** @deprecated Use `resetSlackChannelTypeCacheForTest`. */
-export { resetSlackChannelTypeCacheForTest as __resetSlackChannelTypeCacheForTest };

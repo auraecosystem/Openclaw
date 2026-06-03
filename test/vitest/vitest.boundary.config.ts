@@ -24,7 +24,7 @@ export function createBoundaryVitestConfig(
       isolate,
       ...(isolate ? { runner: undefined } : { runner: nonIsolatedRunnerPath }),
       include: loadBoundaryIncludePatternsFromEnv(env) ?? cliIncludePatterns ?? boundaryTestFiles,
-      ...(cliIncludePatterns?.length === 0 ? { passWithNoTests: true } : {}),
+      ...(cliIncludePatterns !== null ? { passWithNoTests: true } : {}),
       // Boundary workers still need the shared isolated HOME/bootstrap. Only
       // per-file module isolation is disabled here.
       setupFiles: sharedVitestConfig.test.setupFiles,

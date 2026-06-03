@@ -50,7 +50,6 @@ import googlePlugin from "./google/index.js";
 import minimaxPlugin from "./minimax/index.js";
 import openaiPlugin from "./openai/index.js";
 import openrouterPlugin from "./openrouter/index.js";
-import pixversePlugin from "./pixverse/index.js";
 import qwenPlugin from "./qwen/index.js";
 import runwayPlugin from "./runway/index.js";
 import { maybeLoadShellEnvForGenerationProviders } from "./test-support/generation-live-test-helpers.js";
@@ -127,12 +126,6 @@ const CASES: LiveProviderCase[] = [
     pluginId: "openrouter",
     pluginName: "OpenRouter Provider",
     providerId: "openrouter",
-  },
-  {
-    plugin: pixversePlugin,
-    pluginId: "pixverse",
-    pluginName: "PixVerse Provider",
-    providerId: "pixverse",
   },
   { plugin: qwenPlugin, pluginId: "qwen", pluginName: "Qwen Provider", providerId: "qwen" },
   { plugin: runwayPlugin, pluginId: "runway", pluginName: "Runway Provider", providerId: "runway" },
@@ -231,11 +224,11 @@ function buildLiveCapabilityOverrides(params: {
 }): Pick<VideoGenerationRequest, "size" | "aspectRatio" | "resolution" | "audio" | "watermark"> {
   const { caps, liveResolution, liveSize } = params;
   return {
-    ...(caps?.supportsSize && liveSize ? { size: liveSize } : undefined),
-    ...(caps?.supportsAspectRatio ? { aspectRatio: "16:9" } : undefined),
-    ...(caps?.supportsResolution ? { resolution: liveResolution } : undefined),
-    ...(caps?.supportsAudio ? { audio: false } : undefined),
-    ...(caps?.supportsWatermark ? { watermark: false } : undefined),
+    ...(caps?.supportsSize && liveSize ? { size: liveSize } : {}),
+    ...(caps?.supportsAspectRatio ? { aspectRatio: "16:9" } : {}),
+    ...(caps?.supportsResolution ? { resolution: liveResolution } : {}),
+    ...(caps?.supportsAudio ? { audio: false } : {}),
+    ...(caps?.supportsWatermark ? { watermark: false } : {}),
   };
 }
 
@@ -401,7 +394,7 @@ async function runLiveVideoProviderCase(testCase: LiveProviderCase): Promise<voi
     requireProfileKeys: REQUIRE_PROFILE_KEYS,
     hasLiveKeys,
   });
-  let authLabel;
+  let authLabel = "unresolved";
   try {
     const auth = await resolveApiKeyForProvider({
       provider: testCase.providerId,
@@ -436,6 +429,7 @@ async function runLiveVideoProviderCase(testCase: LiveProviderCase): Promise<voi
   });
   const liveSize = testCase.providerId === "openai" ? "1280x720" : undefined;
   const logPrefix = `[live:video-generation] provider=${testCase.providerId} model=${providerModel}`;
+  let generatedVideo: LiveGeneratedVideo | null = null;
 
   const generateAttempt = await runLiveVideoAttempt({
     authLabel,
@@ -463,7 +457,7 @@ async function runLiveVideoProviderCase(testCase: LiveProviderCase): Promise<voi
     expectLiveVideoCasePassed(summaryParams);
     return;
   }
-  const generatedVideo = generateAttempt.video;
+  generatedVideo = generateAttempt.video;
 
   if (!RUN_FULL_VIDEO_MODES) {
     expectLiveVideoCasePassed(summaryParams);

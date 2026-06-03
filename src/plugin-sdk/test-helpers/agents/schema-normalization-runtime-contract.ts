@@ -56,8 +56,8 @@ export function createNativeOpenAICodexResponsesModel() {
   return {
     id: "gpt-5.4",
     name: "GPT-5.4",
-    api: "openai-chatgpt-responses",
-    provider: "openai",
+    api: "openai-codex-responses",
+    provider: "openai-codex",
     baseUrl: "https://chatgpt.com/backend-api",
     reasoning: true,
     input: ["text"],

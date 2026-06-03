@@ -1,5 +1,4 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
 import { ensureAuthProfileStore } from "./auth-profiles/store.js";
 import { normalizeConfiguredProviderCatalogModelId } from "./model-ref-shared.js";
 import {
@@ -20,9 +19,6 @@ type ModelsConfig = NonNullable<OpenClawConfig["models"]>;
 type ProviderModelConfig = NonNullable<
   NonNullable<ModelsConfig["providers"]>[string]["models"]
 >[number];
-type ProviderModelNormalizationOptions = {
-  manifestPlugins?: readonly Pick<PluginManifestRecord, "modelIdNormalization">[];
-};
 
 function getProviderModelId(model: ProviderModelConfig): string | undefined {
   return typeof model.id === "string" && model.id.trim() ? model.id : undefined;
@@ -49,7 +45,6 @@ function mergeNormalizedProviderModel(
 function normalizeProviderModelsForConfig(
   providerKey: string,
   provider: ProviderConfig,
-  options: ProviderModelNormalizationOptions = {},
 ): { provider: ProviderConfig; mutated: boolean } {
   if (!Array.isArray(provider.models) || provider.models.length === 0) {
     return { provider, mutated: false };
@@ -61,9 +56,7 @@ function normalizeProviderModelsForConfig(
   for (const model of provider.models) {
     const rawId = getProviderModelId(model);
     const normalizedId = rawId
-      ? normalizeConfiguredProviderCatalogModelId(providerKey, rawId, {
-          manifestPlugins: options.manifestPlugins,
-        })
+      ? normalizeConfiguredProviderCatalogModelId(providerKey, rawId)
       : rawId;
     const normalizedModel =
       normalizedId && normalizedId !== rawId ? { ...model, id: normalizedId } : model;
@@ -93,7 +86,6 @@ function normalizeProviderModelsForConfig(
 
 export function normalizeProviderCatalogModelsForConfig(
   providers: ModelsConfig["providers"],
-  options: ProviderModelNormalizationOptions = {},
 ): ModelsConfig["providers"] {
   if (!providers) {
     return providers;
@@ -102,7 +94,7 @@ export function normalizeProviderCatalogModelsForConfig(
   let mutated = false;
   const next: Record<string, ProviderConfig> = {};
   for (const [providerKey, provider] of Object.entries(providers)) {
-    const normalized = normalizeProviderModelsForConfig(providerKey, provider, options);
+    const normalized = normalizeProviderModelsForConfig(providerKey, provider);
     if (normalized.mutated) {
       mutated = true;
     }
@@ -120,7 +112,6 @@ export function normalizeProviders(params: {
   sourceProviders?: ModelsConfig["providers"];
   sourceSecretDefaults?: SecretDefaults;
   secretRefManagedProviders?: Set<string>;
-  manifestPlugins?: ProviderModelNormalizationOptions["manifestPlugins"];
 }): ModelsConfig["providers"] {
   const { providers } = params;
   if (!providers) {
@@ -222,9 +213,6 @@ export function normalizeProviders(params: {
     const providerWithNormalizedModels = normalizeProviderModelsForConfig(
       normalizedKey,
       normalizedProvider,
-      {
-        manifestPlugins: params.manifestPlugins,
-      },
     );
     if (providerWithNormalizedModels.mutated) {
       mutated = true;

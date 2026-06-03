@@ -1,5 +1,5 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { loadCronJobsStore, resolveCronJobsStorePath } from "../../cron/store.js";
+import { loadCronStore, resolveCronStorePath } from "../../cron/store.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import type { ReplyPayload } from "../types.js";
 
 const UNSCHEDULED_REMINDER_NOTE =
@@ -31,8 +31,8 @@ export async function hasSessionRelatedCronJobs(params: {
   sessionKey?: string;
 }): Promise<boolean> {
   try {
-    const storePath = resolveCronJobsStorePath(params.cronStorePath);
-    const store = await loadCronJobsStore(storePath);
+    const storePath = resolveCronStorePath(params.cronStorePath);
+    const store = await loadCronStore(storePath);
     if (store.jobs.length === 0) {
       return false;
     }

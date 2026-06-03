@@ -59,7 +59,7 @@ export type {
   UnifiedModelCatalogEntry,
   UnifiedModelCatalogKind,
   UnifiedModelCatalogSource,
-} from "@openclaw/model-catalog-core/model-catalog-types";
+} from "../model-catalog/types.js";
 export type { ProviderRuntimeModel } from "../plugins/provider-runtime-model.types.js";
 export type { ResolvedProviderRuntimeAuth } from "../plugins/runtime/model-auth-types.js";
 export type {
@@ -120,11 +120,8 @@ export type {
   BootstrapResult,
   CompactResult,
   ContextEngine,
-  ContextEngineHostCapability,
-  ContextEngineHostRequirements,
   ContextEngineInfo,
   ContextEngineMaintenanceResult,
-  ContextEngineOperation,
   ContextEngineRuntimeContext,
   IngestBatchResult,
   IngestResult,
@@ -137,7 +134,6 @@ export type {
 
 export { emptyPluginConfigSchema } from "../plugins/config-schema.js";
 export { registerContextEngine } from "../context-engine/registry.js";
-export { assertContextEngineHostSupport } from "../context-engine/host-compat.js";
 export {
   buildMemorySystemPromptAddition,
   delegateCompactionToRuntime,

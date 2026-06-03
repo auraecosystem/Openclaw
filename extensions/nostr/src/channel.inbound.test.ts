@@ -1,5 +1,5 @@
 import { createStartAccountContext } from "openclaw/plugin-sdk/channel-test-helpers";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginRuntime } from "../runtime-api.js";
 import { startNostrGatewayAccount } from "./gateway.js";
 import { setNostrRuntime } from "./runtime.js";
@@ -24,10 +24,6 @@ vi.mock("./nostr-key-utils.js", () => ({
   getPublicKeyFromPrivate: vi.fn(() => "bot-pubkey"),
   normalizePubkey: mocks.normalizePubkey,
 }));
-
-beforeAll(async () => {
-  await import("./inbound-direct-dm-runtime.js");
-});
 
 function createMockBus() {
   return {
@@ -94,24 +90,13 @@ async function startGatewayHarness(params: {
   const bus = createMockBus();
   setNostrRuntime(harness.runtime);
   mocks.startNostrBus.mockResolvedValueOnce(bus as never);
-  const abort = new AbortController();
 
-  const task = startNostrGatewayAccount(
+  const cleanup = (await startNostrGatewayAccount(
     createStartAccountContext({
       account: params.account,
       cfg: params.cfg,
-      abortSignal: abort.signal,
     }),
-  );
-  await vi.waitFor(() => {
-    expect(mocks.startNostrBus).toHaveBeenCalledTimes(1);
-  });
-  const cleanup = {
-    stop: async () => {
-      abort.abort();
-      await task;
-    },
-  };
+  )) as { stop: () => void };
 
   return { harness, bus, cleanup };
 }
@@ -154,7 +139,7 @@ describe("nostr inbound gateway path", () => {
     expect(sendPairingReply).toHaveBeenCalledTimes(1);
     expect(mockCallArg(sendPairingReply)).toContain("Pairing code:");
 
-    await cleanup.stop();
+    cleanup.stop();
   });
 
   it("routes allowed DMs through the standard reply pipeline", async () => {
@@ -197,6 +182,6 @@ describe("nostr inbound gateway path", () => {
     expect(ctx?.CommandAuthorized).toBe(true);
     expect(sendReply).toHaveBeenCalledWith("converted:|a|b|");
 
-    await cleanup.stop();
+    cleanup.stop();
   });
 });

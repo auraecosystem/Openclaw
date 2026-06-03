@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const transcodeAudioBufferToOpusMock = vi.hoisted(() => vi.fn());
 
@@ -71,24 +71,6 @@ describe("buildMinimaxSpeechProvider", () => {
     const savedEnv = { ...process.env };
     let tempStateDir: string;
     let tempAgentDir: string;
-    let tokenPlanEnvConfigured = false;
-
-    beforeAll(() => {
-      const previous = process.env.MINIMAX_CODING_API_KEY;
-      try {
-        process.env.MINIMAX_CODING_API_KEY = "sk-cp-env";
-        tokenPlanEnvConfigured = provider.isConfigured({
-          providerConfig: {},
-          timeoutMs: 30000,
-        });
-      } finally {
-        if (previous === undefined) {
-          delete process.env.MINIMAX_CODING_API_KEY;
-        } else {
-          process.env.MINIMAX_CODING_API_KEY = previous;
-        }
-      }
-    });
 
     beforeEach(async () => {
       tempStateDir = await mkdtemp(path.join(tmpdir(), "openclaw-minimax-tts-auth-"));
@@ -120,7 +102,8 @@ describe("buildMinimaxSpeechProvider", () => {
     });
 
     it("returns true when a MiniMax Token Plan env var is set", () => {
-      expect(tokenPlanEnvConfigured).toBe(true);
+      process.env.MINIMAX_CODING_API_KEY = "sk-cp-env";
+      expect(provider.isConfigured({ providerConfig: {}, timeoutMs: 30000 })).toBe(true);
     });
 
     it("returns true when a MiniMax portal auth profile is available", async () => {
@@ -168,7 +151,7 @@ describe("buildMinimaxSpeechProvider", () => {
               model: "speech-01-240228",
               voiceId: "Chinese (Mandarin)_Warm_Girl",
               speed: 1.5,
-              vol: 2,
+              vol: 2.0,
               pitch: 3,
             },
           },
@@ -180,7 +163,7 @@ describe("buildMinimaxSpeechProvider", () => {
       expect(config.model).toBe("speech-01-240228");
       expect(config.voiceId).toBe("Chinese (Mandarin)_Warm_Girl");
       expect(config.speed).toBe(1.5);
-      expect(config.vol).toBe(2);
+      expect(config.vol).toBe(2.0);
       expect(config.pitch).toBe(3);
     });
 
@@ -262,13 +245,6 @@ describe("buildMinimaxSpeechProvider", () => {
       expect(result.overrides).toBeUndefined();
     });
 
-    it("warns on non-decimal speed values", () => {
-      const result = parseDirectiveToken({ key: "speed", value: "0x1", policy });
-      expect(result.handled).toBe(true);
-      expect(result.warnings).toHaveLength(1);
-      expect(result.overrides).toBeUndefined();
-    });
-
     it("handles vol key", () => {
       const result = parseDirectiveToken({ key: "vol", value: "3", policy });
       expect(result.handled).toBe(true);
@@ -279,13 +255,6 @@ describe("buildMinimaxSpeechProvider", () => {
       const result = parseDirectiveToken({ key: "vol", value: "0", policy });
       expect(result.handled).toBe(true);
       expect(result.warnings).toHaveLength(1);
-    });
-
-    it("warns on non-decimal volume values", () => {
-      const result = parseDirectiveToken({ key: "vol", value: "0x3", policy });
-      expect(result.handled).toBe(true);
-      expect(result.warnings).toHaveLength(1);
-      expect(result.overrides).toBeUndefined();
     });
 
     it("handles volume alias", () => {
@@ -304,13 +273,6 @@ describe("buildMinimaxSpeechProvider", () => {
       const result = parseDirectiveToken({ key: "pitch", value: "20", policy });
       expect(result.handled).toBe(true);
       expect(result.warnings).toHaveLength(1);
-    });
-
-    it("warns on non-decimal pitch values", () => {
-      const result = parseDirectiveToken({ key: "pitch", value: "0x3", policy });
-      expect(result.handled).toBe(true);
-      expect(result.warnings).toHaveLength(1);
-      expect(result.overrides).toBeUndefined();
     });
 
     it("returns handled=false for unknown keys", () => {
@@ -484,32 +446,6 @@ describe("buildMinimaxSpeechProvider", () => {
       expect(voiceSetting.voice_id).toBe("custom_voice");
       expect(voiceSetting.speed).toBe(1.5);
       expect(voiceSetting.vol).toBe(1.5);
-      expect(voiceSetting.pitch).toBe(0);
-    });
-
-    it("drops malformed voice settings before synthesis", async () => {
-      const hexAudio = Buffer.from("audio").toString("hex");
-      const mockFetch = vi.mocked(globalThis.fetch);
-      mockFetch.mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { audio: hexAudio } }), { status: 200 }),
-      );
-
-      await provider.synthesize({
-        text: "Test",
-        cfg: {} as never,
-        providerConfig: {
-          apiKey: "sk-test",
-          speed: 3,
-          vol: -1,
-          pitch: 20,
-        },
-        target: "audio-file",
-        timeoutMs: 30000,
-      });
-
-      const voiceSetting = firstFetchBody().voice_setting as Record<string, unknown>;
-      expect(voiceSetting.speed).toBe(1);
-      expect(voiceSetting.vol).toBe(1);
       expect(voiceSetting.pitch).toBe(0);
     });
 

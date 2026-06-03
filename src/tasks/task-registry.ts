@@ -1,11 +1,5 @@
 import crypto from "node:crypto";
 import { createRequire } from "node:module";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import {
-  buildAgentRunTerminalOutcome,
-  type AgentRunTerminalOutcome,
-} from "../agents/agent-run-terminal-outcome.js";
 import { shouldRouteCompletionThroughRequesterSession } from "../auto-reply/reply/completion-delivery-policy.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { onAgentEvent } from "../infra/agent-events.js";
@@ -14,9 +8,9 @@ import { requestHeartbeat } from "../infra/heartbeat-wake.js";
 import { enqueueSystemEvent } from "../infra/system-events.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { normalizeDeliveryContext } from "../utils/delivery-context.shared.js";
 import { isDeliverableMessageChannel } from "../utils/message-channel.js";
-import { isChildlessCodexNativeSubagentTask } from "./codex-native-subagent-task.js";
 import {
   formatTaskBlockedFollowupMessage,
   formatTaskStateChangeMessage,
@@ -30,11 +24,10 @@ import {
 import type { TaskFlowRecord } from "./task-flow-registry.types.js";
 import {
   getTaskFlowById,
-  syncFlowFromTaskResult,
+  syncFlowFromTask,
   updateFlowRecordByIdExpectedRevision,
 } from "./task-flow-runtime-internal.js";
 import type { TaskRegistryControlRuntime } from "./task-registry-control.types.js";
-import { getTaskRegistryProcessState } from "./task-registry.process-state.js";
 import {
   getTaskRegistryObservers,
   getTaskRegistryStore,
@@ -56,23 +49,20 @@ import type {
   TaskStatus,
   TaskTerminalOutcome,
 } from "./task-registry.types.js";
-import { resolveTaskCleanupAfter } from "./task-retention.js";
 
 const log = createSubsystemLogger("tasks/registry");
-const TASK_FLOW_SYNC_RETRY_DELAYS_MS = [1_000, 5_000, 25_000, 120_000, 600_000] as const;
+const DEFAULT_TASK_RETENTION_MS = 7 * 24 * 60 * 60_000;
 
-const taskRegistryProcessState = getTaskRegistryProcessState();
-const tasks = taskRegistryProcessState.tasks;
-const taskDeliveryStates = taskRegistryProcessState.taskDeliveryStates;
-const taskIdsByRunId = taskRegistryProcessState.taskIdsByRunId;
-const taskIdsByOwnerKey = taskRegistryProcessState.taskIdsByOwnerKey;
-const taskIdsByParentFlowId = taskRegistryProcessState.taskIdsByParentFlowId;
-const taskIdsByRelatedSessionKey = taskRegistryProcessState.taskIdsByRelatedSessionKey;
-const tasksWithPendingDelivery = taskRegistryProcessState.tasksWithPendingDelivery;
+const tasks = new Map<string, TaskRecord>();
+const taskDeliveryStates = new Map<string, TaskDeliveryState>();
+const taskIdsByRunId = new Map<string, Set<string>>();
+const taskIdsByOwnerKey = new Map<string, Set<string>>();
+const taskIdsByParentFlowId = new Map<string, Set<string>>();
+const taskIdsByRelatedSessionKey = new Map<string, Set<string>>();
+const tasksWithPendingDelivery = new Set<string>();
 let listenerStarted = false;
 let listenerStop: (() => void) | null = null;
 let restoreAttempted = false;
-const taskFlowSyncRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 type TaskRegistryDeliveryRuntime = Pick<
   typeof import("./task-registry-delivery-runtime.js"),
   "sendMessage"
@@ -264,22 +254,16 @@ function emitTaskRegistryObserverEvent(createEvent: () => TaskRegistryObserverEv
   }
 }
 
-function persistTaskRegistry(): boolean {
-  try {
-    getTaskRegistryStore().saveSnapshot({
-      tasks,
-      deliveryStates: taskDeliveryStates,
-    });
-    return true;
-  } catch (error) {
-    log.warn("Failed to persist task registry snapshot", { error });
-    return false;
-  }
+function persistTaskRegistry() {
+  getTaskRegistryStore().saveSnapshot({
+    tasks,
+    deliveryStates: taskDeliveryStates,
+  });
 }
 
-function persistTaskUpsert(task: TaskRecord, pendingDeliveryState?: TaskDeliveryState): void {
+function persistTaskUpsert(task: TaskRecord) {
   const store = getTaskRegistryStore();
-  const deliveryState = pendingDeliveryState ?? taskDeliveryStates.get(task.taskId);
+  const deliveryState = taskDeliveryStates.get(task.taskId);
   if (store.upsertTaskWithDeliveryState) {
     store.upsertTaskWithDeliveryState({
       task,
@@ -287,78 +271,30 @@ function persistTaskUpsert(task: TaskRecord, pendingDeliveryState?: TaskDelivery
     });
     return;
   }
-  if (!deliveryState && store.upsertTask) {
+  if (store.upsertTask) {
     store.upsertTask(task);
     return;
   }
-  // Snapshot fallback: project the pending upsert so the snapshot is correct
-  // even though we persist before mutating memory. Delivery state must stay in
-  // the same write as its task; split upserts can leave a durable half-create.
   store.saveSnapshot({
-    tasks: new Map(tasks).set(task.taskId, task),
-    deliveryStates: deliveryState
-      ? new Map(taskDeliveryStates).set(task.taskId, deliveryState)
-      : taskDeliveryStates,
+    tasks,
+    deliveryStates: taskDeliveryStates,
   });
-}
-
-function tryPersistTaskUpsert(
-  task: TaskRecord,
-  operation: string,
-  pendingDeliveryState?: TaskDeliveryState,
-): boolean {
-  try {
-    persistTaskUpsert(task, pendingDeliveryState);
-    return true;
-  } catch (error) {
-    log.warn("Failed to persist task registry upsert", {
-      operation,
-      taskId: task.taskId,
-      runId: task.runId,
-      error,
-    });
-    return false;
-  }
 }
 
 function persistTaskDelete(taskId: string) {
   const store = getTaskRegistryStore();
   if (store.deleteTaskWithDeliveryState) {
-    // Composite delete removes the task row and its delivery state in a single
-    // transaction. This is the only atomic "remove both records" store
-    // primitive, and the one the default sqlite store uses.
     store.deleteTaskWithDeliveryState(taskId);
     return;
   }
-  // No atomic composite delete is available: persist the removal of BOTH the
-  // task and its delivery state in one projected snapshot. saveSnapshot is a
-  // required store method and writes atomically. Using the separate deleteTask
-  // / deleteDeliveryState methods instead would either leave the delivery-state
-  // row behind (a task-only delete) or, if both were called, reintroduce a
-  // two-write divergence window when the second delete threw before the
-  // in-memory mutation. Projecting both deletions into a single snapshot keeps
-  // the persisted store consistent under the persist-before-in-memory ordering.
-  const projectedTasks = new Map(tasks);
-  projectedTasks.delete(taskId);
-  const projectedDeliveryStates = new Map(taskDeliveryStates);
-  projectedDeliveryStates.delete(taskId);
-  store.saveSnapshot({
-    tasks: projectedTasks,
-    deliveryStates: projectedDeliveryStates,
-  });
-}
-
-function tryPersistTaskDelete(taskId: string): boolean {
-  try {
-    persistTaskDelete(taskId);
-    return true;
-  } catch (error) {
-    log.warn("Failed to persist task registry delete", {
-      taskId,
-      error,
-    });
-    return false;
+  if (store.deleteTask) {
+    store.deleteTask(taskId);
+    return;
   }
+  store.saveSnapshot({
+    tasks,
+    deliveryStates: taskDeliveryStates,
+  });
 }
 
 function persistTaskDeliveryStateUpsert(state: TaskDeliveryState) {
@@ -367,29 +303,25 @@ function persistTaskDeliveryStateUpsert(state: TaskDeliveryState) {
     store.upsertDeliveryState(state);
     return;
   }
-  const projectedDeliveryStates = new Map(taskDeliveryStates);
-  projectedDeliveryStates.set(state.taskId, cloneTaskDeliveryState(state));
   store.saveSnapshot({
     tasks,
-    deliveryStates: projectedDeliveryStates,
+    deliveryStates: taskDeliveryStates,
   });
 }
 
-function tryPersistTaskDeliveryStateUpsert(state: TaskDeliveryState): boolean {
-  try {
-    persistTaskDeliveryStateUpsert(state);
-    return true;
-  } catch (error) {
-    log.warn("Failed to persist task delivery state", {
-      taskId: state.taskId,
-      error,
-    });
-    return false;
+function persistTaskDeliveryStateDelete(taskId: string) {
+  const store = getTaskRegistryStore();
+  if (store.deleteDeliveryState) {
+    store.deleteDeliveryState(taskId);
+    return;
   }
+  store.saveSnapshot({
+    tasks,
+    deliveryStates: taskDeliveryStates,
+  });
 }
 
 function clearTaskRegistryMemory(): void {
-  clearTaskFlowSyncRetries();
   tasks.clear();
   taskDeliveryStates.clear();
   taskIdsByRunId.clear();
@@ -506,48 +438,6 @@ function resolveTaskTerminalOutcome(params: {
   return params.status === "succeeded" ? "succeeded" : undefined;
 }
 
-function mapAgentRunTerminalOutcomeToTaskStatus(
-  outcome: AgentRunTerminalOutcome,
-): Extract<TaskStatus, "succeeded" | "failed" | "timed_out" | "cancelled"> {
-  switch (outcome.reason) {
-    case "completed":
-      return "succeeded";
-    case "hard_timeout":
-    case "timed_out":
-      return "timed_out";
-    case "cancelled":
-    case "aborted":
-      return "cancelled";
-    case "blocked":
-    case "failed":
-      return "failed";
-    default:
-      return outcome.reason satisfies never;
-  }
-}
-
-function buildTaskLifecycleTerminalOutcome(params: {
-  phase: "end" | "error";
-  data?: Record<string, unknown>;
-  startedAt?: number;
-  endedAt?: number;
-}): AgentRunTerminalOutcome {
-  const status =
-    params.phase === "error" ? "error" : params.data?.aborted === true ? "timeout" : "ok";
-  // Lifecycle events carry runner/provider terminal facts. Keep the precedence
-  // centralized so task projections match agent.wait and gateway snapshots.
-  return buildAgentRunTerminalOutcome({
-    status,
-    error: params.data?.error,
-    stopReason: params.data?.stopReason,
-    livenessState: params.data?.livenessState,
-    timeoutPhase: params.data?.timeoutPhase,
-    providerStarted: params.data?.providerStarted,
-    startedAt: params.startedAt,
-    endedAt: params.endedAt,
-  });
-}
-
 function appendTaskEvent(event: {
   at: number;
   kind: TaskEventKind;
@@ -628,11 +518,14 @@ function deleteIndexedKey(index: Map<string, Set<string>>, key: string, taskId: 
 }
 
 function getTaskRelatedSessionIndexKeys(task: Pick<TaskRecord, "ownerKey" | "childSessionKey">) {
-  return uniqueStrings(
-    [normalizeOptionalString(task.ownerKey), normalizeOptionalString(task.childSessionKey)].filter(
-      Boolean,
-    ) as string[],
-  );
+  return [
+    ...new Set(
+      [
+        normalizeOptionalString(task.ownerKey),
+        normalizeOptionalString(task.childSessionKey),
+      ].filter(Boolean) as string[],
+    ),
+  ];
 }
 
 function addOwnerKeyIndex(taskId: string, task: Pick<TaskRecord, "ownerKey">) {
@@ -861,19 +754,16 @@ function mergeExistingTaskForCreate(
     deliveryStatus?: TaskDeliveryStatus;
     notifyPolicy?: TaskNotifyPolicy;
   },
-): TaskRecord | null {
+): TaskRecord {
   const patch: Partial<TaskRecord> = {};
   const requesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
   const currentDeliveryState = taskDeliveryStates.get(existing.taskId);
   if (requesterOrigin && !currentDeliveryState?.requesterOrigin) {
-    const deliveryState = upsertTaskDeliveryState({
+    upsertTaskDeliveryState({
       taskId: existing.taskId,
       requesterOrigin,
       lastNotifiedEventAt: currentDeliveryState?.lastNotifiedEventAt,
     });
-    if (!deliveryState.requesterOrigin) {
-      return null;
-    }
   }
   if (params.sourceId?.trim() && !existing.sourceId?.trim()) {
     patch.sourceId = params.sourceId.trim();
@@ -922,7 +812,7 @@ function mergeExistingTaskForCreate(
   if (Object.keys(patch).length === 0) {
     return cloneTaskRecord(existing);
   }
-  return updateTask(existing.taskId, patch);
+  return updateTask(existing.taskId, patch) ?? cloneTaskRecord(existing);
 }
 
 function resolveTaskAgentId(params: {
@@ -1046,66 +936,6 @@ function syncManagedFlowCancellationFromTask(task: TaskRecord): void {
   }
 }
 
-function scheduleTaskFlowSyncRetry(task: TaskRecord, operation: string, attempt = 0): void {
-  const taskId = task.taskId.trim();
-  if (!taskId || taskFlowSyncRetryTimers.has(taskId)) {
-    return;
-  }
-  const delayMs = TASK_FLOW_SYNC_RETRY_DELAYS_MS[attempt];
-  if (delayMs == null) {
-    log.warn("Exhausted parent flow sync retries from task", {
-      operation,
-      taskId,
-      flowId: task.parentFlowId,
-    });
-    return;
-  }
-  const retryTimer = setTimeout(() => {
-    taskFlowSyncRetryTimers.delete(taskId);
-    const current = tasks.get(taskId);
-    if (!current) {
-      return;
-    }
-    const flowId = current.parentFlowId?.trim();
-    if (!flowId || findLatestTaskForFlowId(flowId)?.taskId !== taskId) {
-      return;
-    }
-    const result = syncFlowFromTaskResult(current);
-    if (!result.ok) {
-      log.warn("Failed to retry parent flow sync from task", {
-        operation,
-        taskId,
-        flowId: current.parentFlowId,
-        reason: result.reason,
-      });
-      scheduleTaskFlowSyncRetry(current, operation, attempt + 1);
-    }
-  }, delayMs);
-  retryTimer.unref?.();
-  taskFlowSyncRetryTimers.set(taskId, retryTimer);
-}
-
-function syncFlowFromTaskAfterTaskMutation(task: TaskRecord, operation: string): void {
-  const result = syncFlowFromTaskResult(task);
-  if (result.ok) {
-    return;
-  }
-  log.warn("Failed to sync parent flow from task mutation", {
-    operation,
-    taskId: task.taskId,
-    flowId: task.parentFlowId,
-    reason: result.reason,
-  });
-  scheduleTaskFlowSyncRetry(task, operation);
-}
-
-function clearTaskFlowSyncRetries(): void {
-  for (const timer of taskFlowSyncRetryTimers.values()) {
-    clearTimeout(timer);
-  }
-  taskFlowSyncRetryTimers.clear();
-}
-
 function restoreTaskRegistryOnce() {
   if (restoreAttempted) {
     return;
@@ -1153,21 +983,14 @@ function updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord | nu
   }
   const next = normalizeTaskTimestamps({ ...current, ...patch });
   if (isTerminalTaskStatus(next.status) && typeof next.cleanupAfter !== "number") {
-    next.cleanupAfter = resolveTaskCleanupAfter({
-      ...next,
-      createdAt: next.createdAt ?? Date.now(),
-    });
+    const terminalAt = next.endedAt ?? next.lastEventAt ?? Date.now();
+    next.cleanupAfter = terminalAt + DEFAULT_TASK_RETENTION_MS;
   }
   const sessionIndexChanged =
     normalizeOptionalString(current.ownerKey) !== normalizeOptionalString(next.ownerKey) ||
     normalizeOptionalString(current.childSessionKey) !==
       normalizeOptionalString(next.childSessionKey);
   const parentFlowIndexChanged = current.parentFlowId?.trim() !== next.parentFlowId?.trim();
-  // Persist before mutating memory. If the store rejects the write, keep the
-  // in-memory mirror at the durable value and report that no mutation applied.
-  if (!tryPersistTaskUpsert(next, "update")) {
-    return null;
-  }
   tasks.set(taskId, next);
   if (patch.runId && patch.runId !== current.runId) {
     rebuildRunIdIndex();
@@ -1182,7 +1005,16 @@ function updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord | nu
     deleteParentFlowIdIndex(taskId, current);
     addParentFlowIdIndex(taskId, next);
   }
-  syncFlowFromTaskAfterTaskMutation(next, "update");
+  persistTaskUpsert(next);
+  try {
+    syncFlowFromTask(next);
+  } catch (error) {
+    log.warn("Failed to sync parent flow from task update", {
+      taskId,
+      flowId: next.parentFlowId,
+      error,
+    });
+  }
   try {
     syncManagedFlowCancellationFromTask(next);
   } catch (error) {
@@ -1214,12 +1046,8 @@ function upsertTaskDeliveryState(state: TaskDeliveryState): TaskDeliveryState {
   if (!next.requesterOrigin && typeof next.lastNotifiedEventAt !== "number" && !current) {
     return cloneTaskDeliveryState({ taskId: state.taskId });
   }
-  if (!tryPersistTaskDeliveryStateUpsert(next)) {
-    return current
-      ? cloneTaskDeliveryState(current)
-      : cloneTaskDeliveryState({ taskId: state.taskId });
-  }
   taskDeliveryStates.set(state.taskId, next);
+  persistTaskDeliveryStateUpsert(next);
   return cloneTaskDeliveryState(next);
 }
 
@@ -1253,6 +1081,8 @@ function queueTaskSystemEvent(task: TaskRecord, text: string) {
     sessionKey: ownerKey,
     contextKey: `task:${task.taskId}`,
     deliveryContext: owner.requesterOrigin,
+    forceSenderIsOwnerFalse: true,
+    trusted: false,
   });
   requestHeartbeat({
     source: "background-task",
@@ -1277,6 +1107,8 @@ function queueBlockedTaskFollowup(task: TaskRecord) {
     sessionKey: ownerKey,
     contextKey: `task:${task.taskId}:blocked-followup`,
     deliveryContext: owner.requesterOrigin,
+    forceSenderIsOwnerFalse: true,
+    trusted: false,
   });
   requestHeartbeat({
     source: "background-task-blocked",
@@ -1626,27 +1458,12 @@ function ensureListener() {
         if (phase === "start") {
           patch.status = "running";
         } else if (phase === "end") {
-          const terminal = buildTaskLifecycleTerminalOutcome({
-            phase,
-            data: evt.data,
-            startedAt,
-            endedAt: endedAt ?? now,
-          });
-          patch.status = mapAgentRunTerminalOutcomeToTaskStatus(terminal);
-          patch.endedAt = terminal.endedAt ?? now;
-          if (terminal.error) {
-            patch.error = terminal.error;
-          }
+          patch.status = evt.data?.aborted === true ? "timed_out" : "succeeded";
+          patch.endedAt = endedAt ?? now;
         } else if (phase === "error") {
-          const terminal = buildTaskLifecycleTerminalOutcome({
-            phase,
-            data: evt.data,
-            startedAt,
-            endedAt: endedAt ?? now,
-          });
-          patch.status = mapAgentRunTerminalOutcomeToTaskStatus(terminal);
-          patch.endedAt = terminal.endedAt ?? now;
-          patch.error = terminal.error ?? current.error;
+          patch.status = "failed";
+          patch.endedAt = endedAt ?? now;
+          patch.error = typeof evt.data?.error === "string" ? evt.data.error : current.error;
         }
       } else if (evt.stream === "error") {
         patch.error = typeof evt.data?.error === "string" ? evt.data.error : current.error;
@@ -1698,7 +1515,7 @@ export function createTaskRecord(params: {
   progressSummary?: string | null;
   terminalSummary?: string | null;
   terminalOutcome?: TaskTerminalOutcome | null;
-}): TaskRecord | null {
+}): TaskRecord {
   ensureTaskRegistryReady();
   const requesterSessionKey = resolveTaskRequesterSessionKey(params);
   const scopeKind = resolveTaskScopeKind({
@@ -1782,27 +1599,28 @@ export function createTaskRecord(params: {
     }),
   });
   if (isTerminalTaskStatus(record.status) && typeof record.cleanupAfter !== "number") {
-    record.cleanupAfter = resolveTaskCleanupAfter(record);
-  }
-  const requesterOrigin = normalizeDeliveryContext(params.requesterOrigin);
-  const deliveryState = requesterOrigin
-    ? {
-        taskId,
-        requesterOrigin,
-      }
-    : undefined;
-  if (!tryPersistTaskUpsert(record, "create", deliveryState)) {
-    return null;
+    record.cleanupAfter =
+      (record.endedAt ?? record.lastEventAt ?? record.createdAt) + DEFAULT_TASK_RETENTION_MS;
   }
   tasks.set(taskId, record);
-  if (requesterOrigin) {
-    taskDeliveryStates.set(taskId, deliveryState!);
-  }
+  upsertTaskDeliveryState({
+    taskId,
+    requesterOrigin: normalizeDeliveryContext(params.requesterOrigin),
+  });
   addRunIdIndex(taskId, record.runId);
   addOwnerKeyIndex(taskId, record);
   addParentFlowIdIndex(taskId, record);
   addRelatedSessionKeyIndex(taskId, record);
-  syncFlowFromTaskAfterTaskMutation(record, "create");
+  persistTaskUpsert(record);
+  try {
+    syncFlowFromTask(record);
+  } catch (error) {
+    log.warn("Failed to sync parent flow from task create", {
+      taskId: record.taskId,
+      flowId: record.parentFlowId,
+      error,
+    });
+  }
   emitTaskRegistryObserverEvent(() => ({
     kind: "upserted",
     task: cloneTaskRecord(record),
@@ -2080,20 +1898,14 @@ export async function cancelTaskById(params: {
   try {
     if (task.runtime !== "cli") {
       if (!childSessionKey) {
-        if (!isChildlessCodexNativeSubagentTask(task)) {
-          return {
-            found: true,
-            cancelled: false,
-            reason: "Task has no cancellable child session.",
-            task: cloneTaskRecord(task),
-          };
-        }
+        return {
+          found: true,
+          cancelled: false,
+          reason: "Task has no cancellable child session.",
+          task: cloneTaskRecord(task),
+        };
       }
-      if (!childSessionKey) {
-        // Codex native subagents are mirrored from the Codex app server and do
-        // not have OpenClaw child sessions to terminate. Cancellation clears
-        // the stale task-registry record only.
-      } else if (task.runtime === "acp") {
+      if (task.runtime === "acp") {
         const { getAcpSessionManager } = await loadTaskRegistryControlRuntime();
         await getAcpSessionManager().cancelSession({
           cfg: params.cfg,
@@ -2129,14 +1941,6 @@ export async function cancelTaskById(params: {
       lastEventAt: Date.now(),
       error: params.reason?.trim() || "Cancelled by operator.",
     });
-    if (!updated) {
-      return {
-        found: true,
-        cancelled: false,
-        reason: "Task persistence failed.",
-        task: cloneTaskRecord(task),
-      };
-    }
     if (updated) {
       void maybeDeliverTaskTerminalUpdate(updated.taskId);
     }
@@ -2281,34 +2085,6 @@ export function listTasksForOwnerKey(ownerKey: string): TaskRecord[] {
   return listTasksFromIndex(taskIdsByOwnerKey, key);
 }
 
-export function listFreshTasksForOwnerKey(ownerKey: string): TaskRecord[] {
-  ensureTaskRegistryReady();
-  const key = normalizeOptionalString(ownerKey);
-  if (!key) {
-    return [];
-  }
-  const store = getTaskRegistryStore();
-  if (store.listTasksForOwnerKey) {
-    try {
-      const merged = new Map<string, TaskRecord>();
-      for (const task of store.listTasksForOwnerKey(key)) {
-        merged.set(task.taskId, cloneTaskRecord(normalizeTaskTimestamps(task)));
-      }
-      return [...merged.values()]
-        .map((task, insertionIndex) => Object.assign({}, task, { insertionIndex }))
-        .toSorted(compareTasksNewestFirst)
-        .map(({ insertionIndex: _, ...task }) => task);
-    } catch (error) {
-      log.warn("Failed to read fresh owner task registry records", {
-        ownerKey: key,
-        error,
-      });
-    }
-  }
-
-  return listTasksFromIndex(taskIdsByOwnerKey, key);
-}
-
 export function listTasksForFlowId(flowId: string): TaskRecord[] {
   ensureTaskRegistryReady();
   const key = flowId.trim();
@@ -2348,18 +2124,14 @@ export function deleteTaskRecordById(taskId: string): boolean {
   if (!current) {
     return false;
   }
-  // Persist the delete before mutating memory, as a single atomic store
-  // operation. If persistence fails, leave the in-memory record intact and
-  // report that no delete was applied.
-  if (!tryPersistTaskDelete(taskId)) {
-    return false;
-  }
   deleteOwnerKeyIndex(taskId, current);
   deleteParentFlowIdIndex(taskId, current);
   deleteRelatedSessionKeyIndex(taskId, current);
   tasks.delete(taskId);
   taskDeliveryStates.delete(taskId);
   rebuildRunIdIndex();
+  persistTaskDelete(taskId);
+  persistTaskDeliveryStateDelete(taskId);
   emitTaskRegistryObserverEvent(() => ({
     kind: "deleted",
     taskId: current.taskId,

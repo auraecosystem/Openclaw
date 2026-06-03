@@ -45,7 +45,6 @@ vi.mock("./memory-state.js", () => ({
 
 let getActiveMemorySearchManager: typeof import("./memory-runtime.js").getActiveMemorySearchManager;
 let resolveActiveMemoryBackendConfig: typeof import("./memory-runtime.js").resolveActiveMemoryBackendConfig;
-let closeActiveMemorySearchManager: typeof import("./memory-runtime.js").closeActiveMemorySearchManager;
 let closeActiveMemorySearchManagers: typeof import("./memory-runtime.js").closeActiveMemorySearchManagers;
 
 function createMemoryAutoEnableFixture() {
@@ -68,7 +67,6 @@ function createMemoryRuntimeFixture() {
   return {
     getMemorySearchManager: vi.fn(async () => ({ manager: null, error: "no index" })),
     resolveMemoryBackendConfig: vi.fn(() => ({ backend: "builtin" as const })),
-    closeMemorySearchManager: vi.fn(async () => {}),
   };
 }
 
@@ -149,7 +147,6 @@ describe("memory runtime auto-enable loading", () => {
     ({
       getActiveMemorySearchManager,
       resolveActiveMemoryBackendConfig,
-      closeActiveMemorySearchManager,
       closeActiveMemorySearchManagers,
     } = await import("./memory-runtime.js"));
     resolveRuntimePluginRegistryMock.mockReset();
@@ -345,19 +342,5 @@ describe("memory runtime auto-enable loading", () => {
     },
   ] as const)("$name", async ({ config, setup }) => {
     await expectCloseMemoryRuntimeCase({ config, setup });
-  });
-
-  it("delegates scoped cleanup to the loaded memory runtime without reloading plugins", async () => {
-    const runtime = createMemoryRuntimeFixture();
-    const cfg = { plugins: {} };
-    getMemoryRuntimeMock.mockReturnValue(runtime);
-
-    await closeActiveMemorySearchManager({ cfg: cfg as never, agentId: "main" });
-
-    expect(runtime.closeMemorySearchManager).toHaveBeenCalledWith({
-      cfg,
-      agentId: "main",
-    });
-    expectNoMemoryRuntimeBootstrap();
   });
 });

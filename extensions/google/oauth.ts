@@ -42,11 +42,10 @@ export async function loginGeminiCliOAuth(
   }
 
   ctx.progress.update("Complete sign-in in browser...");
-  ctx.log(`\nOpen this URL in your browser:\n\n${authUrl}\n`);
   try {
     await ctx.openUrl(authUrl);
   } catch {
-    // The URL is already visible; browser launch is best-effort.
+    ctx.log(`\nOpen this URL in your browser:\n\n${authUrl}\n`);
   }
 
   try {

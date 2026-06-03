@@ -1,10 +1,11 @@
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import path from "node:path";
+import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { completeSimple, type AssistantMessage, type Model } from "openclaw/plugin-sdk/llm";
 import * as ts from "typescript";
 import { formatErrorMessage } from "../src/infra/errors.ts";
 
@@ -84,6 +85,8 @@ const CONTROL_UI_I18N_WORKFLOW = 1;
 const DEFAULT_OPENAI_MODEL = "gpt-5.5";
 const DEFAULT_ANTHROPIC_MODEL = "claude-opus-4-6";
 const DEFAULT_PROVIDER = "openai";
+export const DEFAULT_PI_PACKAGE_VERSION = "0.74.1";
+const PI_PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
 const LOCALES_DIR = path.join(ROOT, "ui", "src", "i18n", "locales");
@@ -98,41 +101,16 @@ const DEFAULT_BATCH_CHAR_BUDGET = 2_000;
 const TRANSLATE_MAX_ATTEMPTS = 2;
 const TRANSLATE_BASE_DELAY_MS = 15_000;
 const DEFAULT_PROMPT_TIMEOUT_MS = 120_000;
-const RUN_PROCESS_OUTPUT_MAX_CHARS = 1024 * 1024;
-const RUN_PROCESS_TIMEOUT_MS = 120_000;
-const RUN_PROCESS_KILL_GRACE_MS = 5_000;
 const PROGRESS_HEARTBEAT_MS = 30_000;
 const ENV_PROVIDER = "OPENCLAW_CONTROL_UI_I18N_PROVIDER";
 const ENV_MODEL = "OPENCLAW_CONTROL_UI_I18N_MODEL";
 const ENV_THINKING = "OPENCLAW_CONTROL_UI_I18N_THINKING";
+const ENV_PI_EXECUTABLE = "OPENCLAW_CONTROL_UI_I18N_PI_EXECUTABLE";
+const ENV_PI_ARGS = "OPENCLAW_CONTROL_UI_I18N_PI_ARGS";
+const ENV_PI_PACKAGE_VERSION = "OPENCLAW_CONTROL_UI_I18N_PI_PACKAGE_VERSION";
 const ENV_BATCH_CHAR_BUDGET = "OPENCLAW_CONTROL_UI_I18N_BATCH_CHAR_BUDGET";
 const ENV_PROMPT_TIMEOUT = "OPENCLAW_CONTROL_UI_I18N_PROMPT_TIMEOUT";
 const ENV_AUTH_OPTIONAL = "OPENCLAW_CONTROL_UI_I18N_AUTH_OPTIONAL";
-
-type TranslationProvider = "openai" | "anthropic";
-
-const TRANSLATION_PROVIDER_DEFAULTS: Record<TranslationProvider, Omit<Model, "id" | "name">> = {
-  openai: {
-    api: "openai-responses",
-    provider: "openai",
-    baseUrl: "https://api.openai.com/v1",
-    reasoning: true,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 400_000,
-    maxTokens: 32_000,
-  },
-  anthropic: {
-    api: "anthropic-messages",
-    provider: "anthropic",
-    baseUrl: "https://api.anthropic.com",
-    reasoning: true,
-    input: ["text"],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 200_000,
-    maxTokens: 32_000,
-  },
-};
 
 const LOCALE_ENTRIES: readonly LocaleEntry[] = [
   { locale: "zh-CN", fileName: "zh-CN.ts", exportName: "zh_CN", languageKey: "zhCN" },
@@ -292,14 +270,6 @@ function hasTranslationProvider(): boolean {
   return Boolean(process.env.OPENAI_API_KEY?.trim() || process.env.ANTHROPIC_API_KEY?.trim());
 }
 
-function resolveKnownTranslationProvider(): TranslationProvider {
-  const provider = resolveConfiguredProvider();
-  if (provider === "openai" || provider === "anthropic") {
-    return provider;
-  }
-  throw new Error(`Unsupported translation provider: ${provider}`);
-}
-
 function normalizeText(text: string): string {
   return text.trim().split(/\s+/).join(" ");
 }
@@ -315,7 +285,7 @@ function hashText(text: string): string {
 function cacheNamespace(): string {
   return [
     `wf=${CONTROL_UI_I18N_WORKFLOW}`,
-    "engine=openclaw-llm",
+    "engine=pi",
     `provider=${resolveConfiguredProvider()}`,
     `model=${resolveConfiguredModel()}`,
   ].join("|");
@@ -603,9 +573,7 @@ function buildBatchPrompt(items: readonly TranslationBatchItem[]): string {
 }
 
 function sleep(ms: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function formatDuration(ms: number): string {
@@ -881,7 +849,7 @@ async function syncControlUiRawCopyBaseline(options: { checkOnly: boolean; write
     await writeFile(RAW_COPY_BASELINE_PATH, expected, "utf8");
   }
   if (options.checkOnly && current !== expected) {
-    let currentEntries: RawCopyBaselineEntry[];
+    let currentEntries: RawCopyBaselineEntry[] = [];
     try {
       const parsed = JSON.parse(current) as Partial<RawCopyBaseline>;
       currentEntries = Array.isArray(parsed.entries) ? parsed.entries : [];
@@ -947,220 +915,124 @@ function estimateBatchChars(items: readonly TranslationBatchItem[]): number {
   return items.reduce((total, item) => total + item.key.length + item.text.length + 8, 2);
 }
 
+type PiCommand = {
+  args: string[];
+  executable: string;
+};
+
+function resolvePiPackageVersion(): string {
+  return process.env[ENV_PI_PACKAGE_VERSION]?.trim() || DEFAULT_PI_PACKAGE_VERSION;
+}
+
+function getPiRuntimeDir() {
+  return path.join(
+    homedir(),
+    ".cache",
+    "openclaw",
+    "control-ui-i18n",
+    "pi-runtime",
+    resolvePiPackageVersion(),
+  );
+}
+
+export function resolveLocalPiCommand(root = ROOT): PiCommand | null {
+  const cliPath = path.join(root, "node_modules", ...PI_PACKAGE_NAME.split("/"), "dist", "cli.js");
+  if (!existsSync(cliPath)) {
+    return null;
+  }
+  return { executable: "node", args: [cliPath] };
+}
+
+async function resolvePiCommand(): Promise<PiCommand> {
+  const explicitExecutable = process.env[ENV_PI_EXECUTABLE]?.trim();
+  if (explicitExecutable) {
+    return {
+      executable: explicitExecutable,
+      args: process.env[ENV_PI_ARGS]?.trim().split(/\s+/).filter(Boolean) ?? [],
+    };
+  }
+
+  const pathEntries = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  for (const entry of pathEntries) {
+    const candidate = path.join(entry, process.platform === "win32" ? "pi.cmd" : "pi");
+    if (existsSync(candidate)) {
+      return { executable: candidate, args: [] };
+    }
+  }
+
+  const localCommand = resolveLocalPiCommand();
+  if (localCommand) {
+    return localCommand;
+  }
+
+  const runtimeDir = getPiRuntimeDir();
+  const cliPath = path.join(
+    runtimeDir,
+    "node_modules",
+    ...PI_PACKAGE_NAME.split("/"),
+    "dist",
+    "cli.js",
+  );
+  if (!existsSync(cliPath)) {
+    await mkdir(runtimeDir, { recursive: true });
+    await runProcess(
+      "npm",
+      [
+        "install",
+        "--silent",
+        "--no-audit",
+        "--no-fund",
+        `${PI_PACKAGE_NAME}@${resolvePiPackageVersion()}`,
+      ],
+      {
+        cwd: runtimeDir,
+        rejectOnFailure: true,
+      },
+    );
+  }
+  return { executable: "node", args: [cliPath] };
+}
+
 type RunProcessOptions = {
   cwd?: string;
   input?: string;
-  killGraceMs?: number;
-  maxOutputChars?: number;
   rejectOnFailure?: boolean;
-  timeoutMs?: number;
 };
 
-type ProcessOutputCapture = {
-  text: string;
-  truncatedChars: number;
-};
-
-function resolveRunProcessOutputLimit(options: RunProcessOptions): number {
-  const value = options.maxOutputChars;
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return RUN_PROCESS_OUTPUT_MAX_CHARS;
-  }
-  return Math.max(1, Math.floor(value));
-}
-
-export function appendBoundedProcessOutput(
-  capture: ProcessOutputCapture,
-  chunk: unknown,
-  maxChars: number,
-): ProcessOutputCapture {
-  const nextText = capture.text + String(chunk);
-  if (nextText.length <= maxChars) {
-    return { text: nextText, truncatedChars: capture.truncatedChars };
-  }
-  const truncatedChars = capture.truncatedChars + nextText.length - maxChars;
-  return { text: nextText.slice(-maxChars), truncatedChars };
-}
-
-function formatProcessOutput(capture: ProcessOutputCapture): string {
-  if (capture.truncatedChars === 0) {
-    return capture.text;
-  }
-  return `[output truncated ${capture.truncatedChars} chars; showing tail]\n${capture.text}`;
-}
-
-export async function runProcess(
+async function runProcess(
   executable: string,
   args: string[],
   options: RunProcessOptions = {},
 ): Promise<{ code: number; stderr: string; stdout: string }> {
   return await new Promise((resolve, reject) => {
-    const useProcessGroup = process.platform !== "win32";
     const child = spawn(executable, args, {
       cwd: options.cwd ?? ROOT,
-      detached: useProcessGroup,
       env: process.env,
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    const maxOutputChars = resolveRunProcessOutputLimit(options);
-    const timeoutMs = options.timeoutMs ?? RUN_PROCESS_TIMEOUT_MS;
-    const killGraceMs = options.killGraceMs ?? RUN_PROCESS_KILL_GRACE_MS;
-    let stdout: ProcessOutputCapture = { text: "", truncatedChars: 0 };
-    let stderr: ProcessOutputCapture = { text: "", truncatedChars: 0 };
-    let timedOut = false;
-    let settled = false;
-    let waitingForKillGrace = false;
-    let childClosedResult: { code: number | null; signal: NodeJS.Signals | null } | null = null;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const parentSignalHandlers: { handler: () => void; signal: NodeJS.Signals }[] = [];
-    const cleanupParentSignalHandlers = () => {
-      for (const { signal, handler } of parentSignalHandlers) {
-        process.off(signal, handler);
-      }
-      parentSignalHandlers.length = 0;
-    };
-    const signalWindowsProcessTree = (force: boolean): boolean => {
-      if (process.platform !== "win32" || typeof child.pid !== "number") {
-        return false;
-      }
-      const taskkillArgs = ["/PID", String(child.pid), "/T"];
-      if (force) {
-        taskkillArgs.push("/F");
-      }
-      const result = spawnSync("taskkill.exe", taskkillArgs, { stdio: "ignore" });
-      return result.status === 0;
-    };
-    const signalChild = (signal: NodeJS.Signals) => {
-      if (useProcessGroup && typeof child.pid === "number") {
-        try {
-          process.kill(-child.pid, signal);
-          return;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== "ESRCH") {
-            stderr = appendBoundedProcessOutput(
-              stderr,
-              `failed to send ${signal} to process group: ${error instanceof Error ? error.message : String(error)}\n`,
-              maxOutputChars,
-            );
-          }
-        }
-      }
-      if (process.platform === "win32") {
-        const force = signal === "SIGKILL";
-        if (signalWindowsProcessTree(force) || (!force && signalWindowsProcessTree(true))) {
-          return;
-        }
-      }
-      child.kill(signal);
-    };
-    const relayParentSignal = (signal: NodeJS.Signals) => {
-      const handler = () => {
-        signalChild(signal);
-        cleanupParentSignalHandlers();
-        process.kill(process.pid, signal);
-      };
-      parentSignalHandlers.push({ handler, signal });
-      process.once(signal, handler);
-    };
-    const relayedSignals: NodeJS.Signals[] =
-      process.platform === "win32" ? ["SIGINT", "SIGTERM"] : ["SIGINT", "SIGTERM", "SIGHUP"];
-    for (const signal of relayedSignals) {
-      relayParentSignal(signal);
-    }
-    const processGroupIsAlive = () => {
-      if (!useProcessGroup || typeof child.pid !== "number") {
-        return false;
-      }
-      try {
-        process.kill(-child.pid, 0);
-        return true;
-      } catch (error) {
-        return (error as NodeJS.ErrnoException).code === "EPERM";
-      }
-    };
-    const settle = (callback: () => void) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timeout);
-      if (killTimer) {
-        clearTimeout(killTimer);
-      }
-      cleanupParentSignalHandlers();
-      callback();
-    };
-    const finishClose = (code: number | null, signal: NodeJS.Signals | null) => {
-      settle(() => {
-        const stdoutText = formatProcessOutput(stdout);
-        const stderrText = formatProcessOutput(stderr);
-        if (timedOut) {
-          reject(new Error(`${executable} ${args.join(" ")} timed out after ${timeoutMs}ms`));
-          return;
-        }
-        if ((code ?? 1) !== 0 && options.rejectOnFailure) {
-          reject(
-            new Error(
-              `${executable} ${args.join(" ")} failed: ${
-                stderrText.trim() || stdoutText.trim() || (signal ? `terminated by ${signal}` : "")
-              }`,
-            ),
-          );
-          return;
-        }
-        if ((code ?? 1) === 0 && stdout.truncatedChars > 0) {
-          reject(
-            new Error(
-              `${executable} ${args.join(" ")} produced more than ${maxOutputChars} stdout chars`,
-            ),
-          );
-          return;
-        }
-        resolve({ code: code ?? 1, stderr: stderrText, stdout: stdout.text });
-      });
-    };
-    const scheduleKill = () => {
-      if (waitingForKillGrace) {
-        return;
-      }
-      waitingForKillGrace = true;
-      killTimer = setTimeout(() => {
-        waitingForKillGrace = false;
-        killTimer = undefined;
-        signalChild("SIGKILL");
-        if (childClosedResult) {
-          finishClose(childClosedResult.code, childClosedResult.signal);
-        }
-      }, killGraceMs);
-    };
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      signalChild("SIGTERM");
-      scheduleKill();
-    }, timeoutMs);
+    let stdout = "";
+    let stderr = "";
     child.stdout.on("data", (chunk) => {
-      stdout = appendBoundedProcessOutput(stdout, chunk, maxOutputChars);
+      stdout += String(chunk);
     });
     child.stderr.on("data", (chunk) => {
-      stderr = appendBoundedProcessOutput(stderr, chunk, maxOutputChars);
+      stderr += String(chunk);
     });
-    child.once("error", (error) => {
-      settle(() => {
-        reject(error);
-      });
-    });
+    child.once("error", reject);
     if (options.input !== undefined) {
       child.stdin.end(options.input);
     } else {
       child.stdin.end();
     }
-    child.once("close", (code, signal) => {
-      if (waitingForKillGrace && processGroupIsAlive()) {
-        childClosedResult = { code, signal };
+    child.once("close", (code) => {
+      if ((code ?? 1) !== 0 && options.rejectOnFailure) {
+        reject(
+          new Error(`${executable} ${args.join(" ")} failed: ${stderr.trim() || stdout.trim()}`),
+        );
         return;
       }
-      finishClose(code, signal);
+      resolve({ code: code ?? 1, stderr, stdout });
     });
   });
 }
@@ -1205,6 +1077,13 @@ function restoreReplacementCorruptedStringLiterals(source: string, formatted: st
   return `${output}${formatted.slice(cursor)}`;
 }
 
+type PendingPrompt = {
+  id: string;
+  reject: (reason?: unknown) => void;
+  resolve: (value: string) => void;
+  responseReceived: boolean;
+};
+
 type LocaleRunContext = {
   localeCount: number;
   localeIndex: number;
@@ -1219,7 +1098,7 @@ type TranslationBatchContext = LocaleRunContext & {
 };
 
 type ClientAccess = {
-  getClient: () => Promise<TranslationClient>;
+  getClient: () => Promise<PiRpcClient>;
   resetClient: () => Promise<void>;
 };
 
@@ -1258,74 +1137,195 @@ function buildTranslationBatches(items: readonly TranslationBatchItem[]): Transl
   return batches;
 }
 
-export function resolveTranslationModel(): Model {
-  const provider = resolveKnownTranslationProvider();
-  const modelId = resolveConfiguredModel();
-  return {
-    ...TRANSLATION_PROVIDER_DEFAULTS[provider],
-    id: modelId,
-    name: modelId,
-  };
-}
-
-class TranslationClient {
+class PiRpcClient {
+  private readonly stderrChunks: string[] = [];
   private closed = false;
+  private pending: PendingPrompt | null = null;
+  private readonly process: ChildProcessWithoutNullStreams;
+  private readonly stdin: ChildProcessWithoutNullStreams["stdin"];
+  private requestCount = 0;
   private sequence: Promise<unknown> = Promise.resolve();
-  private readonly model: Model;
 
-  private constructor(private readonly systemPrompt: string) {
-    this.model = resolveTranslationModel();
+  private constructor(processHandle: ChildProcessWithoutNullStreams) {
+    this.process = processHandle;
+    this.stdin = processHandle.stdin;
   }
 
-  static async create(systemPrompt: string): Promise<TranslationClient> {
-    return new TranslationClient(systemPrompt);
+  static async create(systemPrompt: string): Promise<PiRpcClient> {
+    const command = await resolvePiCommand();
+    const args = [
+      ...command.args,
+      "--mode",
+      "rpc",
+      "--provider",
+      resolveConfiguredProvider(),
+      "--model",
+      resolveConfiguredModel(),
+      "--thinking",
+      resolveThinkingLevel(),
+      "--no-session",
+      "--system-prompt",
+      systemPrompt,
+    ];
+    const child = spawn(command.executable, args, {
+      cwd: ROOT,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const client = new PiRpcClient(child);
+    client.bindProcess();
+    await client.waitForBoot();
+    return client;
+  }
+
+  private bindProcess() {
+    const stderr = createInterface({ input: this.process.stderr });
+    stderr.on("line", (line) => {
+      this.stderrChunks.push(line);
+    });
+
+    const stdout = createInterface({ input: this.process.stdout });
+    stdout.on("line", (line) => {
+      void this.handleStdoutLine(line);
+    });
+
+    this.process.once("error", (error) => {
+      this.rejectPending(error);
+    });
+
+    this.process.once("close", () => {
+      this.closed = true;
+      this.rejectPending(
+        new Error(`pi process closed${this.stderr() ? ` (${this.stderr()})` : ""}`),
+      );
+    });
+  }
+
+  private async waitForBoot() {
+    await sleep(150);
+  }
+
+  private stderr() {
+    return this.stderrChunks.join("\n").trim();
+  }
+
+  private rejectPending(error: Error) {
+    const pending = this.pending;
+    this.pending = null;
+    if (pending) {
+      pending.reject(error);
+    }
+  }
+
+  private async handleStdoutLine(line: string) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      return;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    const pending = this.pending;
+    if (!pending) {
+      return;
+    }
+
+    switch (parsed.type) {
+      case "response": {
+        if (parsed.id !== pending.id) {
+          return;
+        }
+        const success = parsed.success === true;
+        if (!success) {
+          const errorText =
+            typeof parsed.error === "string" && parsed.error.trim()
+              ? parsed.error.trim()
+              : "pi prompt failed";
+          this.pending = null;
+          pending.reject(new Error(errorText));
+          return;
+        }
+        pending.responseReceived = true;
+        return;
+      }
+      case "agent_end": {
+        try {
+          const result = extractTranslationResult(parsed);
+          this.pending = null;
+          pending.resolve(result);
+        } catch (error) {
+          this.pending = null;
+          pending.reject(error);
+        }
+      }
+    }
   }
 
   async prompt(message: string, label: string): Promise<string> {
     const result = this.sequence.then(async () => {
       if (this.closed) {
-        throw new Error("translation runtime unavailable");
+        throw new Error(`pi process unavailable${this.stderr() ? ` (${this.stderr()})` : ""}`);
       }
 
+      const id = `req-${++this.requestCount}`;
+      const payload = JSON.stringify({ type: "prompt", id, message });
       const timeoutMs = resolvePromptTimeoutMs();
       const startedAt = Date.now();
-      const controller = new AbortController();
 
       return await new Promise<string>((resolve, reject) => {
         const heartbeat = setInterval(() => {
+          const responseState = this.pending?.responseReceived
+            ? "response=received"
+            : "response=pending";
           logProgress(
-            `${label}: still waiting (${formatDuration(Date.now() - startedAt)} / ${formatDuration(timeoutMs)})`,
+            `${label}: still waiting (${formatDuration(Date.now() - startedAt)} / ${formatDuration(timeoutMs)}, ${responseState})`,
           );
         }, PROGRESS_HEARTBEAT_MS);
         const timer = setTimeout(() => {
-          clearInterval(heartbeat);
-          controller.abort();
-          reject(new Error(`${label}: translation prompt timed out after ${timeoutMs}ms`));
+          if (this.pending?.id === id) {
+            this.pending = null;
+            clearInterval(heartbeat);
+            void this.close();
+            const stderr = this.stderr();
+            reject(
+              new Error(
+                `${label}: translation prompt timed out after ${timeoutMs}ms${stderr ? ` (pi stderr: ${stderr})` : ""}`,
+              ),
+            );
+          }
         }, timeoutMs);
 
-        completeSimple(
-          this.model,
-          {
-            systemPrompt: this.systemPrompt,
-            messages: [{ role: "user", content: message, timestamp: Date.now() }],
-          },
-          {
-            maxTokens: 4096,
-            reasoning: resolveThinkingLevel(),
-            signal: controller.signal,
-            timeoutMs,
-          },
-        )
-          .then((assistantMessage) => {
+        this.pending = {
+          id,
+          reject: (reason) => {
             clearTimeout(timer);
             clearInterval(heartbeat);
-            resolve(extractTranslationResult(assistantMessage));
-          })
-          .catch((error: unknown) => {
+            reject(reason);
+          },
+          resolve: (value) => {
             clearTimeout(timer);
             clearInterval(heartbeat);
-            reject(toLintErrorObject(error, "Non-Error rejection"));
-          });
+            resolve(value);
+          },
+          responseReceived: false,
+        };
+
+        this.stdin.write(`${payload}\n`, (error) => {
+          if (!error) {
+            return;
+          }
+          clearTimeout(timer);
+          clearInterval(heartbeat);
+          if (this.pending?.id === id) {
+            this.pending = null;
+          }
+          reject(error);
+        });
       });
     });
 
@@ -1338,21 +1338,44 @@ class TranslationClient {
       return;
     }
     this.closed = true;
+    this.stdin.end();
+    this.process.kill("SIGTERM");
+    await sleep(150);
+    if (!this.process.killed) {
+      this.process.kill("SIGKILL");
+    }
   }
 }
 
-function extractTranslationResult(message: AssistantMessage): string {
-  if (message.errorMessage || message.stopReason === "error") {
-    throw new Error(message.errorMessage?.trim() || "translation provider error");
+function extractTranslationResult(payload: Record<string, unknown>): string {
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (!message || typeof message !== "object") {
+      continue;
+    }
+    if ((message as { role?: string }).role !== "assistant") {
+      continue;
+    }
+    const errorMessage = (message as { errorMessage?: string }).errorMessage;
+    const stopReason = (message as { stopReason?: string }).stopReason;
+    if (errorMessage || stopReason === "error") {
+      throw new Error(errorMessage?.trim() || "pi error");
+    }
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string") {
+      return content;
+    }
+    if (Array.isArray(content)) {
+      return content
+        .filter((block): block is { type?: string; text?: string } =>
+          Boolean(block && typeof block === "object"),
+        )
+        .map((block) => (block.type === "text" && typeof block.text === "string" ? block.text : ""))
+        .join("");
+    }
   }
-  const text = message.content
-    .map((block) => (block.type === "text" ? block.text : ""))
-    .join("")
-    .trim();
-  if (!text) {
-    throw new Error("assistant translation not found");
-  }
-  return text;
+  throw new Error("assistant translation not found");
 }
 
 async function translateBatch(
@@ -1501,11 +1524,11 @@ async function syncLocale(
     logProgress(
       `${localeLabel}: start keys=${sourceFlat.size} pending=${pending.length} batches=${batchCount} provider=${resolveConfiguredProvider()} model=${resolveConfiguredModel()} thinking=${resolveThinkingLevel()} timeout=${formatDuration(resolvePromptTimeoutMs())} batch_chars=${resolveBatchCharBudget()}`,
     );
-    let client: TranslationClient | null = null;
+    let client: PiRpcClient | null = null;
     const clientAccess: ClientAccess = {
       async getClient() {
         if (!client) {
-          client = await TranslationClient.create(buildSystemPrompt(entry.locale, glossary));
+          client = await PiRpcClient.create(buildSystemPrompt(entry.locale, glossary));
         }
         return client;
       },
@@ -1789,22 +1812,8 @@ function isCliEntrypoint() {
 }
 
 if (isCliEntrypoint()) {
-  await main().catch((error: unknown) => {
+  await main().catch((error) => {
     console.error(formatErrorMessage(error));
     process.exit(1);
   });
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

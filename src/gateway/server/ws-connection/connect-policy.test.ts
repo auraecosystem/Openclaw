@@ -7,310 +7,319 @@ import {
   shouldSkipControlUiPairing,
 } from "./connect-policy.js";
 
-type ControlUiAuthPolicyInput = Parameters<typeof resolveControlUiAuthPolicy>[0];
-type DeviceRaw = NonNullable<ControlUiAuthPolicyInput["deviceRaw"]>;
-type MissingDeviceIdentityInput = Parameters<typeof evaluateMissingDeviceIdentity>[0];
-type MissingDeviceDecisionKind = ReturnType<typeof evaluateMissingDeviceIdentity>["kind"];
-type PairingRole = Parameters<typeof shouldSkipControlUiPairing>[1];
-type PairingAuthMode = Parameters<typeof shouldSkipControlUiPairing>[3];
-type PairingAuthMethod = Parameters<typeof shouldSkipControlUiPairing>[4];
-type ClearUnboundScopesInput = Parameters<
-  typeof shouldClearUnboundScopesForMissingDeviceIdentity
->[0];
-
-function deviceRaw(id: string): DeviceRaw {
-  return {
-    id,
-    publicKey: "pk",
-    signature: "sig",
-    signedAt: Date.now(),
-    nonce: `${id}-nonce`,
-  };
-}
-
-function authPolicy(params: Partial<ControlUiAuthPolicyInput> = {}) {
-  return resolveControlUiAuthPolicy({
-    isControlUi: params.isControlUi ?? false,
-    controlUiConfig: params.controlUiConfig,
-    deviceRaw: params.deviceRaw ?? null,
-  });
-}
-
-function expectMissingDeviceDecision(
-  overrides: Partial<MissingDeviceIdentityInput>,
-  expected: MissingDeviceDecisionKind,
-) {
-  const isControlUi = overrides.isControlUi ?? false;
-  const params: MissingDeviceIdentityInput = {
-    hasDeviceIdentity: false,
-    role: "operator",
-    isControlUi,
-    controlUiAuthPolicy: overrides.controlUiAuthPolicy ?? authPolicy({ isControlUi }),
-    trustedProxyAuthOk: false,
-    sharedAuthOk: true,
-    authOk: true,
-    hasSharedAuth: true,
-    isLocalClient: false,
-    ...overrides,
-  };
-  expect(evaluateMissingDeviceIdentity(params).kind).toBe(expected);
-}
-
-function expectSkipPairing(
-  policy: Parameters<typeof shouldSkipControlUiPairing>[0],
-  role: PairingRole,
-  expected: boolean,
-  params: {
-    pairingComplete?: boolean;
-    authMode?: PairingAuthMode;
-    authMethod?: PairingAuthMethod;
-  } = {},
-) {
-  expect(
-    shouldSkipControlUiPairing(
-      policy,
-      role,
-      params.pairingComplete ?? false,
-      params.authMode,
-      params.authMethod,
-    ),
-  ).toBe(expected);
-}
-
-function expectClearsUnboundScopes(overrides: Partial<ClearUnboundScopesInput>, expected: boolean) {
-  const params: ClearUnboundScopesInput = {
-    decision: { kind: "allow" },
-    controlUiAuthPolicy: authPolicy(),
-    preserveInsecureLocalControlUiScopes: false,
-    authMethod: "token",
-    ...overrides,
-  };
-  expect(shouldClearUnboundScopesForMissingDeviceIdentity(params)).toBe(expected);
-}
-
 describe("ws connect policy", () => {
   test("resolves control-ui auth policy", () => {
-    const bypass = authPolicy({
+    const bypass = resolveControlUiAuthPolicy({
       isControlUi: true,
       controlUiConfig: { dangerouslyDisableDeviceAuth: true },
-      deviceRaw: deviceRaw("dev-1"),
+      deviceRaw: {
+        id: "dev-1",
+        publicKey: "pk",
+        signature: "sig",
+        signedAt: Date.now(),
+        nonce: "nonce-1",
+      },
     });
     expect(bypass.allowBypass).toBe(true);
     expect(bypass.device).toBeNull();
 
-    const regular = authPolicy({
+    const regular = resolveControlUiAuthPolicy({
       isControlUi: false,
       controlUiConfig: { dangerouslyDisableDeviceAuth: true },
-      deviceRaw: deviceRaw("dev-2"),
+      deviceRaw: {
+        id: "dev-2",
+        publicKey: "pk",
+        signature: "sig",
+        signedAt: Date.now(),
+        nonce: "nonce-2",
+      },
     });
     expect(regular.allowBypass).toBe(false);
     expect(regular.device?.id).toBe("dev-2");
   });
 
   test("evaluates missing-device decisions", () => {
-    const policy = authPolicy();
-    const controlUiStrict = authPolicy({
-      isControlUi: true,
-      controlUiConfig: { allowInsecureAuth: true, dangerouslyDisableDeviceAuth: false },
-    });
-    const controlUiNoInsecure = authPolicy({
-      isControlUi: true,
-      controlUiConfig: { dangerouslyDisableDeviceAuth: false },
-    });
-    const bypass = authPolicy({
-      isControlUi: true,
-      controlUiConfig: { dangerouslyDisableDeviceAuth: true },
+    const policy = resolveControlUiAuthPolicy({
+      isControlUi: false,
+      controlUiConfig: undefined,
+      deviceRaw: null,
     });
 
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
         hasDeviceIdentity: true,
         role: "node",
+        isControlUi: false,
         controlUiAuthPolicy: policy,
-      },
-      "allow",
-    );
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
+        isLocalClient: false,
+      }).kind,
+    ).toBe("allow");
 
+    const controlUiStrict = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: { allowInsecureAuth: true, dangerouslyDisableDeviceAuth: false },
+      deviceRaw: null,
+    });
     // Remote Control UI with allowInsecureAuth -> still rejected.
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "operator",
         isControlUi: true,
         controlUiAuthPolicy: controlUiStrict,
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
         isLocalClient: false,
-      },
-      "reject-control-ui-insecure-auth",
-    );
+      }).kind,
+    ).toBe("reject-control-ui-insecure-auth");
 
     // Local Control UI with allowInsecureAuth -> allowed.
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "operator",
         isControlUi: true,
         controlUiAuthPolicy: controlUiStrict,
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
         isLocalClient: true,
-      },
-      "allow",
-    );
+      }).kind,
+    ).toBe("allow");
 
     // Control UI without allowInsecureAuth, even on localhost -> rejected.
-    expectMissingDeviceDecision(
-      {
+    const controlUiNoInsecure = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: { dangerouslyDisableDeviceAuth: false },
+      deviceRaw: null,
+    });
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "operator",
         isControlUi: true,
         controlUiAuthPolicy: controlUiNoInsecure,
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
         isLocalClient: true,
-      },
-      "reject-control-ui-insecure-auth",
-    );
+      }).kind,
+    ).toBe("reject-control-ui-insecure-auth");
 
-    expectMissingDeviceDecision({ controlUiAuthPolicy: policy }, "allow");
-
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
+        role: "operator",
+        isControlUi: false,
         controlUiAuthPolicy: policy,
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
+        isLocalClient: false,
+      }).kind,
+    ).toBe("allow");
+
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
+        role: "operator",
+        isControlUi: false,
+        controlUiAuthPolicy: policy,
+        trustedProxyAuthOk: false,
         localBackendSelfPairingOk: true,
         sharedAuthOk: false,
+        authOk: true,
         hasSharedAuth: false,
         isLocalClient: true,
-      },
-      "allow",
-    );
+      }).kind,
+    ).toBe("allow");
 
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "node",
+        isControlUi: false,
         controlUiAuthPolicy: policy,
+        trustedProxyAuthOk: false,
         localBackendSelfPairingOk: true,
         sharedAuthOk: false,
+        authOk: true,
         hasSharedAuth: false,
         isLocalClient: true,
-      },
-      "reject-device-required",
-    );
+      }).kind,
+    ).toBe("reject-device-required");
 
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
+        role: "operator",
+        isControlUi: false,
         controlUiAuthPolicy: policy,
+        trustedProxyAuthOk: false,
         sharedAuthOk: false,
         authOk: false,
         hasSharedAuth: true,
-      },
-      "reject-unauthorized",
-    );
+        isLocalClient: false,
+      }).kind,
+    ).toBe("reject-unauthorized");
 
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "node",
+        isControlUi: false,
         controlUiAuthPolicy: policy,
-      },
-      "reject-device-required",
-    );
+        trustedProxyAuthOk: false,
+        sharedAuthOk: true,
+        authOk: true,
+        hasSharedAuth: true,
+        isLocalClient: false,
+      }).kind,
+    ).toBe("reject-device-required");
 
     // Trusted-proxy authenticated Control UI should bypass device-identity gating.
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "operator",
         isControlUi: true,
         controlUiAuthPolicy: controlUiNoInsecure,
         trustedProxyAuthOk: true,
         sharedAuthOk: false,
+        authOk: true,
         hasSharedAuth: false,
-      },
-      "allow",
-    );
+        isLocalClient: false,
+      }).kind,
+    ).toBe("allow");
 
-    expectMissingDeviceDecision(
-      {
+    const bypass = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: { dangerouslyDisableDeviceAuth: true },
+      deviceRaw: null,
+    });
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "operator",
         isControlUi: true,
         controlUiAuthPolicy: bypass,
+        trustedProxyAuthOk: false,
         sharedAuthOk: false,
         authOk: false,
         hasSharedAuth: false,
-      },
-      "allow",
-    );
+        isLocalClient: false,
+      }).kind,
+    ).toBe("allow");
 
     // Regression: dangerouslyDisableDeviceAuth bypass must NOT extend to node-role
     // sessions — the break-glass flag is scoped to operator Control UI only.
     // A device-less node-role connection must still be rejected even when the flag
     // is set, to prevent the flag from being abused to admit unauthorized node
     // registrations.
-    expectMissingDeviceDecision(
-      {
+    expect(
+      evaluateMissingDeviceIdentity({
+        hasDeviceIdentity: false,
         role: "node",
         isControlUi: true,
         controlUiAuthPolicy: bypass,
+        trustedProxyAuthOk: false,
         sharedAuthOk: false,
         authOk: false,
         hasSharedAuth: false,
-      },
-      "reject-device-required",
-    );
+        isLocalClient: false,
+      }).kind,
+    ).toBe("reject-device-required");
   });
 
   test("dangerouslyDisableDeviceAuth skips pairing for operator control-ui only", () => {
-    const bypass = authPolicy({
+    const bypass = resolveControlUiAuthPolicy({
       isControlUi: true,
       controlUiConfig: { dangerouslyDisableDeviceAuth: true },
+      deviceRaw: null,
     });
-    const strict = authPolicy({ isControlUi: true });
-
-    expectSkipPairing(bypass, "operator", true);
-    expectSkipPairing(bypass, "node", false);
-    expectSkipPairing(strict, "operator", false);
-    expectSkipPairing(strict, "operator", false, { pairingComplete: true });
+    const strict = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: undefined,
+      deviceRaw: null,
+    });
+    expect(shouldSkipControlUiPairing(bypass, "operator", false)).toBe(true);
+    expect(shouldSkipControlUiPairing(bypass, "node", false)).toBe(false);
+    expect(shouldSkipControlUiPairing(strict, "operator", false)).toBe(false);
+    expect(shouldSkipControlUiPairing(strict, "operator", true)).toBe(false);
   });
 
   test("auth.mode=none skips pairing for operator control-ui only", () => {
-    const controlUi = authPolicy({ isControlUi: true });
-    const nonControlUi = authPolicy();
-
+    const controlUi = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: undefined,
+      deviceRaw: null,
+    });
+    const nonControlUi = resolveControlUiAuthPolicy({
+      isControlUi: false,
+      controlUiConfig: undefined,
+      deviceRaw: null,
+    });
     // Control UI + operator + auth.mode=none: skip pairing (the fix for #42931)
-    expectSkipPairing(controlUi, "operator", true, { authMode: "none" });
+    expect(shouldSkipControlUiPairing(controlUi, "operator", false, "none")).toBe(true);
     // Control UI + node role + auth.mode=none: still require pairing
-    expectSkipPairing(controlUi, "node", false, { authMode: "none" });
+    expect(shouldSkipControlUiPairing(controlUi, "node", false, "none")).toBe(false);
     // Non-Control-UI + operator + auth.mode=none: still require pairing
     // (prevents #43478 regression where ALL clients bypassed pairing)
-    expectSkipPairing(nonControlUi, "operator", false, { authMode: "none" });
+    expect(shouldSkipControlUiPairing(nonControlUi, "operator", false, "none")).toBe(false);
     // Control UI + operator + auth.mode=shared-key: no change
-    expectSkipPairing(controlUi, "operator", false, { authMode: "shared-key" });
+    expect(shouldSkipControlUiPairing(controlUi, "operator", false, "shared-key")).toBe(false);
     // Control UI + operator + no authMode: no change
-    expectSkipPairing(controlUi, "operator", false);
+    expect(shouldSkipControlUiPairing(controlUi, "operator", false)).toBe(false);
   });
 
   test("tailscale auth skips pairing only for operator control-ui with device identity", () => {
-    const device = deviceRaw("dev-1");
-    const controlUiWithDevice = authPolicy({
+    const device = {
+      id: "dev-1",
+      publicKey: "pk",
+      signature: "sig",
+      signedAt: Date.now(),
+      nonce: "nonce-1",
+    };
+    const controlUiWithDevice = resolveControlUiAuthPolicy({
       isControlUi: true,
+      controlUiConfig: undefined,
       deviceRaw: device,
     });
-    const controlUiWithoutDevice = authPolicy({ isControlUi: true });
-    const nonControlUiWithDevice = authPolicy({
+    const controlUiWithoutDevice = resolveControlUiAuthPolicy({
+      isControlUi: true,
+      controlUiConfig: undefined,
+      deviceRaw: null,
+    });
+    const nonControlUiWithDevice = resolveControlUiAuthPolicy({
+      isControlUi: false,
+      controlUiConfig: undefined,
       deviceRaw: device,
     });
 
-    expectSkipPairing(controlUiWithDevice, "operator", true, {
-      authMode: "token",
-      authMethod: "tailscale",
-    });
-    expectSkipPairing(controlUiWithoutDevice, "operator", false, {
-      authMode: "token",
-      authMethod: "tailscale",
-    });
-    expectSkipPairing(controlUiWithDevice, "node", false, {
-      authMode: "token",
-      authMethod: "tailscale",
-    });
-    expectSkipPairing(nonControlUiWithDevice, "operator", false, {
-      authMode: "token",
-      authMethod: "tailscale",
-    });
-    expectSkipPairing(controlUiWithDevice, "operator", false, {
-      authMode: "token",
-      authMethod: "token",
-    });
+    expect(
+      shouldSkipControlUiPairing(controlUiWithDevice, "operator", false, "token", "tailscale"),
+    ).toBe(true);
+    expect(
+      shouldSkipControlUiPairing(controlUiWithoutDevice, "operator", false, "token", "tailscale"),
+    ).toBe(false);
+    expect(
+      shouldSkipControlUiPairing(controlUiWithDevice, "node", false, "token", "tailscale"),
+    ).toBe(false);
+    expect(
+      shouldSkipControlUiPairing(nonControlUiWithDevice, "operator", false, "token", "tailscale"),
+    ).toBe(false);
+    expect(
+      shouldSkipControlUiPairing(controlUiWithDevice, "operator", false, "token", "token"),
+    ).toBe(false);
   });
 
   test("trusted-proxy control-ui bypass only applies to operator + trusted-proxy auth", () => {
@@ -365,49 +374,70 @@ describe("ws connect policy", () => {
   });
 
   test("clears unbound scopes for device-less shared auth outside explicit preservation cases", () => {
-    const nonControlUi = authPolicy();
-    const controlUi = authPolicy({
+    const nonControlUi = resolveControlUiAuthPolicy({
+      isControlUi: false,
+      controlUiConfig: undefined,
+      deviceRaw: null,
+    });
+    const controlUi = resolveControlUiAuthPolicy({
       isControlUi: true,
       controlUiConfig: { allowInsecureAuth: true },
+      deviceRaw: null,
     });
 
-    expectClearsUnboundScopes({ controlUiAuthPolicy: nonControlUi }, true);
-    expectClearsUnboundScopes(
-      {
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
+        decision: { kind: "allow" },
         controlUiAuthPolicy: nonControlUi,
+        preserveInsecureLocalControlUiScopes: false,
+        authMethod: "token",
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
+        decision: { kind: "allow" },
+        controlUiAuthPolicy: nonControlUi,
+        preserveInsecureLocalControlUiScopes: false,
         authMethod: "password",
-      },
-      true,
-    );
-    expectClearsUnboundScopes(
-      {
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
+        decision: { kind: "allow" },
         controlUiAuthPolicy: nonControlUi,
+        preserveInsecureLocalControlUiScopes: false,
         authMethod: "trusted-proxy",
-      },
-      true,
-    );
-    expectClearsUnboundScopes(
-      {
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
+        decision: { kind: "allow" },
         controlUiAuthPolicy: nonControlUi,
+        preserveInsecureLocalControlUiScopes: false,
         authMethod: "trusted-proxy",
         trustedProxyAuthOk: true,
-      },
-      true,
-    );
-    expectClearsUnboundScopes(
-      {
+      }),
+    ).toBe(true);
+
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
+        decision: { kind: "allow" },
         controlUiAuthPolicy: controlUi,
         preserveInsecureLocalControlUiScopes: true,
-      },
-      false,
-    );
-    expectClearsUnboundScopes(
-      {
+        authMethod: "token",
+      }),
+    ).toBe(false);
+
+    expect(
+      shouldClearUnboundScopesForMissingDeviceIdentity({
         decision: { kind: "reject-device-required" },
         controlUiAuthPolicy: nonControlUi,
+        preserveInsecureLocalControlUiScopes: false,
         authMethod: undefined,
-      },
-      true,
-    );
+      }),
+    ).toBe(true);
   });
 });

@@ -6,7 +6,6 @@ type SlackThreadingToolContext = {
   currentThreadTs?: string;
   replyToMode?: "off" | "first" | "all" | "batched";
   hasRepliedRef?: { value: boolean };
-  sameChannelThreadRequired?: boolean;
 };
 
 function createToolContext(
@@ -79,17 +78,5 @@ describe("resolveSlackAutoThreadId", () => {
         toolContext: createToolContext({ currentThreadTs: undefined }),
       }),
     ).toBeUndefined();
-  });
-
-  it("fails closed for same-channel threaded replies when the thread timestamp is missing", () => {
-    expect(() =>
-      resolveSlackAutoThreadId({
-        to: "C123",
-        toolContext: createToolContext({
-          currentThreadTs: undefined,
-          sameChannelThreadRequired: true,
-        }),
-      }),
-    ).toThrow("Slack thread context is required");
   });
 });

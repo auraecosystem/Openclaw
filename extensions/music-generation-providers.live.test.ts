@@ -195,7 +195,7 @@ describeLive("music generation provider live", () => {
           requireProfileKeys: REQUIRE_PROFILE_KEYS,
           hasLiveKeys,
         });
-        let authLabel;
+        let authLabel = "unresolved";
         try {
           const auth = await resolveApiKeyForProvider({
             provider: testCase.providerId,
@@ -231,12 +231,10 @@ describeLive("music generation provider live", () => {
             cfg,
             agentDir,
             authStore,
-            ...(generateCaps?.supportsDuration ? { durationSeconds: 12 } : undefined),
-            ...(generateCaps?.supportsFormat ? { format: "mp3" as const } : undefined),
-            ...(liveLyrics ? { lyrics: liveLyrics } : undefined),
-            ...(generateCaps?.supportsInstrumental && !liveLyrics
-              ? { instrumental: true }
-              : undefined),
+            ...(generateCaps?.supportsDuration ? { durationSeconds: 12 } : {}),
+            ...(generateCaps?.supportsFormat ? { format: "mp3" as const } : {}),
+            ...(liveLyrics ? { lyrics: liveLyrics } : {}),
+            ...(generateCaps?.supportsInstrumental && !liveLyrics ? { instrumental: true } : {}),
           });
 
           expect(result.tracks.length).toBeGreaterThan(0);

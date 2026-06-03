@@ -1,27 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { normalizeUniqueTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
-import {
-  type ConnectParams,
-  ErrorCodes,
-  errorShape,
-  validateNodeDescribeParams,
-  validateNodeEventParams,
-  validateNodeInvokeParams,
-  validateNodeListParams,
-  validateNodePendingAckParams,
-  validateNodePairApproveParams,
-  validateNodePairListParams,
-  validateNodePairRejectParams,
-  validateNodePairRemoveParams,
-  validateNodePairRequestParams,
-  validateNodePairVerifyParams,
-  validateNodeRenameParams,
-} from "../../../packages/gateway-protocol/src/index.js";
 import { getRuntimeConfig } from "../../config/io.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { listDevicePairing } from "../../infra/device-pairing.js";
@@ -48,7 +25,11 @@ import {
   recordRemoteNodeInfo,
   refreshRemoteNodeBins,
   removeRemoteNodeInfo,
-} from "../../skills/runtime/remote.js";
+} from "../../infra/skills-remote.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "../../shared/string-coerce.js";
 import { createKnownNodeCatalog, getKnownNode, listKnownNodes } from "../node-catalog.js";
 import {
   isForegroundRestrictedPluginNodeCommand,
@@ -60,6 +41,23 @@ import { applyPluginNodeInvokePolicy } from "../node-invoke-plugin-policy.js";
 import { sanitizeNodeInvokeParamsForForwarding } from "../node-invoke-sanitize.js";
 import type { NodeSession } from "../node-registry.js";
 import { refreshClientPluginNodeCapability } from "../plugin-node-capability.js";
+import {
+  type ConnectParams,
+  ErrorCodes,
+  errorShape,
+  validateNodeDescribeParams,
+  validateNodeEventParams,
+  validateNodeInvokeParams,
+  validateNodeListParams,
+  validateNodePendingAckParams,
+  validateNodePairApproveParams,
+  validateNodePairListParams,
+  validateNodePairRejectParams,
+  validateNodePairRemoveParams,
+  validateNodePairRequestParams,
+  validateNodePairVerifyParams,
+  validateNodeRenameParams,
+} from "../protocol/index.js";
 import type { NodeEventContext } from "../server-node-events-types.js";
 import {
   NODE_WAKE_RECONNECT_POLL_MS,
@@ -200,16 +198,8 @@ async function resolveDirectNodePushConfig() {
     : { ok: false as const, error: auth.error };
 }
 
-function resolveRelayNodePushConfig(
-  cfg: OpenClawConfig,
-  registration: Extract<
-    NonNullable<Awaited<ReturnType<typeof loadApnsRegistration>>>,
-    { transport: "relay" }
-  >,
-) {
-  const relay = resolveApnsRelayConfigFromEnv(process.env, cfg.gateway, {
-    registrationRelayOrigin: registration.relayOrigin,
-  });
+function resolveRelayNodePushConfig(cfg: OpenClawConfig) {
+  const relay = resolveApnsRelayConfigFromEnv(process.env, cfg.gateway);
   return relay.ok
     ? { ok: true as const, relayConfig: relay.value }
     : { ok: false as const, error: relay.error };
@@ -235,9 +225,7 @@ async function clearStaleApnsRegistrationIfNeeded(
 }
 
 async function delayMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, ms);
-  });
+  await new Promise<void>((resolve) => setTimeout(resolve, ms));
 }
 
 function isForegroundRestrictedIosCommand(command: string): boolean {
@@ -254,8 +242,6 @@ function shouldQueueAsPendingForegroundAction(params: {
   command: string;
   error: unknown;
 }): boolean {
-  // iOS cannot run camera/screen/Talk commands in the background. Queue only
-  // those foreground-only commands when the node explicitly reports that state.
   const platform = normalizeLowercaseStringOrEmpty(params.platform);
   if (!platform.startsWith("ios") && !platform.startsWith("ipados")) {
     return false;
@@ -294,8 +280,6 @@ function enqueuePendingNodeAction(params: {
   const queue = prunePendingNodeActions(params.nodeId, nowMs);
   const existing = queue.find((entry) => entry.idempotencyKey === params.idempotencyKey);
   if (existing) {
-    // Keep retries idempotent so callers do not create duplicate foreground
-    // actions while the node is still backgrounded.
     return existing;
   }
   const entry: PendingNodeAction = {
@@ -339,7 +323,7 @@ function refreshConnectedNodeSurfaceCaches(params: {
     deviceFamily: nodeSession.deviceFamily,
     commands: nodeSession.commands,
     cfg,
-  }).catch((err: unknown) =>
+  }).catch((err) =>
     params.context.logGateway.warn(
       `remote bin probe failed for ${nodeSession.nodeId}: ${formatErrorMessage(err)}`,
     ),
@@ -355,8 +339,6 @@ function resolveAllowedPendingNodeActions(params: {
   if (pending.length === 0) {
     return pending;
   }
-  // Re-filter queued actions against the node's current declared commands and
-  // allowlist; app upgrades or permission changes can make old actions unsafe.
   const connect = params.client?.connect;
   const declaredCommands = Array.isArray(connect?.commands) ? connect.commands : [];
   const allowlist = resolveNodeCommandAllowlist(params.cfg, {
@@ -510,7 +492,7 @@ export async function maybeWakeNodeWithApns(
 
       let wakeResult;
       if (registration.transport === "relay") {
-        const relay = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig(), registration);
+        const relay = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig());
         if (!relay.ok) {
           return withDuration({
             available: false,
@@ -612,7 +594,7 @@ export async function maybeSendNodeWakeNudge(
   try {
     let result;
     if (registration.transport === "relay") {
-      const relay = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig(), registration);
+      const relay = resolveRelayNodePushConfig(opts?.cfg ?? getRuntimeConfig());
       if (!relay.ok) {
         return withDuration({
           sent: false,
@@ -681,8 +663,8 @@ export async function waitForNodeReconnect(params: {
   timeoutMs?: number;
   pollMs?: number;
 }): Promise<boolean> {
-  const timeoutMs = resolveTimerTimeoutMs(params.timeoutMs, NODE_WAKE_RECONNECT_WAIT_MS, 250);
-  const pollMs = resolveTimerTimeoutMs(params.pollMs, NODE_WAKE_RECONNECT_POLL_MS, 50);
+  const timeoutMs = Math.max(250, params.timeoutMs ?? NODE_WAKE_RECONNECT_WAIT_MS);
+  const pollMs = Math.max(50, params.pollMs ?? NODE_WAKE_RECONNECT_POLL_MS);
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
@@ -1048,7 +1030,11 @@ export const nodeHandlers: GatewayRequestHandlers = {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, "nodeId required"));
       return;
     }
-    const ackIds = normalizeUniqueTrimmedStringList(params.ids);
+    const ackIds = Array.from(
+      new Set(
+        (params.ids ?? []).map((value) => normalizeOptionalString(value) ?? "").filter(Boolean),
+      ),
+    );
     const remaining = ackPendingNodeActions(trimmedNodeId, ackIds);
     respond(
       true,
@@ -1242,8 +1228,6 @@ export const nodeHandlers: GatewayRequestHandlers = {
         idempotencyKey: p.idempotencyKey,
       });
       if (policyResult) {
-        // Plugin policies can satisfy an invocation without crossing the raw
-        // node command channel; still emit mirrored Talk events for UI state.
         if (!policyResult.ok) {
           const errorCode = policyResult.unavailable
             ? ErrorCodes.UNAVAILABLE
@@ -1297,8 +1281,6 @@ export const nodeHandlers: GatewayRequestHandlers = {
             error: res.error,
           })
         ) {
-          // Foreground-only iOS commands become pullable pending actions instead
-          // of failing permanently while the device is locked/backgrounded.
           const paramsJSON = toPendingParamsJSON(forwardedParams.params);
           const queued = enqueuePendingNodeAction({
             nodeId,

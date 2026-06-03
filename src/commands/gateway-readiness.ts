@@ -2,7 +2,6 @@ import type { DaemonStatus } from "../cli/daemon-cli/status.gather.js";
 import { promptYesNo } from "../cli/prompt.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { createLazyImportLoader } from "../shared/lazy-promise.js";
-import { gatewayProbeResultSawGateway } from "./gateway-health-auth-diagnostic.js";
 
 const daemonStatusModuleLoader = createLazyImportLoader(
   () => import("../cli/daemon-cli/status.gather.js"),
@@ -81,7 +80,25 @@ function gatewayIsRunning(status: DaemonStatus): boolean {
 }
 
 function gatewayProbeSawGateway(status: DaemonStatus): boolean {
-  return Boolean(status.rpc && gatewayProbeResultSawGateway(status.rpc));
+  const rpc = status.rpc;
+  if (!rpc) {
+    return false;
+  }
+  if (rpc.ok) {
+    return true;
+  }
+  if (rpc.auth?.capability && rpc.auth.capability !== "unknown") {
+    return true;
+  }
+  if (rpc.auth?.role || (rpc.auth?.scopes?.length ?? 0) > 0) {
+    return true;
+  }
+  if (rpc.server?.version || rpc.server?.connId) {
+    return true;
+  }
+  return /\bgateway closed \(\d+\):|\bpairing required\b|\bdevice identity required\b/i.test(
+    rpc.error ?? "",
+  );
 }
 
 function gatewayLooksReachable(status: DaemonStatus): boolean {
@@ -168,9 +185,7 @@ async function waitForGatewayReady(params: {
     !gatewayIsReady(latest, { readyWhenReachable: params.readyWhenReachable });
     attempt += 1
   ) {
-    await new Promise((resolve) => {
-      setTimeout(resolve, delayMs);
-    });
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
     latest = await params.gatherStatus();
   }
   return latest;

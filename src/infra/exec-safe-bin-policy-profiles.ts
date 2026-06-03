@@ -1,5 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 export type SafeBinProfile = {
   minPositional?: number;
@@ -301,7 +300,7 @@ function resolveSafeBinDeniedFlags(
 ): Record<string, string[]> {
   const out: Record<string, string[]> = {};
   for (const [name, fixture] of Object.entries(fixtures)) {
-    const denied = sortUniqueStrings(fixture.deniedFlags ?? []);
+    const denied = Array.from(new Set(fixture.deniedFlags ?? [])).toSorted();
     if (denied.length > 0) {
       out[name] = denied;
     }

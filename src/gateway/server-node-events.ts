@@ -1,22 +1,18 @@
 import { randomUUID } from "node:crypto";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { updatePairedDeviceMetadata } from "../infra/device-pairing.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import {
-  resolveEventSessionKeyForPolicy,
-  resolveEventSessionRoutingPolicy,
-  scopedHeartbeatWakeOptionsForPolicy,
-} from "../infra/event-session-routing.js";
 import { updatePairedNodeMetadata } from "../infra/node-pairing.js";
 import type { PromptImageOrderEntry } from "../media/prompt-image-order.js";
+import { resolveEventSessionKey } from "../routing/session-key.js";
 import {
   NODE_PRESENCE_ALIVE_EVENT,
   normalizeNodePresenceAliveReason,
 } from "../shared/node-presence.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalString,
+} from "../shared/string-coerce.js";
 import type { NodeEvent, NodeEventContext } from "./server-node-events-types.js";
 import {
   agentCommandFromIngress,
@@ -42,6 +38,7 @@ import {
   resolveSessionAgentId,
   resolveSessionModelRef,
   sanitizeInboundSystemTags,
+  scopedHeartbeatWakeOptions,
   sendDurableMessageBatch,
   updateSessionStore,
 } from "./server-node-events.runtime.js";
@@ -66,20 +63,8 @@ export type NodeEventHandleResult = {
   reason?: string;
 };
 
-type NodeAgentCommandInput = Parameters<typeof agentCommandFromIngress>[0];
-
 function normalizeFiniteInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) ? Math.trunc(value) : null;
-}
-
-function dispatchNodeAgentCommand(
-  ctx: NodeEventContext,
-  nodeId: string,
-  input: NodeAgentCommandInput,
-): void {
-  void agentCommandFromIngress(input, defaultRuntime, ctx.deps).catch((err: unknown) => {
-    ctx.logGateway.warn(`agent failed node=${nodeId}: ${formatForLog(err)}`);
-  });
 }
 
 function resolveVoiceTranscriptFingerprint(obj: Record<string, unknown>, text: string): string {
@@ -305,7 +290,7 @@ function queueSessionStoreTouch(params: {
     entry: params.entry,
     sessionId: params.sessionId,
     now: params.now,
-  }).catch((err: unknown) => {
+  }).catch((err) => {
     params.ctx.logGateway.warn("voice session-store update failed: " + formatForLog(err));
   });
 }
@@ -425,20 +410,27 @@ export const handleNodeEvent = async (
         clientRunId: `voice-${randomUUID()}`,
       });
 
-      dispatchNodeAgentCommand(ctx, nodeId, {
-        runId,
-        message: text,
-        sessionId,
-        sessionKey: canonicalKey,
-        thinking: "low",
-        deliver: false,
-        messageChannel: "node",
-        inputProvenance: {
-          kind: "external_user",
-          sourceChannel: "voice",
-          sourceTool: "gateway.voice.transcript",
+      void agentCommandFromIngress(
+        {
+          runId,
+          message: text,
+          sessionId,
+          sessionKey: canonicalKey,
+          thinking: "low",
+          deliver: false,
+          messageChannel: "node",
+          inputProvenance: {
+            kind: "external_user",
+            sourceChannel: "voice",
+            sourceTool: "gateway.voice.transcript",
+          },
+          senderIsOwner: false,
+          allowModelOverride: false,
         },
-        allowModelOverride: false,
+        defaultRuntime,
+        ctx.deps,
+      ).catch((err) => {
+        ctx.logGateway.warn(`agent failed node=${nodeId}: ${formatForLog(err)}`);
       });
       return undefined;
     }
@@ -465,7 +457,7 @@ export const handleNodeEvent = async (
         key?: string | null;
       };
 
-      let link: AgentDeepLink | null;
+      let link: AgentDeepLink | null = null;
       try {
         link = JSON.parse(evt.payloadJSON) as AgentDeepLink;
       } catch {
@@ -580,7 +572,7 @@ export const handleNodeEvent = async (
           channel: deliveryChannel,
           to: deliveryTo,
           text: receiptText,
-        }).catch((err: unknown) => {
+        }).catch((err) => {
           ctx.logGateway.warn(`agent receipt failed node=${nodeId}: ${formatForLog(err)}`);
         });
       } else if (wantsReceipt) {
@@ -589,21 +581,28 @@ export const handleNodeEvent = async (
         );
       }
 
-      dispatchNodeAgentCommand(ctx, nodeId, {
-        runId: sessionId,
-        message,
-        images,
-        imageOrder,
-        sessionId,
-        sessionKey: canonicalKey,
-        thinking: link?.thinking ?? undefined,
-        deliver,
-        to: deliveryTo,
-        channel: deliveryChannel,
-        timeout:
-          typeof link?.timeoutSeconds === "number" ? link.timeoutSeconds.toString() : undefined,
-        messageChannel: "node",
-        allowModelOverride: false,
+      void agentCommandFromIngress(
+        {
+          runId: sessionId,
+          message,
+          images,
+          imageOrder,
+          sessionId,
+          sessionKey: canonicalKey,
+          thinking: link?.thinking ?? undefined,
+          deliver,
+          to: deliveryTo,
+          channel: deliveryChannel,
+          timeout:
+            typeof link?.timeoutSeconds === "number" ? link.timeoutSeconds.toString() : undefined,
+          messageChannel: "node",
+          senderIsOwner: false,
+          allowModelOverride: false,
+        },
+        defaultRuntime,
+        ctx.deps,
+      ).catch((err) => {
+        ctx.logGateway.warn(`agent failed node=${nodeId}: ${formatForLog(err)}`);
       });
       return undefined;
     }
@@ -649,6 +648,8 @@ export const handleNodeEvent = async (
       const queued = enqueueSystemEvent(summary, {
         sessionKey,
         contextKey: `notification:${keyRaw}`,
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
       });
       if (queued) {
         requestHeartbeat({
@@ -723,9 +724,6 @@ export const handleNodeEvent = async (
       if (obj.suppressNotifyOnExit === true) {
         return undefined;
       }
-      if (evt.event === "exec.denied") {
-        return undefined;
-      }
       const command = sanitizeInboundSystemTags(normalizeOptionalString(obj.command) ?? "");
       const exitCode =
         typeof obj.exitCode === "number" && Number.isFinite(obj.exitCode)
@@ -733,17 +731,9 @@ export const handleNodeEvent = async (
           : undefined;
       const timedOut = obj.timedOut === true;
       const output = sanitizeInboundSystemTags(normalizeOptionalString(obj.output) ?? "");
-      // Strip parens from the untrusted RAW reason before sanitizeInboundSystemTags
-      // runs: the `Exec denied (node=..., <reason>): cmd` wire format is parsed by
-      // matching the first balanced `(...)` and stray parens in user-supplied
-      // input would break the metadata/body boundary. We strip pre-sanitize so
-      // that legitimate `[System Message]` style tags can still be converted to
-      // `(System Message)` by sanitizeInboundSystemTags afterward.
-      const reason = sanitizeInboundSystemTags(
-        (normalizeOptionalString(obj.reason) ?? "").replace(/[()]/g, ""),
-      );
+      const reason = sanitizeInboundSystemTags(normalizeOptionalString(obj.reason) ?? "");
 
-      let text;
+      let text = "";
       if (evt.event === "exec.started") {
         text = `Exec started (node=${nodeId}${runId ? ` id=${runId}` : ""})`;
         if (command) {
@@ -777,17 +767,18 @@ export const handleNodeEvent = async (
         }
       }
 
-      const eventRouting = resolveEventSessionRoutingPolicy({ cfg, sessionKey });
       const queued = enqueueSystemEvent(text, {
-        sessionKey: resolveEventSessionKeyForPolicy(sessionKey, eventRouting),
+        sessionKey: resolveEventSessionKey(sessionKey, cfg.session?.mainKey, cfg.session?.scope),
         contextKey: runId ? `exec:${runId}` : "exec",
+        forceSenderIsOwnerFalse: true,
+        trusted: false,
       });
       if (queued) {
         // Scope wakes only for canonical agent sessions. Synthetic node-* fallback
         // keys should keep legacy unscoped behavior so enabled non-main heartbeat
         // agents still run when no explicit agent session is provided.
         requestHeartbeat(
-          scopedHeartbeatWakeOptionsForPolicy(
+          scopedHeartbeatWakeOptions(
             sessionKey,
             {
               source: "exec-event",
@@ -795,7 +786,8 @@ export const handleNodeEvent = async (
               reason: "exec-event",
               coalesceMs: 0,
             },
-            eventRouting,
+            cfg.session?.mainKey,
+            cfg.session?.scope,
           ),
         );
       }
@@ -828,7 +820,6 @@ export const handleNodeEvent = async (
             topic,
             environment,
             distribution: obj.distribution,
-            relayOrigin: obj.relayOrigin,
             tokenDebugSuffix: obj.tokenDebugSuffix,
           });
         } else {

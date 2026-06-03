@@ -1,5 +1,4 @@
 import { createDedupeCache } from "../infra/dedupe.js";
-import { resolveNonNegativeIntegerOption } from "../infra/numeric-options.js";
 import type { FileLockOptions } from "./file-lock.js";
 import { withFileLock } from "./file-lock.js";
 import { readJsonFileWithFallback, writeJsonFileAtomically } from "./json-store.js";
@@ -149,9 +148,9 @@ function isRecentTimestamp(seenAt: number | undefined, ttlMs: number, now: numbe
 
 /** Create a dedupe helper that combines in-memory fast checks with a lock-protected disk store. */
 export function createPersistentDedupe(options: PersistentDedupeOptions): PersistentDedupe {
-  const ttlMs = resolveNonNegativeIntegerOption(options.ttlMs, 0);
-  const memoryMaxSize = resolveNonNegativeIntegerOption(options.memoryMaxSize, 0);
-  const fileMaxEntries = Math.max(1, resolveNonNegativeIntegerOption(options.fileMaxEntries, 1));
+  const ttlMs = Math.max(0, Math.floor(options.ttlMs));
+  const memoryMaxSize = Math.max(0, Math.floor(options.memoryMaxSize));
+  const fileMaxEntries = Math.max(1, Math.floor(options.fileMaxEntries));
   const lockOptions = mergeLockOptions(options.lockOptions);
   const memory = createDedupeCache({ ttlMs, maxSize: memoryMaxSize });
   const inflight = new Map<string, Promise<boolean>>();
@@ -325,15 +324,15 @@ function createReleasedClaimError(scopedKey: string): Error {
 
 /** Create a claim/commit/release dedupe guard backed by memory and optional persistent storage. */
 export function createClaimableDedupe(options: ClaimableDedupeOptions): ClaimableDedupe {
-  const ttlMs = resolveNonNegativeIntegerOption(options.ttlMs, 0);
-  const memoryMaxSize = resolveNonNegativeIntegerOption(options.memoryMaxSize, 0);
+  const ttlMs = Math.max(0, Math.floor(options.ttlMs));
+  const memoryMaxSize = Math.max(0, Math.floor(options.memoryMaxSize));
   const memory = createDedupeCache({ ttlMs, maxSize: memoryMaxSize });
   const persistent =
     options.resolveFilePath != null
       ? createPersistentDedupe({
           ttlMs,
           memoryMaxSize,
-          fileMaxEntries: Math.max(1, resolveNonNegativeIntegerOption(options.fileMaxEntries, 1)),
+          fileMaxEntries: Math.max(1, Math.floor(options.fileMaxEntries)),
           resolveFilePath: options.resolveFilePath,
           lockOptions: options.lockOptions,
           onDiskError: options.onDiskError,
@@ -412,15 +411,15 @@ export function createClaimableDedupe(options: ClaimableDedupeOptions): Claimabl
     }
     const namespace = resolveNamespace(dedupeOptions?.namespace);
     const scopedKey = resolveScopedKey(namespace, trimmed);
-    const claimValue = inflight.get(scopedKey);
+    const claim = inflight.get(scopedKey);
     try {
       const recorded = persistent
         ? await persistent.checkAndRecord(trimmed, dedupeOptions)
         : !memory.check(scopedKey, dedupeOptions?.now);
-      claimValue?.resolve(recorded);
+      claim?.resolve(recorded);
       return recorded;
     } catch (error) {
-      claimValue?.reject(error);
+      claim?.reject(error);
       throw error;
     } finally {
       inflight.delete(scopedKey);
@@ -440,11 +439,11 @@ export function createClaimableDedupe(options: ClaimableDedupeOptions): Claimabl
     }
     const namespace = resolveNamespace(dedupeOptions?.namespace);
     const scopedKey = resolveScopedKey(namespace, trimmed);
-    const claimLocal = inflight.get(scopedKey);
-    if (!claimLocal) {
+    const claim = inflight.get(scopedKey);
+    if (!claim) {
       return;
     }
-    claimLocal.reject(dedupeOptions?.error ?? createReleasedClaimError(scopedKey));
+    claim.reject(dedupeOptions?.error ?? createReleasedClaimError(scopedKey));
     inflight.delete(scopedKey);
   }
 

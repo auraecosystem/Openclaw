@@ -1,6 +1,5 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "./string-coerce.js";
 
-/** Normalizes optional assistant identity fields and truncates them to the caller's limit. */
 export function coerceIdentityValue(
   value: string | undefined,
   maxLength: number,

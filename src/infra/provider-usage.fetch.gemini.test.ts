@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createProviderUsageFetch, makeResponse } from "../test-utils/provider-usage-fetch.js";
 import { fetchGeminiUsage } from "./provider-usage.fetch.gemini.js";
 
-const usageProvider = "openai" as const;
+const usageProvider = "openai-codex" as const;
 
 describe("fetchGeminiUsage", () => {
   it("returns HTTP errors for failed requests", async () => {
@@ -58,7 +58,7 @@ describe("fetchGeminiUsage", () => {
 
     expect(result).toEqual({
       provider: usageProvider,
-      displayName: "OpenAI",
+      displayName: "Codex",
       windows: [],
     });
   });

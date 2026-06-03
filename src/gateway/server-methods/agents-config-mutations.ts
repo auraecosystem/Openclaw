@@ -17,7 +17,6 @@ export type AgentDeleteMutationResult = {
   removedBindings: number;
 };
 
-/** Typed precondition failure surfaced by agent mutation handlers as gateway errors. */
 export class AgentConfigPreconditionError extends Error {
   constructor(
     readonly kind: "already-exists" | "not-found",
@@ -32,12 +31,10 @@ export class AgentConfigPreconditionError extends Error {
   }
 }
 
-/** Checks the current config snapshot for a concrete agent entry. */
 export function isConfiguredAgent(cfg: OpenClawConfig, agentId: string): boolean {
   return findAgentEntryIndex(listAgentEntries(cfg), agentId) >= 0;
 }
 
-/** Adds a new agent entry through the retrying config mutation path. */
 export async function createAgentConfigEntry(params: {
   agentId: string;
   name: string;
@@ -65,7 +62,6 @@ export async function createAgentConfigEntry(params: {
   });
 }
 
-/** Updates an existing agent entry while preserving omitted fields. */
 export async function updateAgentConfigEntry(params: {
   agentId: string;
   name?: string;
@@ -91,7 +87,6 @@ export async function updateAgentConfigEntry(params: {
   });
 }
 
-/** Removes an agent entry and returns filesystem roots the caller should clean up. */
 export async function deleteAgentConfigEntry(params: { agentId: string }): Promise<{
   nextConfig: OpenClawConfig;
   result: AgentDeleteMutationResult | undefined;

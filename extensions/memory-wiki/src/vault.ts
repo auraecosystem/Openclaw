@@ -7,7 +7,6 @@ import {
 import { FsSafeError, pathExists, root as fsRoot } from "openclaw/plugin-sdk/security-runtime";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
-import { resolveMemoryWikiTimestamp } from "./time.js";
 
 export const WIKI_VAULT_DIRECTORIES = [
   "entities",
@@ -129,7 +128,7 @@ export async function initializeMemoryWikiVault(
       JSON.stringify(
         {
           version: 1,
-          createdAt: resolveMemoryWikiTimestamp(options?.nowMs),
+          createdAt: new Date(options?.nowMs ?? Date.now()).toISOString(),
           renderMode: config.vault.renderMode,
         },
         null,
@@ -143,7 +142,7 @@ export async function initializeMemoryWikiVault(
   if (createdDirectories.length > 0 || createdFiles.length > 0) {
     await appendMemoryWikiLog(rootDir, {
       type: "init",
-      timestamp: resolveMemoryWikiTimestamp(options?.nowMs),
+      timestamp: new Date(options?.nowMs ?? Date.now()).toISOString(),
       details: {
         createdDirectories: createdDirectories.map((dir) => path.relative(rootDir, dir) || "."),
         createdFiles: createdFiles.map((file) => path.relative(rootDir, file)),

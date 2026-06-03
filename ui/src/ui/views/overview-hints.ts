@@ -1,7 +1,7 @@
 import {
   ConnectErrorDetailCodes,
   readConnectPairingRequiredMessage,
-} from "../../../../packages/gateway-protocol/src/connect-error-details.js";
+} from "../../../../src/gateway/protocol/connect-error-details.js";
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 
 const AUTH_REQUIRED_CODES = new Set<string>([

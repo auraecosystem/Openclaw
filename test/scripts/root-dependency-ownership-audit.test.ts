@@ -37,24 +37,28 @@ describe("collectModuleSpecifiers", () => {
         const runtimeRequire = createRequire(runtimePackagePath);
         require.resolve("gaxios");
         runtimeRequire.resolve("openshell/package.json");
-        resolvePackageFileForCommandExplanation("tree-sitter-bash", "tree-sitter-bash.wasm");
       `),
-    ]).toEqual(["gaxios", "openshell/package.json", "tree-sitter-bash"]);
+    ]).toEqual(["gaxios", "openshell/package.json"]);
   });
 
   it("resolves simple string constants used by lazy runtime imports", () => {
     expect([
       ...collectModuleSpecifiers(`
         const READABILITY_MODULE = "@mozilla/readability";
-        const CLAWPDF_MODULE = "clawpdf";
+        const PDFJS_MODULE = "pdfjs-dist/legacy/build/pdf.mjs";
         const CIAO_MODULE_ID = "@homebridge/ciao";
         let SQLITE_VEC_MODULE_ID = "sqlite-vec";
         import(READABILITY_MODULE);
-        import(CLAWPDF_MODULE);
+        import(PDFJS_MODULE);
         require(CIAO_MODULE_ID);
         require.resolve(SQLITE_VEC_MODULE_ID);
       `),
-    ]).toEqual(["@mozilla/readability", "clawpdf", "@homebridge/ciao", "sqlite-vec"]);
+    ]).toEqual([
+      "@mozilla/readability",
+      "pdfjs-dist/legacy/build/pdf.mjs",
+      "@homebridge/ciao",
+      "sqlite-vec",
+    ]);
   });
 });
 
@@ -150,15 +154,15 @@ describe("collectRootDependencyOwnershipCheckErrors", () => {
     writeRepoFile(
       repoRoot,
       "package.json",
-      JSON.stringify({ dependencies: { clawpdf: "^0.2.0", "sqlite-vec": "0.1.9" } }),
+      JSON.stringify({ dependencies: { "pdfjs-dist": "^5.0.0", "sqlite-vec": "0.1.9" } }),
     );
     writeRepoFile(
       repoRoot,
       "src/media/pdf-extract.ts",
       `
-        const CLAWPDF_MODULE = "clawpdf";
+        const PDFJS_MODULE = "pdfjs-dist/legacy/build/pdf.mjs";
         export async function loadPdf() {
-          return import(CLAWPDF_MODULE);
+          return import(PDFJS_MODULE);
         }
       `,
     );
@@ -182,13 +186,13 @@ describe("collectRootDependencyOwnershipCheckErrors", () => {
       {
         category: "core_runtime",
         declaredInExtensions: [],
-        depName: "clawpdf",
+        depName: "pdfjs-dist",
         fileCount: 1,
         internalizedBundledRuntimeOwners: [],
         recommendation: "keep at root",
         sampleFiles: ["src/media/pdf-extract.ts"],
         sections: ["src"],
-        spec: "^0.2.0",
+        spec: "^5.0.0",
       },
       {
         category: "core_runtime",

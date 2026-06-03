@@ -1,12 +1,10 @@
 import { createRequire } from "node:module";
 import net from "node:net";
-import { isRecord as isObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import { addActiveManagedProxyTlsOptions } from "./proxy/managed-proxy-undici.js";
 import { resolveUndiciAutoSelectFamilyConnectOptions } from "./undici-family-policy.js";
 
 export const TEST_UNDICI_RUNTIME_DEPS_KEY = "__OPENCLAW_TEST_UNDICI_RUNTIME_DEPS__";
 
-/** Runtime-loaded undici constructors/functions used where static imports would affect globals. */
 export type UndiciRuntimeDeps = {
   Agent: typeof import("undici").Agent;
   EnvHttpProxyAgent: typeof import("undici").EnvHttpProxyAgent;
@@ -15,7 +13,6 @@ export type UndiciRuntimeDeps = {
   fetch: typeof import("undici").fetch;
 };
 
-/** Minimal undici surface needed by global-dispatcher installation code. */
 export type UndiciGlobalDispatcherDeps = Pick<UndiciRuntimeDeps, "Agent" | "EnvHttpProxyAgent"> & {
   getGlobalDispatcher: typeof import("undici").getGlobalDispatcher;
   setGlobalDispatcher: typeof import("undici").setGlobalDispatcher;
@@ -36,6 +33,10 @@ type UnknownFunction = (...args: unknown[]) => unknown;
 const HTTP1_ONLY_DISPATCHER_OPTIONS = Object.freeze({
   allowH2: false as const,
 });
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function applyMissingConnectOptions(
   connect: Record<string, unknown>,
@@ -108,8 +109,6 @@ function stripIpServernameFromConnect(connect: unknown): unknown {
 function createIpSafeProxyClientFactory(): UndiciProxyClientFactory {
   return (origin, options) => {
     const Pool = loadUndiciProxyPoolCtor();
-    // HTTPS proxies addressed by IP can arrive with an IP servername. Strip it
-    // before TLS connect because OpenSSL rejects IP literals as SNI values.
     const clientOptions = isObjectRecord(options)
       ? { ...options, connect: stripIpServernameFromConnect(options.connect) }
       : options;
@@ -124,15 +123,12 @@ function addIpSafeProxyClientFactory<TOptions extends object>(options: TOptions)
   if ("clientFactory" in options) {
     return options;
   }
-  // Only install our factory when the caller did not provide one, otherwise
-  // custom proxy pools would lose their own connection policy.
   return {
     ...options,
     clientFactory: createIpSafeProxyClientFactory(),
   };
 }
 
-/** Loads undici lazily, allowing tests to inject constructors without global side effects. */
 export function loadUndiciRuntimeDeps(): UndiciRuntimeDeps {
   const override = (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY];
   if (isUndiciRuntimeDeps(override)) {
@@ -150,7 +146,6 @@ export function loadUndiciRuntimeDeps(): UndiciRuntimeDeps {
   };
 }
 
-/** Loads only the undici global-dispatcher API used by startup proxy setup. */
 export function loadUndiciGlobalDispatcherDeps(): UndiciGlobalDispatcherDeps {
   const override = (globalThis as Record<string, unknown>)[TEST_UNDICI_RUNTIME_DEPS_KEY];
   if (isUndiciGlobalDispatcherDeps(override)) {
@@ -211,7 +206,6 @@ function withHttp1OnlyDispatcherOptions<T extends object | undefined>(
   return base;
 }
 
-/** Creates a direct undici Agent with OpenClaw's HTTP/1-only dispatcher policy. */
 export function createHttp1Agent(
   options?: UndiciAgentOptions,
   timeoutMs?: number,
@@ -220,10 +214,6 @@ export function createHttp1Agent(
   return new Agent(withHttp1OnlyDispatcherOptions(options, timeoutMs));
 }
 
-/**
- * Creates an EnvHttpProxyAgent with OpenClaw proxy TLS, IP-safe proxy pools,
- * timeout propagation, and HTTP/1-only dispatch.
- */
 export function createHttp1EnvHttpProxyAgent(
   options?: UndiciEnvHttpProxyAgentOptions,
   timeoutMs?: number,
@@ -241,10 +231,6 @@ export function createHttp1EnvHttpProxyAgent(
   );
 }
 
-/**
- * Creates a fixed ProxyAgent with the same HTTP/1, managed TLS, timeout, and
- * IP-safe proxy connection policy used by env proxy dispatchers.
- */
 export function createHttp1ProxyAgent(
   options: UndiciProxyAgentOptions,
   timeoutMs?: number,

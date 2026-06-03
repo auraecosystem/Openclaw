@@ -12,17 +12,17 @@ interface BridgeLogger {
   debug?: (msg: string) => void;
 }
 
-let loggerInstance: BridgeLogger | null = null;
+let _logger: BridgeLogger | null = null;
 
 /** Register the framework logger. Called once in startGateway(). */
 export function setBridgeLogger(logger: BridgeLogger): void {
-  loggerInstance = logger;
+  _logger = logger;
 }
 
 /** Get the bridge logger. Falls back to console if not yet registered. */
 export function getBridgeLogger(): BridgeLogger {
   return (
-    loggerInstance ?? {
+    _logger ?? {
       info: (msg) => console.log(msg),
       error: (msg) => console.error(msg),
       debug: (msg) => console.log(msg),

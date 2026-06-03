@@ -6,7 +6,6 @@ import {
   parseAgentSessionKey,
 } from "../../routing/session-key.js";
 import { resolveModelAgentRuntimeMetadata } from "../agent-runtime-metadata.js";
-import { listAgentIds } from "../agent-scope-config.js";
 import { resolveAgentConfig, resolveAgentEffectiveModelPrimary } from "../agent-scope.js";
 import { resolveDefaultModelForAgent } from "../model-selection.js";
 import { resolveSubagentAllowedTargetIds } from "../subagent-target-policy.js";
@@ -35,7 +34,8 @@ export function createAgentsListTool(opts?: {
   return {
     label: "Agents",
     name: "agents_list",
-    description: 'List agent ids allowed for `sessions_spawn runtime="subagent"`.',
+    description:
+      'List OpenClaw agent ids you can target with `sessions_spawn` when `runtime="subagent"` (based on subagent allowlists).',
     parameters: AgentsListToolSchema,
     execute: async () => {
       const cfg = getRuntimeConfig();
@@ -59,7 +59,7 @@ export function createAgentsListTool(opts?: {
         cfg?.agents?.defaults?.subagents?.allowAgents;
 
       const configuredAgents = Array.isArray(cfg.agents?.list) ? cfg.agents?.list : [];
-      const configuredIds = listAgentIds(cfg);
+      const configuredIds = configuredAgents.map((entry) => normalizeAgentId(entry.id));
       const configuredNameMap = new Map<string, string>();
       for (const entry of configuredAgents) {
         const name = entry?.name?.trim() ?? "";

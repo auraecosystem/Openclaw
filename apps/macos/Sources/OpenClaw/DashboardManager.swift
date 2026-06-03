@@ -10,7 +10,6 @@ final class DashboardManager {
     static let shared = DashboardManager()
 
     private var controller: DashboardWindowController?
-    private static let failureURL = URL(string: "about:blank")!
 
     private init() {}
 
@@ -70,19 +69,6 @@ final class DashboardManager {
         Task { _ = try? await ControlChannel.shared.health(timeout: 3) }
     }
 
-    func showFailure(_ error: Error) {
-        let message = (error as NSError).localizedDescription
-        dashboardManagerLogger.error("dashboard setup failed error=\(message, privacy: .public)")
-        let controller = self.controller ?? DashboardWindowController(
-            url: Self.failureURL,
-            auth: DashboardWindowAuth(gatewayUrl: nil, token: nil, password: nil))
-        self.controller = controller
-        controller.showFailure(
-            title: "Dashboard unavailable",
-            message: message,
-            detail: "Check Settings → Connection or use Debug → Reset Remote Tunnel, then try again.")
-    }
-
     func close() {
         self.controller?.closeDashboard()
     }
@@ -115,10 +101,9 @@ final class DashboardManager {
 
     private func immediateDashboardConfig(mode: AppState.ConnectionMode) -> GatewayConnection.Config? {
         let root = OpenClawConfigFile.loadDict()
-        let resolution = GatewayRemoteConfig.resolveTransportResolution(root: root)
         if mode == .remote,
-           resolution.transport == .direct,
-           let url = resolution.directURL
+           GatewayRemoteConfig.resolveTransport(root: root) == .direct,
+           let url = GatewayRemoteConfig.resolveGatewayUrl(root: root)
         {
             return (
                 url,

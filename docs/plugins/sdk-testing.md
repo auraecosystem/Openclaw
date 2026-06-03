@@ -20,8 +20,7 @@ plugins.
 ## Test utilities
 
 These test-helper subpaths are repo-local source entrypoints for OpenClaw's own
-bundled plugin tests. They are not package exports for third-party plugins, and
-they may import Vitest or other repo-only test dependencies.
+bundled plugin tests. They are not package exports for third-party plugins.
 
 **Plugin API mock import:** `openclaw/plugin-sdk/plugin-test-api`
 
@@ -47,8 +46,7 @@ they may import Vitest or other repo-only test dependencies.
 
 **Node builtin mock import:** `openclaw/plugin-sdk/test-node-mocks`
 
-Inside the OpenClaw repo, prefer the focused subpaths below for new bundled
-plugin tests. The broad
+Prefer the focused subpaths below for new plugin tests. The broad
 `openclaw/plugin-sdk/testing` barrel is legacy compatibility only.
 Repo guardrails reject new real imports from `plugin-sdk/testing` and
 `plugin-sdk/test-utils`; those names remain only as deprecated compatibility

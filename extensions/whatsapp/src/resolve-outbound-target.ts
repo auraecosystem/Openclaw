@@ -1,5 +1,4 @@
 import { missingTargetError } from "openclaw/plugin-sdk/channel-feedback";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   isWhatsAppGroupJid,
   isWhatsAppNewsletterJid,
@@ -38,7 +37,9 @@ export function resolveWhatsAppOutboundTarget(params: {
     return { ok: true, to: normalizedTo };
   }
 
-  const allowListRaw = normalizeStringEntries(params.allowFrom ?? []);
+  const allowListRaw = (params.allowFrom ?? [])
+    .map((entry) => String(entry).trim())
+    .filter(Boolean);
   const hasWildcard = allowListRaw.includes("*");
   const allowList = allowListRaw
     .filter((entry) => entry !== "*")

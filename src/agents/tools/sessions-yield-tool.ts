@@ -13,7 +13,8 @@ export function createSessionsYieldTool(opts?: {
   return {
     label: "Yield",
     name: "sessions_yield",
-    description: "End current turn. Use after spawning subagents; results arrive as next message.",
+    description:
+      "End your current turn. Use after spawning subagents to receive their results as the next message.",
     parameters: SessionsYieldToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;

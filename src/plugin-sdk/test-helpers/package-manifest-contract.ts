@@ -19,9 +19,10 @@ type PackageManifestContractParams = {
   minHostVersionBaseline?: string;
 };
 
-function readPackageManifest(relativePath: string): PackageManifest {
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Test helper lets assertions ascribe package manifest shape.
+function readJson<T>(relativePath: string): T {
   const absolutePath = path.resolve(process.cwd(), relativePath);
-  return JSON.parse(fs.readFileSync(absolutePath, "utf8")) as PackageManifest;
+  return JSON.parse(fs.readFileSync(absolutePath, "utf8")) as T;
 }
 
 function bundledPluginFile(pluginId: string, relativePath: string): string {
@@ -35,8 +36,8 @@ export function describePackageManifestContract(params: PackageManifestContractP
     if (params.pluginLocalRuntimeDeps?.length) {
       for (const dependencyName of params.pluginLocalRuntimeDeps) {
         it(`keeps ${dependencyName} plugin-local`, () => {
-          const rootManifest = readPackageManifest("package.json");
-          const pluginManifest = readPackageManifest(packagePath);
+          const rootManifest = readJson("package.json") as PackageManifest;
+          const pluginManifest = readJson(packagePath) as PackageManifest;
           const pluginSpec =
             pluginManifest.dependencies?.[dependencyName] ??
             pluginManifest.optionalDependencies?.[dependencyName];
@@ -59,7 +60,7 @@ export function describePackageManifestContract(params: PackageManifestContractP
           return;
         }
 
-        const manifest = readPackageManifest(packagePath);
+        const manifest = readJson<PackageManifest>(packagePath);
         const requirement = parseMinHostVersionRequirement(
           manifest.openclaw?.install?.minHostVersion ?? null,
         );

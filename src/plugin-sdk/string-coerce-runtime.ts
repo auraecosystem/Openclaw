@@ -10,42 +10,22 @@ export {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
   normalizeOptionalStringifiedId,
-  normalizeStringifiedEntries,
   normalizeStringifiedOptionalString,
   readStringValue,
-} from "../../packages/normalization-core/src/string-coerce.js";
-export {
-  asFiniteNumberInRange,
-  asFiniteNumber,
-  asPositiveSafeInteger,
-  asSafeIntegerInRange,
-  parseFiniteNumber,
-  parseStrictFiniteNumber,
-  parseStrictInteger,
-  parseStrictNonNegativeInteger,
-  parseStrictPositiveInteger,
-} from "../../packages/normalization-core/src/number-coercion.js";
-export { asBoolean, parseBooleanValue } from "../utils/boolean.js";
+} from "../shared/string-coerce.js";
 export {
   asRecord,
   asNullableRecord,
   asOptionalRecord,
   readStringField,
-} from "../../packages/normalization-core/src/record-coerce.js";
+} from "../shared/record-coerce.js";
 export { isRecord } from "../utils.js";
 export {
   normalizeAtHashSlug,
   normalizeHyphenSlug,
   normalizeOptionalTrimmedStringList,
-  normalizeSortedUniqueTrimmedStringList,
   normalizeSingleOrTrimmedStringList,
   normalizeStringEntries,
   normalizeStringEntriesLower,
-  normalizeUniqueStringEntries,
-  normalizeUniqueTrimmedStringList,
-  normalizeTrimmedStringList,
-  sortUniqueStrings,
-  uniqueStrings,
-  uniqueValues,
-} from "../../packages/normalization-core/src/string-normalization.js";
+} from "../shared/string-normalization.js";
 export { summarizeStringEntries } from "../shared/string-sample.js";

@@ -111,6 +111,6 @@ export function resolveDiscordDirectoryUserId(params: {
   return cache.get(withoutDiscriminator);
 }
 
-export function resetDiscordDirectoryCacheForTest(): void {
+export function __resetDiscordDirectoryCacheForTest(): void {
   DIRECTORY_HANDLE_CACHE.clear();
 }

@@ -1,5 +1,5 @@
-import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
-import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   onSessionTranscriptUpdate,
@@ -43,7 +43,6 @@ describe("guardSessionManager transcript updates", () => {
 
     expect(updates).toStrictEqual([
       {
-        agentId: "main",
         message: {
           content: [{ text: "hello from subagent", type: "text" }],
           role: "assistant",

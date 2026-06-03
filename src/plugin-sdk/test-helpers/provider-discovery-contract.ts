@@ -717,7 +717,6 @@ export function describeMinimaxProviderDiscoveryContract(
         apiKey: "minimax-key",
       });
       const ids = providerModelIds(provider);
-      expect(ids).toContain("MiniMax-M3");
       expect(ids).toContain("MiniMax-M2.7");
       expect(ids).toContain("MiniMax-M2.7-highspeed");
     });

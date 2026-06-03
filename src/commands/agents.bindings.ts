@@ -1,5 +1,3 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { normalizeSortedUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { getBundledChannelSetupPlugin } from "../channels/plugins/bundled.js";
 import { resolveChannelDefaultAccountId } from "../channels/plugins/helpers.js";
 import { getLoadedChannelPlugin } from "../channels/plugins/index.js";
@@ -11,6 +9,8 @@ import type { AgentRouteBinding } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { listManifestChannelContributionIds } from "../plugins/manifest-contribution-ids.js";
 import { DEFAULT_ACCOUNT_ID, normalizeAgentId } from "../routing/session-key.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { normalizeStringEntries } from "../shared/string-normalization.js";
 import type { ChannelChoice } from "./onboard-types.js";
 
 export { describeBinding } from "./agents.binding-format.js";
@@ -22,7 +22,9 @@ function bindingMatchKey(match: AgentRouteBinding["match"]) {
 }
 
 function bindingMatchIdentityKey(match: AgentRouteBinding["match"]) {
-  const roles = Array.isArray(match.roles) ? normalizeSortedUniqueStringEntries(match.roles) : [];
+  const roles = Array.isArray(match.roles)
+    ? Array.from(new Set(normalizeStringEntries(match.roles).toSorted()))
+    : [];
   return JSON.stringify([
     match.channel,
     match.peer?.kind ?? "",
@@ -262,10 +264,6 @@ function resolveBindingAccountId(params: {
   });
   if (pluginAccountId?.trim()) {
     return pluginAccountId.trim();
-  }
-
-  if (plugin && plugin.config.listAccountIds(params.config).length > 1) {
-    return "*";
   }
 
   if (plugin?.meta.forceAccountBinding) {

@@ -16,32 +16,6 @@ final class RemotePortTunnel: @unchecked Sendable {
     let localPort: UInt16?
     private let stderrHandle: FileHandle?
 
-    private final class StderrCapture: @unchecked Sendable {
-        private let lock = NSLock()
-        private var text = ""
-        private let limit = 4096
-
-        func append(_ chunk: String) {
-            let trimmed = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { return }
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            if !self.text.isEmpty {
-                self.text += "\n"
-            }
-            self.text += trimmed
-            if self.text.count > self.limit {
-                self.text = String(self.text.suffix(self.limit))
-            }
-        }
-
-        func snapshot() -> String {
-            self.lock.lock()
-            defer { self.lock.unlock() }
-            return self.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-    }
-
     private init(process: Process, localPort: UInt16?, stderrHandle: FileHandle?) {
         self.process = process
         self.localPort = localPort
@@ -119,7 +93,6 @@ final class RemotePortTunnel: @unchecked Sendable {
         let pipe = Pipe()
         process.standardError = pipe
         let stderrHandle = pipe.fileHandleForReading
-        let stderrCapture = StderrCapture()
 
         // Consume stderr so ssh cannot block if it logs.
         stderrHandle.readabilityHandler = { handle in
@@ -133,7 +106,6 @@ final class RemotePortTunnel: @unchecked Sendable {
                 .trimmingCharacters(in: .whitespacesAndNewlines),
                 !line.isEmpty
             else { return }
-            stderrCapture.append(line)
             Self.logger.error("ssh tunnel stderr: \(line, privacy: .public)")
         }
         process.terminationHandler = { _ in
@@ -142,11 +114,7 @@ final class RemotePortTunnel: @unchecked Sendable {
 
         try process.run()
 
-        try await Self.waitForListener(
-            process: process,
-            localPort: localPort,
-            stderrHandle: stderrHandle,
-            stderrCapture: stderrCapture)
+        try await Self.waitForListener(process: process, localPort: localPort, stderrHandle: stderrHandle)
 
         // Track tunnel so we can clean up stale listeners on restart.
         Task {
@@ -163,13 +131,12 @@ final class RemotePortTunnel: @unchecked Sendable {
     private static func waitForListener(
         process: Process,
         localPort: UInt16,
-        stderrHandle: FileHandle,
-        stderrCapture: StderrCapture) async throws
+        stderrHandle: FileHandle) async throws
     {
         let deadline = Date().addingTimeInterval(6)
         repeat {
             if !process.isRunning {
-                let stderr = Self.drainStderr(stderrHandle, captured: stderrCapture.snapshot())
+                let stderr = Self.drainStderr(stderrHandle)
                 let msg = stderr.isEmpty ? "ssh tunnel exited before listening" : "ssh tunnel failed: \(stderr)"
                 throw NSError(domain: "RemotePortTunnel", code: 4, userInfo: [NSLocalizedDescriptionKey: msg])
             }
@@ -185,7 +152,7 @@ final class RemotePortTunnel: @unchecked Sendable {
         } while Date() < deadline
 
         process.terminate()
-        let stderr = Self.drainStderr(stderrHandle, captured: stderrCapture.snapshot())
+        let stderr = Self.drainStderr(stderrHandle)
         let msg = stderr.isEmpty ? "ssh tunnel did not open local port \(localPort)" : "ssh tunnel failed: \(stderr)"
         throw NSError(domain: "RemotePortTunnel", code: 4, userInfo: [NSLocalizedDescriptionKey: msg])
     }
@@ -344,27 +311,16 @@ final class RemotePortTunnel: @unchecked Sendable {
     }
 
     private static func drainStderr(_ handle: FileHandle) -> String {
-        self.drainStderr(handle, captured: "")
-    }
-
-    private static func drainStderr(_ handle: FileHandle, captured: String) -> String {
         handle.readabilityHandler = nil
         defer { try? handle.close() }
 
         do {
             let data = try handle.readToEnd() ?? Data()
-            let remaining = String(data: data, encoding: .utf8)?
+            return String(data: data, encoding: .utf8)?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if captured.isEmpty {
-                return remaining
-            }
-            if remaining.isEmpty {
-                return captured
-            }
-            return captured + "\n" + remaining
         } catch {
             self.logger.debug("Failed to drain ssh stderr: \(error, privacy: .public)")
-            return captured
+            return ""
         }
     }
 

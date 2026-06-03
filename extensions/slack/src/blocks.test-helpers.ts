@@ -35,7 +35,9 @@ vi.mock("./accounts.js", async () => {
 });
 
 // Kept for compatibility with existing tests; mocks install at module evaluation.
-export function installSlackBlockTestMocks() {}
+export function installSlackBlockTestMocks() {
+  return;
+}
 
 export function createSlackEditTestClient(): SlackEditTestClient {
   return {

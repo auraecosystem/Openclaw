@@ -27,7 +27,11 @@ export async function loadModelsConfigWithSource(params: {
     targetIds: getModelsCommandSecretTargetIds(),
     runtime: params.runtime,
   });
-  setRuntimeConfigSnapshot(resolvedConfig, sourceConfig);
+  if (pinnedSourceConfig) {
+    setRuntimeConfigSnapshot(resolvedConfig, sourceConfig);
+  } else {
+    setRuntimeConfigSnapshot(resolvedConfig);
+  }
   return {
     sourceConfig,
     resolvedConfig,

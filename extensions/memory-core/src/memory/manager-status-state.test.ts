@@ -28,17 +28,6 @@ describe("memory manager status state", () => {
     ).toBe(true);
   });
 
-  it("marks status-only managers dirty when index identity mismatches", () => {
-    expect(
-      resolveInitialMemoryDirty({
-        hasMemorySource: false,
-        statusOnly: true,
-        hasIndexedMeta: true,
-        indexIdentityMismatched: true,
-      }),
-    ).toBe(true);
-  });
-
   it("reports the requested provider before provider initialization", () => {
     expect(
       resolveStatusProviderInfo({

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { evaluateChannelHealth, resolveChannelRestartReason } from "./channel-health-policy.js";
 
-function evaluateHealth(
+function evaluateDiscordHealth(
   account: Record<string, unknown>,
-  opts: { now?: number; channelId?: string } = {},
+  now = 100_000,
+  channelId = "discord",
 ) {
-  const { now = 100_000, channelId = "discord" } = opts;
   return evaluateChannelHealth(account, {
     channelId,
     now,
@@ -14,171 +14,284 @@ function evaluateHealth(
   });
 }
 
-function runningAccount(overrides: Record<string, unknown> = {}) {
-  return {
-    running: true,
-    enabled: true,
-    configured: true,
-    ...overrides,
-  };
-}
-
-function connectedAccount(overrides: Record<string, unknown> = {}) {
-  return runningAccount({ connected: true, ...overrides });
-}
-
-function activeRunAccount(lastRunActivityAt: number, overrides: Record<string, unknown> = {}) {
-  return runningAccount({
-    connected: false,
-    activeRuns: 1,
-    lastRunActivityAt,
-    ...overrides,
-  });
-}
-
-function staleTransportAccount(overrides: Record<string, unknown> = {}) {
-  return connectedAccount({
-    lastStartAt: 0,
-    lastTransportActivityAt: 0,
-    ...overrides,
-  });
-}
-
-function inheritedTransportAccount() {
-  return connectedAccount({
-    lastStartAt: 50_000,
-    lastTransportActivityAt: 10_000,
-  });
-}
-
 describe("evaluateChannelHealth", () => {
   it("treats disabled accounts as healthy unmanaged", () => {
-    const evaluation = evaluateHealth({
-      running: false,
-      enabled: false,
-      configured: true,
-    });
+    const evaluation = evaluateChannelHealth(
+      {
+        running: false,
+        enabled: false,
+        configured: true,
+      },
+      {
+        channelId: "discord",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: true, reason: "unmanaged" });
   });
 
   it("uses channel connect grace before flagging disconnected", () => {
-    const evaluation = evaluateHealth(
-      runningAccount({
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
         connected: false,
+        enabled: true,
+        configured: true,
         lastStartAt: 95_000,
-      }),
+      },
+      {
+        channelId: "discord",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
     );
     expect(evaluation).toEqual({ healthy: true, reason: "startup-connect-grace" });
   });
 
   it("treats active runs as busy even when disconnected", () => {
     const now = 100_000;
-    const evaluation = evaluateHealth(activeRunAccount(now - 30_000), { now });
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: false,
+        enabled: true,
+        configured: true,
+        activeRuns: 1,
+        lastRunActivityAt: now - 30_000,
+      },
+      {
+        channelId: "discord",
+        now,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: true, reason: "busy" });
   });
 
   it("flags stale busy channels as stuck when run activity is too old", () => {
     const now = 100_000;
-    const evaluation = evaluateHealth(activeRunAccount(now - 26 * 60_000), { now });
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: false,
+        enabled: true,
+        configured: true,
+        activeRuns: 1,
+        lastRunActivityAt: now - 26 * 60_000,
+      },
+      {
+        channelId: "discord",
+        now,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: false, reason: "stuck" });
   });
 
   it("ignores inherited busy flags until current lifecycle reports run activity", () => {
     const now = 100_000;
-    const evaluation = evaluateHealth(
-      runningAccount({
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
         connected: false,
+        enabled: true,
+        configured: true,
         lastStartAt: now - 30_000,
         busy: true,
         activeRuns: 1,
         lastRunActivityAt: now - 31_000,
-      }),
-      { now },
+      },
+      {
+        channelId: "discord",
+        now,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
     );
     expect(evaluation).toEqual({ healthy: false, reason: "disconnected" });
   });
 
   it("flags stale sockets when transport activity ages beyond threshold", () => {
-    const evaluation = evaluateHealth(staleTransportAccount());
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 0,
+        lastTransportActivityAt: 0,
+      },
+      {
+        channelId: "discord",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
   });
 
   it("ignores stale app events without transport activity", () => {
-    const evaluation = evaluateHealth(
-      connectedAccount({
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
         lastStartAt: 0,
         lastEventAt: 0,
-      }),
+      },
+      {
+        channelId: "discord",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
     );
     expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("flags stale sockets for telegram polling channels with transport activity", () => {
-    const evaluation = evaluateHealth(staleTransportAccount({ mode: "polling" }), {
-      channelId: "example",
-    });
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 0,
+        lastTransportActivityAt: 0,
+        mode: "polling",
+      },
+      {
+        channelId: "example",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
   });
 
   it("does not special-case malformed channel mode when transport activity is explicit", () => {
-    const evaluation = evaluateHealth(
-      staleTransportAccount({ mode: { polling: true } as unknown as string }),
-      { channelId: "example" },
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 0,
+        lastTransportActivityAt: 0,
+        mode: { polling: true } as unknown as string,
+      },
+      {
+        channelId: "example",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
     );
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
   });
 
   it("trusts explicit transport activity instead of webhook mode heuristics", () => {
-    const evaluation = evaluateHealth(staleTransportAccount({ mode: "webhook" }));
+    const evaluation = evaluateDiscordHealth({
+      running: true,
+      connected: true,
+      enabled: true,
+      configured: true,
+      lastStartAt: 0,
+      lastTransportActivityAt: 0,
+      mode: "webhook",
+    });
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
   });
 
   it("does not flag stale sockets for channels without transport tracking", () => {
-    const evaluation = evaluateHealth(
-      connectedAccount({
-        lastStartAt: 0,
-        lastTransportActivityAt: null,
-      }),
-    );
+    const evaluation = evaluateDiscordHealth({
+      running: true,
+      connected: true,
+      enabled: true,
+      configured: true,
+      lastStartAt: 0,
+      lastTransportActivityAt: null,
+    });
     expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("keeps quiet telegram webhooks healthy when they do not publish transport tracking", () => {
-    const evaluation = evaluateHealth(
-      connectedAccount({
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
         mode: "webhook",
         lastStartAt: 0,
         lastEventAt: 0,
-      }),
-      { channelId: "telegram" },
+      },
+      {
+        channelId: "telegram",
+        now: 100_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
     );
     expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("does not flag stale sockets without an active connected socket", () => {
-    const evaluation = evaluateHealth(
-      runningAccount({
+    const evaluation = evaluateDiscordHealth(
+      {
+        running: true,
+        enabled: true,
+        configured: true,
         lastStartAt: 0,
         lastTransportActivityAt: 0,
-      }),
-      { now: 75_000, channelId: "slack" },
+      },
+      75_000,
+      "slack",
     );
     expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("ignores inherited transport timestamps from a previous lifecycle", () => {
-    const evaluation = evaluateHealth(inheritedTransportAccount(), {
-      now: 75_000,
-      channelId: "slack",
-    });
+    const evaluation = evaluateDiscordHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 50_000,
+        lastTransportActivityAt: 10_000,
+      },
+      75_000,
+      "slack",
+    );
     expect(evaluation).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("flags inherited transport timestamps after the lifecycle exceeds the stale threshold", () => {
-    const evaluation = evaluateHealth(inheritedTransportAccount(), {
-      now: 140_000,
-      channelId: "slack",
-    });
+    const evaluation = evaluateChannelHealth(
+      {
+        running: true,
+        connected: true,
+        enabled: true,
+        configured: true,
+        lastStartAt: 50_000,
+        lastTransportActivityAt: 10_000,
+      },
+      {
+        channelId: "slack",
+        now: 140_000,
+        channelConnectGraceMs: 10_000,
+        staleEventThresholdMs: 30_000,
+      },
+    );
     expect(evaluation).toEqual({ healthy: false, reason: "stale-socket" });
   });
 });
@@ -197,9 +310,12 @@ describe("resolveChannelRestartReason", () => {
 
   it("maps disconnected to disconnected instead of stuck", () => {
     const reason = resolveChannelRestartReason(
-      runningAccount({
+      {
+        running: true,
         connected: false,
-      }),
+        enabled: true,
+        configured: true,
+      },
       { healthy: false, reason: "disconnected" },
     );
     expect(reason).toBe("disconnected");

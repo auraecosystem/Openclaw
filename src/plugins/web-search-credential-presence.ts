@@ -52,11 +52,13 @@ function hasManifestWebSearchEnvCredentialCandidate(params: {
     if ((plugin.contracts?.webSearchProviders?.length ?? 0) === 0) {
       return false;
     }
-    const envVars = [
-      ...(plugin.setup?.providers ?? []).flatMap((provider) => provider.envVars ?? []),
-      ...Object.values(plugin.providerAuthEnvVars ?? {}).flat(),
-    ];
-    return envVars.some((envVar) => hasConfiguredCredentialValue(env[envVar]));
+    const providerAuthEnvVars = plugin.providerAuthEnvVars;
+    if (!providerAuthEnvVars) {
+      return false;
+    }
+    return Object.values(providerAuthEnvVars)
+      .flat()
+      .some((envVar) => hasConfiguredCredentialValue(env[envVar]));
   });
 }
 
@@ -65,6 +67,7 @@ export function hasConfiguredWebSearchCredential(params: {
   env?: NodeJS.ProcessEnv;
   searchConfig?: Record<string, unknown>;
   origin?: PluginManifestRecord["origin"];
+  bundledAllowlistCompat?: boolean;
 }): boolean {
   const searchConfig =
     params.searchConfig ??

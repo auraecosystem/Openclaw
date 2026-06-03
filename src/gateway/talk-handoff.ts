@@ -1,11 +1,4 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import {
-  asDateTimestampMs,
-  isFutureDateTimestampMs,
-  resolveDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { recordTalkObservabilityEvent } from "../talk/observability.js";
 import {
   createTalkSessionController,
@@ -105,10 +98,8 @@ const handoffs = new Map<string, TalkHandoffRecord>();
 
 export function createTalkHandoff(params: TalkHandoffCreateParams): TalkHandoffCreateResult {
   pruneExpiredTalkHandoffs();
-  const rawCreatedAt = Date.now();
-  const createdAt = resolveDateTimestampMs(rawCreatedAt);
+  const createdAt = Date.now();
   const ttlMs = normalizeTtlMs(params.ttlMs);
-  const expiresAt = resolveExpiresAtMsFromDurationMs(ttlMs, { nowMs: rawCreatedAt }) ?? 0;
   const id = randomUUID();
   const roomId = `talk_${id}`;
   const token = randomBytes(32).toString("base64url");
@@ -135,7 +126,7 @@ export function createTalkHandoff(params: TalkHandoffCreateParams): TalkHandoffC
     transport: params.transport ?? "managed-room",
     brain: params.brain ?? "agent-consult",
     createdAt,
-    expiresAt,
+    expiresAt: createdAt + ttlMs,
     room,
   };
   appendTalkHandoffRoomEvent(record, {
@@ -293,12 +284,8 @@ function normalizeTtlMs(value: number | undefined): number {
 }
 
 function pruneExpiredTalkHandoffs(now = Date.now()): void {
-  const validNow = asDateTimestampMs(now);
-  if (validNow === undefined) {
-    return;
-  }
   for (const [id, record] of handoffs) {
-    if (!isFutureDateTimestampMs(record.expiresAt, { nowMs: validNow })) {
+    if (record.expiresAt <= now) {
       appendTalkHandoffRoomEvent(record, {
         type: "session.closed",
         payload: { reason: "expired", handoffId: id, roomId: record.roomId },
@@ -356,7 +343,7 @@ function resolveTalkHandoffAccess(
   if (!record) {
     return { ok: false, reason: "not_found" };
   }
-  if (!isFutureDateTimestampMs(record.expiresAt)) {
+  if (record.expiresAt <= Date.now()) {
     appendTalkHandoffRoomEvent(record, {
       type: "session.closed",
       payload: { reason: "expired", handoffId: id, roomId: record.roomId },
@@ -398,4 +385,9 @@ function joinTalkHandoffRoom(record: TalkHandoffRecord, clientId: string | undef
     }),
   );
   return events;
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
 }

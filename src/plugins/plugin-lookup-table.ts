@@ -1,13 +1,12 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
-  createGatewayStartupMetadataPluginIdScope,
-  isMetadataSnapshotScopedForGatewayStartup,
   resolveGatewayStartupPluginPlanFromRegistry,
   type GatewayStartupPluginPlan,
 } from "./channel-plugin-ids.js";
+import { hashJson } from "./installed-plugin-index-hash.js";
 import {
   isPluginMetadataSnapshotCompatible,
-  resolvePluginMetadataSnapshot,
+  loadPluginMetadataSnapshot,
   type PluginMetadataSnapshot,
   type PluginMetadataSnapshotOwnerMaps,
 } from "./plugin-metadata-snapshot.js";
@@ -30,6 +29,7 @@ export type PluginLookUpTableMetrics = {
 };
 
 export type PluginLookUpTable = PluginMetadataSnapshot & {
+  key: string;
   startup: PluginLookUpTableStartupPlan;
   metrics: PluginMetadataSnapshot["metrics"] &
     Pick<
@@ -47,52 +47,24 @@ export type LoadPluginLookUpTableParams = {
   metadataSnapshot?: PluginMetadataSnapshot;
 };
 
-let lookupTableMemoBySnapshot = new WeakMap<
-  PluginMetadataSnapshot,
-  Map<string, PluginLookUpTable>
->();
-
-export function clearPluginLookUpTableMemoForTest(): void {
-  lookupTableMemoBySnapshot = new WeakMap<PluginMetadataSnapshot, Map<string, PluginLookUpTable>>();
-}
-
 export function loadPluginLookUpTable(params: LoadPluginLookUpTableParams): PluginLookUpTable {
   const requestedSnapshotConfig = params.activationSourceConfig ?? params.config;
-  const pluginIdScope = createGatewayStartupMetadataPluginIdScope({
-    config: params.config,
-    ...(params.activationSourceConfig !== undefined
-      ? { activationSourceConfig: params.activationSourceConfig }
-      : {}),
-    env: params.env,
-  });
   const metadataSnapshot =
     params.metadataSnapshot &&
     isPluginMetadataSnapshotCompatible({
       snapshot: params.metadataSnapshot,
       config: requestedSnapshotConfig,
       env: params.env,
-      allowScopedSnapshot: true,
       workspaceDir: params.workspaceDir,
       index: params.index,
-    }) &&
-    isMetadataSnapshotScopedForGatewayStartup({
-      metadataSnapshot: params.metadataSnapshot,
-      pluginIdScope,
     })
       ? params.metadataSnapshot
-      : resolvePluginMetadataSnapshot({
+      : loadPluginMetadataSnapshot({
           config: requestedSnapshotConfig,
           workspaceDir: params.workspaceDir,
           env: params.env,
-          allowWorkspaceScopedCurrent: params.workspaceDir === undefined,
           ...(params.index ? { index: params.index } : {}),
-          pluginIdScope,
         });
-  const memoKey = pluginIdScope.key;
-  const memo = lookupTableMemoBySnapshot.get(metadataSnapshot)?.get(memoKey);
-  if (memo) {
-    return memo;
-  }
   const { index, manifestRegistry } = metadataSnapshot;
   const startupPlanStartedAt = performance.now();
   const startup = resolveGatewayStartupPluginPlanFromRegistry({
@@ -106,8 +78,18 @@ export function loadPluginLookUpTable(params: LoadPluginLookUpTableParams): Plug
   });
   const startupPlanMs = performance.now() - startupPlanStartedAt;
 
-  const table: PluginLookUpTable = {
+  return {
     ...metadataSnapshot,
+    key: hashJson({
+      policyHash: index.policyHash,
+      generatedAtMs: index.generatedAtMs,
+      plugins: index.plugins.map((plugin) => [
+        plugin.pluginId,
+        plugin.manifestHash,
+        plugin.installRecordHash,
+      ]),
+      startup,
+    }),
     startup,
     metrics: {
       ...metadataSnapshot.metrics,
@@ -117,11 +99,4 @@ export function loadPluginLookUpTable(params: LoadPluginLookUpTableParams): Plug
       deferredChannelPluginCount: startup.configuredDeferredChannelPluginIds.length,
     },
   };
-  let memoByKey = lookupTableMemoBySnapshot.get(metadataSnapshot);
-  if (!memoByKey) {
-    memoByKey = new Map();
-    lookupTableMemoBySnapshot.set(metadataSnapshot, memoByKey);
-  }
-  memoByKey.set(memoKey, table);
-  return table;
 }

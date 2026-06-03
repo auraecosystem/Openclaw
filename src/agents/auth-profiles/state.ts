@@ -1,11 +1,7 @@
 import fs from "node:fs";
-import { isDeepStrictEqual } from "node:util";
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
-import { loadJsonFile, repairJsonFilePermissions, saveJsonFile } from "../../infra/json-file.js";
+import { loadJsonFile, saveJsonFile } from "../../infra/json-file.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import { normalizeProviderId } from "../provider-id.js";
 import { AUTH_STORE_VERSION } from "./constants.js";
 import { resolveAuthStatePath } from "./paths.js";
 import type {
@@ -35,8 +31,12 @@ const AUTH_FAILURE_REASONS = new Set<AuthProfileFailureReason>([
 const AUTH_BLOCKED_REASONS = new Set<AuthProfileBlockedReason>(["subscription_limit"]);
 const AUTH_BLOCKED_SOURCES = new Set<AuthProfileBlockedSource>(["codex_rate_limits", "wham"]);
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
 function normalizeFiniteNumber(value: unknown): number | undefined {
-  return asFiniteNumber(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeEnumValue<T extends string>(value: unknown, allowed: Set<T>): T | undefined {
@@ -76,7 +76,7 @@ function normalizeAuthProfileOrder(raw: unknown): AuthProfileState["order"] {
       if (!providerKey) {
         return acc;
       }
-      const list = normalizeTrimmedStringList(value);
+      const list = value.map((entry) => normalizeOptionalString(entry) ?? "").filter(Boolean);
       if (list.length > 0) {
         acc[providerKey] = list;
       }
@@ -214,10 +214,6 @@ export function savePersistedAuthProfileState(
     }
     return null;
   }
-  if (isDeepStrictEqual(loadJsonFile(statePath), payload)) {
-    repairJsonFilePermissions(statePath);
-  } else {
-    saveJsonFile(statePath, payload);
-  }
+  saveJsonFile(statePath, payload);
   return payload;
 }

@@ -29,6 +29,7 @@ export async function startQaProviderServer(
       return await startMockOpenAiProviderServer(serverParams);
     case "aimock":
       return await startAimockProviderServer(serverParams);
+    case "live-frontier":
     default:
       return null;
   }

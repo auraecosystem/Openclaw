@@ -1,5 +1,4 @@
 import { resolveProviderRequestHeaders } from "../agents/provider-request-config.js";
-import { parseStrictFiniteNumber } from "./parse-finite-number.js";
 import {
   buildUsageHttpErrorSnapshot,
   fetchJson,
@@ -59,20 +58,16 @@ export async function fetchCodexUsage(
   timeoutMs: number,
   fetchFn: typeof fetch,
 ): Promise<ProviderUsageSnapshot> {
-  const version = process.env.OPENCLAW_VERSION?.trim();
   const defaultHeaders: Record<string, string> = {
     Authorization: `Bearer ${token}`,
     Accept: "application/json",
-    originator: "openclaw",
-    ...(version ? { version } : {}),
-    "User-Agent": `openclaw/${version || "dev"}`,
   };
   if (accountId) {
     defaultHeaders["ChatGPT-Account-Id"] = accountId;
   }
   const headers =
     resolveProviderRequestHeaders({
-      provider: "openai",
+      provider: "openai-codex",
       baseUrl: "https://chatgpt.com/backend-api/wham/usage",
       capability: "other",
       transport: "http",
@@ -88,13 +83,13 @@ export async function fetchCodexUsage(
 
   if (!res.ok) {
     return buildUsageHttpErrorSnapshot({
-      provider: "openai",
+      provider: "openai-codex",
       status: res.status,
       tokenExpiredStatuses: [401, 403],
     });
   }
 
-  const parsed = await readUsageJson("openai", res);
+  const parsed = await readUsageJson("openai-codex", res);
   if (!parsed.ok) {
     return parsed.snapshot;
   }
@@ -131,13 +126,13 @@ export async function fetchCodexUsage(
     const balance =
       typeof data.credits.balance === "number"
         ? data.credits.balance
-        : (parseStrictFiniteNumber(data.credits.balance) ?? 0);
+        : Number.parseFloat(data.credits.balance) || 0;
     plan = plan ? `${plan} ($${balance.toFixed(2)})` : `$${balance.toFixed(2)}`;
   }
 
   return {
-    provider: "openai",
-    displayName: PROVIDER_LABELS.openai,
+    provider: "openai-codex",
+    displayName: PROVIDER_LABELS["openai-codex"],
     windows,
     plan,
   };

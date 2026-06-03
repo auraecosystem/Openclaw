@@ -74,8 +74,8 @@ describe("resolveEffectiveExecutionContract", () => {
         "openai/gpt-5.4",
         "openai:gpt-5.4",
         "openai/gpt-5o-mini",
-        "openai/gpt-5.4",
-        "openai:gpt-5.4",
+        "openai-codex/gpt-5.4",
+        "openai-codex:gpt-5.4",
         "  openai/gpt-5.4  ",
         " OPENAI:GPT-5.4 ",
       ]) {
@@ -137,7 +137,7 @@ describe("resolveEffectiveExecutionContract", () => {
       const config: OpenClawConfig = {
         agents: {
           defaults: {
-            embeddedAgent: {
+            embeddedPi: {
               executionContract: "strict-agentic",
             },
           },
@@ -156,7 +156,7 @@ describe("resolveEffectiveExecutionContract", () => {
       const config: OpenClawConfig = {
         agents: {
           defaults: {
-            embeddedAgent: {
+            embeddedPi: {
               executionContract: "default",
             },
           },
@@ -175,7 +175,7 @@ describe("resolveEffectiveExecutionContract", () => {
       const config: OpenClawConfig = {
         agents: {
           defaults: {
-            embeddedAgent: {
+            embeddedPi: {
               executionContract: "strict-agentic",
             },
           },

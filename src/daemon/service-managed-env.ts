@@ -1,4 +1,3 @@
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { normalizeEnvVarKey } from "../infra/host-env-security.js";
 import type { GatewayServiceEnvironmentValueSource } from "./service-types.js";
 
@@ -156,5 +155,5 @@ export function collectInlineManagedServiceEnvKeys(
     }
     inlineKeys.push(normalized);
   }
-  return sortUniqueStrings(inlineKeys);
+  return [...new Set(inlineKeys)].toSorted();
 }

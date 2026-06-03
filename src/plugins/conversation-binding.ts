@@ -1,10 +1,6 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
 import type { ReplyPayload } from "../auto-reply/reply-payload.js";
 import {
   createConversationBindingRecord,
@@ -15,9 +11,13 @@ import { getChannelPlugin, normalizeChannelId } from "../channels/plugins/index.
 import { formatErrorMessage } from "../infra/errors.js";
 import { expandHomePrefix } from "../infra/home-dir.js";
 import { writeJson } from "../infra/json-files.js";
-import type { ConversationRef } from "../infra/outbound/session-binding-service.js";
+import { type ConversationRef } from "../infra/outbound/session-binding-service.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 import { resolveGlobalMap, resolveGlobalSingleton } from "../shared/global-singleton.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../shared/string-coerce.js";
 import type {
   PluginConversationBinding,
   PluginConversationBindingResolvedEvent,
@@ -946,7 +946,7 @@ function dispatchPluginConversationBindingResolved(params: {
 }): void {
   // Keep platform interaction acks fast even if the plugin does slow post-bind work.
   queueMicrotask(() => {
-    void notifyPluginConversationBindingResolved(params).catch((error: unknown) => {
+    void notifyPluginConversationBindingResolved(params).catch((error) => {
       log.warn(`plugin binding resolved dispatch failed: ${String(error)}`);
     });
   });
@@ -1003,7 +1003,7 @@ export function buildPluginBindingResolvedText(params: PluginBindingResolveResul
   return `Allowed ${params.request.pluginName ?? params.request.pluginId} to bind this conversation once.${summarySuffix}`;
 }
 
-export const testing = {
+export const __testing = {
   reset() {
     pendingRequests.clear();
     const state = getPluginBindingGlobalState();
@@ -1012,4 +1012,3 @@ export const testing = {
     state.fallbackNoticeBindingIds.clear();
   },
 };
-export { testing as __testing };

@@ -1,3 +1,5 @@
+import { getChatChannelMeta } from "../channels/chat-meta.js";
+import { getRegisteredChannelPluginMeta, normalizeChatChannelId } from "../channels/registry.js";
 import {
   GATEWAY_CLIENT_MODES,
   GATEWAY_CLIENT_NAMES,
@@ -5,10 +7,7 @@ import {
   type GatewayClientName,
   normalizeGatewayClientMode,
   normalizeGatewayClientName,
-} from "../../packages/gateway-protocol/src/client-info.js";
-import { listBundledChannelCatalogEntries } from "../channels/bundled-channel-catalog-read.js";
-import { getChatChannelMeta } from "../channels/chat-meta.js";
-import { getRegisteredChannelPluginMeta, normalizeChatChannelId } from "../channels/registry.js";
+} from "../gateway/protocol/client-info.js";
 export {
   isDeliverableMessageChannel,
   isGatewayMessageChannel,
@@ -76,16 +75,7 @@ export function isMarkdownCapableMessageChannel(raw?: string | null): boolean {
   }
   const builtInChannel = normalizeChatChannelId(channel);
   if (builtInChannel) {
-    const builtInMeta = getChatChannelMeta(builtInChannel);
-    if (builtInMeta) {
-      return builtInMeta.markdownCapable === true;
-    }
-    const catalogMeta = listBundledChannelCatalogEntries().find(
-      (entry) => entry.id === builtInChannel,
-    );
-    if (catalogMeta) {
-      return catalogMeta.channel.markdownCapable === true;
-    }
+    return getChatChannelMeta(builtInChannel).markdownCapable === true;
   }
   return getRegisteredChannelPluginMeta(channel)?.markdownCapable === true;
 }

@@ -6,7 +6,8 @@ vi.mock("./send.js", () => ({
   sendMessageSlack: (...args: unknown[]) => sendMessageSlackMock(...args),
 }));
 
-const { slackOutbound } = await import("./outbound-adapter.js");
+let slackOutbound: typeof import("./outbound-adapter.js").slackOutbound;
+({ slackOutbound } = await import("./outbound-adapter.js"));
 
 describe("slackOutbound", () => {
   const cfg = {

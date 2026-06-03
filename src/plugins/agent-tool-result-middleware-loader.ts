@@ -93,7 +93,6 @@ export async function loadAgentToolResultMiddlewaresForRuntime(params: {
   }
 }
 
-export const testing = {
+export const __testing = {
   listMiddlewareOwnerPluginIds,
 };
-export { testing as __testing };

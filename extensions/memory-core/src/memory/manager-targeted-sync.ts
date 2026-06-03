@@ -22,31 +22,30 @@ export function clearMemorySyncedSessionFiles(params: {
   return params.sessionsDirtyFiles.size > 0;
 }
 
-export function markMemoryTargetSessionFilesDirty(params: {
-  sessionsDirtyFiles: Set<string>;
-  targetSessionFiles?: Iterable<string> | null;
-}): boolean {
-  if (params.targetSessionFiles) {
-    for (const targetSessionFile of params.targetSessionFiles) {
-      params.sessionsDirtyFiles.add(targetSessionFile);
-    }
-  }
-  return params.sessionsDirtyFiles.size > 0;
-}
-
 export async function runMemoryTargetedSessionSync(params: {
   hasSessionSource: boolean;
   targetSessionFiles: Set<string> | null;
   reason?: string;
   progress?: TargetedSyncProgress;
+  useUnsafeReindex: boolean;
   sessionsDirtyFiles: Set<string>;
   syncSessionFiles: (params: {
     needsFullReindex: boolean;
     targetSessionFiles?: string[];
     progress?: TargetedSyncProgress;
   }) => Promise<void>;
-  shouldFallbackOnError: (err: unknown) => boolean;
+  shouldFallbackOnError: (message: string) => boolean;
   activateFallbackProvider: (reason: string) => Promise<boolean>;
+  runSafeReindex: (params: {
+    reason?: string;
+    force?: boolean;
+    progress?: TargetedSyncProgress;
+  }) => Promise<void>;
+  runUnsafeReindex: (params: {
+    reason?: string;
+    force?: boolean;
+    progress?: TargetedSyncProgress;
+  }) => Promise<void>;
 }): Promise<{ handled: boolean; sessionsDirty: boolean }> {
   if (!params.hasSessionSource || !params.targetSessionFiles) {
     return {
@@ -71,16 +70,23 @@ export async function runMemoryTargetedSessionSync(params: {
   } catch (err) {
     const reason = formatErrorMessage(err);
     const activated =
-      params.shouldFallbackOnError(err) && (await params.activateFallbackProvider(reason));
+      params.shouldFallbackOnError(reason) && (await params.activateFallbackProvider(reason));
     if (!activated) {
       throw err;
     }
+    const reindexParams = {
+      reason: params.reason,
+      force: true,
+      progress: params.progress,
+    };
+    if (params.useUnsafeReindex) {
+      await params.runUnsafeReindex(reindexParams);
+    } else {
+      await params.runSafeReindex(reindexParams);
+    }
     return {
       handled: true,
-      sessionsDirty: markMemoryTargetSessionFilesDirty({
-        sessionsDirtyFiles: params.sessionsDirtyFiles,
-        targetSessionFiles: params.targetSessionFiles,
-      }),
+      sessionsDirty: params.sessionsDirtyFiles.size > 0,
     };
   }
 }

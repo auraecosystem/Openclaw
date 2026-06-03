@@ -1,26 +1,37 @@
 import type { Command } from "commander";
-import { formatDocsLink } from "../../../packages/terminal-core/src/links.js";
-import { colorize, isRich, theme } from "../../../packages/terminal-core/src/theme.js";
 import type { HealthSummary } from "../../commands/health.js";
-import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
+import { formatGatewayTransportErrorJson } from "../../gateway/call.js";
 import type { CostUsageSummary } from "../../infra/session-cost-usage.js";
 import type {
   DiagnosticStabilityBundle,
   ReadDiagnosticStabilityBundleResult,
 } from "../../logging/diagnostic-stability-bundle.js";
-import type {
-  DiagnosticStabilityEventRecord,
-  DiagnosticStabilitySnapshot,
+import {
+  normalizeDiagnosticStabilityQuery,
+  selectDiagnosticStabilitySnapshot,
+  type DiagnosticStabilityEventRecord,
+  type DiagnosticStabilitySnapshot,
 } from "../../logging/diagnostic-stability.js";
 import type { WriteDiagnosticSupportExportResult } from "../../logging/diagnostic-support-export.js";
 import { defaultRuntime } from "../../runtime.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
+import { formatDocsLink } from "../../terminal/links.js";
+import { colorize, isRich, theme } from "../../terminal/theme.js";
+import { runCommandWithRuntime } from "../cli-utils.js";
 import { inheritOptionFromParent } from "../command-options.js";
 import { addGatewayServiceCommands } from "../daemon-cli/register-service-commands.js";
 import { formatHelpExamples } from "../help-format.js";
-import type { GatewayRpcOpts } from "./call.js";
+import { withProgress } from "../progress.js";
+import { callGatewayCli, gatewayCallOpts, type GatewayRpcOpts } from "./call.js";
 import type { GatewayDiscoverOpts } from "./discover.js";
-import { addGatewayRunCommand } from "./run-command.js";
+import {
+  dedupeBeacons,
+  parseDiscoverTimeoutMs,
+  pickBeaconHost,
+  pickGatewayPort,
+  renderBeaconLines,
+} from "./discover.js";
+import { addGatewayRunCommand } from "./run.js";
 
 const configModuleLoader = createLazyImportLoader(
   () => import("../../config/read-best-effort-config.runtime.js"),
@@ -34,7 +45,7 @@ const bonjourDiscoveryModuleLoader = createLazyImportLoader(
 );
 const wideAreaDnsModuleLoader = createLazyImportLoader(() => import("../../infra/widearea-dns.js"));
 const healthStyleModuleLoader = createLazyImportLoader(
-  () => import("../../../packages/terminal-core/src/health-style.js"),
+  () => import("../../terminal/health-style.js"),
 );
 const usageFormatModuleLoader = createLazyImportLoader(() => import("../../utils/usage-format.js"));
 const stabilityBundleModuleLoader = createLazyImportLoader(
@@ -87,31 +98,9 @@ function loadDaemonStatusGatherModule() {
   return daemonStatusGatherModuleLoader.load();
 }
 
-function gatewayCallOpts(cmd: Command): Command {
-  return cmd
-    .option("--url <url>", "Gateway WebSocket URL (defaults to gateway.remote.url when configured)")
-    .option("--token <token>", "Gateway token (if required)")
-    .option("--password <password>", "Gateway password (password auth)")
-    .option("--timeout <ms>", "Timeout in ms", "10000")
-    .option("--expect-final", "Wait for final response (agent)", false)
-    .option("--json", "Output JSON", false);
-}
-
-async function callGatewayCli(method: string, opts: GatewayRpcOpts, params?: unknown) {
-  const mod = await import("./call.js");
-  return mod.callGatewayCli(method, opts, params);
-}
-
-async function runGatewayCommand(
-  action: () => Promise<void>,
-  label?: string,
-  opts?: { json?: boolean },
-) {
-  try {
-    await action();
-  } catch (err) {
+function runGatewayCommand(action: () => Promise<void>, label?: string, opts?: { json?: boolean }) {
+  return runCommandWithRuntime(defaultRuntime, action, (err) => {
     if (opts?.json) {
-      const { formatGatewayTransportErrorJson } = await import("../../gateway/call.js");
       const payload = formatGatewayTransportErrorJson(err);
       if (payload) {
         defaultRuntime.writeJson(payload);
@@ -122,7 +111,7 @@ async function runGatewayCommand(
     const message = String(err);
     defaultRuntime.error(label ? `${label}: ${message}` : message);
     defaultRuntime.exit(1);
-  }
+  });
 }
 
 function parseDaysOption(raw: unknown, fallback = 30): number {
@@ -130,9 +119,9 @@ function parseDaysOption(raw: unknown, fallback = 30): number {
     return Math.max(1, Math.floor(raw));
   }
   if (typeof raw === "string" && raw.trim() !== "") {
-    const parsed = parseStrictPositiveInteger(raw);
-    if (parsed !== undefined) {
-      return parsed;
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) {
+      return Math.max(1, Math.floor(parsed));
     }
   }
   return fallback;
@@ -212,9 +201,6 @@ function formatStabilityEvent(record: DiagnosticStabilityEventRecord): string {
     record.bytes !== undefined ? `bytes=${formatBytes(record.bytes)}` : "",
     record.limitBytes !== undefined ? `limit=${formatBytes(record.limitBytes)}` : "",
     record.queueDepth !== undefined ? `queueDepth=${record.queueDepth}` : "",
-    record.queueLength !== undefined ? `queueLength=${record.queueLength}` : "",
-    record.droppedEvents !== undefined ? `dropped=${record.droppedEvents}` : "",
-    record.maxQueueLength !== undefined ? `maxQueue=${record.maxQueueLength}` : "",
     record.queued !== undefined ? `queued=${record.queued}` : "",
     record.memory ? `rss=${formatBytes(record.memory.rssBytes)}` : "",
     record.memory ? `heap=${formatBytes(record.memory.heapUsedBytes)}` : "",
@@ -404,17 +390,6 @@ function resolveSupportExportRpcOptions(
   };
 }
 
-function parseOptionalPositiveIntegerOption(raw: unknown, label: string): number | undefined {
-  if (raw === undefined || raw === null || raw === "") {
-    return undefined;
-  }
-  const parsed = parseStrictPositiveInteger(raw);
-  if (parsed === undefined) {
-    throw new Error(`${label} must be a positive integer.`);
-  }
-  return parsed;
-}
-
 async function writeSupportExportFromCli(opts: {
   json?: boolean;
   output?: string;
@@ -427,8 +402,8 @@ async function writeSupportExportFromCli(opts: {
   const rpc = resolveSupportExportRpcOptions(opts.rpc);
   const result = await writeDiagnosticSupportExport({
     outputPath: opts.output,
-    logLimit: parseOptionalPositiveIntegerOption(opts.logLines, "--log-lines"),
-    logMaxBytes: parseOptionalPositiveIntegerOption(opts.logBytes, "--log-bytes"),
+    logLimit: opts.logLines ? Number(opts.logLines) : undefined,
+    logMaxBytes: opts.logBytes ? Number(opts.logBytes) : undefined,
     stabilityBundle: opts.stabilityBundle,
     readStatusSnapshot: async () => {
       const { gatherDaemonStatus } = await loadDaemonStatusGatherModule();
@@ -575,8 +550,6 @@ export function registerGatewayCli(program: Command) {
       .option("--output <path>", "Diagnostics export output .zip path")
       .action(async (opts, command) => {
         await runGatewayCommand(async () => {
-          const { normalizeDiagnosticStabilityQuery, selectDiagnosticStabilitySnapshot } =
-            await import("../../logging/diagnostic-stability.js");
           const rpcOpts = resolveGatewayRpcOptions(opts, command);
           const query = normalizeDiagnosticStabilityQuery(
             {
@@ -703,20 +676,10 @@ export function registerGatewayCli(program: Command) {
           { readSourceConfigBestEffort },
           { discoverGatewayBeacons },
           { resolveWideAreaDiscoveryDomain },
-          {
-            dedupeBeacons,
-            parseDiscoverTimeoutMs,
-            pickBeaconHost,
-            pickGatewayPort,
-            renderBeaconLines,
-          },
-          { withProgress },
         ] = await Promise.all([
           loadConfigModule(),
           loadBonjourDiscoveryModule(),
           loadWideAreaDnsModule(),
-          import("./discover.js"),
-          import("../progress.js"),
         ]);
         const cfg = await readSourceConfigBestEffort();
         const wideAreaDomain = resolveWideAreaDiscoveryDomain({

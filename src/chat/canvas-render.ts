@@ -1,6 +1,4 @@
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
-import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
-import { parseFenceSpans } from "../../packages/markdown-core/src/fences.js";
+import { parseFenceSpans } from "../markdown/fences.js";
 
 type CanvasSurface = "assistant_message";
 
@@ -22,7 +20,9 @@ function tryParseJsonRecord(value: string | undefined): Record<string, unknown> 
   }
   try {
     const parsed = JSON.parse(value);
-    return asOptionalRecord(parsed);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : undefined;
   } catch {
     return undefined;
   }
@@ -41,7 +41,7 @@ function getRecordNumberField(
   key: string,
 ): number | undefined {
   const value = record?.[key];
-  return asFiniteNumber(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function getNestedRecord(
@@ -49,7 +49,9 @@ function getNestedRecord(
   key: string,
 ): Record<string, unknown> | undefined {
   const value = record?.[key];
-  return asOptionalRecord(value);
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
 }
 
 function normalizeSurface(value: string | undefined): CanvasSurface | undefined {

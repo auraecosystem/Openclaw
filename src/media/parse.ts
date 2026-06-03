@@ -1,5 +1,6 @@
 // Shared helpers for parsing MEDIA tokens from command/stdout text.
 
+import { parseFenceSpans } from "../markdown/fences.js";
 import {
   extractEmbeddedIpv4FromIpv6,
   isBlockedSpecialUseIpv4Address,
@@ -9,8 +10,7 @@ import {
   isLegacyIpv4Literal,
   parseCanonicalIpAddress,
   parseLooseIpAddress,
-} from "@openclaw/net-policy/ip";
-import { parseFenceSpans } from "../../packages/markdown-core/src/fences.js";
+} from "../shared/net/ip.js";
 import { parseAudioTag } from "./audio-tags.js";
 
 // Allow optional wrapping backticks and punctuation after the token; capture the core token.
@@ -28,7 +28,6 @@ export type ParsedMediaOutputSegment =
 
 export type SplitMediaFromOutputOptions = {
   extractMarkdownImages?: boolean;
-  extractMediaDirectives?: boolean;
 };
 
 export function normalizeMediaSource(src: string) {
@@ -494,8 +493,7 @@ export function splitMediaFromOutput(
     return { text: "" };
   }
   const extractMarkdownImages = options.extractMarkdownImages === true;
-  const extractMediaDirectives = options.extractMediaDirectives !== false;
-  const mayContainMediaToken = extractMediaDirectives && /media:/i.test(trimmedRaw);
+  const mayContainMediaToken = /media:/i.test(trimmedRaw);
   const mayContainMarkdownImage = extractMarkdownImages && /!\[[^\]]*]\(/.test(trimmedRaw);
   const mayContainAudioTag = trimmedRaw.includes("[[");
   if (!mayContainMediaToken && !mayContainMarkdownImage && !mayContainAudioTag) {
@@ -537,7 +535,7 @@ export function splitMediaFromOutput(
     }
 
     const trimmedStart = line.trimStart();
-    if (!extractMediaDirectives || !trimmedStart.toUpperCase().startsWith("MEDIA:")) {
+    if (!trimmedStart.toUpperCase().startsWith("MEDIA:")) {
       const markdownImageResult = extractMarkdownImages
         ? collectMarkdownImageSegments({ line, media })
         : { lineSegments: [], foundMedia: false };

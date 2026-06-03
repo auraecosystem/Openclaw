@@ -53,9 +53,7 @@ function matchInteractiveSnapshotLine(
   if (!match) {
     return null;
   }
-  const roleRaw = match[2];
-  const name = match[3];
-  const suffix = match[4];
+  const [, , roleRaw, name, suffix] = match;
   if (roleRaw.startsWith("/")) {
     return null;
   }
@@ -386,9 +384,7 @@ export function buildRoleSnapshotFromAiSnapshot(
       out.push(line);
       continue;
     }
-    const roleRaw = match[2];
-    const name = match[3];
-    const suffix = match[4];
+    const [, , roleRaw, name, suffix] = match;
     if (roleRaw.startsWith("/")) {
       out.push(line);
       continue;

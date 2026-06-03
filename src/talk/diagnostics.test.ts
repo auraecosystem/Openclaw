@@ -54,9 +54,7 @@ describe("talk diagnostics", () => {
     });
 
     recordTalkDiagnosticEvent(talkEvent);
-    await new Promise<void>((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(diagnostics).toHaveLength(1);
     const [diagnostic] = diagnostics;

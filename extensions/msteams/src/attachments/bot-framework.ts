@@ -1,8 +1,6 @@
-import { parseMediaContentLength } from "openclaw/plugin-sdk/media-runtime";
 import { getMSTeamsRuntime } from "../runtime.js";
 import { ensureUserAgentHeader } from "../user-agent.js";
 import {
-  applyAuthorizationHeaderForUrl,
   inferPlaceholder,
   isUrlAllowed,
   type MSTeamsAttachmentDownloadLogger,
@@ -55,46 +53,32 @@ function normalizeServiceUrl(serviceUrl: string): string {
   return serviceUrl.replace(/\/+$/, "");
 }
 
-function buildBotFrameworkAttachmentHeaders(params: {
-  url: string;
-  accessToken: string;
-  policy: MSTeamsAttachmentFetchPolicy;
-}): Headers {
-  const headers = ensureUserAgentHeader();
-  applyAuthorizationHeaderForUrl({
-    headers,
-    url: params.url,
-    authAllowHosts: params.policy.authAllowHosts,
-    bearerToken: params.accessToken,
-  });
-  return headers;
-}
-
 async function fetchBotFrameworkAttachmentInfo(params: {
   serviceUrl: string;
   attachmentId: string;
   accessToken: string;
   policy: MSTeamsAttachmentFetchPolicy;
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   resolveFn?: MSTeamsAttachmentResolveFn;
   logger?: MSTeamsAttachmentDownloadLogger;
 }): Promise<BotFrameworkAttachmentInfo | undefined> {
   const url = `${normalizeServiceUrl(params.serviceUrl)}/v3/attachments/${encodeURIComponent(params.attachmentId)}`;
+  // Use `safeFetchWithPolicy` instead of `fetchWithSsrFGuard`. The strict
+  // pinned undici dispatcher used by `fetchWithSsrFGuard` is incompatible
+  // with Node 24+'s built-in undici v7 and silently breaks Bot Framework
+  // attachment downloads (same root cause as the SharePoint fix in #63396).
+  // `safeFetchWithPolicy` already enforces hostname allowlist validation
+  // across every redirect hop, which is sufficient for these attachment
+  // service URLs.
   let response: Response;
   try {
     response = await safeFetchWithPolicy({
       url,
       policy: params.policy,
       fetchFn: params.fetchFn,
-      fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
       resolveFn: params.resolveFn,
       requestInit: {
-        headers: buildBotFrameworkAttachmentHeaders({
-          url,
-          accessToken: params.accessToken,
-          policy: params.policy,
-        }),
+        headers: ensureUserAgentHeader({ Authorization: `Bearer ${params.accessToken}` }),
       },
     });
   } catch (err) {
@@ -104,7 +88,6 @@ async function fetchBotFrameworkAttachmentInfo(params: {
     return undefined;
   }
   if (!response.ok) {
-    await response.body?.cancel();
     params.logger?.warn?.("msteams botFramework attachmentInfo non-ok", {
       status: response.status,
     });
@@ -131,25 +114,21 @@ async function saveBotFrameworkAttachmentView(params: {
   preserveFilenames?: boolean;
   policy: MSTeamsAttachmentFetchPolicy;
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   resolveFn?: MSTeamsAttachmentResolveFn;
   logger?: MSTeamsAttachmentDownloadLogger;
 }): Promise<{ path: string; contentType?: string } | undefined> {
   const url = `${normalizeServiceUrl(params.serviceUrl)}/v3/attachments/${encodeURIComponent(params.attachmentId)}/views/${encodeURIComponent(params.viewId)}`;
+  // See `fetchBotFrameworkAttachmentInfo` for why this uses
+  // `safeFetchWithPolicy` instead of `fetchWithSsrFGuard` on Node 24+ (#63396).
   let response: Response;
   try {
     response = await safeFetchWithPolicy({
       url,
       policy: params.policy,
       fetchFn: params.fetchFn,
-      fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
       resolveFn: params.resolveFn,
       requestInit: {
-        headers: buildBotFrameworkAttachmentHeaders({
-          url,
-          accessToken: params.accessToken,
-          policy: params.policy,
-        }),
+        headers: ensureUserAgentHeader({ Authorization: `Bearer ${params.accessToken}` }),
       },
     });
   } catch (err) {
@@ -159,24 +138,13 @@ async function saveBotFrameworkAttachmentView(params: {
     return undefined;
   }
   if (!response.ok) {
-    await response.body?.cancel();
     params.logger?.warn?.("msteams botFramework attachmentView non-ok", {
       status: response.status,
     });
     return undefined;
   }
-  let contentLength: number | null;
-  try {
-    contentLength = parseMediaContentLength(response.headers.get("content-length"));
-  } catch (err) {
-    await response.body?.cancel();
-    params.logger?.warn?.("msteams botFramework attachmentView invalid content-length", {
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return undefined;
-  }
-  if (contentLength !== null && contentLength > params.maxBytes) {
-    await response.body?.cancel();
+  const contentLength = response.headers.get("content-length");
+  if (contentLength && Number(contentLength) > params.maxBytes) {
     return undefined;
   }
   try {
@@ -210,7 +178,6 @@ export async function downloadMSTeamsBotFrameworkAttachment(params: {
   allowHosts?: string[];
   authAllowHosts?: string[];
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   resolveFn?: MSTeamsAttachmentResolveFn;
   fileNameHint?: string | null;
   contentTypeHint?: string | null;
@@ -248,7 +215,6 @@ export async function downloadMSTeamsBotFrameworkAttachment(params: {
     accessToken,
     policy,
     fetchFn: params.fetchFn,
-    fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
     resolveFn: params.resolveFn,
     logger: params.logger,
   });
@@ -296,7 +262,6 @@ export async function downloadMSTeamsBotFrameworkAttachment(params: {
     preserveFilenames: params.preserveFilenames,
     policy,
     fetchFn: params.fetchFn,
-    fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
     resolveFn: params.resolveFn,
     logger: params.logger,
   });
@@ -325,7 +290,6 @@ export async function downloadMSTeamsBotFrameworkAttachments(params: {
   allowHosts?: string[];
   authAllowHosts?: string[];
   fetchFn?: typeof fetch;
-  fetchFnSupportsDispatcher?: boolean;
   resolveFn?: MSTeamsAttachmentResolveFn;
   fileNameHint?: string | null;
   contentTypeHint?: string | null;
@@ -360,7 +324,6 @@ export async function downloadMSTeamsBotFrameworkAttachments(params: {
         allowHosts: params.allowHosts,
         authAllowHosts: params.authAllowHosts,
         fetchFn: params.fetchFn,
-        fetchFnSupportsDispatcher: params.fetchFnSupportsDispatcher,
         resolveFn: params.resolveFn,
         fileNameHint: params.fileNameHint,
         contentTypeHint: params.contentTypeHint,

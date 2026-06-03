@@ -2,11 +2,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, vi, type Mock } from "vitest";
-import { captureEnv } from "../test-utils/env.js";
 import { withFastReplyConfig } from "./reply/get-reply-fast-path.js";
 
 type ReplyRuntimeMocks = {
-  runEmbeddedAgent: Mock;
+  runEmbeddedPiAgent: Mock;
   loadModelCatalog: Mock;
   webAuthExists: Mock;
   getWebAuthAgeMs: Mock;
@@ -15,7 +14,7 @@ type ReplyRuntimeMocks = {
 
 const replyRuntimeMockState = vi.hoisted(() => ({
   mocks: {
-    runEmbeddedAgent: vi.fn(),
+    runEmbeddedPiAgent: vi.fn(),
     loadModelCatalog: vi.fn(),
     webAuthExists: vi.fn().mockResolvedValue(true),
     getWebAuthAgeMs: vi.fn().mockReturnValue(120_000),
@@ -23,13 +22,14 @@ const replyRuntimeMockState = vi.hoisted(() => ({
   } as ReplyRuntimeMocks,
 }));
 
-vi.mock("../agents/embedded-agent.js", () => ({
-  abortEmbeddedAgentRun: vi.fn().mockReturnValue(false),
-  runEmbeddedAgent: (...args: unknown[]) => replyRuntimeMockState.mocks.runEmbeddedAgent(...args),
-  queueEmbeddedAgentMessage: vi.fn().mockReturnValue(false),
+vi.mock("../agents/pi-embedded.js", () => ({
+  abortEmbeddedPiRun: vi.fn().mockReturnValue(false),
+  runEmbeddedPiAgent: (...args: unknown[]) =>
+    replyRuntimeMockState.mocks.runEmbeddedPiAgent(...args),
+  queueEmbeddedPiMessage: vi.fn().mockReturnValue(false),
   resolveEmbeddedSessionLane: (key: string) => `session:${key.trim() || "main"}`,
-  isEmbeddedAgentRunActive: vi.fn().mockReturnValue(false),
-  isEmbeddedAgentRunStreaming: vi.fn().mockReturnValue(false),
+  isEmbeddedPiRunActive: vi.fn().mockReturnValue(false),
+  isEmbeddedPiRunStreaming: vi.fn().mockReturnValue(false),
 }));
 
 vi.mock("../agents/model-catalog.runtime.js", () => ({
@@ -45,7 +45,7 @@ vi.mock("../commands-registry.runtime.js", () => ({
   listChatCommands: () => [],
 }));
 
-vi.mock("../skills/discovery/chat-commands.runtime.js", () => ({
+vi.mock("../skill-commands.runtime.js", () => ({
   listSkillCommandsForWorkspace: () => [],
 }));
 
@@ -55,13 +55,13 @@ vi.mock("../plugins/runtime/runtime-web-channel-plugin.js", () => ({
   readWebSelfId: (...args: unknown[]) => replyRuntimeMockState.mocks.readWebSelfId(...args),
 }));
 
-vi.mock("../agents/embedded-agent.runtime.js", () => ({
-  abortEmbeddedAgentRun: vi.fn().mockReturnValue(false),
-  isEmbeddedAgentRunActive: vi.fn().mockReturnValue(false),
-  isEmbeddedAgentRunStreaming: vi.fn().mockReturnValue(false),
+vi.mock("../agents/pi-embedded.runtime.js", () => ({
+  abortEmbeddedPiRun: vi.fn().mockReturnValue(false),
+  isEmbeddedPiRunActive: vi.fn().mockReturnValue(false),
+  isEmbeddedPiRunStreaming: vi.fn().mockReturnValue(false),
   resolveActiveEmbeddedRunSessionId: vi.fn().mockReturnValue(undefined),
   resolveEmbeddedSessionLane: (key: string) => `session:${key.trim() || "main"}`,
-  waitForEmbeddedAgentRunEnd: vi.fn(async () => undefined),
+  waitForEmbeddedPiRunEnd: vi.fn(async () => undefined),
 }));
 
 vi.mock("./reply/agent-runner.runtime.js", () => ({
@@ -93,7 +93,7 @@ vi.mock("./reply/agent-runner.runtime.js", () => ({
       };
     };
   }) => {
-    const result = await replyRuntimeMockState.mocks.runEmbeddedAgent({
+    const result = await replyRuntimeMockState.mocks.runEmbeddedPiAgent({
       prompt: params.followupRun.prompt || params.commandBody,
       agentDir: params.followupRun.run.agentDir,
       agentId: params.followupRun.run.agentId,
@@ -120,14 +120,37 @@ vi.mock("./reply/agent-runner.runtime.js", () => ({
   },
 }));
 
-const HOME_ENV_KEYS = [
-  "HOME",
-  "USERPROFILE",
-  "HOMEDRIVE",
-  "HOMEPATH",
-  "OPENCLAW_STATE_DIR",
-  "OPENCLAW_AGENT_DIR",
-] as const;
+type HomeEnvSnapshot = {
+  HOME: string | undefined;
+  USERPROFILE: string | undefined;
+  HOMEDRIVE: string | undefined;
+  HOMEPATH: string | undefined;
+  OPENCLAW_STATE_DIR: string | undefined;
+  OPENCLAW_AGENT_DIR: string | undefined;
+  PI_CODING_AGENT_DIR: string | undefined;
+};
+
+function snapshotHomeEnv(): HomeEnvSnapshot {
+  return {
+    HOME: process.env.HOME,
+    USERPROFILE: process.env.USERPROFILE,
+    HOMEDRIVE: process.env.HOMEDRIVE,
+    HOMEPATH: process.env.HOMEPATH,
+    OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR,
+    OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
+  };
+}
+
+function restoreHomeEnv(snapshot: HomeEnvSnapshot) {
+  for (const [key, value] of Object.entries(snapshot)) {
+    if (value === undefined) {
+      delete process.env[key];
+    } else {
+      process.env[key] = value;
+    }
+  }
+}
 
 export function createTempHomeHarness(options: { prefix: string; beforeEachCase?: () => void }) {
   let fixtureRoot = "";
@@ -147,11 +170,12 @@ export function createTempHomeHarness(options: { prefix: string; beforeEachCase?
   async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
     const home = path.join(fixtureRoot, `case-${++caseId}`);
     await fs.mkdir(path.join(home, ".openclaw", "agents", "main", "sessions"), { recursive: true });
-    const envSnapshot = captureEnv([...HOME_ENV_KEYS]);
+    const envSnapshot = snapshotHomeEnv();
     process.env.HOME = home;
     process.env.USERPROFILE = home;
     process.env.OPENCLAW_STATE_DIR = path.join(home, ".openclaw");
     process.env.OPENCLAW_AGENT_DIR = path.join(home, ".openclaw", "agent");
+    process.env.PI_CODING_AGENT_DIR = path.join(home, ".openclaw", "agent");
 
     if (process.platform === "win32") {
       const match = home.match(/^([A-Za-z]:)(.*)$/);
@@ -165,7 +189,7 @@ export function createTempHomeHarness(options: { prefix: string; beforeEachCase?
       options.beforeEachCase?.();
       return await fn(home);
     } finally {
-      envSnapshot.restore();
+      restoreHomeEnv(envSnapshot);
     }
   }
 
@@ -191,7 +215,7 @@ export function makeReplyConfig(home: string) {
 
 export function createReplyRuntimeMocks(): ReplyRuntimeMocks {
   return {
-    runEmbeddedAgent: vi.fn(),
+    runEmbeddedPiAgent: vi.fn(),
     loadModelCatalog: vi.fn(),
     webAuthExists: vi.fn().mockResolvedValue(true),
     getWebAuthAgeMs: vi.fn().mockReturnValue(120_000),
@@ -204,7 +228,7 @@ export function installReplyRuntimeMocks(mocks: ReplyRuntimeMocks) {
 }
 
 export function resetReplyRuntimeMocks(mocks: ReplyRuntimeMocks) {
-  mocks.runEmbeddedAgent.mockClear();
+  mocks.runEmbeddedPiAgent.mockClear();
   mocks.loadModelCatalog.mockClear();
   mocks.loadModelCatalog.mockResolvedValue([
     { id: "claude-opus-4-6", name: "Opus 4.5", provider: "anthropic" },

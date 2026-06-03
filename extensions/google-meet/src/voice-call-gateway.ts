@@ -68,7 +68,7 @@ async function createConnectedGatewayClient(
           reject(new Error("gateway event loop readiness timeout"));
         }
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         clearTimeout(timer);
         reject(err instanceof Error ? err : new Error(String(err)));
       });

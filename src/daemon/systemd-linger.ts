@@ -1,10 +1,10 @@
 import os from "node:os";
+import { formatErrorMessage } from "../infra/errors.js";
+import { runCommandWithTimeout, runExec } from "../process/exec.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { formatErrorMessage } from "../infra/errors.js";
-import { runCommandWithTimeout, runExec } from "../process/exec.js";
+} from "../shared/string-coerce.js";
 
 function resolveLoginctlUser(env: Record<string, string | undefined>): string | null {
   const fromEnv = normalizeOptionalString(env.USER) || normalizeOptionalString(env.LOGNAME);

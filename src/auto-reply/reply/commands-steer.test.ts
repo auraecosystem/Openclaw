@@ -3,9 +3,9 @@ import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { buildCommandTestParams } from "./commands.test-harness.js";
 
 const steerRuntimeMocks = vi.hoisted(() => ({
-  formatEmbeddedAgentQueueFailureSummary: vi.fn(),
-  isEmbeddedAgentRunActive: vi.fn(),
-  queueEmbeddedAgentMessageWithOutcomeAsync: vi.fn(),
+  formatEmbeddedPiQueueFailureSummary: vi.fn(),
+  isEmbeddedPiRunActive: vi.fn(),
+  queueEmbeddedPiMessageWithOutcomeAsync: vi.fn(),
   resolveActiveEmbeddedRunSessionId: vi.fn(),
 }));
 
@@ -24,13 +24,13 @@ function buildParams(commandBody: string) {
 
 describe("handleSteerCommand", () => {
   beforeEach(() => {
-    steerRuntimeMocks.formatEmbeddedAgentQueueFailureSummary
+    steerRuntimeMocks.formatEmbeddedPiQueueFailureSummary
       .mockReset()
       .mockReturnValue(
         "queue_message_failed reason=not_streaming sessionId=session-active gatewayHealth=live",
       );
-    steerRuntimeMocks.isEmbeddedAgentRunActive.mockReset().mockReturnValue(false);
-    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockReset().mockResolvedValue({
+    steerRuntimeMocks.isEmbeddedPiRunActive.mockReset().mockReturnValue(false);
+    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockReset().mockResolvedValue({
       queued: true,
       sessionId: "session-active",
       target: "embedded_run",
@@ -51,7 +51,7 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:main",
     );
-    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "session-active",
       "keep going",
       {
@@ -74,7 +74,7 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:discord:direct:target",
     );
-    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "session-target",
       "check the target",
       {
@@ -85,7 +85,7 @@ describe("handleSteerCommand", () => {
   });
 
   it("falls back to the stored session id when it is still active", async () => {
-    steerRuntimeMocks.isEmbeddedAgentRunActive.mockReturnValue(true);
+    steerRuntimeMocks.isEmbeddedPiRunActive.mockReturnValue(true);
 
     const params = buildParams("/tell continue from state");
     params.sessionEntry = { sessionId: "stored-session-id", updatedAt: Date.now() };
@@ -95,8 +95,8 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:main",
     );
-    expect(steerRuntimeMocks.isEmbeddedAgentRunActive).toHaveBeenCalledWith("stored-session-id");
-    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.isEmbeddedPiRunActive).toHaveBeenCalledWith("stored-session-id");
+    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "stored-session-id",
       "continue from state",
       {
@@ -113,7 +113,7 @@ describe("handleSteerCommand", () => {
       shouldContinue: false,
       reply: { text: "Usage: /steer <message>" },
     });
-    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).not.toHaveBeenCalled();
+    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).not.toHaveBeenCalled();
   });
 
   it("continues as a normal prompt when no current session run is active", async () => {
@@ -127,12 +127,12 @@ describe("handleSteerCommand", () => {
     expect(params.ctx.BodyForAgent).toBe("keep going");
     expect((params.ctx as Record<string, unknown>).BodyStripped).toBe("keep going");
     expect(params.command.commandBodyNormalized).toBe("keep going");
-    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).not.toHaveBeenCalled();
+    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).not.toHaveBeenCalled();
   });
 
   it("continues as a normal prompt when the active run rejects steering injection", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockResolvedValue({
+    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockResolvedValue({
       queued: false,
       sessionId: "session-active",
       reason: "not_streaming",
@@ -147,7 +147,7 @@ describe("handleSteerCommand", () => {
     });
     expect(params.ctx.BodyForAgent).toBe("keep going");
     expect(params.command.commandBodyNormalized).toBe("keep going");
-    expect(steerRuntimeMocks.formatEmbeddedAgentQueueFailureSummary).toHaveBeenCalledWith({
+    expect(steerRuntimeMocks.formatEmbeddedPiQueueFailureSummary).toHaveBeenCalledWith({
       queued: false,
       sessionId: "session-active",
       reason: "not_streaming",
@@ -157,7 +157,7 @@ describe("handleSteerCommand", () => {
 
   it("continues as a normal prompt when steering throws", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockRejectedValue(
+    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockRejectedValue(
       new Error("socket closed"),
     );
 
@@ -173,7 +173,7 @@ describe("handleSteerCommand", () => {
 
   it("continues as a normal prompt when the active run is compacting", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockResolvedValue({
+    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockResolvedValue({
       queued: false,
       sessionId: "session-active",
       reason: "compacting",

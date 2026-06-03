@@ -1,38 +1,23 @@
-import { createHash } from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { readJsonFileWithFallback } from "openclaw/plugin-sdk/json-store";
-import { getMatrixRuntime } from "../../runtime.js";
+import { readJsonFileWithFallback, writeJsonFileAtomically } from "openclaw/plugin-sdk/json-store";
+import { createAsyncLock } from "../async-lock.js";
 import { resolveMatrixStateFilePath } from "../client/storage.js";
 import type { MatrixAuth } from "../client/types.js";
 import { LogService } from "../sdk/logger.js";
-import { resolveMatrixSqliteStateEnv } from "../sqlite-state.js";
 
 const INBOUND_DEDUPE_FILENAME = "inbound-dedupe.json";
-const INBOUND_DEDUPE_NAMESPACE = "inbound-dedupe";
-const INBOUND_DEDUPE_MIGRATIONS_NAMESPACE = "inbound-dedupe-migrations";
 const STORE_VERSION = 1;
 const DEFAULT_MAX_ENTRIES = 20_000;
 const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PERSIST_DEBOUNCE_MS = 250;
 
 type StoredMatrixInboundDedupeEntry = {
-  roomId: string;
-  eventId: string;
-  ts: number;
-};
-
-type LegacyMatrixInboundDedupeEntry = {
   key: string;
   ts: number;
 };
 
-type LegacyMatrixInboundDedupeState = {
+type StoredMatrixInboundDedupeState = {
   version: number;
-  entries: LegacyMatrixInboundDedupeEntry[];
-};
-
-type MatrixInboundDedupeMigrationMarker = {
-  importedAt: number;
+  entries: StoredMatrixInboundDedupeEntry[];
 };
 
 export type MatrixInboundEventDeduper = {
@@ -47,21 +32,10 @@ function normalizeEventPart(value: string): string {
   return value.trim();
 }
 
-function buildEventKey(params: { auth: MatrixAuth; roomId: string; eventId: string }): string {
-  const accountId = normalizeEventPart(params.auth.accountId) || "default";
+function buildEventKey(params: { roomId: string; eventId: string }): string {
   const roomId = normalizeEventPart(params.roomId);
   const eventId = normalizeEventPart(params.eventId);
-  if (!roomId || !eventId) {
-    return "";
-  }
-  const digest = createHash("sha256")
-    .update(accountId)
-    .update("\0")
-    .update(roomId)
-    .update("\0")
-    .update(eventId)
-    .digest("hex");
-  return `${accountId}:${digest}`;
+  return roomId && eventId ? `${roomId}|${eventId}` : "";
 }
 
 function resolveInboundDedupeStatePath(params: {
@@ -105,9 +79,7 @@ function pruneSeenEvents(params: {
     return;
   }
   while (seen.size > max) {
-    const oldestKey = [...seen.entries()].toSorted(
-      (a, b) => a[1] - b[1] || a[0].localeCompare(b[0]),
-    )[0]?.[0];
+    const oldestKey = seen.keys().next().value;
     if (typeof oldestKey !== "string") {
       break;
     }
@@ -115,58 +87,30 @@ function pruneSeenEvents(params: {
   }
 }
 
-function createInboundDedupeStore(params: { env?: NodeJS.ProcessEnv; stateDir?: string }) {
-  return getMatrixRuntime().state.openKeyedStore<StoredMatrixInboundDedupeEntry>({
-    namespace: INBOUND_DEDUPE_NAMESPACE,
-    maxEntries: DEFAULT_MAX_ENTRIES,
-    env: resolveMatrixSqliteStateEnv(params),
-  });
+function toStoredState(params: {
+  seen: Map<string, number>;
+  ttlMs: number;
+  maxEntries: number;
+  nowMs: number;
+}): StoredMatrixInboundDedupeState {
+  pruneSeenEvents(params);
+  return {
+    version: STORE_VERSION,
+    entries: Array.from(params.seen.entries()).map(([key, ts]) => ({ key, ts })),
+  };
 }
 
-function createInboundDedupeMigrationStore(params: { env?: NodeJS.ProcessEnv; stateDir?: string }) {
-  return getMatrixRuntime().state.openKeyedStore<MatrixInboundDedupeMigrationMarker>({
-    namespace: INBOUND_DEDUPE_MIGRATIONS_NAMESPACE,
-    maxEntries: 1_000,
-    env: resolveMatrixSqliteStateEnv(params),
-  });
-}
-
-function buildLegacyImportKey(params: { auth: MatrixAuth; storagePath: string }): string {
-  const accountId = normalizeEventPart(params.auth.accountId) || "default";
-  const digest = createHash("sha256")
-    .update(accountId)
-    .update("\0")
-    .update(params.storagePath)
-    .digest("hex");
-  return `${accountId}:${digest}`;
-}
-
-async function loadLegacyEntries(storagePath: string): Promise<StoredMatrixInboundDedupeEntry[]> {
-  const { value } = await readJsonFileWithFallback<LegacyMatrixInboundDedupeState | null>(
+async function readStoredState(
+  storagePath: string,
+): Promise<StoredMatrixInboundDedupeState | null> {
+  const { value } = await readJsonFileWithFallback<StoredMatrixInboundDedupeState | null>(
     storagePath,
     null,
   );
   if (value?.version !== STORE_VERSION || !Array.isArray(value.entries)) {
-    return [];
+    return null;
   }
-  const entries: StoredMatrixInboundDedupeEntry[] = [];
-  for (const entry of value.entries) {
-    if (!entry || typeof entry.key !== "string") {
-      continue;
-    }
-    const separatorIndex = entry.key.indexOf("|");
-    if (separatorIndex <= 0) {
-      continue;
-    }
-    const roomId = entry.key.slice(0, separatorIndex).trim();
-    const eventId = entry.key.slice(separatorIndex + 1).trim();
-    const ts = normalizeTimestamp(entry.ts);
-    if (!roomId || !eventId || ts === null) {
-      continue;
-    }
-    entries.push({ roomId, eventId, ts });
-  }
-  return entries;
+  return value;
 }
 
 export async function createMatrixInboundEventDeduper(params: {
@@ -194,63 +138,90 @@ export async function createMatrixInboundEventDeduper(params: {
       env: params.env,
       stateDir: params.stateDir,
     });
-  const stateDir = params.stateDir ?? path.dirname(storagePath);
-  const store = createInboundDedupeStore({ env: params.env, stateDir });
-  const migrationStore = createInboundDedupeMigrationStore({ env: params.env, stateDir });
 
   const seen = new Map<string, number>();
   const pending = new Set<string>();
+  const persistLock = createAsyncLock();
 
   try {
-    for (const entry of await store.entries()) {
-      const value = entry.value;
-      const roomId = typeof value?.roomId === "string" ? value.roomId.trim() : "";
-      const eventId = typeof value?.eventId === "string" ? value.eventId.trim() : "";
-      const ts = normalizeTimestamp(value?.ts);
-      const expectedKey = buildEventKey({ auth: params.auth, roomId, eventId });
-      if (expectedKey && expectedKey === entry.key && ts !== null) {
-        seen.set(entry.key, ts);
+    const stored = await readStoredState(storagePath);
+    for (const entry of stored?.entries ?? []) {
+      if (!entry || typeof entry.key !== "string") {
+        continue;
       }
-    }
-    const legacyImportKey = buildLegacyImportKey({ auth: params.auth, storagePath });
-    const legacyAlreadyImported = await migrationStore.lookup(legacyImportKey);
-    if (!legacyAlreadyImported) {
-      const legacyEntries = await loadLegacyEntries(storagePath);
-      let migratedLegacyEntries = 0;
-      for (const entry of legacyEntries) {
-        const key = buildEventKey({
-          auth: params.auth,
-          roomId: entry.roomId,
-          eventId: entry.eventId,
-        });
-        if (!key) {
-          continue;
-        }
-        if (seen.has(key)) {
-          migratedLegacyEntries += 1;
-          continue;
-        }
-        seen.set(key, entry.ts);
-        await store
-          .register(key, entry, ttlMs > 0 ? { ttlMs } : undefined)
-          .then(() => {
-            migratedLegacyEntries += 1;
-          })
-          .catch(() => {});
+      const key = entry.key.trim();
+      const ts = normalizeTimestamp(entry.ts);
+      if (!key || ts === null) {
+        continue;
       }
-      if (legacyEntries.length > 0 && migratedLegacyEntries === legacyEntries.length) {
-        await migrationStore.register(legacyImportKey, { importedAt: nowMs() });
-        await fs.rm(storagePath, { force: true }).catch(() => {});
-      }
+      seen.set(key, ts);
     }
     pruneSeenEvents({ seen, ttlMs, maxEntries, nowMs: nowMs() });
   } catch (err) {
     LogService.warn("MatrixInboundDedupe", "Failed loading Matrix inbound dedupe store:", err);
   }
 
+  let dirty = false;
+  let persistTimer: NodeJS.Timeout | null = null;
+  let persistPromise: Promise<void> | null = null;
+
+  const persist = async () => {
+    dirty = false;
+    const payload = toStoredState({
+      seen,
+      ttlMs,
+      maxEntries,
+      nowMs: nowMs(),
+    });
+    try {
+      await persistLock(async () => {
+        await writeJsonFileAtomically(storagePath, payload);
+      });
+    } catch (err) {
+      dirty = true;
+      throw err;
+    }
+  };
+
+  const flush = async (): Promise<void> => {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    for (;;) {
+      if (!dirty && !persistPromise) {
+        break;
+      }
+      if (dirty && !persistPromise) {
+        persistPromise = persist().finally(() => {
+          persistPromise = null;
+        });
+      }
+      await persistPromise;
+    }
+  };
+
+  const schedulePersist = () => {
+    dirty = true;
+    if (persistTimer) {
+      return;
+    }
+    persistTimer = setTimeout(() => {
+      persistTimer = null;
+      void flush().catch((err) => {
+        LogService.warn(
+          "MatrixInboundDedupe",
+          "Failed persisting Matrix inbound dedupe store:",
+          err,
+        );
+      });
+    }, PERSIST_DEBOUNCE_MS);
+    persistTimer.unref?.();
+  };
+
   return {
     claimEvent: ({ roomId, eventId }) => {
-      const key = buildEventKey({ auth: params.auth, roomId, eventId });
+      const key = buildEventKey({ roomId, eventId });
       if (!key) {
         return true;
       }
@@ -262,7 +233,7 @@ export async function createMatrixInboundEventDeduper(params: {
       return true;
     },
     commitEvent: async ({ roomId, eventId }) => {
-      const key = buildEventKey({ auth: params.auth, roomId, eventId });
+      const key = buildEventKey({ roomId, eventId });
       if (!key) {
         return;
       }
@@ -271,32 +242,26 @@ export async function createMatrixInboundEventDeduper(params: {
       seen.delete(key);
       seen.set(key, ts);
       pruneSeenEvents({ seen, ttlMs, maxEntries, nowMs: nowMs() });
-      await store
-        .register(
-          key,
-          {
-            roomId: normalizeEventPart(roomId),
-            eventId: normalizeEventPart(eventId),
-            ts,
-          },
-          ttlMs > 0 ? { ttlMs } : undefined,
-        )
-        .catch((err: unknown) => {
-          LogService.warn(
-            "MatrixInboundDedupe",
-            "Failed persisting Matrix inbound dedupe entry:",
-            err,
-          );
-        });
+      schedulePersist();
     },
     releaseEvent: ({ roomId, eventId }) => {
-      const key = buildEventKey({ auth: params.auth, roomId, eventId });
+      const key = buildEventKey({ roomId, eventId });
       if (!key) {
         return;
       }
       pending.delete(key);
     },
-    flush: async () => {},
-    stop: async () => {},
+    flush,
+    stop: async () => {
+      try {
+        await flush();
+      } catch (err) {
+        LogService.warn(
+          "MatrixInboundDedupe",
+          "Failed to flush Matrix inbound dedupe store during stop():",
+          err,
+        );
+      }
+    },
   };
 }

@@ -1,11 +1,10 @@
-import { createHash } from "node:crypto";
-import { readJsonFileWithFallback } from "openclaw/plugin-sdk/json-store";
-import { getTelegramRuntime } from "./runtime.js";
+import fs from "node:fs";
+import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
+import { replaceFileAtomicSync } from "openclaw/plugin-sdk/security-runtime";
 
-export const TELEGRAM_TOPIC_NAME_CACHE_MAX_ENTRIES = 2_048;
-const STORE_NAMESPACE_PREFIX = "telegram.topic-name-cache";
+const MAX_ENTRIES = 2_048;
 const TOPIC_NAME_CACHE_STATE_KEY = Symbol.for("openclaw.telegramTopicNameCacheState");
-const DEFAULT_TOPIC_NAME_CACHE_SCOPE = "default";
+const DEFAULT_TOPIC_NAME_CACHE_KEY = "__default__";
 
 type TopicEntry = {
   name: string;
@@ -20,34 +19,20 @@ type TopicNameStore = Map<string, TopicEntry>;
 type TopicNameStoreState = {
   lastUpdatedAt: number;
   store: TopicNameStore;
-  hydrated: boolean;
-  hydratePromise?: Promise<void>;
-  persistentStore: TopicNamePersistentStore;
 };
 
 type TopicNameCacheState = {
   stores: Map<string, TopicNameStoreState>;
 };
 
-type TopicNamePersistentStore = {
-  register(key: string, value: TopicEntry): Promise<void>;
-  entries(): Promise<Array<{ key: string; value: TopicEntry }>>;
-  delete(key: string): Promise<boolean>;
-  clear(): Promise<void>;
-};
-
-let topicNameStoreFactoryForTest: ((namespace: string) => TopicNamePersistentStore) | undefined;
-
 function createTopicNameStore(): TopicNameStore {
   return new Map<string, TopicEntry>();
 }
 
-function createTopicNameStoreState(namespace: string): TopicNameStoreState {
+function createTopicNameStoreState(): TopicNameStoreState {
   return {
     lastUpdatedAt: 0,
     store: createTopicNameStore(),
-    hydrated: false,
-    persistentStore: openTopicNamePersistentStore(namespace),
   };
 }
 
@@ -66,36 +51,13 @@ function cacheKey(chatId: number | string, threadId: number | string): string {
   return `${chatId}:${threadId}`;
 }
 
-function namespaceForScope(scope: string): string {
-  const hash = createHash("sha256").update(scope).digest("hex").slice(0, 16);
-  return `${STORE_NAMESPACE_PREFIX}.${hash}`;
-}
-
 export function resolveTopicNameCachePath(storePath: string): string {
   return `${storePath}.telegram-topic-names.json`;
 }
 
-export function resolveTopicNameCacheScope(storePath: string): string {
-  return storePath;
-}
-
-export function resolveTopicNameCacheNamespace(scope: string): string {
-  return namespaceForScope(scope);
-}
-
-function openTopicNamePersistentStore(namespace: string): TopicNamePersistentStore {
-  return (
-    topicNameStoreFactoryForTest?.(namespace) ??
-    getTelegramRuntime().state.openKeyedStore<TopicEntry>({
-      namespace,
-      maxEntries: TELEGRAM_TOPIC_NAME_CACHE_MAX_ENTRIES,
-    })
-  );
-}
-
-function evictOldest(store: TopicNameStore): string | undefined {
-  if (store.size <= TELEGRAM_TOPIC_NAME_CACHE_MAX_ENTRIES) {
-    return undefined;
+function evictOldest(store: TopicNameStore): void {
+  if (store.size <= MAX_ENTRIES) {
+    return;
   }
   let oldestKey: string | undefined;
   let oldestTime = Infinity;
@@ -108,7 +70,6 @@ function evictOldest(store: TopicNameStore): string | undefined {
   if (oldestKey) {
     store.delete(oldestKey);
   }
-  return oldestKey;
 }
 
 function isTopicEntry(value: unknown): value is TopicEntry {
@@ -124,145 +85,135 @@ function isTopicEntry(value: unknown): value is TopicEntry {
   );
 }
 
-function getTopicStoreState(scope?: string): TopicNameStoreState {
+function readPersistedTopicNames(persistedPath: string): TopicNameStore {
+  if (!fs.existsSync(persistedPath)) {
+    return createTopicNameStore();
+  }
+  try {
+    const raw = fs.readFileSync(persistedPath, "utf-8");
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const entries = Object.entries(parsed)
+      .filter((entry): entry is [string, TopicEntry] => isTopicEntry(entry[1]))
+      .toSorted(([, left], [, right]) => right.updatedAt - left.updatedAt)
+      .slice(0, MAX_ENTRIES);
+    return new Map(entries);
+  } catch (error) {
+    logVerbose(`telegram: failed to read topic-name cache: ${String(error)}`);
+    return createTopicNameStore();
+  }
+}
+
+function getTopicStoreState(persistedPath?: string): TopicNameStoreState {
   const state = getTopicNameCacheState();
-  const stateKey = scope ?? DEFAULT_TOPIC_NAME_CACHE_SCOPE;
+  const stateKey = persistedPath ?? DEFAULT_TOPIC_NAME_CACHE_KEY;
   const existing = state.stores.get(stateKey);
   if (existing) {
     return existing;
   }
-  const next = createTopicNameStoreState(namespaceForScope(stateKey));
+  const next = persistedPath
+    ? {
+        lastUpdatedAt: 0,
+        store: readPersistedTopicNames(persistedPath),
+      }
+    : createTopicNameStoreState();
+  next.lastUpdatedAt = Math.max(0, ...Array.from(next.store.values(), (entry) => entry.updatedAt));
   state.stores.set(stateKey, next);
   return next;
 }
 
-async function hydrateTopicStoreState(state: TopicNameStoreState): Promise<void> {
-  if (state.hydrated) {
-    return;
-  }
-  if (state.hydratePromise) {
-    await state.hydratePromise;
-    return;
-  }
-  state.hydratePromise = (async () => {
-    const entries = await state.persistentStore.entries();
-    for (const { key, value } of entries) {
-      if (isTopicEntry(value)) {
-        state.store.set(key, value);
-      }
-    }
-    state.lastUpdatedAt = Math.max(
-      0,
-      ...Array.from(state.store.values(), (entry) => entry.updatedAt),
-    );
-    state.hydrated = true;
-  })().finally(() => {
-    state.hydratePromise = undefined;
-  });
-  await state.hydratePromise;
+function getTopicStore(persistedPath?: string): TopicNameStore {
+  return getTopicStoreState(persistedPath).store;
 }
 
-async function getTopicStore(scope?: string): Promise<TopicNameStore> {
-  const state = getTopicStoreState(scope);
-  await hydrateTopicStoreState(state);
-  return state.store;
-}
-
-function nextUpdatedAt(scope?: string): number {
-  const state = getTopicStoreState(scope);
+function nextUpdatedAt(persistedPath?: string): number {
+  const state = getTopicStoreState(persistedPath);
   const now = Date.now();
   state.lastUpdatedAt = now > state.lastUpdatedAt ? now : state.lastUpdatedAt + 1;
   return state.lastUpdatedAt;
 }
 
-export async function updateTopicName(
+function removeTopicStore(persistedPath?: string): void {
+  const state = getTopicNameCacheState();
+  const stateKey = persistedPath ?? DEFAULT_TOPIC_NAME_CACHE_KEY;
+  if (persistedPath) {
+    fs.rmSync(persistedPath, { force: true });
+  }
+  state.stores.delete(stateKey);
+}
+
+function persistTopicStore(persistedPath: string, store: TopicNameStore): void {
+  if (store.size === 0) {
+    fs.rmSync(persistedPath, { force: true });
+    return;
+  }
+  replaceFileAtomicSync({
+    filePath: persistedPath,
+    content: JSON.stringify(Object.fromEntries(store)),
+    tempPrefix: ".telegram-topic-name-cache",
+  });
+}
+
+export function updateTopicName(
   chatId: number | string,
   threadId: number | string,
   patch: Partial<Omit<TopicEntry, "updatedAt">>,
-  scope?: string,
-): Promise<void> {
-  const state = getTopicStoreState(scope);
-  await hydrateTopicStoreState(state);
+  persistedPath?: string,
+): void {
+  const cache = getTopicStore(persistedPath);
   const key = cacheKey(chatId, threadId);
-  const existing = state.store.get(key);
-  const iconColor = patch.iconColor ?? existing?.iconColor;
-  const iconCustomEmojiId = patch.iconCustomEmojiId ?? existing?.iconCustomEmojiId;
-  const closed = patch.closed ?? existing?.closed;
+  const existing = cache.get(key);
   const merged: TopicEntry = {
     name: patch.name ?? existing?.name ?? "",
-    updatedAt: nextUpdatedAt(scope),
-    ...(iconColor !== undefined ? { iconColor } : {}),
-    ...(iconCustomEmojiId !== undefined ? { iconCustomEmojiId } : {}),
-    ...(closed !== undefined ? { closed } : {}),
+    iconColor: patch.iconColor ?? existing?.iconColor,
+    iconCustomEmojiId: patch.iconCustomEmojiId ?? existing?.iconCustomEmojiId,
+    closed: patch.closed ?? existing?.closed,
+    updatedAt: nextUpdatedAt(persistedPath),
   };
   if (!merged.name) {
     return;
   }
-  state.store.set(key, merged);
-  await state.persistentStore.register(key, merged);
-  const evictedKey = evictOldest(state.store);
-  if (evictedKey) {
-    await state.persistentStore.delete(evictedKey);
+  cache.set(key, merged);
+  evictOldest(cache);
+  if (persistedPath) {
+    try {
+      persistTopicStore(persistedPath, cache);
+    } catch (error) {
+      logVerbose(`telegram: failed to persist topic-name cache: ${String(error)}`);
+    }
   }
 }
 
-export async function getTopicName(
+export function getTopicName(
   chatId: number | string,
   threadId: number | string,
-  scope?: string,
-): Promise<string | undefined> {
-  const state = getTopicStoreState(scope);
-  await hydrateTopicStoreState(state);
-  const key = cacheKey(chatId, threadId);
-  const entry = state.store.get(key);
+  persistedPath?: string,
+): string | undefined {
+  const entry = getTopicStore(persistedPath).get(cacheKey(chatId, threadId));
   if (entry) {
-    entry.updatedAt = nextUpdatedAt(scope);
-    await state.persistentStore.register(key, entry);
+    entry.updatedAt = nextUpdatedAt(persistedPath);
   }
   return entry?.name;
 }
 
-export async function getTopicEntry(
+export function getTopicEntry(
   chatId: number | string,
   threadId: number | string,
-  scope?: string,
-): Promise<TopicEntry | undefined> {
-  return (await getTopicStore(scope)).get(cacheKey(chatId, threadId));
+  persistedPath?: string,
+): TopicEntry | undefined {
+  return getTopicStore(persistedPath).get(cacheKey(chatId, threadId));
 }
 
-export async function listTelegramLegacyTopicNameCacheEntries(params: {
-  persistedPath: string;
-  maxEntries?: number;
-}): Promise<Array<{ key: string; value: TopicEntry }>> {
-  const { value } = await readJsonFileWithFallback<Record<string, unknown>>(
-    params.persistedPath,
-    {},
-  );
-  return Object.entries(value)
-    .filter((entry): entry is [string, TopicEntry] => isTopicEntry(entry[1]))
-    .toSorted(([, left], [, right]) => right.updatedAt - left.updatedAt)
-    .slice(0, params.maxEntries ?? TELEGRAM_TOPIC_NAME_CACHE_MAX_ENTRIES)
-    .map(([key, entry]) => ({ key, value: entry }));
-}
-
-export async function clearTopicNameCache(): Promise<void> {
+export function clearTopicNameCache(): void {
   const state = getTopicNameCacheState();
-  await Promise.all(
-    [...state.stores.values()].map((storeState) => storeState.persistentStore.clear()),
-  );
-  state.stores.clear();
+  for (const stateKey of state.stores.keys()) {
+    removeTopicStore(stateKey === DEFAULT_TOPIC_NAME_CACHE_KEY ? undefined : stateKey);
+  }
 }
 
-export function topicNameCacheSize(scope?: string): number {
-  return getTopicStoreState(scope).store.size;
+export function topicNameCacheSize(): number {
+  return getTopicStore().size;
 }
 
 export function resetTopicNameCacheForTest(): void {
   getTopicNameCacheState().stores.clear();
-}
-
-export function setTelegramTopicNameStoreFactoryForTest(
-  factory: ((namespace: string) => TopicNamePersistentStore) | undefined,
-): void {
-  topicNameStoreFactoryForTest = factory;
 }

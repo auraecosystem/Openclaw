@@ -34,19 +34,10 @@ const createFakeProcess = () =>
     execPath: "/usr/local/bin/node",
   }) as unknown as NodeJS.Process;
 
-const createKillableChild = () => {
-  const child = Object.assign(new EventEmitter(), {
-    kill: vi.fn(),
-  });
-  child.kill.mockImplementation((signal: NodeJS.Signals = "SIGTERM") => {
-    queueMicrotask(() => child.emit("exit", null, signal));
-    return true;
-  });
-  return child;
-};
-
 const createWatchHarness = () => {
-  const child = createKillableChild();
+  const child = Object.assign(new EventEmitter(), {
+    kill: vi.fn(() => {}),
+  });
   const spawn = vi.fn(() => child);
   const watcher = Object.assign(new EventEmitter(), {
     close: vi.fn(async () => {}),
@@ -139,31 +130,10 @@ describe("watch-node script", () => {
       ];
       expect(watchPaths).toEqual(runNodeWatchedPaths);
       expect(watchPaths).toContain("extensions");
-      expect(watchPaths).toContain("packages/gateway-client/src");
-      expect(watchPaths).toContain("packages/gateway-protocol/src");
-      expect(watchPaths).toContain("packages/markdown-core/src");
-      expect(watchPaths).toContain("packages/media-core/src");
-      expect(watchPaths).toContain("packages/media-generation-core/src");
-      expect(watchPaths).toContain("packages/acp-core/src");
-      expect(watchPaths).toContain("packages/net-policy/src");
       expect(watchPaths).toContain("tsdown.config.ts");
       expect(watchOptions.ignoreInitial).toBe(true);
       expect(watchOptions.ignored("src")).toBe(false);
       expect(watchOptions.ignored("src/infra")).toBe(false);
-      expect(watchOptions.ignored("packages/gateway-client/src/client.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/gateway-client/src/client.test.ts")).toBe(true);
-      expect(watchOptions.ignored("packages/gateway-protocol/src/schema/cron.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/markdown-core/src/ir.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/markdown-core/src/ir.test.ts")).toBe(true);
-      expect(watchOptions.ignored("packages/media-core/src/mime.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/media-core/src/mime.test.ts")).toBe(true);
-      expect(watchOptions.ignored("packages/media-generation-core/src/model-ref.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/media-generation-core/src/model-ref.test.ts")).toBe(
-        true,
-      );
-      expect(watchOptions.ignored("packages/acp-core/src/runtime/types.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/net-policy/src/ip.ts")).toBe(false);
-      expect(watchOptions.ignored("packages/net-policy/src/ip.test.ts")).toBe(true);
       expect(watchOptions.ignored("extensions")).toBe(false);
       expect(watchOptions.ignored("extensions/voice-call")).toBe(false);
       expect(watchOptions.ignored("extensions/voice-call/dist")).toBe(true);
@@ -229,7 +199,9 @@ describe("watch-node script", () => {
   });
 
   it("starts the runner before loading chokidar", async () => {
-    const child = createKillableChild();
+    const child = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
     const spawn = vi.fn(() => child);
     const watcher = Object.assign(new EventEmitter(), {
       close: vi.fn(async () => {}),
@@ -259,9 +231,7 @@ describe("watch-node script", () => {
     );
 
     resolveLoadChokidar({ watch });
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(watch).toHaveBeenCalledTimes(1);
 
     fakeProcess.emit("SIGINT");
@@ -336,7 +306,7 @@ describe("watch-node script", () => {
   it("runs doctor once and restarts when gateway exits nonzero", async () => {
     const gatewayA = Object.assign(new EventEmitter(), { kill: vi.fn() });
     const doctor = Object.assign(new EventEmitter(), { kill: vi.fn() });
-    const gatewayB = createKillableChild();
+    const gatewayB = Object.assign(new EventEmitter(), { kill: vi.fn() });
     const spawn = vi
       .fn()
       .mockReturnValueOnce(gatewayA)
@@ -345,9 +315,7 @@ describe("watch-node script", () => {
     const { watcher, fakeProcess, runPromise } = startWatchRun({ spawn });
 
     gatewayA.emit("exit", 1, null);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(spawn).toHaveBeenCalledTimes(2);
     const doctorSpawnCall = requireMockCall(spawn, 1);
@@ -361,9 +329,7 @@ describe("watch-node script", () => {
     expect(requireSpawnOptions(spawn, 1).stdio).toBe("inherit");
 
     doctor.emit("exit", 0, null);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
 
     expect(spawn).toHaveBeenCalledTimes(3);
     const restartedGatewaySpawnCall = requireMockCall(spawn, 2);
@@ -402,14 +368,14 @@ describe("watch-node script", () => {
     const childA = Object.assign(new EventEmitter(), {
       kill: vi.fn(),
     });
-    const childB = createKillableChild();
+    const childB = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
     const spawn = vi.fn().mockReturnValueOnce(childA).mockReturnValueOnce(childB);
     const { watcher, fakeProcess, runPromise } = startWatchRun({ spawn });
 
     childA.emit("exit", 143, null);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(spawn).toHaveBeenCalledTimes(2);
 
     fakeProcess.emit("SIGINT");
@@ -452,7 +418,9 @@ describe("watch-node script", () => {
     const childA = createAutoExitChild();
     const childB = createAutoExitChild();
     const childC = createAutoExitChild();
-    const childD = createKillableChild();
+    const childD = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
     const spawn = vi
       .fn()
       .mockReturnValueOnce(childA)
@@ -462,51 +430,37 @@ describe("watch-node script", () => {
     const { watcher, fakeProcess, runPromise } = startWatchRun({ spawn });
 
     watcher.emit("change", "src/infra/watch-node.test.ts");
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(childA.kill).not.toHaveBeenCalled();
 
     watcher.emit("change", "src/infra/watch-node.test.tsx");
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(childA.kill).not.toHaveBeenCalled();
 
     watcher.emit("change", "src/infra/watch-node-test-helpers.ts");
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(childA.kill).not.toHaveBeenCalled();
 
     watcher.emit("change", VOICE_CALL_README);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(childA.kill).not.toHaveBeenCalled();
 
     watcher.emit("change", VOICE_CALL_MANIFEST);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(childA.kill).toHaveBeenCalledWith("SIGTERM");
     expect(spawn).toHaveBeenCalledTimes(2);
 
     watcher.emit("change", VOICE_CALL_PACKAGE);
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(childB.kill).toHaveBeenCalledWith("SIGTERM");
     expect(spawn).toHaveBeenCalledTimes(3);
 
     watcher.emit("change", "src/infra/watch-node.ts");
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     expect(childC.kill).toHaveBeenCalledWith("SIGTERM");
     expect(spawn).toHaveBeenCalledTimes(4);
 
@@ -541,7 +495,9 @@ describe("watch-node script", () => {
       ),
       { code: "ERR_INVALID_PACKAGE_CONFIG" },
     );
-    const child = createKillableChild();
+    const child = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
     const spawn = vi.fn(() => child);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -584,7 +540,9 @@ describe("watch-node script", () => {
     const error = Object.assign(new Error("Cannot find package 'chokidar'"), {
       code: "ERR_MODULE_NOT_FOUND",
     });
-    const child = createKillableChild();
+    const child = Object.assign(new EventEmitter(), {
+      kill: vi.fn(() => {}),
+    });
     const spawn = vi.fn(() => child);
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -650,9 +608,7 @@ describe("watch-node script", () => {
         spawn,
       });
 
-      await new Promise((resolve) => {
-        setImmediate(resolve);
-      });
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(signalProcess).toHaveBeenCalledWith(2121, "SIGTERM");
       expect(spawn).toHaveBeenCalledTimes(1);

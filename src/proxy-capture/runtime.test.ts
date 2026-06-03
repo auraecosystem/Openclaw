@@ -69,9 +69,7 @@ describe("debug proxy runtime", () => {
       headers: { "content-type": "application/json" },
       body: '{"input":"hello"}',
     });
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     finalizeDebugProxyCapture(settings, deps);
 
     const sessionEvents = events.filter((event) => event.sessionId === "runtime-test-session");
@@ -104,9 +102,7 @@ describe("debug proxy runtime", () => {
       headers,
       body: "{}",
     });
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     finalizeDebugProxyCapture(settings, deps);
 
     const request = events.find((event) => event.kind === "request");
@@ -141,9 +137,7 @@ describe("debug proxy runtime", () => {
       settings,
       deps,
     );
-    await new Promise((resolve) => {
-      setImmediate(resolve);
-    });
+    await new Promise((resolve) => setImmediate(resolve));
     finalizeDebugProxyCapture(settings, deps);
 
     const request = events.find((event) => event.kind === "request");

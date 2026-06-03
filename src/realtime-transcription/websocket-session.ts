@@ -350,9 +350,7 @@ class WebSocketRealtimeTranscriptionSession<Event> implements RealtimeTranscript
     const delay = this.reconnectDelayMs * 2 ** (this.reconnectAttempts - 1);
     this.reconnecting = true;
     try {
-      await new Promise((resolve) => {
-        setTimeout(resolve, delay);
-      });
+      await new Promise((resolve) => setTimeout(resolve, delay));
       if (!this.closed) {
         await this.doConnect();
       }
@@ -360,6 +358,7 @@ class WebSocketRealtimeTranscriptionSession<Event> implements RealtimeTranscript
       if (!this.closed) {
         this.reconnecting = false;
         await this.attemptReconnect();
+        return;
       }
     } finally {
       this.reconnecting = false;

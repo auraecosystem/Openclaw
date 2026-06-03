@@ -38,16 +38,13 @@ export function tracePluginLifecyclePhase<T>(
     return fn();
   }
   const start = process.hrtime.bigint();
-  let status: "error" | "ok" | undefined;
+  let status: "error" | "ok" = "error";
   try {
     const result = fn();
     status = "ok";
     return result;
-  } catch (error) {
-    status = "error";
-    throw error;
   } finally {
-    emitPluginLifecycleTrace({ phase, start, status: status ?? "error", details });
+    emitPluginLifecycleTrace({ phase, start, status, details });
   }
 }
 
@@ -60,15 +57,12 @@ export async function tracePluginLifecyclePhaseAsync<T>(
     return fn();
   }
   const start = process.hrtime.bigint();
-  let status: "error" | "ok" | undefined;
+  let status: "error" | "ok" = "error";
   try {
     const result = await fn();
     status = "ok";
     return result;
-  } catch (error) {
-    status = "error";
-    throw error;
   } finally {
-    emitPluginLifecycleTrace({ phase, start, status: status ?? "error", details });
+    emitPluginLifecycleTrace({ phase, start, status, details });
   }
 }

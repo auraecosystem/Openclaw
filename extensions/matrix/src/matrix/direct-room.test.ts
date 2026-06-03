@@ -41,7 +41,7 @@ describe("inspectMatrixDirectRoomEvidence", () => {
     expect(result.strict).toBe(true);
   });
 
-  it("preserves strict evidence when local is_direct=false provides a promotion veto reason", async () => {
+  it("records only the local member-state direct flag", async () => {
     const client = createClient({
       getRoomStateEvent: vi.fn(async (_roomId: string, _eventType: string, stateKey: string) =>
         stateKey === "@bot:example.org" ? { is_direct: false } : { is_direct: true },

@@ -1,4 +1,3 @@
-import { normalizeChannelId } from "../channels/registry.js";
 import type { OutboundSendDeps } from "../infra/outbound/send-deps.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
 import type { CliDeps } from "./deps.types.js";
@@ -47,10 +46,6 @@ const NON_CHANNEL_DEP_KEYS = new Set([
   "toString",
   "valueOf",
 ]);
-
-function resolveKnownChannelId(raw: string): string | undefined {
-  return normalizeChannelId(raw) ?? undefined;
-}
 
 // Per-channel module caches for lazy loading.
 const senderCache = new Map<string, Promise<RuntimeSend>>();
@@ -105,11 +100,7 @@ export function createDefaultDeps(): CliDeps {
       if (existing !== undefined || NON_CHANNEL_DEP_KEYS.has(property)) {
         return existing;
       }
-      const channelId = resolveKnownChannelId(property);
-      if (!channelId) {
-        return existing;
-      }
-      const sender = resolveSender(channelId);
+      const sender = resolveSender(property);
       Reflect.set(target, property, sender, receiver);
       return sender;
     },

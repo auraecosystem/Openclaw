@@ -1,26 +1,27 @@
 import { existsSync } from "node:fs";
-import { note } from "../../packages/terminal-core/src/note.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../agents/agent-scope.js";
-import { formatCliCommand } from "../cli/command-format.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { SkillStatusEntry } from "../skills/discovery/status.js";
-import { buildWorkspaceSkillStatus } from "../skills/discovery/status.js";
+import type { SkillStatusEntry, SkillStatusReport } from "../agents/skills-status.js";
+import { buildWorkspaceSkillStatus } from "../agents/skills-status.js";
 import {
   detectGhConfigDirMismatch,
   formatGhConfigDirMismatchHint,
   type GhConfigDiscoveryInput,
   type GhConfigDiscoveryResult,
-} from "../skills/lifecycle/gh-config-discovery.js";
+} from "../agents/skills/gh-config-discovery.js";
+import { formatCliCommand } from "../cli/command-format.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { note } from "../terminal/note.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
-import {
-  collectUnavailableAgentSkills,
-  disableUnavailableSkillsInConfig,
-} from "./doctor-skills-core.js";
 
-export {
-  collectUnavailableAgentSkills,
-  disableUnavailableSkillsInConfig,
-} from "./doctor-skills-core.js";
+export function collectUnavailableAgentSkills(report: SkillStatusReport): SkillStatusEntry[] {
+  return report.skills.filter(
+    (skill) =>
+      !skill.eligible &&
+      !skill.disabled &&
+      !skill.blockedByAllowlist &&
+      !skill.blockedByAgentFilter,
+  );
+}
 
 function formatMissingSummary(skill: SkillStatusEntry): string {
   const missing: string[] = [];
@@ -97,6 +98,29 @@ export function formatUnavailableSkillDoctorLines(skills: SkillStatusEntry[]): s
     `Inspect details: ${formatCliCommand("openclaw skills check --agent <id>")} or ${formatCliCommand("openclaw skills info <name> --agent <id>")}`,
   );
   return lines;
+}
+
+export function disableUnavailableSkillsInConfig(
+  config: OpenClawConfig,
+  skills: readonly SkillStatusEntry[],
+): OpenClawConfig {
+  if (skills.length === 0) {
+    return config;
+  }
+  const entries = { ...config.skills?.entries };
+  for (const skill of skills) {
+    entries[skill.skillKey] = {
+      ...entries[skill.skillKey],
+      enabled: false,
+    };
+  }
+  return {
+    ...config,
+    skills: {
+      ...config.skills,
+      entries,
+    },
+  };
 }
 
 export async function maybeRepairSkillReadiness(params: {

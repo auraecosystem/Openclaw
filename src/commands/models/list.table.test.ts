@@ -7,7 +7,7 @@ describe("printModelTable", () => {
     const runtime = { log: vi.fn(), error: vi.fn() };
     const rows: ModelRow[] = [
       {
-        key: "openai/gpt-5.5",
+        key: "openai-codex/gpt-5.5",
         name: "GPT-5.5",
         input: "text+image",
         contextWindow: 400_000,
@@ -23,7 +23,7 @@ describe("printModelTable", () => {
 
     expect(runtime.log.mock.calls).toEqual([
       ["Model                                      Input      Ctx         Local Auth  Tags"],
-      ["openai/gpt-5.5                             text+image 266k/391k   no    yes   "],
+      ["openai-codex/gpt-5.5                       text+image 266k/391k   no    yes   "],
     ]);
   });
 });

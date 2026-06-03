@@ -1,4 +1,4 @@
-import { normalizeOptionalString, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { PluginRuntime, RuntimeLogger } from "../../runtime-api.js";
 import type { CoreConfig } from "../../types.js";
 import type { MatrixAuth } from "../client.js";
@@ -113,15 +113,14 @@ function createMatrixPostHealthySyncDecryptFailureTracker(params: {
       }
 
       warningEmitted = true;
-      const rooms = uniqueStrings(observations.map((entry) => entry.roomId)).slice(
+      const rooms = [...new Set(observations.map((entry) => entry.roomId))].slice(
         0,
         MATRIX_POST_HEALTHY_SYNC_DECRYPT_FAILURE_SAMPLE_LIMIT,
       );
-      const senders = uniqueStrings(
-        observations
-          .map((entry) => entry.sender)
-          .filter((sender): sender is string => Boolean(sender)),
-      ).slice(0, MATRIX_POST_HEALTHY_SYNC_DECRYPT_FAILURE_SAMPLE_LIMIT);
+      const senders = [...new Set(observations.map((entry) => entry.sender).filter(Boolean))].slice(
+        0,
+        MATRIX_POST_HEALTHY_SYNC_DECRYPT_FAILURE_SAMPLE_LIMIT,
+      );
       const eventIds = observations
         .slice(-MATRIX_POST_HEALTHY_SYNC_DECRYPT_FAILURE_SAMPLE_LIMIT)
         .map((entry) => entry.eventId);
@@ -230,7 +229,7 @@ export function registerMatrixMonitorEvents(params: {
     }
     return Promise.resolve()
       .then(task)
-      .catch((error: unknown) => {
+      .catch((error) => {
         logVerboseMessage(`matrix: ${label} failed (${String(error)})`);
       });
   };
@@ -271,63 +270,57 @@ export function registerMatrixMonitorEvents(params: {
     );
   });
 
-  client.on("room.failed_decryption", (roomId: string, event: MatrixRawEvent, error: Error) => {
-    void runMonitorTask(
-      `failed decryption handler room=${roomId} id=${event.event_id ?? "unknown"}`,
-      async () => {
-        const failureState = postHealthySyncDecryptFailureTracker.recordFailure(
+  client.on(
+    "room.failed_decryption",
+    async (roomId: string, event: MatrixRawEvent, error: Error) => {
+      const failureState = postHealthySyncDecryptFailureTracker.recordFailure(roomId, event, error);
+      const selfUserId = await resolveMatrixSelfUserId(client, logVerboseMessage);
+      const sender = typeof event.sender === "string" ? event.sender : null;
+      const senderMatchesOwnUser = Boolean(selfUserId && sender && selfUserId === sender);
+      logger.warn(
+        failureState.freshAfterHealthySync
+          ? "Failed to decrypt fresh post-healthy-sync message"
+          : "Failed to decrypt message",
+        {
           roomId,
-          event,
-          error,
-        );
-        const selfUserId = await resolveMatrixSelfUserId(client, logVerboseMessage);
-        const sender = typeof event.sender === "string" ? event.sender : null;
-        const senderMatchesOwnUser = Boolean(selfUserId && sender && selfUserId === sender);
-        logger.warn(
-          failureState.freshAfterHealthySync
-            ? "Failed to decrypt fresh post-healthy-sync message"
-            : "Failed to decrypt message",
-          {
-            roomId,
-            eventId: event.event_id,
-            sender,
-            senderMatchesOwnUser,
-            error: error.message,
-            freshAfterHealthySync: failureState.freshAfterHealthySync,
-            ...(failureState.freshAfterHealthySync
-              ? {
-                  postHealthySyncFailureCount: failureState.failureCount,
-                }
-              : {}),
-          },
-        );
-        if (failureState.warning) {
-          logger.warn(formatMatrixPostHealthySyncDecryptionHint(auth.accountId), {
-            roomId,
-            eventId: event.event_id,
-            failureCount: failureState.failureCount,
-            roomCount: failureState.warning.roomCount,
-            rooms: failureState.warning.rooms,
-            senderCount: failureState.warning.senderCount,
-            senders: failureState.warning.senders,
-            sampleEventIds: failureState.warning.eventIds,
-            latestError: failureState.warning.latestError,
-            windowMs: failureState.warning.windowMs,
-          });
-        }
-        if (senderMatchesOwnUser) {
-          logger.warn(formatMatrixSelfDecryptionHint(auth.accountId), {
-            roomId,
-            eventId: event.event_id,
-            sender,
-          });
-        }
-        logVerboseMessage(
-          `matrix: failed decrypt room=${roomId} id=${event.event_id ?? "unknown"} freshAfterHealthySync=${String(failureState.freshAfterHealthySync)} error=${error.message}`,
-        );
-      },
-    );
-  });
+          eventId: event.event_id,
+          sender,
+          senderMatchesOwnUser,
+          error: error.message,
+          freshAfterHealthySync: failureState.freshAfterHealthySync,
+          ...(failureState.freshAfterHealthySync
+            ? {
+                postHealthySyncFailureCount: failureState.failureCount,
+              }
+            : {}),
+        },
+      );
+      if (failureState.warning) {
+        logger.warn(formatMatrixPostHealthySyncDecryptionHint(auth.accountId), {
+          roomId,
+          eventId: event.event_id,
+          failureCount: failureState.failureCount,
+          roomCount: failureState.warning.roomCount,
+          rooms: failureState.warning.rooms,
+          senderCount: failureState.warning.senderCount,
+          senders: failureState.warning.senders,
+          sampleEventIds: failureState.warning.eventIds,
+          latestError: failureState.warning.latestError,
+          windowMs: failureState.warning.windowMs,
+        });
+      }
+      if (senderMatchesOwnUser) {
+        logger.warn(formatMatrixSelfDecryptionHint(auth.accountId), {
+          roomId,
+          eventId: event.event_id,
+          sender,
+        });
+      }
+      logVerboseMessage(
+        `matrix: failed decrypt room=${roomId} id=${event.event_id ?? "unknown"} freshAfterHealthySync=${String(failureState.freshAfterHealthySync)} error=${error.message}`,
+      );
+    },
+  );
 
   client.on("verification.summary", (summary) => {
     void runMonitorTask("verification summary handler", async () => {

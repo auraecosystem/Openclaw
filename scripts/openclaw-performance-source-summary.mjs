@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 
 function parseArgs(argv) {
-  const options = { baselineSourceDir: null, sourceDir: null, output: null };
+  const options = { sourceDir: null, output: null };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const readValue = () => {
@@ -19,9 +19,6 @@ function parseArgs(argv) {
     switch (arg) {
       case "--source-dir":
         options.sourceDir = path.resolve(readValue());
-        break;
-      case "--baseline-source-dir":
-        options.baselineSourceDir = path.resolve(readValue());
         break;
       case "--output":
         options.output = path.resolve(readValue());
@@ -41,7 +38,7 @@ function parseArgs(argv) {
 }
 
 function printHelp() {
-  console.log(`Usage: node scripts/openclaw-performance-source-summary.mjs --source-dir <dir> [--baseline-source-dir <dir>] [--output <summary.md>]
+  console.log(`Usage: node scripts/openclaw-performance-source-summary.mjs --source-dir <dir> [--output <summary.md>]
 
 Summarizes OpenClaw-native performance probe artifacts for CI reports.`);
 }
@@ -75,42 +72,6 @@ function metric(stats, key = "p50") {
   return stats && typeof stats[key] === "number" ? stats[key] : null;
 }
 
-function percentDelta(before, after) {
-  if (typeof before !== "number" || typeof after !== "number") {
-    return null;
-  }
-  if (before === 0) {
-    return after === 0 ? 0 : null;
-  }
-  return ((after - before) / before) * 100;
-}
-
-function formatDeltaMb(before, after) {
-  if (typeof before !== "number" || typeof after !== "number") {
-    return "n/a";
-  }
-  const delta = after - before;
-  const percent = percentDelta(before, after);
-  const sign = delta > 0 ? "+" : "";
-  const percentText = percent == null ? "new" : `${percent > 0 ? "+" : ""}${percent.toFixed(1)}%`;
-  return `${sign}${formatMb(delta)} (${percentText})`;
-}
-
-function memoryRisk(before, after) {
-  const percent = percentDelta(before, after);
-  const delta = typeof before === "number" && typeof after === "number" ? after - before : null;
-  if (percent == null || delta == null) {
-    return "n/a";
-  }
-  if (percent >= 20 && delta >= 10) {
-    return "watch";
-  }
-  if (percent <= -10 && delta <= -10) {
-    return "improved";
-  }
-  return "stable";
-}
-
 function escapeCell(value) {
   return String(value).replaceAll("|", "\\|");
 }
@@ -141,18 +102,6 @@ function loadMockHelloSummaries(sourceDir) {
     }))
     .filter((entry) => entry.summary != null)
     .toSorted((a, b) => a.id.localeCompare(b.id));
-}
-
-function loadSourceArtifacts(sourceDir) {
-  if (!sourceDir || !fs.existsSync(sourceDir)) {
-    return null;
-  }
-  return {
-    startup: readJsonIfExists(path.join(sourceDir, "gateway-cpu", "gateway-startup-bench.json")),
-    cli: readJsonIfExists(path.join(sourceDir, "cli-startup.json")),
-    extensionMemory: readJsonIfExists(path.join(sourceDir, "extension-memory.json")),
-    mockHelloSummaries: loadMockHelloSummaries(sourceDir),
-  };
 }
 
 function buildStartupRows(startup) {
@@ -216,117 +165,6 @@ function buildCliRows(cli) {
   ]);
 }
 
-function buildStartupMemoryDeltaRows(current, baseline) {
-  const baselineById = new Map((baseline?.results ?? []).map((result) => [result.id, result]));
-  return (current?.results ?? [])
-    .map((result) => {
-      const before = baselineById.get(result.id);
-      if (!before) {
-        return null;
-      }
-      const beforeRss = metric(before.summary?.maxRssMb, "p95");
-      const afterRss = metric(result.summary?.maxRssMb, "p95");
-      const beforeReadyHeap = metric(
-        before.summary?.startupTrace?.["memory.ready.heapUsedMb"],
-        "p95",
-      );
-      const afterReadyHeap = metric(
-        result.summary?.startupTrace?.["memory.ready.heapUsedMb"],
-        "p95",
-      );
-      return [
-        "gateway boot",
-        result.id ?? "unknown",
-        formatMb(beforeRss),
-        formatMb(afterRss),
-        formatDeltaMb(beforeRss, afterRss),
-        formatDeltaMb(beforeReadyHeap, afterReadyHeap),
-        memoryRisk(beforeRss, afterRss),
-      ];
-    })
-    .filter(Boolean);
-}
-
-function buildCliMemoryDeltaRows(current, baseline) {
-  const baselineById = new Map((baseline?.primary?.cases ?? []).map((entry) => [entry.id, entry]));
-  return (current?.primary?.cases ?? [])
-    .map((entry) => {
-      const before = baselineById.get(entry.id);
-      if (!before) {
-        return null;
-      }
-      const beforeRss = metric(before.summary?.maxRssMb, "p95");
-      const afterRss = metric(entry.summary?.maxRssMb, "p95");
-      return [
-        "cli",
-        entry.id ?? "unknown",
-        formatMb(beforeRss),
-        formatMb(afterRss),
-        formatDeltaMb(beforeRss, afterRss),
-        "n/a",
-        memoryRisk(beforeRss, afterRss),
-      ];
-    })
-    .filter(Boolean);
-}
-
-function average(values) {
-  const numeric = values.filter((value) => typeof value === "number" && Number.isFinite(value));
-  if (numeric.length === 0) {
-    return null;
-  }
-  return numeric.reduce((sum, value) => sum + value, 0) / numeric.length;
-}
-
-function buildMockHelloMemoryDeltaRows(current, baseline) {
-  const beforeDelta = average(
-    (baseline ?? []).map(
-      (entry) => entry.summary?.metrics?.gatewayProcessRssDeltaBytes / 1024 / 1024,
-    ),
-  );
-  const afterDelta = average(
-    (current ?? []).map(
-      (entry) => entry.summary?.metrics?.gatewayProcessRssDeltaBytes / 1024 / 1024,
-    ),
-  );
-  if (beforeDelta == null || afterDelta == null) {
-    return [];
-  }
-  return [
-    [
-      "mock hello",
-      "gateway RSS delta avg",
-      formatMb(beforeDelta),
-      formatMb(afterDelta),
-      formatDeltaMb(beforeDelta, afterDelta),
-      "n/a",
-      memoryRisk(beforeDelta, afterDelta),
-    ],
-  ];
-}
-
-function buildExtensionMemoryRows(extensionMemory) {
-  return (extensionMemory?.topByDeltaMb ?? [])
-    .slice(0, 10)
-    .map((entry) => [
-      entry.dir ?? "unknown",
-      formatMb(entry.maxRssMb),
-      formatMb(entry.deltaFromBaselineMb),
-      entry.status ?? "unknown",
-    ]);
-}
-
-function buildMemoryDeltaRows(current, baseline) {
-  if (!baseline) {
-    return [];
-  }
-  return [
-    ...buildStartupMemoryDeltaRows(current.startup, baseline.startup),
-    ...buildCliMemoryDeltaRows(current.cli, baseline.cli),
-    ...buildMockHelloMemoryDeltaRows(current.mockHelloSummaries, baseline.mockHelloSummaries),
-  ];
-}
-
 function formatExitSummary(value) {
   if (typeof value !== "string" || !value) {
     return "n/a";
@@ -343,16 +181,13 @@ function buildObservationRows(summary) {
   ]);
 }
 
-function buildMarkdown(sourceDir, baselineSourceDir) {
-  const current = loadSourceArtifacts(sourceDir) ?? {
-    startup: null,
-    cli: null,
-    extensionMemory: null,
-    mockHelloSummaries: [],
-  };
-  const baseline = loadSourceArtifacts(baselineSourceDir);
+function buildMarkdown(sourceDir) {
   const gatewaySummary = readJsonIfExists(path.join(sourceDir, "gateway-cpu", "summary.json"));
-  const memoryDeltaRows = buildMemoryDeltaRows(current, baseline);
+  const startup = readJsonIfExists(
+    path.join(sourceDir, "gateway-cpu", "gateway-startup-bench.json"),
+  );
+  const cli = readJsonIfExists(path.join(sourceDir, "cli-startup.json"));
+  const mockHelloSummaries = loadMockHelloSummaries(sourceDir);
 
   const lines = [
     "# OpenClaw Source Performance",
@@ -374,35 +209,11 @@ function buildMarkdown(sourceDir, baselineSourceDir) {
         "RSS p95",
         "CPU core p95",
       ],
-      buildStartupRows(current.startup),
-    ),
-    "## Memory Trend",
-    "",
-    baseline
-      ? "Compared with the latest published mock-provider source probe for this tested ref."
-      : "No published source baseline was available for this tested ref.",
-    "",
-    ...table(
-      [
-        "surface",
-        "case",
-        "baseline RSS p95",
-        "current RSS p95",
-        "RSS delta",
-        "heap delta",
-        "state",
-      ],
-      memoryDeltaRows,
-    ),
-    "## Bundled Plugin Import Memory",
-    "",
-    ...table(
-      ["plugin", "max RSS", "delta from empty process", "status"],
-      buildExtensionMemoryRows(current.extensionMemory),
+      buildStartupRows(startup),
     ),
     "## Startup Hotspots",
     "",
-    ...table(["case", "phase", "p50", "p95"], buildTraceRows(current.startup)),
+    ...table(["case", "phase", "p50", "p95"], buildTraceRows(startup)),
     "## Fake Model Hello Loops",
     "",
     ...table(
@@ -417,13 +228,13 @@ function buildMarkdown(sourceDir, baselineSourceDir) {
         "RSS delta",
         "model",
       ],
-      buildMockHelloRows(current.mockHelloSummaries),
+      buildMockHelloRows(mockHelloSummaries),
     ),
     "## CLI Against Booted Gateway",
     "",
     ...table(
       ["case", "command", "duration p50", "duration p95", "RSS p95", "exits"],
-      buildCliRows(current.cli),
+      buildCliRows(cli),
     ),
     "## Observations",
     "",
@@ -435,7 +246,7 @@ function buildMarkdown(sourceDir, baselineSourceDir) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  const markdown = buildMarkdown(options.sourceDir, options.baselineSourceDir);
+  const markdown = buildMarkdown(options.sourceDir);
   if (options.output) {
     fs.mkdirSync(path.dirname(options.output), { recursive: true });
     fs.writeFileSync(options.output, markdown, "utf8");
@@ -444,9 +255,7 @@ async function main() {
   }
 }
 
-main().catch(
-  /** @param {unknown} error */ (error) => {
-    console.error(error instanceof Error ? error.stack : String(error));
-    process.exitCode = 1;
-  },
-);
+main().catch((error) => {
+  console.error(error instanceof Error ? error.stack : String(error));
+  process.exitCode = 1;
+});

@@ -84,7 +84,7 @@ export async function listChannelsMSTeams(
     description: ch.description,
     membershipType: ch.membershipType,
   }));
-  return { channels, truncated: Boolean(nextPath) };
+  return { channels, truncated: !!nextPath };
 }
 
 // ---------------------------------------------------------------------------

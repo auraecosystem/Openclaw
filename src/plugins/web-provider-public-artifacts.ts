@@ -1,5 +1,4 @@
 import path from "node:path";
-import { normalizeUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { normalizePluginId } from "./config-state.js";
 import type { PluginLoadOptions } from "./loader.js";
 import { loadManifestMetadataSnapshot } from "./manifest-contract-eligibility.js";
@@ -19,6 +18,7 @@ type BundledWebProviderPublicArtifactParams = {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
+  bundledAllowlistCompat?: boolean;
   onlyPluginIds?: readonly string[];
 };
 
@@ -31,17 +31,16 @@ function filterAllowlistedBundledPluginIds(
   config: PluginLoadOptions["config"] | undefined,
   pluginIds: readonly string[],
 ) {
-  // Deprecated shipped compat marker: old allowlist configs used this to keep
-  // bundled web provider discovery available while plugin IDs were tightened.
-  if (config?.plugins?.bundledDiscovery === "compat") {
-    return [...pluginIds];
-  }
   const allow = config?.plugins?.allow;
-  if (!Array.isArray(allow) || allow.length === 0) {
+  if (
+    config?.plugins?.bundledDiscovery === "compat" ||
+    !Array.isArray(allow) ||
+    allow.length === 0
+  ) {
     return [...pluginIds];
   }
   const allowedPluginIds = new Set(
-    normalizeUniqueStringEntries(allow.map((pluginId) => normalizePluginId(pluginId))),
+    allow.map((pluginId) => normalizePluginId(pluginId)).filter(Boolean),
   );
   return pluginIds.filter((pluginId) => allowedPluginIds.has(pluginId));
 }
@@ -52,6 +51,7 @@ function resolveBundledCandidatePluginIds(params: {
   config?: PluginLoadOptions["config"];
   workspaceDir?: string;
   env?: PluginLoadOptions["env"];
+  bundledAllowlistCompat?: boolean;
   onlyPluginIds?: readonly string[];
 }): BundledCandidateResolution {
   if (params.onlyPluginIds !== undefined) {
@@ -111,6 +111,7 @@ export function resolveBundledWebSearchProvidersFromPublicArtifacts(
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
+    bundledAllowlistCompat: params.bundledAllowlistCompat,
     onlyPluginIds: params.onlyPluginIds,
   });
   if (pluginIds.pluginIds.length === 0) {
@@ -156,6 +157,7 @@ export function resolveBundledWebFetchProvidersFromPublicArtifacts(
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
+    bundledAllowlistCompat: params.bundledAllowlistCompat,
     onlyPluginIds: params.onlyPluginIds,
   });
   if (pluginIds.pluginIds.length === 0) {

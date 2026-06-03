@@ -19,20 +19,15 @@ function normalizeSignalApproverId(value: string | number): string | undefined {
   return e164.length > 1 ? e164 : undefined;
 }
 
-export function getSignalApprovalApprovers(params: {
-  cfg: Parameters<typeof resolveSignalAccount>[0]["cfg"];
-  accountId?: string | null;
-}): string[] {
-  const account = resolveSignalAccount(params).config;
-  return resolveApprovalApprovers({
-    allowFrom: account.allowFrom,
-    defaultTo: account.defaultTo,
-    normalizeApprover: normalizeSignalApproverId,
-  });
-}
-
 export const signalApprovalAuth = createResolvedApproverActionAuthAdapter({
   channelLabel: "Signal",
-  resolveApprovers: getSignalApprovalApprovers,
+  resolveApprovers: ({ cfg, accountId }) => {
+    const account = resolveSignalAccount({ cfg, accountId }).config;
+    return resolveApprovalApprovers({
+      allowFrom: account.allowFrom,
+      defaultTo: account.defaultTo,
+      normalizeApprover: normalizeSignalApproverId,
+    });
+  },
   normalizeSenderId: (value) => normalizeSignalApproverId(value),
 });

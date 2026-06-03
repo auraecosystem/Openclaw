@@ -11,8 +11,6 @@ const getPageForTargetId = vi.fn(async () => {
 });
 const ensurePageState = vi.fn(() => ({}));
 const restoreRoleRefsForTarget = vi.fn(() => {});
-const isBrowserObservedDialogBlockedError = vi.fn(() => false);
-const markObservedDialogsHandledRemotelyForPage = vi.fn(() => ({}));
 const refLocator = vi.fn(() => {
   if (!locator) {
     throw new Error("test: locator not set");
@@ -21,16 +19,14 @@ const refLocator = vi.fn(() => {
 });
 const forceDisconnectPlaywrightForTarget = vi.fn(async () => {});
 
-const resolveStrictExistingUploadPaths =
-  vi.fn<typeof import("./paths.js").resolveStrictExistingUploadPaths>();
+const resolveStrictExistingPathsWithinRoot =
+  vi.fn<typeof import("./paths.js").resolveStrictExistingPathsWithinRoot>();
 
 vi.mock("./pw-session.js", () => {
   return {
     ensurePageState,
     forceDisconnectPlaywrightForTarget,
     getPageForTargetId,
-    isBrowserObservedDialogBlockedError,
-    markObservedDialogsHandledRemotelyForPage,
     refLocator,
     restoreRoleRefsForTarget,
   };
@@ -38,7 +34,8 @@ vi.mock("./pw-session.js", () => {
 
 vi.mock("./paths.js", () => {
   return {
-    resolveStrictExistingUploadPaths,
+    DEFAULT_UPLOAD_DIR: "/tmp/openclaw/uploads",
+    resolveStrictExistingPathsWithinRoot,
   };
 });
 
@@ -61,7 +58,7 @@ describe("setInputFilesViaPlaywright", () => {
     vi.clearAllMocks();
     page = null;
     locator = null;
-    resolveStrictExistingUploadPaths.mockResolvedValue({
+    resolveStrictExistingPathsWithinRoot.mockResolvedValue({
       ok: true,
       paths: ["/private/tmp/openclaw/uploads/ok.txt"],
     });
@@ -77,17 +74,19 @@ describe("setInputFilesViaPlaywright", () => {
       paths: ["/tmp/openclaw/uploads/ok.txt"],
     });
 
-    expect(resolveStrictExistingUploadPaths).toHaveBeenCalledWith({
+    expect(resolveStrictExistingPathsWithinRoot).toHaveBeenCalledWith({
+      rootDir: "/tmp/openclaw/uploads",
       requestedPaths: ["/tmp/openclaw/uploads/ok.txt"],
+      scopeLabel: "uploads directory (/tmp/openclaw/uploads)",
     });
     expect(refLocator).toHaveBeenCalledWith(page, "e7");
     expect(setInputFiles).toHaveBeenCalledWith(["/private/tmp/openclaw/uploads/ok.txt"]);
   });
 
   it("throws and skips setInputFiles when use-time validation fails", async () => {
-    resolveStrictExistingUploadPaths.mockResolvedValueOnce({
+    resolveStrictExistingPathsWithinRoot.mockResolvedValueOnce({
       ok: false,
-      error: "Invalid path: must stay within inbound media directory",
+      error: "Invalid path: must stay within uploads directory",
     });
 
     const { setInputFiles } = seedSingleLocatorPage();
@@ -99,7 +98,7 @@ describe("setInputFilesViaPlaywright", () => {
         element: "input[type=file]",
         paths: ["/tmp/openclaw/uploads/missing.txt"],
       }),
-    ).rejects.toThrow("Invalid path: must stay within inbound media directory");
+    ).rejects.toThrow("Invalid path: must stay within uploads directory");
 
     expect(setInputFiles).not.toHaveBeenCalled();
   });

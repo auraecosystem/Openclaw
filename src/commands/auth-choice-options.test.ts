@@ -181,34 +181,7 @@ describe("buildAuthChoiceOptions", () => {
         providerId: "xiaomi",
         methodId: "api-key",
         choiceId: "xiaomi-api-key",
-        choiceLabel: "Xiaomi API key (Pay-as-you-go)",
-        groupId: "xiaomi",
-        groupLabel: "Xiaomi",
-      },
-      {
-        pluginId: "xiaomi",
-        providerId: "xiaomi-token-plan",
-        methodId: "token-plan-ams",
-        choiceId: "xiaomi-token-plan-ams",
-        choiceLabel: "Xiaomi Token Plan (Europe)",
-        groupId: "xiaomi",
-        groupLabel: "Xiaomi",
-      },
-      {
-        pluginId: "xiaomi",
-        providerId: "xiaomi-token-plan",
-        methodId: "token-plan-cn",
-        choiceId: "xiaomi-token-plan-cn",
-        choiceLabel: "Xiaomi Token Plan (China)",
-        groupId: "xiaomi",
-        groupLabel: "Xiaomi",
-      },
-      {
-        pluginId: "xiaomi",
-        providerId: "xiaomi-token-plan",
-        methodId: "token-plan-sgp",
-        choiceId: "xiaomi-token-plan-sgp",
-        choiceLabel: "Xiaomi Token Plan (Singapore)",
+        choiceLabel: "Xiaomi API key",
         groupId: "xiaomi",
         groupLabel: "Xiaomi",
       },
@@ -297,9 +270,6 @@ describe("buildAuthChoiceOptions", () => {
       "github-copilot",
       "zai-api-key",
       "xiaomi-api-key",
-      "xiaomi-token-plan-ams",
-      "xiaomi-token-plan-cn",
-      "xiaomi-token-plan-sgp",
       "minimax-global-api",
       "moonshot-api-key",
       "together-api-key",
@@ -587,7 +557,7 @@ describe("buildAuthChoiceOptions", () => {
         assistantPriority: 5,
       },
       {
-        value: "openai",
+        value: "openai-codex",
         label: "ChatGPT/Codex Browser Login",
         groupId: "openai",
         groupLabel: "OpenAI",
@@ -595,7 +565,7 @@ describe("buildAuthChoiceOptions", () => {
         onboardingFeatured: true,
       },
       {
-        value: "openai-chatgpt-device-code",
+        value: "openai-codex-device-code",
         label: "ChatGPT/Codex Device Pairing",
         groupId: "openai",
         groupLabel: "OpenAI",
@@ -610,8 +580,8 @@ describe("buildAuthChoiceOptions", () => {
     const openAIGroup = requireChoiceGroup(groups, "openai");
 
     expect(openAIGroup.options.map((option) => option.value)).toEqual([
-      "openai",
-      "openai-chatgpt-device-code",
+      "openai-codex",
+      "openai-codex-device-code",
       "openai-api-key",
     ]);
     expect(openAIGroup.options[0]?.onboardingFeatured).toBe(true);

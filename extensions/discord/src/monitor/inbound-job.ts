@@ -12,9 +12,6 @@ type DiscordInboundJobRuntimeField =
   | "guildHistories"
   | "client"
   | "threadBindings"
-  // Function-backed feedback stays runtime-only; payload must remain
-  // materializable data so queued jobs cannot accidentally serialize it.
-  | "replyTypingFeedback"
   | "discordRestFetch";
 
 type DiscordInboundJobRuntime = Pick<DiscordMessagePreflightContext, DiscordInboundJobRuntimeField>;
@@ -29,8 +26,6 @@ export type DiscordInboundJob = {
 };
 
 export function resolveDiscordInboundJobQueueKey(ctx: DiscordMessagePreflightContext): string {
-  // This key is both the run-queue serialization key and the typing prestart
-  // dedupe key, so keep it aligned with the eventual session route.
   const sessionKey = ctx.route.sessionKey?.trim();
   if (sessionKey) {
     return sessionKey;
@@ -52,7 +47,6 @@ export function buildDiscordInboundJob(
     guildHistories,
     client,
     threadBindings,
-    replyTypingFeedback,
     discordRestFetch,
     message,
     data,
@@ -78,7 +72,6 @@ export function buildDiscordInboundJob(
       guildHistories,
       client,
       threadBindings,
-      replyTypingFeedback,
       discordRestFetch,
     },
     replayKeys: options?.replayKeys ? [...options.replayKeys] : undefined,

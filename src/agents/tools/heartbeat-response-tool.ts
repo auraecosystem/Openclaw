@@ -1,4 +1,3 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { Type } from "typebox";
 import {
   HEARTBEAT_RESPONSE_TOOL_NAME,
@@ -24,6 +23,10 @@ const HeartbeatResponseToolSchema = Type.Object(
   { additionalProperties: false },
 );
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 function readRequiredBoolean(params: Record<string, unknown>, key: string): boolean {
   const raw = readSnakeCaseParamRaw(params, key);
   if (typeof raw !== "boolean") {
@@ -33,13 +36,12 @@ function readRequiredBoolean(params: Record<string, unknown>, key: string): bool
 }
 
 export function createHeartbeatResponseTool(): AnyAgentTool {
-  let recorded = false;
   return {
     label: "Heartbeat",
     name: HEARTBEAT_RESPONSE_TOOL_NAME,
-    displaySummary: "Record heartbeat outcome/notify choice.",
+    displaySummary: "Record a heartbeat outcome and whether it should notify the user.",
     description:
-      "Record heartbeat result. `notify=false` no visible send. `notify=true` needs concise notificationText.",
+      "Record the result of a heartbeat run. Use notify=false when nothing should be sent visibly. Use notify=true with notificationText when the user should receive a concise heartbeat alert.",
     parameters: HeartbeatResponseToolSchema,
     execute: async (_toolCallId, args) => {
       if (!isRecord(args)) {
@@ -52,10 +54,6 @@ export function createHeartbeatResponseTool(): AnyAgentTool {
           "Invalid heartbeat response. Provide outcome, notify, and non-empty summary.",
         );
       }
-      if (recorded) {
-        throw new ToolInputError("heartbeat_respond already recorded for this turn");
-      }
-      recorded = true;
       return jsonResult({
         status: "recorded",
         ...response,

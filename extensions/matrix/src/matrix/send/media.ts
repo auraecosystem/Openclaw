@@ -8,12 +8,12 @@ import type {
   TimedFileInfo,
   VideoFileInfo,
 } from "../sdk.js";
-import type {
-  MatrixMediaContent,
-  MatrixMediaInfo,
-  MatrixMediaMsgType,
-  MatrixRelation,
-  MediaKind,
+import {
+  type MatrixMediaContent,
+  type MatrixMediaInfo,
+  type MatrixMediaMsgType,
+  type MatrixRelation,
+  type MediaKind,
 } from "./types.js";
 
 const getCore = () => getMatrixRuntime();

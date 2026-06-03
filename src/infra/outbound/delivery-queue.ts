@@ -1,6 +1,7 @@
 export {
   ackDelivery,
   enqueueDelivery,
+  ensureQueueDir,
   failDelivery,
   loadPendingDelivery,
   loadPendingDeliveries,
@@ -11,7 +12,6 @@ export {
 export type {
   QueuedDelivery,
   QueuedDeliveryPayload,
-  QueuedReplyPayloadSendingHook,
   QueuedRenderedMessageBatchPlan,
 } from "./delivery-queue-storage.js";
 export {

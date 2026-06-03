@@ -17,7 +17,6 @@ export function createExtensionProvidersVitestConfig(
     {
       dir: "extensions",
       env,
-      isolate: true,
       name: "extension-providers",
       passWithNoTests: true,
       setupFiles: ["test/setup.extensions.ts"],

@@ -56,7 +56,7 @@ function formatInstallHint(install: PluginPackageInstall): string {
   return "install source";
 }
 
-export const testing = {
+export const __testing = {
   formatInstallHint,
 };
 
@@ -131,4 +131,3 @@ export async function setupOfficialPluginInstalls(params: {
   }
   return next;
 }
-export { testing as __testing };

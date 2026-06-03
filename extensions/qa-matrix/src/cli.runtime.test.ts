@@ -9,15 +9,11 @@ const closeGlobalDispatcher = vi.hoisted(() => vi.fn(async () => {}));
 vi.mock("./runners/contract/runtime.js", () => ({
   runMatrixQaLive,
 }));
-vi.mock("undici", async () => {
-  const actual = await vi.importActual<typeof import("undici")>("undici");
-  return {
-    ...actual,
-    getGlobalDispatcher: () => ({
-      close: closeGlobalDispatcher,
-    }),
-  };
-});
+vi.mock("undici", () => ({
+  getGlobalDispatcher: () => ({
+    close: closeGlobalDispatcher,
+  }),
+}));
 
 import { runQaMatrixCommand } from "./cli.runtime.js";
 
@@ -63,7 +59,7 @@ describe("matrix qa cli runtime", () => {
       summaryPath: "/tmp/matrix-summary.json",
       observedEventsPath: "/tmp/matrix-events.json",
     });
-    const originalStdoutWrite = process.stdout["write"];
+    const originalStdoutWrite = process.stdout.write;
     process.stdout.write = (() => true) as typeof process.stdout.write;
 
     try {
@@ -104,7 +100,7 @@ describe("matrix qa cli runtime", () => {
       summaryPath: "/tmp/matrix-summary.json",
       observedEventsPath: "/tmp/matrix-events.json",
     });
-    const originalStdoutWrite = process.stdout["write"];
+    const originalStdoutWrite = process.stdout.write;
     process.stdout.write = vi.fn(() => true) as unknown as typeof process.stdout.write;
 
     try {
@@ -129,8 +125,8 @@ describe("matrix qa cli runtime", () => {
     await mkdir(path.join(outputDir, "matrix-qa-output.log"), { recursive: true });
     runMatrixQaLive.mockRejectedValue(new Error("scenario failed"));
     const stderrChunks: string[] = [];
-    const originalStdoutWrite = process.stdout["write"];
-    const originalStderrWrite = process.stderr["write"];
+    const originalStdoutWrite = process.stdout.write;
+    const originalStderrWrite = process.stderr.write;
     process.stdout.write = (() => true) as typeof process.stdout.write;
     process.stderr.write = ((chunk: string | Buffer) => {
       stderrChunks.push(String(chunk));

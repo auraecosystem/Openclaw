@@ -91,36 +91,36 @@ export const installHooksFromPath: AsyncUnknownMock = vi.fn();
 export const recordHookInstall: UnknownMock = vi.fn();
 
 const { defaultRuntime, runtimeLogs, runtimeErrors, resetRuntimeCapture } = vi.hoisted(() => {
-  const runtimeLogsLocal: string[] = [];
-  const runtimeErrorsLocal: string[] = [];
+  const runtimeLogs: string[] = [];
+  const runtimeErrors: string[] = [];
   const stringifyArgs = (args: unknown[]) => args.map((value) => String(value)).join(" ");
   const normalizeStdout = (value: string) => (value.endsWith("\n") ? value.slice(0, -1) : value);
   const stringifyJson = (value: unknown, space = 2) =>
     JSON.stringify(value, null, space > 0 ? space : undefined);
-  const defaultRuntimeLocal = {
+  const defaultRuntime = {
     log: vi.fn((...args: unknown[]) => {
-      runtimeLogsLocal.push(stringifyArgs(args));
+      runtimeLogs.push(stringifyArgs(args));
     }),
     error: vi.fn((...args: unknown[]) => {
-      runtimeErrorsLocal.push(stringifyArgs(args));
+      runtimeErrors.push(stringifyArgs(args));
     }),
     writeStdout: vi.fn((value: string) => {
-      defaultRuntimeLocal.log(normalizeStdout(value));
+      defaultRuntime.log(normalizeStdout(value));
     }),
     writeJson: vi.fn((value: unknown, space = 2) => {
-      defaultRuntimeLocal.log(stringifyJson(value, space));
+      defaultRuntime.log(stringifyJson(value, space));
     }),
     exit: vi.fn((code: number) => {
       throw new Error(`__exit__:${code}`);
     }),
   } as CliMockOutputRuntime;
   return {
-    defaultRuntime: defaultRuntimeLocal,
-    runtimeLogs: runtimeLogsLocal,
-    runtimeErrors: runtimeErrorsLocal,
+    defaultRuntime,
+    runtimeLogs,
+    runtimeErrors,
     resetRuntimeCapture: () => {
-      runtimeLogsLocal.length = 0;
-      runtimeErrorsLocal.length = 0;
+      runtimeLogs.length = 0;
+      runtimeErrors.length = 0;
     },
   };
 });
@@ -345,25 +345,6 @@ vi.mock("../plugins/status.js", () => ({
       ...args,
     )) as (typeof import("../plugins/status.js"))["buildPluginCompatibilityNotices"],
   formatPluginCompatibilityNotice: (entry: { message: string }) => entry.message,
-}));
-
-vi.mock("../plugins/status-snapshot.js", () => ({
-  buildPluginRegistrySnapshotReport: ((
-    ...args: Parameters<
-      (typeof import("../plugins/status-snapshot.js"))["buildPluginRegistrySnapshotReport"]
-    >
-  ) =>
-    invokeMock<
-      Parameters<
-        (typeof import("../plugins/status-snapshot.js"))["buildPluginRegistrySnapshotReport"]
-      >,
-      ReturnType<
-        (typeof import("../plugins/status-snapshot.js"))["buildPluginRegistrySnapshotReport"]
-      >
-    >(
-      buildPluginRegistrySnapshotReport,
-      ...args,
-    )) as (typeof import("../plugins/status-snapshot.js"))["buildPluginRegistrySnapshotReport"],
 }));
 
 vi.mock("../plugins/plugin-registry.js", () => ({
@@ -621,7 +602,6 @@ vi.mock("../plugins/clawhub.js", () => ({
   CLAWHUB_INSTALL_ERROR_CODE: {
     PACKAGE_NOT_FOUND: "package_not_found",
     VERSION_NOT_FOUND: "version_not_found",
-    ARTIFACT_UNAVAILABLE: "artifact_unavailable",
   },
   installPluginFromClawHub: ((
     ...args: Parameters<(typeof import("../plugins/clawhub.js"))["installPluginFromClawHub"]>

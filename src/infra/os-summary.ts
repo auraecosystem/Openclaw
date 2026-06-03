@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import os from "node:os";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 type OsSummary = {
   platform: NodeJS.Platform;

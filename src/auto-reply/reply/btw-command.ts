@@ -1,4 +1,4 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { normalizeCommandBody, type CommandNormalizeOptions } from "../commands-registry.js";
 
 const BTW_COMMAND_RE = /^\/btw(?::|\s|$)/i;

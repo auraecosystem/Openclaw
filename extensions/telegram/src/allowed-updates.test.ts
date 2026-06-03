@@ -19,7 +19,6 @@ describe("resolveTelegramAllowedUpdates", () => {
       "business_message",
       "edited_business_message",
       "deleted_business_messages",
-      "guest_message",
       "inline_query",
       "chosen_inline_result",
       "callback_query",

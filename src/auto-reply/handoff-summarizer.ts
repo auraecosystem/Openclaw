@@ -1,4 +1,4 @@
-import type { AgentMessage } from "../agents/runtime/index.js";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 
 export interface HandoffSnapshot {
   summary: string;

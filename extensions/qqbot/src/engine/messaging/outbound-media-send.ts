@@ -303,7 +303,7 @@ export async function sendVoice(
   ctx: MediaTargetContext,
   voicePath: string,
   directUploadFormats?: string[],
-  transcodeEnabled = true,
+  transcodeEnabled: boolean = true,
 ): Promise<OutboundResult> {
   const resolvedMediaPath = resolveOutboundMediaPath(voicePath, "voice", {
     allowMissingLocalPath: true,

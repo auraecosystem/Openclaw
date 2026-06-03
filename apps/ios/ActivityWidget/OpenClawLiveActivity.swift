@@ -13,9 +13,8 @@ struct OpenClawLiveActivity: Widget {
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(context.state.statusText)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.subheadline)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     self.trailingView(state: context.state)
@@ -23,7 +22,10 @@ struct OpenClawLiveActivity: Widget {
             } compactLeading: {
                 self.statusDot(state: context.state)
             } compactTrailing: {
-                self.compactStatusIcon(state: context.state)
+                Text(context.state.statusText)
+                    .font(.caption2)
+                    .lineLimit(1)
+                    .frame(maxWidth: 64)
             } minimal: {
                 self.statusDot(state: context.state)
             }
@@ -31,31 +33,39 @@ struct OpenClawLiveActivity: Widget {
     }
 
     private func lockScreenView(context: ActivityViewContext<OpenClawActivityAttributes>) -> some View {
-        HStack(spacing: 10) {
-            self.statusIcon(state: context.state)
-                .frame(width: 30, height: 30)
-                .background(.thinMaterial, in: Circle())
+        HStack(spacing: 8) {
+            self.statusDot(state: context.state)
+                .frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 2) {
                 Text("OpenClaw")
                     .font(.subheadline.bold())
-                    .lineLimit(1)
                 Text(context.state.statusText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
             }
             Spacer()
             self.trailingView(state: context.state)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.vertical, 4)
     }
 
+    @ViewBuilder
     private func trailingView(state: OpenClawActivityAttributes.ContentState) -> some View {
-        self.statusIcon(state: state)
-            .font(.system(size: 16, weight: .semibold))
-            .frame(width: 28, height: 28)
+        if state.isConnecting {
+            ProgressView().controlSize(.small)
+        } else if state.isDisconnected {
+            Image(systemName: "wifi.slash")
+                .foregroundStyle(.red)
+        } else if state.isIdle {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .foregroundStyle(.green)
+        } else {
+            Text(state.startedAt, style: .timer)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
     }
 
     private func statusDot(state: OpenClawActivityAttributes.ContentState) -> some View {
@@ -64,33 +74,10 @@ struct OpenClawLiveActivity: Widget {
             .frame(width: 6, height: 6)
     }
 
-    private func compactStatusIcon(state: OpenClawActivityAttributes.ContentState) -> some View {
-        self.statusIcon(state: state)
-            .font(.system(size: 12, weight: .semibold))
-            .frame(width: 18, height: 18)
-    }
-
-    @ViewBuilder
-    private func statusIcon(state: OpenClawActivityAttributes.ContentState) -> some View {
-        if state.isConnecting {
-            Image(systemName: "arrow.triangle.2.circlepath")
-                .foregroundStyle(.cyan)
-        } else if state.isDisconnected {
-            Image(systemName: "wifi.slash")
-                .foregroundStyle(.red)
-        } else if state.isIdle {
-            Image(systemName: "checkmark")
-                .foregroundStyle(.green)
-        } else {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-        }
-    }
-
     private func dotColor(state: OpenClawActivityAttributes.ContentState) -> Color {
         if state.isDisconnected { return .red }
-        if state.isConnecting { return .cyan }
+        if state.isConnecting { return .gray }
         if state.isIdle { return .green }
-        return .orange
+        return .blue
     }
 }

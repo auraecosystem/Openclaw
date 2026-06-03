@@ -7,10 +7,6 @@
  */
 
 import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
-import {
   containerCheck,
   containerRpcRequest,
   streamContainerEvents,
@@ -25,7 +21,6 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 10_000;
 const MODE_CACHE_TTL_MS = 30_000;
-const NATIVE_PREFERENCE_GRACE_MS = 50;
 
 export type SignalSseEvent = {
   event?: string;
@@ -60,51 +55,29 @@ function resolveAutoProbeTimeoutMs(timeoutMs: number | undefined): number {
     : DEFAULT_TIMEOUT_MS;
 }
 
-function waitForNativePreferenceGrace(
-  nativeResultPromise: Promise<{ ok: boolean }>,
-): Promise<{ ok: boolean }> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(() => resolve({ ok: false }), NATIVE_PREFERENCE_GRACE_MS);
-    timer.unref?.();
-    void nativeResultPromise.then((result) => {
-      clearTimeout(timer);
-      resolve(result);
-    });
-  });
-}
-
 async function resolveAutoApiMode(
   baseUrl: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   options: { account?: string; requireContainerReceive?: boolean } = {},
 ): Promise<"native" | "container"> {
-  const rawNow = Date.now();
-  const now = asDateTimestampMs(rawNow);
   const cached = detectedModeCache.get(baseUrl);
-  if (cached) {
-    if (now !== undefined && cached.expiresAt > now) {
-      if (
-        cached.mode !== "container" ||
-        !options.requireContainerReceive ||
-        (Boolean(options.account?.trim()) && cached.receiveAccount === options.account?.trim())
-      ) {
-        return cached.mode;
-      }
-    } else {
-      detectedModeCache.delete(baseUrl);
+  if (cached && cached.expiresAt > Date.now()) {
+    if (
+      cached.mode !== "container" ||
+      !options.requireContainerReceive ||
+      cached.receiveAccount === options.account
+    ) {
+      return cached.mode;
     }
   }
   const detected = await detectSignalApiMode(baseUrl, timeoutMs, options);
-  const expiresAt = resolveExpiresAtMsFromDurationMs(MODE_CACHE_TTL_MS, { nowMs: rawNow });
-  if (expiresAt !== undefined) {
-    detectedModeCache.set(baseUrl, {
-      mode: detected,
-      expiresAt,
-      ...(detected === "container" && options.requireContainerReceive && options.account
-        ? { receiveAccount: options.account }
-        : {}),
-    });
-  }
+  detectedModeCache.set(baseUrl, {
+    mode: detected,
+    expiresAt: Date.now() + MODE_CACHE_TTL_MS,
+    ...(detected === "container" && options.requireContainerReceive && options.account
+      ? { receiveAccount: options.account }
+      : {}),
+  });
   return detected;
 }
 
@@ -130,41 +103,29 @@ async function resolveApiModeForOperation(params: {
 
 /**
  * Detect which Signal API mode is available by probing endpoints.
- * Native wins when both APIs are healthy because it preserves the richer JSON-RPC contract.
+ * First endpoint to respond OK wins.
  */
 export async function detectSignalApiMode(
   baseUrl: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
   options: { account?: string; requireContainerReceive?: boolean } = {},
 ): Promise<"native" | "container"> {
+  const nativePromise = nativeCheck(baseUrl, timeoutMs).then((r) =>
+    r.ok ? ("native" as const) : Promise.reject(new Error("native not ok")),
+  );
   const containerAccount = options.requireContainerReceive ? options.account?.trim() : undefined;
-  const nativeResultPromise = nativeCheck(baseUrl, timeoutMs).catch(() => ({ ok: false }));
-  const containerResultPromise = containerAccount
-    ? containerCheck(baseUrl, timeoutMs, containerAccount).catch(() => ({ ok: false }))
+  const containerPromise = containerAccount
+    ? containerCheck(baseUrl, timeoutMs, containerAccount).then((r) =>
+        r.ok ? ("container" as const) : Promise.reject(new Error("container not ok")),
+      )
     : options.requireContainerReceive
-      ? Promise.resolve({ ok: false })
-      : containerCheck(baseUrl, timeoutMs).catch(() => ({ ok: false }));
-
-  const nativeHealthyPromise = nativeResultPromise.then((result) => {
-    if (result.ok) {
-      return "native" as const;
-    }
-    throw new Error("native not ok");
-  });
-  const containerHealthyPromise = containerResultPromise.then((result) => {
-    if (result.ok) {
-      return "container" as const;
-    }
-    throw new Error("container not ok");
-  });
+      ? Promise.reject(new Error("container receive account required"))
+      : containerCheck(baseUrl, timeoutMs).then((r) =>
+          r.ok ? ("container" as const) : Promise.reject(new Error("container not ok")),
+        );
 
   try {
-    const firstHealthy = await Promise.any([nativeHealthyPromise, containerHealthyPromise]);
-    if (firstHealthy === "native") {
-      return "native";
-    }
-    const nativeResult = await waitForNativePreferenceGrace(nativeResultPromise);
-    return nativeResult.ok ? "native" : "container";
+    return await Promise.any([nativePromise, containerPromise]);
   } catch {
     throw new Error(`Signal API not reachable at ${baseUrl}`);
   }

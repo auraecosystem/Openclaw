@@ -16,7 +16,6 @@ const DIGEST_PINNED_DOCKERFILES = [
   "scripts/docker/install-sh-smoke/Dockerfile",
   "scripts/e2e/Dockerfile",
   "scripts/e2e/Dockerfile.qr-import",
-  "scripts/e2e/plugin-binding-command-escape.Dockerfile",
 ] as const;
 
 type DependabotDockerGroup = {

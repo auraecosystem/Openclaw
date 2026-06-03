@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { MsgContext } from "../auto-reply/templating.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { MIN_AUDIO_FILE_BYTES } from "./defaults.js";
@@ -78,10 +78,6 @@ async function runAudioCapabilityWithTranscriber(params: {
 }
 
 describe("runCapability skips tiny audio files", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-  });
-
   it("skips audio transcription when file is smaller than MIN_AUDIO_FILE_BYTES", async () => {
     await withAudioFixture({
       filePrefix: "openclaw-tiny-audio",
@@ -176,7 +172,7 @@ describe("runCapability skips tiny audio files", () => {
           media,
           cache,
           transcribeAudio: async () => {
-            throw Object.assign(new Error("HTTP 400 validation failed"), { status: 400 });
+            throw new Error("upstream 500");
           },
         });
 
@@ -193,7 +189,7 @@ describe("runCapability skips tiny audio files", () => {
           throw new Error("expected failed audio decision attempt");
         }
         expect(attempt.outcome).toBe("failed");
-        expect(attempt.reason).toContain("HTTP 400 validation failed");
+        expect(attempt.reason).toContain("upstream 500");
       },
     });
   });

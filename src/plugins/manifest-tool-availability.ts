@@ -1,5 +1,3 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef, type SecretRef } from "../config/types.secrets.js";
 import { resolveDefaultSecretProviderAlias } from "../secrets/ref-contract.js";
@@ -12,6 +10,10 @@ import type {
 type ToolMetadata = NonNullable<PluginManifestRecord["toolMetadata"]>[string];
 export type ManifestConfigAvailabilitySignal = PluginManifestCapabilityProviderConfigSignal;
 export type ManifestAuthAvailabilitySignal = PluginManifestCapabilityProviderAuthSignal;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function readPath(root: unknown, path: string | undefined): unknown {
   if (!path?.trim()) {
@@ -32,33 +34,21 @@ function readPath(root: unknown, path: string | undefined): unknown {
 }
 
 function readStringAtPath(root: unknown, path: string): string | undefined {
-  return normalizeOptionalString(readPath(root, path));
+  const value = readPath(root, path);
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function readEffectiveConfigs(params: {
+function readEffectiveConfig(params: {
   config?: OpenClawConfig;
   rootPath: string;
   overlayPath?: string;
-  overlayMapPath?: string;
-}): Array<Record<string, unknown>> {
+}): Record<string, unknown> | undefined {
   const root = readPath(params.config, params.rootPath);
   if (!isRecord(root)) {
-    return [];
+    return undefined;
   }
   const overlay = readPath(root, params.overlayPath);
-  const baseConfig = isRecord(overlay) ? { ...root, ...overlay } : root;
-  if (params.overlayMapPath?.trim()) {
-    const overlayMap = readPath(baseConfig, params.overlayMapPath);
-    if (!isRecord(overlayMap)) {
-      return [];
-    }
-    return Object.entries(overlayMap)
-      .toSorted(([left], [right]) => left.localeCompare(right))
-      .flatMap(([, mapOverlay]) =>
-        isRecord(mapOverlay) ? [{ ...baseConfig, ...mapOverlay }] : [],
-      );
-  }
-  return [baseConfig];
+  return isRecord(overlay) ? { ...root, ...overlay } : root;
 }
 
 function hasConfiguredSecretRefInConfigPath(params: {
@@ -113,35 +103,18 @@ export function manifestConfigSignalPasses(params: {
   env: NodeJS.ProcessEnv;
   signal: ManifestConfigAvailabilitySignal;
 }): boolean {
-  const effectiveConfigs = readEffectiveConfigs({
+  const effectiveConfig = readEffectiveConfig({
     config: params.config,
     rootPath: params.signal.rootPath,
     overlayPath: params.signal.overlayPath,
-    overlayMapPath: params.signal.overlayMapPath,
   });
-  if (effectiveConfigs.length === 0) {
+  if (!effectiveConfig) {
     return false;
   }
-  return effectiveConfigs.some((effectiveConfig) =>
-    manifestEffectiveConfigSignalPasses({
-      config: params.config,
-      env: params.env,
-      effectiveConfig,
-      signal: params.signal,
-    }),
-  );
-}
-
-function manifestEffectiveConfigSignalPasses(params: {
-  config?: OpenClawConfig;
-  env: NodeJS.ProcessEnv;
-  effectiveConfig: Record<string, unknown>;
-  signal: ManifestConfigAvailabilitySignal;
-}): boolean {
   const modeSignal = params.signal.mode;
   if (modeSignal) {
     const modePath = modeSignal.path?.trim() || "mode";
-    const mode = readStringAtPath(params.effectiveConfig, modePath) ?? modeSignal.default;
+    const mode = readStringAtPath(effectiveConfig, modePath) ?? modeSignal.default;
     if (!mode) {
       return false;
     }
@@ -157,7 +130,7 @@ function manifestEffectiveConfigSignalPasses(params: {
       !hasConfiguredValue({
         config: params.config,
         env: params.env,
-        value: readPath(params.effectiveConfig, requiredPath),
+        value: readPath(effectiveConfig, requiredPath),
       })
     ) {
       return false;
@@ -170,7 +143,7 @@ function manifestEffectiveConfigSignalPasses(params: {
       hasConfiguredValue({
         config: params.config,
         env: params.env,
-        value: readPath(params.effectiveConfig, path),
+        value: readPath(effectiveConfig, path),
       }),
     )
   ) {

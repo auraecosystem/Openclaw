@@ -270,9 +270,7 @@ HTTPServer(("0.0.0.0", 8000), Handler).serve_forever()
         },
       };
     }
-    await new Promise((resolve) => {
-      setTimeout(resolve, 500);
-    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
 
   await runCommand({
@@ -324,7 +322,7 @@ async function runBackendExec(params: {
     env: {},
     usePty: false,
   });
-  let result: ExecResult | null | undefined;
+  let result: ExecResult | null = null;
   try {
     result = await runCommand({
       command: execSpec.argv[0] ?? "ssh",
@@ -374,7 +372,7 @@ describe("openshell sandbox backend e2e", () => {
       const scopeKey = `session:openshell-e2e-deny:${scopeSuffix}`;
       const allowSandboxName = `openclaw-policy-allow-${scopeSuffix}`;
       const gatewayPort = await allocatePort();
-      let hostPolicyServer: HostPolicyServer | null | undefined;
+      let hostPolicyServer: HostPolicyServer | null = null;
       const sandboxCfg = {
         mode: "all" as const,
         backend: "openshell" as const,

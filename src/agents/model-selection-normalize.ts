@@ -1,13 +1,12 @@
-import {
-  findNormalizedProviderKey as findNormalizedProviderKeyCore,
-  findNormalizedProviderValue as findNormalizedProviderValueCore,
-  normalizeProviderId as normalizeProviderIdCore,
-  normalizeProviderIdForAuth as normalizeProviderIdForAuthCore,
-} from "@openclaw/model-catalog-core/provider-id";
-import { stripSelfProviderModelPrefix } from "@openclaw/model-catalog-core/provider-model-id-normalization";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { PluginManifestRecord } from "../plugins/manifest-registry.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { modelKey as sharedModelKey, normalizeStaticProviderModelId } from "./model-ref-shared.js";
+import {
+  findNormalizedProviderKey,
+  findNormalizedProviderValue,
+  normalizeProviderId,
+  normalizeProviderIdForAuth,
+} from "./provider-id.js";
 import { normalizeProviderModelIdWithRuntime } from "./provider-model-normalization.runtime.js";
 
 export type ModelRef = {
@@ -34,27 +33,12 @@ export function legacyModelKey(provider: string, model: string): string | null {
   return rawKey === canonicalKey ? null : rawKey;
 }
 
-export function normalizeProviderId(provider: string): string {
-  return normalizeProviderIdCore(provider);
-}
-
-export function normalizeProviderIdForAuth(provider: string): string {
-  return normalizeProviderIdForAuthCore(provider);
-}
-
-export function findNormalizedProviderValue<T>(
-  entries: Record<string, T> | undefined,
-  provider: string,
-): T | undefined {
-  return findNormalizedProviderValueCore(entries, provider);
-}
-
-export function findNormalizedProviderKey(
-  entries: Record<string, unknown> | undefined,
-  provider: string,
-): string | undefined {
-  return findNormalizedProviderKeyCore(entries, provider);
-}
+export {
+  findNormalizedProviderKey,
+  findNormalizedProviderValue,
+  normalizeProviderId,
+  normalizeProviderIdForAuth,
+};
 
 function normalizeProviderModelId(
   provider: string,
@@ -64,8 +48,7 @@ function normalizeProviderModelId(
     allowPluginNormalization?: boolean;
   },
 ): string {
-  const providerModel = stripSelfProviderModelPrefix(provider, model);
-  const staticModelId = normalizeStaticProviderModelId(provider, providerModel, {
+  const staticModelId = normalizeStaticProviderModelId(provider, model, {
     allowManifestNormalization: options?.allowManifestNormalization,
     manifestPlugins: options?.manifestPlugins,
   });

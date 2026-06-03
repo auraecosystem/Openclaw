@@ -42,10 +42,8 @@ async function main() {
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  main().catch(
-    /** @param {unknown} err */ (err) => {
-      console.error(String(err));
-      process.exit(1);
-    },
-  );
+  main().catch((err) => {
+    console.error(String(err));
+    process.exit(1);
+  });
 }

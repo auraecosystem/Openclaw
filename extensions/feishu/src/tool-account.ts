@@ -79,8 +79,6 @@ export function resolveAnyEnabledFeishuToolsConfig(
     drive: false,
     perm: false,
     scopes: false,
-    bitable: false,
-    base: false,
   };
   for (const account of accounts) {
     const cfg = resolveToolsConfig(account.config.tools);
@@ -90,8 +88,6 @@ export function resolveAnyEnabledFeishuToolsConfig(
     merged.drive = merged.drive || cfg.drive;
     merged.perm = merged.perm || cfg.perm;
     merged.scopes = merged.scopes || cfg.scopes;
-    merged.bitable = merged.bitable || cfg.bitable;
-    merged.base = merged.base || cfg.base;
   }
   return merged;
 }

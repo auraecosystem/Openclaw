@@ -1,5 +1,5 @@
 import path from "node:path";
-import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-outbound";
+import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-message";
 import {
   createPluginRuntimeMock,
   createStartAccountContext,
@@ -16,7 +16,7 @@ import { createQaBusState, startQaBusServer } from "../../qa-lab/bus-api.js";
 import { qaChannelPlugin, setQaChannelRuntime } from "../api.js";
 import { listQaChannelAccountIds, resolveDefaultQaChannelAccountId } from "./accounts.js";
 
-type QaDispatchTurn = Parameters<PluginRuntime["channel"]["inbound"]["dispatchReply"]>[0];
+type QaRunPreparedTurn = Parameters<PluginRuntime["channel"]["turn"]["runPrepared"]>[0];
 
 afterEach(() => {
   resetPluginRuntimeStateForTest();
@@ -55,7 +55,6 @@ function expectDispatchedContext(ctx: Record<string, unknown> | null): Record<st
 
 function createMockQaRuntime(params?: {
   onDispatch?: (ctx: Record<string, unknown>) => void;
-  toolStarts?: Array<{ name?: string; phase?: string; args?: Record<string, unknown> }>;
 }): PluginRuntime {
   const sessionUpdatedAt = new Map<string, number>();
   return createPluginRuntimeMock({
@@ -111,29 +110,18 @@ function createMockQaRuntime(params?: {
         async dispatchReplyWithBufferedBlockDispatcher({
           ctx,
           dispatcherOptions,
-          replyOptions,
         }: {
           ctx: { BodyForAgent?: string; Body?: string };
           dispatcherOptions: { deliver: (payload: { text: string }) => Promise<void> };
-          replyOptions?: {
-            onToolStart?: (payload: {
-              name?: string;
-              phase?: string;
-              args?: Record<string, unknown>;
-            }) => Promise<void> | void;
-          };
         }) {
-          for (const toolStart of params?.toolStarts ?? []) {
-            await replyOptions?.onToolStart?.(toolStart);
-          }
           params?.onDispatch?.(ctx as Record<string, unknown>);
           await dispatcherOptions.deliver({
             text: `qa-echo: ${ctx.BodyForAgent ?? ctx.Body ?? ""}`,
           });
         },
       },
-      inbound: {
-        async dispatchReply(turn: QaDispatchTurn) {
+      turn: {
+        async runPrepared(turn: QaRunPreparedTurn) {
           await turn.recordInboundSession({
             storePath: turn.storePath,
             sessionKey:
@@ -148,19 +136,7 @@ function createMockQaRuntime(params?: {
             dispatched: true,
             ctxPayload: turn.ctxPayload,
             routeSessionKey: turn.routeSessionKey,
-            dispatchResult: await turn.dispatchReplyWithBufferedBlockDispatcher({
-              ctx: turn.ctxPayload,
-              cfg: turn.cfg,
-              dispatcherOptions: {
-                ...turn.dispatcherOptions,
-                deliver: async (...args: Parameters<typeof turn.delivery.deliver>) => {
-                  await turn.delivery.deliver(...args);
-                },
-                onError: turn.delivery.onError,
-              },
-              replyOptions: turn.replyOptions,
-              replyResolver: turn.replyResolver,
-            }),
+            dispatchResult: await turn.runDispatch(),
           };
         },
       },
@@ -361,63 +337,6 @@ describe("qa-channel plugin", () => {
       await harness.stop();
     }
   });
-
-  it(
-    "attaches sanitized agent tool starts to outbound qa bus messages",
-    { timeout: 20_000 },
-    async () => {
-      const harness = await startQaChannelTestHarness({
-        allowFrom: ["*"],
-        runtime: createMockQaRuntime({
-          toolStarts: [
-            {
-              name: "exec",
-              phase: "start",
-              args: {
-                command: "pwd",
-                apiToken: "secret-token",
-              },
-            },
-            {
-              name: "exec",
-              phase: "update",
-              args: {
-                command: "ignored update",
-              },
-            },
-          ],
-        }),
-      });
-
-      try {
-        harness.state.addInboundMessage({
-          conversation: { id: "alice", kind: "direct" },
-          senderId: "alice",
-          senderName: "Alice",
-          text: "hello",
-        });
-
-        const outbound = await harness.state.waitFor({
-          kind: "message-text",
-          textIncludes: "qa-echo: hello",
-          direction: "outbound",
-          timeoutMs: 15_000,
-        });
-
-        expect("toolCalls" in outbound ? outbound.toolCalls : undefined).toEqual([
-          {
-            name: "exec",
-            arguments: {
-              command: "[redacted]",
-              apiToken: "[redacted]",
-            },
-          },
-        ]);
-      } finally {
-        await harness.stop();
-      }
-    },
-  );
 
   it(
     "surfaces shared group traffic with the room target as From",

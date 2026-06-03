@@ -5,13 +5,8 @@
   },
   "enabledByDefault": true,
   "providers": ["synthetic"],
-  "setup": {
-    "providers": [
-      {
-        "id": "synthetic",
-        "envVars": ["SYNTHETIC_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "synthetic": ["SYNTHETIC_API_KEY"]
   },
   "providerAuthChoices": [
     {

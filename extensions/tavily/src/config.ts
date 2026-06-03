@@ -1,5 +1,4 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
-import { resolvePositiveTimeoutSeconds } from "openclaw/plugin-sdk/provider-web-search";
 import {
   normalizeResolvedSecretInputString,
   normalizeSecretInput,
@@ -61,9 +60,15 @@ export function resolveTavilyBaseUrl(cfg?: OpenClawConfig): string {
 }
 
 export function resolveTavilySearchTimeoutSeconds(override?: number): number {
-  return resolvePositiveTimeoutSeconds(override, DEFAULT_TAVILY_SEARCH_TIMEOUT_SECONDS);
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
+    return Math.floor(override);
+  }
+  return DEFAULT_TAVILY_SEARCH_TIMEOUT_SECONDS;
 }
 
 export function resolveTavilyExtractTimeoutSeconds(override?: number): number {
-  return resolvePositiveTimeoutSeconds(override, DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS);
+  if (typeof override === "number" && Number.isFinite(override) && override > 0) {
+    return Math.floor(override);
+  }
+  return DEFAULT_TAVILY_EXTRACT_TIMEOUT_SECONDS;
 }

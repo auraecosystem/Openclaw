@@ -1,6 +1,5 @@
 import { z, type ZodTypeAny } from "zod";
 import type { JsonSchemaObject } from "../shared/json-schema.types.js";
-import { parseConfigPathArrayIndex } from "../shared/path-array-index.js";
 import type { PluginConfigUiHint } from "./manifest-types.js";
 import { validateJsonSchemaValue } from "./schema-validator.js";
 import type { OpenClawPluginConfigSchema } from "./types.js";
@@ -90,7 +89,8 @@ function toIssuePath(path: string): Array<string | number> {
     return [];
   }
   return path.split(".").map((segment) => {
-    return parseConfigPathArrayIndex(segment) ?? segment;
+    const index = Number(segment);
+    return Number.isInteger(index) && String(index) === segment ? index : segment;
   });
 }
 

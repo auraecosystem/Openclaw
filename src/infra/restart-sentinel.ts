@@ -1,6 +1,5 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { isRecord as isPlainRecord } from "@openclaw/normalization-core/record-coerce";
 import { formatCliCommand } from "../cli/command-format.js";
 import { resolveStateDir } from "../config/paths.js";
 import { resolveRuntimeServiceVersion } from "../version.js";
@@ -65,15 +64,15 @@ export type RestartSentinel = {
   payload: RestartSentinelPayload;
 };
 
+export const DEFAULT_RESTART_SUCCESS_CONTINUATION_MESSAGE =
+  "The gateway restart completed successfully. Tell the user OpenClaw restarted successfully and continue any pending work.";
+
 const SENTINEL_FILENAME = "restart-sentinel.json";
 
 export function formatDoctorNonInteractiveHint(
   env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,
 ): string {
-  return `Recommended follow-up: run ${formatCliCommand(
-    "openclaw doctor --non-interactive",
-    env,
-  )} in a terminal or approvals-capable OpenClaw surface.`;
+  return `Run: ${formatCliCommand("openclaw doctor --non-interactive", env)}`;
 }
 
 export function resolveRestartSentinelPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -90,8 +89,12 @@ export async function writeRestartSentinel(
   return filePath;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
 function cloneRestartSentinelPayload(payload: RestartSentinelPayload): RestartSentinelPayload {
-  return structuredClone(payload);
+  return JSON.parse(JSON.stringify(payload)) as RestartSentinelPayload;
 }
 
 async function rewriteRestartSentinel(
@@ -167,7 +170,9 @@ export function buildRestartSuccessContinuation(params: {
   if (message) {
     return { kind: "agentTurn", message };
   }
-  return null;
+  return params.sessionKey?.trim()
+    ? { kind: "agentTurn", message: DEFAULT_RESTART_SUCCESS_CONTINUATION_MESSAGE }
+    : null;
 }
 
 export async function readRestartSentinel(
@@ -190,6 +195,15 @@ export async function readRestartSentinel(
     return parsed;
   } catch {
     return null;
+  }
+}
+
+export async function hasRestartSentinel(env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  try {
+    await fs.access(resolveRestartSentinelPath(env));
+    return true;
+  } catch {
+    return false;
   }
 }
 

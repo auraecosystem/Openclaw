@@ -14,7 +14,7 @@
 // endDate / utcTimeZone combinations.
 //
 // CAL-003 compliance: no mock of internal branches. Growth is driven through
-// the testApi.loadCostUsageSummaryCached seam (same entry point usage.test.ts
+// the __test.loadCostUsageSummaryCached seam (same entry point usage.test.ts
 // already exercises) with distinct (startMs, endMs) pairs. Only the external
 // loadCostUsageSummaryFromCache dependency is stubbed.
 
@@ -52,13 +52,13 @@ vi.mock("../../infra/session-cost-usage.js", async () => {
   };
 });
 
-import { testApi } from "./usage.js";
+import { __test } from "./usage.js";
 
 describe("costUsageCache bounded growth", () => {
   const DAY_MS = 24 * 60 * 60 * 1000;
 
   beforeEach(() => {
-    testApi.costUsageCache.clear();
+    __test.costUsageCache.clear();
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.loadCostUsageSummaryFromCache.mockResolvedValue(createSummary());
@@ -76,25 +76,25 @@ describe("costUsageCache bounded growth", () => {
     for (let i = 0; i < ITERATIONS; i++) {
       const startMs = Date.UTC(2026, 0, 1) + i * DAY_MS;
       const endMs = startMs + (i % 3 === 0 ? DAY_MS : 7 * DAY_MS) - 1;
-      await testApi.loadCostUsageSummaryCached({ startMs, endMs, config });
+      await __test.loadCostUsageSummaryCached({ startMs, endMs, config });
     }
 
     // Primary: map must be bounded. Pre-fix this equals ITERATIONS (600).
-    expect(testApi.costUsageCache.size).toBeLessThan(ITERATIONS);
+    expect(__test.costUsageCache.size).toBeLessThan(ITERATIONS);
 
     // Secondary: the most recent entry must still be present. FIFO evicts
     // oldest-first, never the newest.
     const lastStartMs = Date.UTC(2026, 0, 1) + (ITERATIONS - 1) * DAY_MS;
     const lastEndMs = lastStartMs + ((ITERATIONS - 1) % 3 === 0 ? DAY_MS : 7 * DAY_MS) - 1;
-    const lastCacheKey = `agent:__default__:${lastStartMs}-${lastEndMs}`;
-    expect(testApi.costUsageCache.has(lastCacheKey)).toBe(true);
+    const lastCacheKey = `${lastStartMs}-${lastEndMs}`;
+    expect(__test.costUsageCache.has(lastCacheKey)).toBe(true);
 
     // Tertiary: the oldest entry must have been evicted once the cap was
     // exceeded. Pre-fix all 600 entries remain and this fails too.
     const firstStartMs = Date.UTC(2026, 0, 1);
     const firstEndMs = firstStartMs + DAY_MS - 1;
-    const firstCacheKey = `agent:__default__:${firstStartMs}-${firstEndMs}`;
-    expect(testApi.costUsageCache.has(firstCacheKey)).toBe(false);
+    const firstCacheKey = `${firstStartMs}-${firstEndMs}`;
+    expect(__test.costUsageCache.has(firstCacheKey)).toBe(false);
   });
 
   it("evicts settled entries before in-flight entries when possible", async () => {
@@ -102,7 +102,7 @@ describe("costUsageCache bounded growth", () => {
     const pending = new Promise<ReturnType<typeof createSummary>>(() => {});
     mocks.loadCostUsageSummaryFromCache.mockReturnValueOnce(pending);
 
-    const inFlight = testApi.loadCostUsageSummaryCached({
+    const inFlight = __test.loadCostUsageSummaryCached({
       startMs: 1,
       endMs: 2,
       config,
@@ -111,21 +111,21 @@ describe("costUsageCache bounded growth", () => {
 
     for (let i = 0; i < 256; i++) {
       const startMs = Date.UTC(2026, 0, 1) + i * DAY_MS;
-      await testApi.loadCostUsageSummaryCached({
+      await __test.loadCostUsageSummaryCached({
         startMs,
         endMs: startMs + DAY_MS - 1,
         config,
       });
     }
 
-    const repeated = testApi.loadCostUsageSummaryCached({
+    const repeated = __test.loadCostUsageSummaryCached({
       startMs: 1,
       endMs: 2,
       config,
     });
     await Promise.resolve();
 
-    expect(testApi.costUsageCache.has("agent:__default__:1-2")).toBe(true);
+    expect(__test.costUsageCache.has("1-2")).toBe(true);
     expect(mocks.loadCostUsageSummaryFromCache).toHaveBeenCalledTimes(257);
     void inFlight.catch(() => {});
     void repeated.catch(() => {});

@@ -1,4 +1,3 @@
-import { resolveIntegerOption } from "openclaw/plugin-sdk/number-runtime";
 import { chunkMarkdownTextWithMode, type ChunkMode } from "openclaw/plugin-sdk/reply-chunking";
 
 type ChunkDiscordTextOpts = {
@@ -24,10 +23,6 @@ const DEFAULT_MAX_CHARS = 2000;
 const DEFAULT_MAX_LINES = 17;
 const FENCE_RE = /^( {0,3})(`{3,}|~{3,})(.*)$/;
 const CJK_PUNCTUATION_BREAK_AFTER_RE = /[、。，．！？；：）］｝〉》」』】〕〗〙]/u;
-
-function resolveDiscordChunkLimit(value: unknown, fallback: number) {
-  return resolveIntegerOption(value, fallback, { min: 1 });
-}
 
 function countLines(text: string) {
   if (!text) {
@@ -119,7 +114,7 @@ function splitLongLine(
   maxChars: number,
   opts: { preserveWhitespace: boolean },
 ): string[] {
-  const limit = resolveDiscordChunkLimit(maxChars, DEFAULT_MAX_CHARS);
+  const limit = Math.max(1, Math.floor(maxChars));
   if (line.length <= limit) {
     return [line];
   }
@@ -155,8 +150,8 @@ function splitLongLine(
  * while keeping fenced code blocks balanced across chunks.
  */
 export function chunkDiscordText(text: string, opts: ChunkDiscordTextOpts = {}): string[] {
-  const maxChars = resolveDiscordChunkLimit(opts.maxChars, DEFAULT_MAX_CHARS);
-  const maxLines = resolveDiscordChunkLimit(opts.maxLines, DEFAULT_MAX_LINES);
+  const maxChars = Math.max(1, Math.floor(opts.maxChars ?? DEFAULT_MAX_CHARS));
+  const maxLines = Math.max(1, Math.floor(opts.maxLines ?? DEFAULT_MAX_LINES));
 
   const body = text ?? "";
   if (!body) {
@@ -267,7 +262,7 @@ export function chunkDiscordTextWithMode(
   }
   const lineChunks = chunkMarkdownTextWithMode(
     text,
-    resolveDiscordChunkLimit(opts.maxChars, DEFAULT_MAX_CHARS),
+    Math.max(1, Math.floor(opts.maxChars ?? DEFAULT_MAX_CHARS)),
     "newline",
   );
   const chunks: string[] = [];
@@ -292,7 +287,7 @@ function rebalanceReasoningItalics(source: string, chunks: string[]): string[] {
   }
 
   const opensWithReasoningItalics =
-    /^(?:Reasoning:|Thinking\.{0,3})\n+_/u.test(source) && source.trimEnd().endsWith("_");
+    source.startsWith("Reasoning:\n_") && source.trimEnd().endsWith("_");
   if (!opensWithReasoningItalics) {
     return chunks;
   }

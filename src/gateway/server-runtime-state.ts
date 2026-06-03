@@ -9,6 +9,7 @@ import {
   pinActivePluginHttpRouteRegistry,
   releasePinnedPluginChannelRegistry,
   releasePinnedPluginHttpRouteRegistry,
+  resolveActivePluginHttpRouteRegistry,
 } from "../plugins/runtime.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
@@ -26,7 +27,6 @@ import {
 } from "./server-chat-state.js";
 import { MAX_PREAUTH_PAYLOAD_BYTES } from "./server-constants.js";
 import { attachGatewayUpgradeHandler, createGatewayHttpServer } from "./server-http.js";
-import type { GatewayRequestContext } from "./server-methods/types.js";
 import type { DedupeEntry } from "./server-shared.js";
 import type { HookClientIpConfig, HooksRequestHandler } from "./server/hooks-request-handler.js";
 import { listenGatewayHttpServer } from "./server/http-listen.js";
@@ -64,9 +64,6 @@ type GatewayPluginUpgradeHandler = (
   },
 ) => Promise<boolean>;
 
-const loadGatewayPluginsHttpModule = async () => await import("./server/plugins-http.js");
-
-/** Creates the HTTP/WebSocket runtime state and pinned plugin registries for one gateway start. */
 export async function createGatewayRuntimeState(params: {
   cfg: import("../config/config.js").OpenClawConfig;
   bindHost: string;
@@ -87,8 +84,6 @@ export async function createGatewayRuntimeState(params: {
   hooksConfig: () => HooksConfigResolved | null;
   getHookClientIpConfig: () => HookClientIpConfig;
   pluginRegistry: PluginRegistry;
-  getPluginRouteRegistry?: () => PluginRegistry;
-  getGatewayRequestContext?: () => GatewayRequestContext | undefined;
   pinChannelRegistry?: boolean;
   deps: CliDeps;
   log: { info: (msg: string) => void; warn: (msg: string) => void };
@@ -128,8 +123,6 @@ export async function createGatewayRuntimeState(params: {
     releasePinnedPluginChannelRegistry();
   }
   try {
-    const resolvePluginRouteRegistry = () =>
-      params.getPluginRouteRegistry?.() ?? params.pluginRegistry;
     const clients = new Set<GatewayWsClient>();
     const { broadcast, broadcastToConnIds } = createGatewayBroadcaster({ clients });
 
@@ -145,8 +138,6 @@ export async function createGatewayRuntimeState(params: {
         return false;
       }
       if (!loadedHooksRequestHandler) {
-        // Hooks are cold for most gateway starts; create the handler only after a request
-        // matches the configured base path so startup avoids importing hook runtime code.
         const { createGatewayHooksRequestHandler } = await import("./server/hooks.js");
         loadedHooksRequestHandler = createGatewayHooksRequestHandler({
           deps: params.deps,
@@ -168,19 +159,15 @@ export async function createGatewayRuntimeState(params: {
       pathContext,
       dispatchContext,
     ) => {
-      const registry = resolvePluginRouteRegistry();
+      const registry = resolveActivePluginHttpRouteRegistry(params.pluginRegistry);
       if ((registry.httpRoutes ?? []).length === 0) {
         return false;
       }
       if (!loadedPluginRequestHandler) {
-        // Route registries can be re-pinned after bootstrap; keep the handler lazy and route
-        // lookup dynamic so plugin HTTP routes follow the active registry snapshot.
-        const { createGatewayPluginRequestHandler } = await loadGatewayPluginsHttpModule();
+        const { createGatewayPluginRequestHandler } = await import("./server/plugins-http.js");
         loadedPluginRequestHandler = createGatewayPluginRequestHandler({
           registry: params.pluginRegistry,
-          getRouteRegistry: resolvePluginRouteRegistry,
           log: params.logPlugins,
-          getGatewayRequestContext: params.getGatewayRequestContext,
         });
       }
       return await loadedPluginRequestHandler(req, res, pathContext, dispatchContext);
@@ -192,31 +179,30 @@ export async function createGatewayRuntimeState(params: {
       pathContext,
       dispatchContext,
     ) => {
-      const registry = resolvePluginRouteRegistry();
+      const registry = resolveActivePluginHttpRouteRegistry(params.pluginRegistry);
       if ((registry.httpRoutes ?? []).length === 0) {
         return false;
       }
       if (!loadedPluginUpgradeHandler) {
-        // WebSocket upgrades share the same dynamic route registry as HTTP requests; this keeps
-        // reloads from serving stale plugin upgrade handlers.
-        const { createGatewayPluginUpgradeHandler } = await loadGatewayPluginsHttpModule();
+        const { createGatewayPluginUpgradeHandler } = await import("./server/plugins-http.js");
         loadedPluginUpgradeHandler = createGatewayPluginUpgradeHandler({
           registry: params.pluginRegistry,
-          getRouteRegistry: resolvePluginRouteRegistry,
           log: params.logPlugins,
-          getGatewayRequestContext: params.getGatewayRequestContext,
         });
       }
       return await loadedPluginUpgradeHandler(req, socket, head, pathContext, dispatchContext);
     };
     const shouldEnforcePluginGatewayAuth = (pathContext: PluginRoutePathContext): boolean => {
-      return shouldEnforceGatewayAuthForPluginPath(resolvePluginRouteRegistry(), pathContext);
+      return shouldEnforceGatewayAuthForPluginPath(
+        resolveActivePluginHttpRouteRegistry(params.pluginRegistry),
+        pathContext,
+      );
     };
     const resolvePluginNodeCapabilityRoute = (pathContext: PluginRoutePathContext) =>
-      // Capability routes are selected from the current pinned registry so auth decisions and
-      // node-capability dispatch agree when plugin routes are reloaded.
-      findMatchingPluginNodeCapabilityRoute(resolvePluginRouteRegistry(), pathContext)
-        ?.nodeCapability;
+      findMatchingPluginNodeCapabilityRoute(
+        resolveActivePluginHttpRouteRegistry(params.pluginRegistry),
+        pathContext,
+      )?.nodeCapability;
 
     const bindHosts = await resolveGatewayListenHosts(params.bindHost);
     if (!isLoopbackHost(params.bindHost)) {
@@ -242,7 +228,7 @@ export async function createGatewayRuntimeState(params: {
 
     const httpServers: HttpServer[] = [];
     const httpBindHosts: string[] = [];
-    for (const _ of bindHosts) {
+    for (const _host of bindHosts) {
       const httpServer = createGatewayHttpServer({
         clients,
         controlUiEnabled: params.controlUiEnabled,
@@ -289,8 +275,6 @@ export async function createGatewayRuntimeState(params: {
         await startListeningPromise;
         return;
       }
-      // Listening is idempotent for callers racing startup; reset the promise only on failure so
-      // a transient bind error can be retried after the caller handles it.
       startListeningPromise = (async () => {
         for (const [index, host] of bindHosts.entries()) {
           const server = httpServers[index];
@@ -370,8 +354,6 @@ export async function createGatewayRuntimeState(params: {
       toolEventRecipients,
     };
   } catch (err) {
-    // If state creation fails after pins are installed, release them immediately so later
-    // in-process gateway starts do not inherit a half-created plugin runtime.
     releasePinnedPluginHttpRouteRegistry();
     releasePinnedPluginChannelRegistry();
     throw err;

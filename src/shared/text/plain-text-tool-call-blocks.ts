@@ -1,1 +1,1 @@
-export { stripPlainTextToolCallBlocks } from "../../../packages/tool-call-repair/src/index.js";
+export { stripPlainTextToolCallBlocks } from "../../plugin-sdk/tool-payload.js";

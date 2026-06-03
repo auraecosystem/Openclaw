@@ -1,10 +1,9 @@
 // Keep provider onboarding helpers dependency-light so bundled provider plugins
 // do not pull heavyweight runtime graphs at activation time.
 
-import { findNormalizedProviderKey } from "@openclaw/model-catalog-core/provider-id";
-import { resolvePrimaryStringValue } from "../../packages/normalization-core/src/string-coerce.js";
 import { ensureStaticModelAllowlistEntry } from "../agents/model-allowlist-entry.js";
 import { normalizeConfiguredProviderCatalogModelId } from "../agents/model-ref-shared.js";
+import { findNormalizedProviderKey } from "../agents/provider-id.js";
 import {
   normalizeAgentModelMapForConfig,
   normalizeAgentModelRefForConfig,
@@ -16,6 +15,7 @@ import type {
   ModelProviderConfig,
 } from "../config/types.models.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { resolvePrimaryStringValue } from "../shared/string-coerce.js";
 
 export type { OpenClawConfig, ModelApi, ModelDefinitionConfig, ModelProviderConfig };
 export {
@@ -51,10 +51,6 @@ function extractAgentDefaultModelFallbacks(model: unknown): string[] | undefined
   }
   const fallbacks = (model as { fallbacks?: unknown }).fallbacks;
   return Array.isArray(fallbacks) ? fallbacks.map((value) => String(value)) : undefined;
-}
-
-function hasAgentDefaultModelPrimary(cfg: OpenClawConfig): boolean {
-  return resolvePrimaryStringValue(cfg.agents?.defaults?.model) !== undefined;
 }
 
 function normalizeAgentModelAliasEntry(entry: AgentModelAliasEntry): {
@@ -408,9 +404,7 @@ export function applyProviderConfigWithDefaultModelPreset(
     defaultModelId: params.defaultModelId,
   });
   return params.primaryModelRef
-    ? hasAgentDefaultModelPrimary(cfg)
-      ? next
-      : applyAgentDefaultModelPrimary(next, params.primaryModelRef)
+    ? applyAgentDefaultModelPrimary(next, params.primaryModelRef)
     : next;
 }
 
@@ -452,9 +446,7 @@ export function applyProviderConfigWithDefaultModelsPreset(
     defaultModelId: params.defaultModelId,
   });
   return params.primaryModelRef
-    ? hasAgentDefaultModelPrimary(cfg)
-      ? next
-      : applyAgentDefaultModelPrimary(next, params.primaryModelRef)
+    ? applyAgentDefaultModelPrimary(next, params.primaryModelRef)
     : next;
 }
 
@@ -526,9 +518,7 @@ export function applyProviderConfigWithModelCatalogPreset(
     catalogModels: params.catalogModels,
   });
   return params.primaryModelRef
-    ? hasAgentDefaultModelPrimary(cfg)
-      ? next
-      : applyAgentDefaultModelPrimary(next, params.primaryModelRef)
+    ? applyAgentDefaultModelPrimary(next, params.primaryModelRef)
     : next;
 }
 

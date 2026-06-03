@@ -1,19 +1,16 @@
 /**
- * Known user tracking — SQLite KV-backed store.
+ * Known user tracking — JSON file-based store.
  *
- * Legacy `known-users.json` data is imported once, then deleted after SQLite
- * has the canonical copy.
+ * Migrated from src/known-users.ts. Dependencies are only Node.js
+ * built-ins + log + platform (both zero plugin-sdk).
  */
 
-import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import { privateFileStoreSync } from "openclaw/plugin-sdk/security-runtime";
 import type { ChatScope } from "../types.js";
 import { formatErrorMessage } from "../utils/format.js";
 import { debugLog, debugError } from "../utils/log.js";
-import { getQQBotDataPath } from "../utils/platform.js";
-import { openQQBotSyncKeyedStore } from "../utils/sqlite-state.js";
+import { getQQBotDataDir, getQQBotDataPath } from "../utils/platform.js";
 
 /** Persisted record for a user who has interacted with the bot. */
 interface KnownUser {
@@ -27,9 +24,14 @@ interface KnownUser {
   interactionCount: number;
 }
 
-type KnownUsersMigrationMarker = {
-  importedAt: string;
-};
+let usersCache: Map<string, KnownUser> | null = null;
+const SAVE_THROTTLE_MS = 5000;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let isDirty = false;
+
+function ensureDir(): void {
+  getQQBotDataDir("data");
+}
 
 function getKnownUsersFile(): string {
   return path.join(getQQBotDataPath("data"), "known-users.json");
@@ -40,77 +42,63 @@ function makeUserKey(user: Partial<KnownUser>): string {
   return user.type === "group" && user.groupOpenid ? `${base}:${user.groupOpenid}` : base;
 }
 
-const KNOWN_USERS_NAMESPACE = "known-users";
-const KNOWN_USERS_MIGRATIONS_NAMESPACE = "known-users-migrations";
-const LEGACY_KNOWN_USERS_MIGRATION_KEY = "known-users-json-v1";
-const MAX_KNOWN_USERS = 100_000;
-let legacyImported = false;
-
-function createKnownUsersStore() {
-  return openQQBotSyncKeyedStore<KnownUser>({
-    namespace: KNOWN_USERS_NAMESPACE,
-    maxEntries: MAX_KNOWN_USERS,
-  });
-}
-
-function createKnownUsersMigrationStore() {
-  return openQQBotSyncKeyedStore<KnownUsersMigrationMarker>({
-    namespace: KNOWN_USERS_MIGRATIONS_NAMESPACE,
-    maxEntries: 100,
-  });
-}
-
-function knownUserStateKey(key: string): string {
-  return crypto.createHash("sha256").update(key).digest("hex");
-}
-
-function toStoredKnownUser(user: KnownUser): KnownUser {
-  return {
-    openid: user.openid,
-    type: user.type,
-    ...(user.nickname ? { nickname: user.nickname } : {}),
-    ...(user.groupOpenid ? { groupOpenid: user.groupOpenid } : {}),
-    accountId: user.accountId,
-    firstSeenAt: user.firstSeenAt,
-    lastSeenAt: user.lastSeenAt,
-    interactionCount: user.interactionCount,
-  };
-}
-
-function ensureLegacyKnownUsersImported(): void {
-  if (legacyImported) {
-    return;
+function loadUsersFromFile(): Map<string, KnownUser> {
+  if (usersCache !== null) {
+    return usersCache;
   }
-  const migrationStore = createKnownUsersMigrationStore();
-  if (migrationStore.lookup(LEGACY_KNOWN_USERS_MIGRATION_KEY)) {
-    legacyImported = true;
-    return;
-  }
+  usersCache = new Map();
   try {
     const knownUsersFile = getKnownUsersFile();
     const users = privateFileStoreSync(path.dirname(knownUsersFile)).readJsonIfExists<KnownUser[]>(
       path.basename(knownUsersFile),
     );
-    if (Array.isArray(users)) {
-      const store = createKnownUsersStore();
+    if (users) {
       for (const user of users) {
-        store.registerIfAbsent(knownUserStateKey(makeUserKey(user)), toStoredKnownUser(user));
+        usersCache.set(makeUserKey(user), user);
       }
-      debugLog(`[known-users] Migrated ${users.length} users to SQLite`);
-      fs.rmSync(knownUsersFile, { force: true });
+      debugLog(`[known-users] Loaded ${usersCache.size} users`);
     }
-    migrationStore.register(LEGACY_KNOWN_USERS_MIGRATION_KEY, {
-      importedAt: new Date().toISOString(),
-    });
-    legacyImported = true;
   } catch (err) {
-    debugError(`[known-users] Failed to import legacy users: ${formatErrorMessage(err)}`);
+    debugError(`[known-users] Failed to load users: ${formatErrorMessage(err)}`);
+    usersCache = new Map();
+  }
+  return usersCache;
+}
+
+function saveUsersToFile(): void {
+  if (!isDirty || saveTimer) {
+    return;
+  }
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    doSaveUsersToFile();
+  }, SAVE_THROTTLE_MS);
+}
+
+function doSaveUsersToFile(): void {
+  if (!usersCache || !isDirty) {
+    return;
+  }
+  try {
+    ensureDir();
+    const filePath = getKnownUsersFile();
+    privateFileStoreSync(path.dirname(filePath)).writeJson(
+      path.basename(filePath),
+      Array.from(usersCache.values()),
+    );
+    isDirty = false;
+  } catch (err) {
+    debugError(`[known-users] Failed to save users: ${formatErrorMessage(err)}`);
   }
 }
 
 /** Flush pending writes immediately, typically during shutdown. */
 export function flushKnownUsers(): void {
-  // SQLite writes are synchronous; no pending JSON flush remains.
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+  doSaveUsersToFile();
 }
 
 /** Record a known user whenever a message is received. */
@@ -121,41 +109,30 @@ export function recordKnownUser(user: {
   groupOpenid?: string;
   accountId: string;
 }): void {
-  try {
-    ensureLegacyKnownUsersImported();
-    const store = createKnownUsersStore();
-    const key = makeUserKey(user);
-    const stateKey = knownUserStateKey(key);
-    const now = Date.now();
-    const existing = store.lookup(stateKey);
+  const cache = loadUsersFromFile();
+  const key = makeUserKey(user);
+  const now = Date.now();
+  const existing = cache.get(key);
 
-    if (existing) {
-      const next: KnownUser = {
-        ...existing,
-        lastSeenAt: now,
-        interactionCount: existing.interactionCount + 1,
-      };
-      if (user.nickname && user.nickname !== existing.nickname) {
-        next.nickname = user.nickname;
-      }
-      store.register(stateKey, toStoredKnownUser(next));
-    } else {
-      store.register(
-        stateKey,
-        toStoredKnownUser({
-          openid: user.openid,
-          type: user.type,
-          nickname: user.nickname,
-          groupOpenid: user.groupOpenid,
-          accountId: user.accountId,
-          firstSeenAt: now,
-          lastSeenAt: now,
-          interactionCount: 1,
-        }),
-      );
-      debugLog(`[known-users] New user: ${user.openid} (${user.type})`);
+  if (existing) {
+    existing.lastSeenAt = now;
+    existing.interactionCount++;
+    if (user.nickname && user.nickname !== existing.nickname) {
+      existing.nickname = user.nickname;
     }
-  } catch (err) {
-    debugError(`[known-users] Failed to record user: ${formatErrorMessage(err)}`);
+  } else {
+    cache.set(key, {
+      openid: user.openid,
+      type: user.type,
+      nickname: user.nickname,
+      groupOpenid: user.groupOpenid,
+      accountId: user.accountId,
+      firstSeenAt: now,
+      lastSeenAt: now,
+      interactionCount: 1,
+    });
+    debugLog(`[known-users] New user: ${user.openid} (${user.type})`);
   }
+  isDirty = true;
+  saveUsersToFile();
 }

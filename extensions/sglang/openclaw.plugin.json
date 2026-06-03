@@ -22,13 +22,8 @@
       }
     }
   },
-  "setup": {
-    "providers": [
-      {
-        "id": "sglang",
-        "envVars": ["SGLANG_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "sglang": ["SGLANG_API_KEY"]
   },
   "providerAuthChoices": [
     {

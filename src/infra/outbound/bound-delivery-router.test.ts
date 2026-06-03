@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createBoundDeliveryRouter } from "./bound-delivery-router.js";
 import {
-  testing,
+  __testing,
   registerSessionBindingAdapter,
   type SessionBindingRecord,
 } from "./session-binding-service.js";
@@ -44,7 +44,7 @@ function registerRuntimeSessionBindings(
 
 describe("bound delivery router", () => {
   beforeEach(() => {
-    testing.resetSessionBindingAdaptersForTests();
+    __testing.resetSessionBindingAdaptersForTests();
   });
 
   const resolveDestination = (params: {

@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { VERSION } from "../version.js";
 import { assertFutureConfigActionAllowed } from "./future-config-guard.js";
 import {
@@ -91,21 +91,10 @@ function mergeGatewayServiceEnv(
   if (!command?.environment) {
     return baseEnv;
   }
-  const merged = {
+  return {
     ...baseEnv,
     ...command.environment,
   };
-  for (const key of [
-    "OPENCLAW_LAUNCHD_LABEL",
-    "OPENCLAW_SYSTEMD_UNIT",
-    "OPENCLAW_WINDOWS_TASK_NAME",
-  ]) {
-    const value = baseEnv[key]?.trim();
-    if (value) {
-      merged[key] = value;
-    }
-  }
-  return merged;
 }
 
 const TEMP_PROGRAM_ROOTS = [os.tmpdir(), "/tmp", "/private/tmp", "/var/tmp"].map((entry) =>

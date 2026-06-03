@@ -34,6 +34,7 @@ type EnvSnapshot = {
   OPENCLAW_STATE_DIR?: string;
   OPENCLAW_OAUTH_DIR?: string;
   OPENCLAW_AGENT_DIR?: string;
+  PI_CODING_AGENT_DIR?: string;
 };
 
 function captureEnv(): EnvSnapshot {
@@ -43,6 +44,7 @@ function captureEnv(): EnvSnapshot {
     OPENCLAW_STATE_DIR: process.env.OPENCLAW_STATE_DIR,
     OPENCLAW_OAUTH_DIR: process.env.OPENCLAW_OAUTH_DIR,
     OPENCLAW_AGENT_DIR: process.env.OPENCLAW_AGENT_DIR,
+    PI_CODING_AGENT_DIR: process.env.PI_CODING_AGENT_DIR,
   };
 }
 
@@ -159,6 +161,7 @@ describe("doctor state integrity oauth dir checks", () => {
     process.env.OPENCLAW_STATE_DIR = path.join(tempHome, ".openclaw");
     delete process.env.OPENCLAW_OAUTH_DIR;
     delete process.env.OPENCLAW_AGENT_DIR;
+    delete process.env.PI_CODING_AGENT_DIR;
     fs.mkdirSync(process.env.OPENCLAW_STATE_DIR, { recursive: true, mode: 0o700 });
     noteMock.mockClear();
   });
@@ -274,6 +277,7 @@ describe("doctor state integrity oauth dir checks", () => {
       "agent",
     );
     process.env.OPENCLAW_AGENT_DIR = legacyAgentDir;
+    process.env.PI_CODING_AGENT_DIR = legacyAgentDir;
 
     const text = await runStateIntegrityText({
       agents: {

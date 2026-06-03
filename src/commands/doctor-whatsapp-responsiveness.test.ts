@@ -6,12 +6,10 @@ const spawnSyncMock = vi.hoisted(() => vi.fn());
 
 vi.mock("node:child_process", async () => {
   const { mockNodeChildProcessSpawnSync } = await import("openclaw/plugin-sdk/test-node-mocks");
-  return mockNodeChildProcessSpawnSync(spawnSyncMock, () =>
-    vi.importActual<typeof import("node:child_process")>("node:child_process"),
-  );
+  return mockNodeChildProcessSpawnSync(spawnSyncMock);
 });
 
-vi.mock("../../packages/terminal-core/src/note.js", () => ({
+vi.mock("../terminal/note.js", () => ({
   note: noteMock,
 }));
 
@@ -31,17 +29,12 @@ describe("doctor WhatsApp responsiveness", () => {
         " 102 /usr/bin/node /usr/lib/node_modules/openclaw/dist/index.js gateway --port 18789",
         " 103 openclaw channels",
         " 104 openclaw tui --local",
-        " 105 /usr/bin/openclaw chat",
-        " 106 helper --note 'openclaw tui'",
-        " 107 openclaw-helper openclaw terminal",
-        " 108 openclaw --flag tui",
       ].join("\n"),
     });
 
     expect(listLocalTuiProcesses()).toEqual([
       { pid: 101, command: "openclaw-tui" },
       { pid: 104, command: "openclaw tui --local" },
-      { pid: 105, command: "/usr/bin/openclaw chat" },
     ]);
   });
 

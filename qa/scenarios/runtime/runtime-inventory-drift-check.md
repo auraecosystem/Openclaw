@@ -38,9 +38,6 @@ execution:
 steps:
   - name: keeps tools.effective and skills.status aligned after config changes
     actions:
-      - call: ensureImageGenerationConfigured
-        args:
-          - ref: env
       - call: writeWorkspaceSkill
         args:
           - env:

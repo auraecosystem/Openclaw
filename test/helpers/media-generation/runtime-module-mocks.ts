@@ -68,11 +68,6 @@ const mediaRuntimeMocks = vi.hoisted(() => {
         : undefined;
     }),
     resolveProviderAuthEnvVarCandidates: vi.fn(() => ({})),
-    resolveProviderAuthLookupMaps: vi.fn(() => ({
-      aliasMap: {},
-      envCandidateMap: {},
-      authEvidenceMap: {},
-    })),
     debug,
     warn,
   };
@@ -103,7 +98,6 @@ vi.mock("../../../src/logging/subsystem.js", () => ({
 vi.mock("../../../src/secrets/provider-env-vars.js", () => ({
   getProviderEnvVars: mediaRuntimeMocks.getProviderEnvVars,
   resolveProviderAuthEnvVarCandidates: mediaRuntimeMocks.resolveProviderAuthEnvVarCandidates,
-  resolveProviderAuthLookupMaps: mediaRuntimeMocks.resolveProviderAuthLookupMaps,
 }));
 
 vi.mock("../../../src/image-generation/model-ref.js", () => ({

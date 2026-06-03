@@ -5,14 +5,6 @@ export default definePluginEntry({
   name: "Memory LanceDB",
   description: "LanceDB-backed memory provider",
   register(api) {
-    api.registerCli(() => {}, {
-      descriptors: [
-        {
-          name: "ltm",
-          description: "Inspect and query LanceDB-backed memory",
-          hasSubcommands: true,
-        },
-      ],
-    });
+    api.registerCli(() => {}, { commands: ["ltm"] });
   },
 });

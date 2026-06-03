@@ -39,7 +39,8 @@ export default defineSingleProviderPluginEntry({
           pluginEntry && typeof pluginEntry === "object" && pluginEntry.config
             ? (pluginEntry.config as HuggingFacePluginConfig)
             : undefined;
-        const discoveryEnabled = pluginConfig?.discovery?.enabled;
+        const discoveryEnabled =
+          pluginConfig?.discovery?.enabled ?? ctx.config?.models?.huggingfaceDiscovery?.enabled;
         if (discoveryEnabled === false) {
           return null;
         }

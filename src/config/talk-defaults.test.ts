@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,19 +11,7 @@ import {
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 function readRepoFile(relativePath: string): string {
-  try {
-    return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
-    }
-  }
-
-  // Sparse worktrees may omit app sources, but the tracked blob is still the parity source.
-  return execFileSync("git", ["show", `HEAD:${relativePath}`], {
-    cwd: repoRoot,
-    encoding: "utf8",
-  });
+  return fs.readFileSync(path.join(repoRoot, relativePath), "utf8");
 }
 
 describe("talk silence timeout defaults", () => {

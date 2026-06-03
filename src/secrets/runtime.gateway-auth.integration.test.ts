@@ -65,7 +65,7 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
   });
 
   it(
-    "rejects unresolved active gateway auth refs before persisting them",
+    "keeps last-known-good runtime snapshot active when reload introduces unresolved active gateway auth refs",
     async () => {
       await withTempHome("openclaw-secrets-runtime-gateway-auth-reload-lkg-", async (home) => {
         const initialTokenRef = {
@@ -78,23 +78,6 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
           provider: "default",
           id: "MISSING_GATEWAY_AUTH_TOKEN",
         } as const;
-        await fs.mkdir(path.join(home, ".openclaw"), { recursive: true });
-        await fs.writeFile(
-          path.join(home, ".openclaw", "openclaw.json"),
-          `${JSON.stringify(
-            {
-              gateway: {
-                auth: {
-                  mode: "token",
-                  token: initialTokenRef,
-                },
-              },
-            },
-            null,
-            2,
-          )}\n`,
-          "utf8",
-        );
 
         const prepared = await prepareSecretsRuntimeSnapshot({
           config: asConfig({
@@ -126,7 +109,7 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
               },
             },
           }),
-        ).rejects.toThrow(/active SecretRef resolution failed: .*MISSING_GATEWAY_AUTH_TOKEN/i);
+        ).rejects.toThrow(/runtime snapshot refresh failed: .*MISSING_GATEWAY_AUTH_TOKEN/i);
 
         const activeAfterFailure = getActiveSecretsRuntimeSnapshot();
         if (activeAfterFailure === null) {
@@ -138,7 +121,7 @@ describe("secrets runtime snapshot gateway-auth integration", () => {
         const persistedConfig = JSON.parse(
           await fs.readFile(path.join(home, ".openclaw", "openclaw.json"), "utf8"),
         ) as OpenClawConfig;
-        expect(persistedConfig.gateway?.auth?.token).toEqual(initialTokenRef);
+        expect(persistedConfig.gateway?.auth?.token).toEqual(missingTokenRef);
       });
     },
     SECRETS_RUNTIME_INTEGRATION_TIMEOUT_MS,

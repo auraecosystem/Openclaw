@@ -8,8 +8,7 @@ export {
   resolveIMessageAccount,
 } from "./src/accounts.js";
 export {
-  testing,
-  testing as __testing,
+  __testing,
   createIMessageConversationBindingManager,
 } from "./src/conversation-bindings.js";
 export {

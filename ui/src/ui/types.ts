@@ -1,5 +1,4 @@
 export type UpdateAvailable = import("../../../src/infra/update-startup.js").UpdateAvailable;
-import type { SessionGoal } from "../../../src/config/sessions/types.js";
 import type { CronJobBase } from "../../../src/cron/types-shared.js";
 import type { ConfigUiHints } from "../../../src/shared/config-ui-hints-types.js";
 import type {
@@ -9,7 +8,6 @@ import type {
   SessionsPatchResultBase,
 } from "../../../src/shared/session-types.js";
 export type { ConfigUiHint, ConfigUiHints } from "../../../src/shared/config-ui-hints-types.js";
-export type { SessionGoal } from "../../../src/config/sessions/types.js";
 
 export type ChannelsStatusSnapshot = {
   ts: number;
@@ -292,9 +290,6 @@ export type ConfigSnapshot = {
   hash?: string | null;
   parsed?: unknown;
   valid?: boolean | null;
-  sourceConfig?: Record<string, unknown> | null;
-  resolved?: Record<string, unknown> | null;
-  runtimeConfig?: Record<string, unknown> | null;
   config?: Record<string, unknown> | null;
   issues?: ConfigSnapshotIssue[] | null;
 };
@@ -462,7 +457,6 @@ export type GatewaySessionRow = {
   contextTokens?: number;
   compactionCheckpointCount?: number;
   latestCompactionCheckpoint?: SessionCompactionCheckpointPreview;
-  goal?: SessionGoal;
 };
 
 export type SessionsListResult = SessionsListResultBase<GatewaySessionsDefaults, GatewaySessionRow>;
@@ -675,38 +669,9 @@ export type SkillsStatusConfigCheck = {
 
 export type SkillInstallOption = {
   id: string;
-  kind: "brew" | "node" | "go" | "uv" | "download";
+  kind: "brew" | "node" | "go" | "uv";
   label: string;
   bins: string[];
-};
-
-export type SkillClawHubLink =
-  | {
-      status: "linked";
-      valid: true;
-      registry: string;
-      slug: string;
-      installedVersion: string;
-      installedAt: number;
-      originPath?: string;
-      lockPath?: string;
-    }
-  | {
-      status: "invalid";
-      valid: false;
-      reason: string;
-      registry?: string;
-      slug?: string;
-      installedVersion?: string;
-      installedAt?: number;
-      originPath?: string;
-      lockPath?: string;
-    };
-
-export type SkillCardStatus = {
-  present: true;
-  path: string;
-  sizeBytes: number;
 };
 
 export type SkillStatusEntry = {
@@ -723,13 +688,8 @@ export type SkillStatusEntry = {
   always: boolean;
   disabled: boolean;
   blockedByAllowlist: boolean;
-  blockedByAgentFilter?: boolean;
   eligible: boolean;
-  modelVisible?: boolean;
-  userInvocable?: boolean;
-  commandVisible?: boolean;
   requirements: {
-    anyBins?: string[];
     bins: string[];
     env: string[];
     config: string[];
@@ -743,15 +703,11 @@ export type SkillStatusEntry = {
   };
   configChecks: SkillsStatusConfigCheck[];
   install: SkillInstallOption[];
-  clawhub?: SkillClawHubLink;
-  skillCard?: SkillCardStatus;
 };
 
 export type SkillStatusReport = {
   workspaceDir: string;
   managedSkillsDir: string;
-  agentId?: string;
-  agentSkillFilter?: string[];
   skills: SkillStatusEntry[];
 };
 
@@ -790,19 +746,19 @@ export type ModelCatalogEntry = {
 };
 
 export type ToolCatalogProfile =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolCatalogProfile;
+  import("../../../src/gateway/protocol/schema/types.js").ToolCatalogProfile;
 export type ToolCatalogEntry =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolCatalogEntry;
+  import("../../../src/gateway/protocol/schema/types.js").ToolCatalogEntry;
 export type ToolCatalogGroup =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolCatalogGroup;
+  import("../../../src/gateway/protocol/schema/types.js").ToolCatalogGroup;
 export type ToolsCatalogResult =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolsCatalogResult;
+  import("../../../src/gateway/protocol/schema/types.js").ToolsCatalogResult;
 export type ToolsEffectiveEntry =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolsEffectiveEntry;
+  import("../../../src/gateway/protocol/schema/types.js").ToolsEffectiveEntry;
 export type ToolsEffectiveGroup =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolsEffectiveGroup;
+  import("../../../src/gateway/protocol/schema/types.js").ToolsEffectiveGroup;
 export type ToolsEffectiveResult =
-  import("../../../packages/gateway-protocol/src/schema.js").ToolsEffectiveResult;
+  import("../../../src/gateway/protocol/schema/types.js").ToolsEffectiveResult;
 
 export type ModelAuthExpiry =
   import("../../../src/gateway/server-methods/models-auth-status.js").ModelAuthExpiry;

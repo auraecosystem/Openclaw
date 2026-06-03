@@ -1,7 +1,3 @@
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { logVerbose } from "openclaw/plugin-sdk/runtime-env";
 import { normalizeOptionalStringifiedId } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ChannelType, Message } from "../internal/discord.js";
@@ -30,24 +26,8 @@ const DISCORD_CHANNEL_INFO_CACHE = new Map<
   { value: DiscordChannelInfo | null; expiresAt: number }
 >();
 
-export function resetDiscordChannelInfoCacheForTest() {
+export function __resetDiscordChannelInfoCacheForTest() {
   DISCORD_CHANNEL_INFO_CACHE.clear();
-}
-
-function resolveDiscordChannelInfoCacheExpiresAt(ttlMs: number, nowMs: number): number | undefined {
-  return resolveExpiresAtMsFromDurationMs(ttlMs, { nowMs });
-}
-
-function cacheDiscordChannelInfo(
-  channelId: string,
-  value: DiscordChannelInfo | null,
-  ttlMs: number,
-  nowMs: number,
-): void {
-  const expiresAt = resolveDiscordChannelInfoCacheExpiresAt(ttlMs, nowMs);
-  if (expiresAt !== undefined) {
-    DISCORD_CHANNEL_INFO_CACHE.set(channelId, { value, expiresAt });
-  }
 }
 
 function normalizeDiscordChannelId(value: unknown): string {
@@ -71,11 +51,9 @@ export async function resolveDiscordChannelInfo(
   client: DiscordChannelInfoClient,
   channelId: string,
 ): Promise<DiscordChannelInfo | null> {
-  const rawNow = Date.now();
-  const now = asDateTimestampMs(rawNow);
   const cached = DISCORD_CHANNEL_INFO_CACHE.get(channelId);
   if (cached) {
-    if (now !== undefined && cached.expiresAt > now) {
+    if (cached.expiresAt > Date.now()) {
       return cached.value;
     }
     DISCORD_CHANNEL_INFO_CACHE.delete(channelId);
@@ -83,7 +61,10 @@ export async function resolveDiscordChannelInfo(
   try {
     const channel = await client.fetchChannel(channelId);
     if (!channel) {
-      cacheDiscordChannelInfo(channelId, null, DISCORD_CHANNEL_INFO_NEGATIVE_CACHE_TTL_MS, rawNow);
+      DISCORD_CHANNEL_INFO_CACHE.set(channelId, {
+        value: null,
+        expiresAt: Date.now() + DISCORD_CHANNEL_INFO_NEGATIVE_CACHE_TTL_MS,
+      });
       return null;
     }
     const channelInfo = resolveDiscordChannelInfoSafe(channel);
@@ -99,11 +80,17 @@ export async function resolveDiscordChannelInfo(
       parentId: channelInfo.parentId,
       ownerId: channelInfo.ownerId,
     };
-    cacheDiscordChannelInfo(channelId, payload, DISCORD_CHANNEL_INFO_CACHE_TTL_MS, rawNow);
+    DISCORD_CHANNEL_INFO_CACHE.set(channelId, {
+      value: payload,
+      expiresAt: Date.now() + DISCORD_CHANNEL_INFO_CACHE_TTL_MS,
+    });
     return payload;
   } catch (err) {
     logVerbose(`discord: failed to fetch channel ${channelId}: ${String(err)}`);
-    cacheDiscordChannelInfo(channelId, null, DISCORD_CHANNEL_INFO_NEGATIVE_CACHE_TTL_MS, rawNow);
+    DISCORD_CHANNEL_INFO_CACHE.set(channelId, {
+      value: null,
+      expiresAt: Date.now() + DISCORD_CHANNEL_INFO_NEGATIVE_CACHE_TTL_MS,
+    });
     return null;
   }
 }

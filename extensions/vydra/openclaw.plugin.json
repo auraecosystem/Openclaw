@@ -5,13 +5,8 @@
   },
   "enabledByDefault": true,
   "providers": ["vydra"],
-  "setup": {
-    "providers": [
-      {
-        "id": "vydra",
-        "envVars": ["VYDRA_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "vydra": ["VYDRA_API_KEY"]
   },
   "providerAuthChoices": [
     {

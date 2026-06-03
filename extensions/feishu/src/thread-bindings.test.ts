@@ -1,7 +1,7 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { getSessionBindingService } from "openclaw/plugin-sdk/conversation-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { testing, createFeishuThreadBindingManager } from "./thread-bindings.js";
+import { __testing, createFeishuThreadBindingManager } from "./thread-bindings.js";
 
 const baseCfg = {
   session: { mainKey: "main", scope: "per-sender" },
@@ -9,7 +9,7 @@ const baseCfg = {
 
 describe("Feishu thread bindings", () => {
   beforeEach(() => {
-    testing.resetFeishuThreadBindingsForTests();
+    __testing.resetFeishuThreadBindingsForTests();
   });
 
   afterEach(() => {

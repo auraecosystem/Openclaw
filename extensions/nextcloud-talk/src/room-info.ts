@@ -1,5 +1,4 @@
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
 import { ssrfPolicyFromPrivateNetworkOptIn } from "openclaw/plugin-sdk/ssrf-runtime";
 import { fetchWithSsrFGuard, type RuntimeEnv } from "../runtime-api.js";
@@ -14,7 +13,7 @@ const roomCache = new Map<
   { kind?: "direct" | "group"; fetchedAt: number; error?: string }
 >();
 
-export const testing = {
+export const __testing = {
   resetRoomCache() {
     roomCache.clear();
   },
@@ -25,10 +24,14 @@ function resolveRoomCacheKey(params: { accountId: string; roomToken: string }) {
 }
 
 function coerceRoomType(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+  if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
-  return parseStrictPositiveInteger(value);
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
 }
 
 function resolveRoomKindFromType(type: number | undefined): "direct" | "group" | undefined {
@@ -124,4 +127,3 @@ export async function resolveNextcloudTalkRoomKind(params: {
     return undefined;
   }
 }
-export { testing as __testing };

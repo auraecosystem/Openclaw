@@ -1,6 +1,5 @@
-import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../auto-reply/tokens.js";
-import { buildAgentRunTerminalOutcomeFromWaitResult } from "./agent-run-terminal-outcome.js";
+import { extractTextFromChatContent } from "../shared/chat-content.js";
 import { wrapPromptDataBlock } from "./sanitize-for-prompt.js";
 import {
   captureSubagentCompletionReplyUsing,
@@ -9,12 +8,12 @@ import {
 import {
   callGateway,
   getRuntimeConfig,
-  readSessionEntry,
-  readSessionMessagesAsync,
+  loadSessionStore,
   resolveAgentIdFromSessionKey,
   resolveStorePath,
 } from "./subagent-announce.runtime.js";
 import { assistantCallsSessionsYield, isSessionsYieldToolResult } from "./subagent-yield-output.js";
+import { readLatestAssistantReply } from "./tools/agent-step.js";
 import { extractAssistantText, sanitizeTextContent } from "./tools/session-message-text.js";
 import { isAnnounceSkip } from "./tools/sessions-send-tokens.js";
 
@@ -23,19 +22,13 @@ const FAST_TEST_RETRY_INTERVAL_MS = 8;
 type SubagentAnnounceOutputDeps = {
   callGateway: typeof callGateway;
   getRuntimeConfig: typeof getRuntimeConfig;
-  readSessionEntry: typeof readSessionEntry;
-  readSessionMessagesAsync: typeof readSessionMessagesAsync;
-  resolveAgentIdFromSessionKey: typeof resolveAgentIdFromSessionKey;
-  resolveStorePath: typeof resolveStorePath;
+  readLatestAssistantReply: typeof readLatestAssistantReply;
 };
 
 const defaultSubagentAnnounceOutputDeps: SubagentAnnounceOutputDeps = {
   callGateway,
   getRuntimeConfig,
-  readSessionEntry,
-  readSessionMessagesAsync,
-  resolveAgentIdFromSessionKey,
-  resolveStorePath,
+  readLatestAssistantReply,
 };
 
 let subagentAnnounceOutputDeps: SubagentAnnounceOutputDeps = defaultSubagentAnnounceOutputDeps;
@@ -44,10 +37,17 @@ function isFastTestMode() {
   return process.env.OPENCLAW_TEST_FAST === "1";
 }
 
+type ToolResultMessage = {
+  role?: unknown;
+  content?: unknown;
+};
+
 type SubagentOutputSnapshot = {
   latestAssistantText?: string;
   latestSilentText?: string;
-  latestToolCallCount?: number;
+  latestRawText?: string;
+  assistantFragments: string[];
+  toolCallCount: number;
   waitingForContinuation?: boolean;
 };
 
@@ -59,9 +59,6 @@ type AgentWaitResult = {
   stopReason?: string;
   livenessState?: string;
   yielded?: boolean;
-  pendingError?: boolean;
-  timeoutPhase?: string;
-  providerStarted?: boolean;
 };
 
 export type SubagentRunOutcome = {
@@ -72,6 +69,10 @@ export type SubagentRunOutcome = {
   elapsedMs?: number;
 };
 
+function readFiniteNumber(value: number | undefined): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 export function withSubagentOutcomeTiming(
   outcome: SubagentRunOutcome,
   timing: {
@@ -79,8 +80,8 @@ export function withSubagentOutcomeTiming(
     endedAt?: number;
   },
 ): SubagentRunOutcome {
-  const startedAt = asFiniteNumber(timing.startedAt) ?? asFiniteNumber(outcome.startedAt);
-  const endedAt = asFiniteNumber(timing.endedAt) ?? asFiniteNumber(outcome.endedAt);
+  const startedAt = readFiniteNumber(timing.startedAt) ?? readFiniteNumber(outcome.startedAt);
+  const endedAt = readFiniteNumber(timing.endedAt) ?? readFiniteNumber(outcome.endedAt);
   const nextTiming: Pick<SubagentRunOutcome, "startedAt" | "endedAt" | "elapsedMs"> = {};
   if (typeof startedAt === "number") {
     nextTiming.startedAt = startedAt;
@@ -94,43 +95,116 @@ export function withSubagentOutcomeTiming(
   return { ...outcome, ...nextTiming };
 }
 
-function extractSubagentAssistantText(message: unknown): string {
+function extractToolResultText(content: unknown): string {
+  if (typeof content === "string") {
+    return sanitizeTextContent(content);
+  }
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const obj = content as {
+      text?: unknown;
+      output?: unknown;
+      content?: unknown;
+      result?: unknown;
+      error?: unknown;
+      summary?: unknown;
+    };
+    if (typeof obj.text === "string") {
+      return sanitizeTextContent(obj.text);
+    }
+    if (typeof obj.output === "string") {
+      return sanitizeTextContent(obj.output);
+    }
+    if (typeof obj.content === "string") {
+      return sanitizeTextContent(obj.content);
+    }
+    if (typeof obj.result === "string") {
+      return sanitizeTextContent(obj.result);
+    }
+    if (typeof obj.error === "string") {
+      return sanitizeTextContent(obj.error);
+    }
+    if (typeof obj.summary === "string") {
+      return sanitizeTextContent(obj.summary);
+    }
+  }
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  const joined = extractTextFromChatContent(content, {
+    sanitizeText: sanitizeTextContent,
+    normalizeText: (text) => text,
+    joinWith: "\n",
+  });
+  return joined?.trim() ?? "";
+}
+
+function extractInlineTextContent(content: unknown): string {
+  if (!Array.isArray(content)) {
+    return "";
+  }
+  return (
+    extractTextFromChatContent(content, {
+      sanitizeText: sanitizeTextContent,
+      normalizeText: (text) => text.trim(),
+      joinWith: "",
+    }) ?? ""
+  );
+}
+
+function extractSubagentOutputText(message: unknown): string {
   if (!message || typeof message !== "object") {
     return "";
   }
   const role = (message as { role?: unknown }).role;
-  if (role !== "assistant") {
-    return "";
-  }
   const content = (message as { content?: unknown }).content;
-  if (typeof content === "string") {
-    return sanitizeTextContent(content);
+  if (role === "assistant") {
+    if (typeof content === "string") {
+      return sanitizeTextContent(content);
+    }
+    return extractAssistantText(message) ?? "";
   }
-  return extractAssistantText(message) ?? "";
+  if (role === "toolResult" || role === "tool") {
+    return extractToolResultText((message as ToolResultMessage).content);
+  }
+  if (role == null) {
+    if (typeof content === "string") {
+      return sanitizeTextContent(content);
+    }
+    if (Array.isArray(content)) {
+      return extractInlineTextContent(content);
+    }
+  }
+  return "";
 }
 
-function countAssistantToolCalls(message: unknown): number {
-  if (!message || typeof message !== "object") {
+function countAssistantToolCalls(content: unknown): number {
+  if (!Array.isArray(content)) {
     return 0;
   }
-  const content = (message as { content?: unknown }).content;
-  const contentToolCalls = Array.isArray(content)
-    ? content.filter(
-        (block) =>
-          block &&
-          typeof block === "object" &&
-          ((block as { type?: unknown }).type === "toolCall" ||
-            (block as { type?: unknown }).type === "tool_use"),
-      ).length
-    : 0;
-  const toolCalls =
-    (message as { toolCalls?: unknown; tool_calls?: unknown }).toolCalls ??
-    (message as { tool_calls?: unknown }).tool_calls;
-  return contentToolCalls + (Array.isArray(toolCalls) ? toolCalls.length : 0);
+  let count = 0;
+  for (const block of content) {
+    if (!block || typeof block !== "object") {
+      continue;
+    }
+    const type = (block as { type?: unknown }).type;
+    if (
+      type === "toolCall" ||
+      type === "tool_use" ||
+      type === "toolUse" ||
+      type === "functionCall" ||
+      type === "function_call"
+    ) {
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutputSnapshot {
-  const snapshot: SubagentOutputSnapshot = {};
+  const snapshot: SubagentOutputSnapshot = {
+    assistantFragments: [],
+    toolCallCount: 0,
+  };
   let previousAssistantCalledYield = false;
   for (const message of messages) {
     if (!message || typeof message !== "object") {
@@ -138,47 +212,82 @@ function summarizeSubagentOutputHistory(messages: Array<unknown>): SubagentOutpu
     }
     const role = (message as { role?: unknown }).role;
     if (role === "assistant") {
+      snapshot.toolCallCount += countAssistantToolCalls((message as { content?: unknown }).content);
       if (assistantCallsSessionsYield(message)) {
         snapshot.latestAssistantText = undefined;
+        snapshot.latestRawText = undefined;
         snapshot.latestSilentText = undefined;
+        snapshot.assistantFragments = [];
         snapshot.waitingForContinuation = true;
         previousAssistantCalledYield = true;
         continue;
       }
-      const text = extractSubagentAssistantText(message).trim();
+      const text = extractSubagentOutputText(message).trim();
       if (!text) {
-        snapshot.latestToolCallCount =
-          (snapshot.latestToolCallCount ?? 0) + countAssistantToolCalls(message);
-        snapshot.waitingForContinuation = false;
         previousAssistantCalledYield = false;
         continue;
       }
       if (isAnnounceSkip(text) || isSilentReplyText(text, SILENT_REPLY_TOKEN)) {
         snapshot.latestSilentText = text;
         snapshot.latestAssistantText = undefined;
+        snapshot.assistantFragments = [];
         snapshot.waitingForContinuation = false;
         previousAssistantCalledYield = false;
         continue;
       }
       snapshot.latestSilentText = undefined;
       snapshot.latestAssistantText = text;
+      snapshot.assistantFragments.push(text);
       snapshot.waitingForContinuation = false;
       previousAssistantCalledYield = false;
       continue;
     }
     if (isSessionsYieldToolResult(message, previousAssistantCalledYield)) {
       snapshot.latestAssistantText = undefined;
+      snapshot.latestRawText = undefined;
       snapshot.latestSilentText = undefined;
+      snapshot.assistantFragments = [];
       snapshot.waitingForContinuation = true;
       previousAssistantCalledYield = false;
       continue;
+    }
+    const text = extractSubagentOutputText(message).trim();
+    if (text) {
+      snapshot.latestRawText = text;
+      snapshot.waitingForContinuation = false;
     }
     previousAssistantCalledYield = false;
   }
   return snapshot;
 }
 
-function selectSubagentOutputText(snapshot: SubagentOutputSnapshot): string | undefined {
+function formatSubagentPartialProgress(
+  snapshot: SubagentOutputSnapshot,
+  outcome?: SubagentRunOutcome,
+): string | undefined {
+  if (snapshot.latestSilentText) {
+    return undefined;
+  }
+  const timedOut = outcome?.status === "timeout";
+  if (snapshot.assistantFragments.length === 0 && (!timedOut || snapshot.toolCallCount === 0)) {
+    return undefined;
+  }
+  const parts: string[] = [];
+  if (timedOut && snapshot.toolCallCount > 0) {
+    parts.push(
+      `[Partial progress: ${snapshot.toolCallCount} tool call(s) executed before timeout]`,
+    );
+  }
+  if (snapshot.assistantFragments.length > 0) {
+    parts.push(snapshot.assistantFragments.slice(-3).join("\n\n---\n\n"));
+  }
+  return parts.join("\n\n") || undefined;
+}
+
+function selectSubagentOutputText(
+  snapshot: SubagentOutputSnapshot,
+  outcome?: SubagentRunOutcome,
+): string | undefined {
   if (snapshot.waitingForContinuation) {
     return undefined;
   }
@@ -188,45 +297,35 @@ function selectSubagentOutputText(snapshot: SubagentOutputSnapshot): string | un
   if (snapshot.latestAssistantText) {
     return snapshot.latestAssistantText;
   }
-  if (snapshot.latestToolCallCount && snapshot.latestToolCallCount > 0) {
-    return `${snapshot.latestToolCallCount} tool call(s) made without visible output.`;
+  const partialProgress = formatSubagentPartialProgress(snapshot, outcome);
+  if (partialProgress) {
+    return partialProgress;
   }
-  return undefined;
+  return snapshot.latestRawText;
 }
 
 export async function readSubagentOutput(
   sessionKey: string,
-  _outcome?: SubagentRunOutcome,
-  options?: { sessionFile?: string },
+  outcome?: SubagentRunOutcome,
 ): Promise<string | undefined> {
-  let messages: unknown[] | undefined;
-  if (options?.sessionFile) {
-    const transcriptMessages = await subagentAnnounceOutputDeps.readSessionMessagesAsync(
-      sessionKey,
-      undefined,
-      options.sessionFile,
-      {
-        mode: "recent",
-        maxMessages: 100,
-        maxBytes: 1024 * 1024,
-      },
-    );
-    messages = transcriptMessages;
-  }
-  const history =
-    messages === undefined
-      ? await subagentAnnounceOutputDeps.callGateway({
-          method: "chat.history",
-          params: { sessionKey, limit: 100 },
-        })
-      : undefined;
-  const sourceMessages = messages ?? (Array.isArray(history?.messages) ? history.messages : []);
-  const snapshot = summarizeSubagentOutputHistory(sourceMessages);
-  const selected = selectSubagentOutputText(snapshot);
+  const history = await subagentAnnounceOutputDeps.callGateway({
+    method: "chat.history",
+    params: { sessionKey, limit: 100 },
+  });
+  const messages = Array.isArray(history?.messages) ? history.messages : [];
+  const snapshot = summarizeSubagentOutputHistory(messages);
+  const selected = selectSubagentOutputText(snapshot, outcome);
   if (selected?.trim()) {
     return selected;
   }
-  return undefined;
+  if (snapshot.waitingForContinuation) {
+    return undefined;
+  }
+  const latestAssistant = await subagentAnnounceOutputDeps.readLatestAssistantReply({
+    sessionKey,
+    limit: 100,
+  });
+  return latestAssistant?.trim() ? latestAssistant : undefined;
 }
 
 export async function readLatestSubagentOutputWithRetry(params: {
@@ -276,17 +375,12 @@ export function applySubagentWaitOutcome(params: {
     next.endedAt = params.wait.endedAt;
   }
   const waitError = typeof params.wait?.error === "string" ? params.wait.error : undefined;
-  const terminalOutcome = buildAgentRunTerminalOutcomeFromWaitResult(params.wait);
   let outcome = next.outcome;
-  // Capture/announcement callers can pass raw wait snapshots that bypass the
-  // primary normalizers, so preserve the shared timeout/cancel precedence here.
-  if (terminalOutcome?.status === "timeout") {
+  if (params.wait?.status === "timeout") {
     outcome = { status: "timeout" };
-  } else if (terminalOutcome?.reason === "aborted" || terminalOutcome?.reason === "cancelled") {
-    outcome = { status: "error", error: "subagent run terminated" };
-  } else if (terminalOutcome?.reason === "blocked" || terminalOutcome?.reason === "failed") {
-    outcome = { status: "error", error: terminalOutcome.error ?? waitError };
-  } else if (terminalOutcome?.reason === "completed") {
+  } else if (params.wait?.status === "error") {
+    outcome = { status: "error", error: waitError };
+  } else if (params.wait?.status === "ok") {
     outcome = { status: "ok" };
   }
   next.outcome = outcome ? withSubagentOutcomeTiming(outcome, next) : undefined;
@@ -295,7 +389,7 @@ export function applySubagentWaitOutcome(params: {
 
 export async function captureSubagentCompletionReply(
   sessionKey: string,
-  options?: { waitForReply?: boolean; outcome?: SubagentRunOutcome; sessionFile?: string },
+  options?: { waitForReply?: boolean; outcome?: SubagentRunOutcome },
 ): Promise<string | undefined> {
   return await captureSubagentCompletionReplyUsing({
     sessionKey,
@@ -303,9 +397,7 @@ export async function captureSubagentCompletionReply(
     maxWaitMs: isFastTestMode() ? 50 : 1_500,
     retryIntervalMs: isFastTestMode() ? FAST_TEST_RETRY_INTERVAL_MS : 100,
     readSubagentOutput: async (nextSessionKey) =>
-      await readSubagentOutput(nextSessionKey, options?.outcome, {
-        sessionFile: options?.sessionFile,
-      }),
+      await readSubagentOutput(nextSessionKey, options?.outcome),
   });
 }
 
@@ -334,39 +426,16 @@ function formatChildResultData(resultText?: string | null): string {
   );
 }
 
-type ChildCompletionRow = {
-  childSessionKey: string;
-  task: string;
-  label?: string;
-  createdAt: number;
-  endedAt?: number;
-  frozenResultText?: string | null;
-  completion?: {
-    resultText?: string | null;
-    fallbackResultText?: string | null;
-  };
-  delivery?: {
-    payload?: {
-      frozenResultText?: string | null;
-      fallbackFrozenResultText?: string | null;
-    };
-  };
-  outcome?: SubagentRunOutcome;
-};
-
-function selectChildCompletionResultText(child: ChildCompletionRow): string | undefined {
-  return (
-    child.completion?.resultText ??
-    child.delivery?.payload?.frozenResultText ??
-    child.completion?.fallbackResultText ??
-    child.delivery?.payload?.fallbackFrozenResultText ??
-    child.frozenResultText ??
-    undefined
-  )?.trim();
-}
-
 export function buildChildCompletionFindings(
-  children: Array<ChildCompletionRow>,
+  children: Array<{
+    childSessionKey: string;
+    task: string;
+    label?: string;
+    createdAt: number;
+    endedAt?: number;
+    frozenResultText?: string | null;
+    outcome?: SubagentRunOutcome;
+  }>,
 ): string | undefined {
   const sorted = [...children].toSorted((a, b) => {
     if (a.createdAt !== b.createdAt) {
@@ -379,7 +448,7 @@ export function buildChildCompletionFindings(
 
   const sections: string[] = [];
   for (const [index, child] of sorted.entries()) {
-    const resultText = selectChildCompletionResultText(child);
+    const resultText = child.frozenResultText?.trim();
     const outcome = describeSubagentOutcome(child.outcome);
     if (
       child.outcome?.status === "ok" &&
@@ -416,16 +485,6 @@ export function dedupeLatestChildCompletionRows(
     createdAt: number;
     endedAt?: number;
     frozenResultText?: string | null;
-    completion?: {
-      resultText?: string | null;
-      fallbackResultText?: string | null;
-    };
-    delivery?: {
-      payload?: {
-        frozenResultText?: string | null;
-        fallbackFrozenResultText?: string | null;
-      };
-    };
     outcome?: SubagentRunOutcome;
   }>,
 ) {
@@ -449,16 +508,6 @@ export function filterCurrentDirectChildCompletionRows(
     createdAt: number;
     endedAt?: number;
     frozenResultText?: string | null;
-    completion?: {
-      resultText?: string | null;
-      fallbackResultText?: string | null;
-    };
-    delivery?: {
-      payload?: {
-        frozenResultText?: string | null;
-        fallbackFrozenResultText?: string | null;
-      };
-    };
     outcome?: SubagentRunOutcome;
   }>,
   params: {
@@ -511,13 +560,7 @@ function formatTokenCount(value?: number) {
     return `${(value / 1_000_000).toFixed(1)}m`;
   }
   if (value >= 1_000) {
-    const formattedThousands = (value / 1_000).toFixed(1);
-    // Keep the compact stats unit scheme stable when one-decimal rounding
-    // reaches the next unit, e.g. 999_999 -> 1000.0k.
-    if (Number(formattedThousands) >= 1_000) {
-      return `${(value / 1_000_000).toFixed(1)}m`;
-    }
-    return `${formattedThousands}k`;
+    return `${(value / 1_000).toFixed(1)}k`;
   }
   return String(Math.round(value));
 }
@@ -528,9 +571,9 @@ export async function buildCompactAnnounceStatsLine(params: {
   endedAt?: number;
 }) {
   const cfg = subagentAnnounceOutputDeps.getRuntimeConfig();
-  const agentId = subagentAnnounceOutputDeps.resolveAgentIdFromSessionKey(params.sessionKey);
-  const storePath = subagentAnnounceOutputDeps.resolveStorePath(cfg.session?.store, { agentId });
-  let entry = subagentAnnounceOutputDeps.readSessionEntry(storePath, params.sessionKey);
+  const agentId = resolveAgentIdFromSessionKey(params.sessionKey);
+  const storePath = resolveStorePath(cfg.session?.store, { agentId });
+  let entry = loadSessionStore(storePath)[params.sessionKey];
   const tokenWaitAttempts = isFastTestMode() ? 1 : 3;
   for (let attempt = 0; attempt < tokenWaitAttempts; attempt += 1) {
     const hasTokenData =
@@ -541,11 +584,9 @@ export async function buildCompactAnnounceStatsLine(params: {
       break;
     }
     if (!isFastTestMode()) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, 150);
-      });
+      await new Promise((resolve) => setTimeout(resolve, 150));
     }
-    entry = subagentAnnounceOutputDeps.readSessionEntry(storePath, params.sessionKey);
+    entry = loadSessionStore(storePath)[params.sessionKey];
   }
 
   const input = typeof entry?.inputTokens === "number" ? entry.inputTokens : 0;
@@ -567,7 +608,7 @@ export async function buildCompactAnnounceStatsLine(params: {
   return `Stats: ${parts.join(" • ")}`;
 }
 
-export const testing = {
+export const __testing = {
   setDepsForTest(overrides?: Partial<SubagentAnnounceOutputDeps>) {
     subagentAnnounceOutputDeps = overrides
       ? {
@@ -577,4 +618,3 @@ export const testing = {
       : defaultSubagentAnnounceOutputDeps;
   },
 };
-export { testing as __testing };

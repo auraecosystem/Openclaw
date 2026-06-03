@@ -13,24 +13,15 @@ export type {
 } from "../auto-reply/reply/provider-dispatcher.types.js";
 export type { ReplyPayload } from "./reply-payload.js";
 
-let providerDispatcherRuntimeModulePromise: Promise<
-  typeof import("../auto-reply/reply/provider-dispatcher.runtime.js")
-> | null = null;
-
-const loadProviderDispatcherRuntimeModule = async () => {
-  providerDispatcherRuntimeModulePromise ??=
-    import("../auto-reply/reply/provider-dispatcher.runtime.js");
-  return await providerDispatcherRuntimeModulePromise;
-};
-
 export const dispatchReplyWithBufferedBlockDispatcher: DispatchReplyWithBufferedBlockDispatcher =
   async (params) => {
     const { dispatchReplyWithBufferedBlockDispatcher: dispatch } =
-      await loadProviderDispatcherRuntimeModule();
+      await import("../auto-reply/reply/provider-dispatcher.runtime.js");
     return await dispatch(params);
   };
 
 export const dispatchReplyWithDispatcher: DispatchReplyWithDispatcher = async (params) => {
-  const { dispatchReplyWithDispatcher: dispatch } = await loadProviderDispatcherRuntimeModule();
+  const { dispatchReplyWithDispatcher: dispatch } =
+    await import("../auto-reply/reply/provider-dispatcher.runtime.js");
   return await dispatch(params);
 };

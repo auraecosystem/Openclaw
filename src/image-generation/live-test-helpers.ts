@@ -1,4 +1,3 @@
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   parseLiveCsvFilter,
@@ -7,6 +6,7 @@ import {
   resolveConfiguredLiveProviderModels,
   resolveLiveAuthStore,
 } from "../media-generation/live-test-helpers.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 
 export { parseProviderModelMap, redactLiveApiKey };
 

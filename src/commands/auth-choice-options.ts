@@ -1,4 +1,3 @@
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveProviderSetupFlowContributions } from "../flows/provider-flow.js";
@@ -89,7 +88,7 @@ export function formatAuthChoiceChoicesForCli(params?: {
     }).map((contribution) => contribution.option.value),
   ];
 
-  return uniqueStrings(values).join("|");
+  return [...new Set(values)].join("|");
 }
 
 export function buildAuthChoiceOptions(params: {

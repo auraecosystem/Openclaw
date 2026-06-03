@@ -14,7 +14,6 @@ import type {
   ChannelSetupWizardAllowFromEntry,
 } from "openclaw/plugin-sdk/setup-runtime";
 import { formatDocsLink } from "openclaw/plugin-sdk/setup-tools";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   resolveDefaultSlackAccountId,
   resolveSlackAccount,
@@ -138,7 +137,7 @@ async function resolveSlackGroupAllowlist(params: {
         .filter((entry) => entry.resolved && entry.id)
         .map((entry) => entry.id as string);
       const unresolved = resolved.filter((entry) => !entry.resolved).map((entry) => entry.input);
-      keys = [...resolvedKeys, ...normalizeStringEntries(unresolved)];
+      keys = [...resolvedKeys, ...unresolved.map((entry) => entry.trim()).filter(Boolean)];
       await noteChannelLookupSummary({
         prompter: params.prompter,
         label: t("wizard.slack.channelsLabel"),

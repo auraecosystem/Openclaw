@@ -17,14 +17,6 @@ type DevicesRpcOpts = {
 
 const DEFAULT_DEVICES_TIMEOUT_MS = 10_000;
 
-type DevicesRuntimeModule = typeof import("./devices-cli.runtime.js");
-
-let devicesRuntimePromise: Promise<DevicesRuntimeModule> | undefined;
-
-function loadDevicesRuntime(): Promise<DevicesRuntimeModule> {
-  return (devicesRuntimePromise ??= import("./devices-cli.runtime.js"));
-}
-
 const devicesCallOpts = (cmd: Command, defaults?: { timeoutMs?: number }) =>
   cmd
     .option("--url <url>", "Gateway WebSocket URL (defaults to gateway.remote.url when configured)")
@@ -45,7 +37,7 @@ export function registerDevicesCli(program: Command) {
       .command("list")
       .description("List pending and paired devices")
       .action(async (opts: DevicesRpcOpts) => {
-        const { runDevicesListCommand } = await loadDevicesRuntime();
+        const { runDevicesListCommand } = await import("./devices-cli.runtime.js");
         await runDevicesListCommand(opts);
       }),
   );
@@ -56,7 +48,7 @@ export function registerDevicesCli(program: Command) {
       .description("Remove a paired device entry")
       .argument("<deviceId>", "Paired device id")
       .action(async (deviceId: string, opts: DevicesRpcOpts) => {
-        const { runDevicesRemoveCommand } = await loadDevicesRuntime();
+        const { runDevicesRemoveCommand } = await import("./devices-cli.runtime.js");
         await runDevicesRemoveCommand(deviceId, opts);
       }),
   );
@@ -68,7 +60,7 @@ export function registerDevicesCli(program: Command) {
       .option("--pending", "Also reject all pending pairing requests", false)
       .option("--yes", "Confirm destructive clear", false)
       .action(async (opts: DevicesRpcOpts) => {
-        const { runDevicesClearCommand } = await loadDevicesRuntime();
+        const { runDevicesClearCommand } = await import("./devices-cli.runtime.js");
         await runDevicesClearCommand(opts);
       }),
   );
@@ -80,7 +72,7 @@ export function registerDevicesCli(program: Command) {
       .argument("[requestId]", "Pending request id")
       .option("--latest", "Show the most recent pending request to approve explicitly", false)
       .action(async (requestId: string | undefined, opts: DevicesRpcOpts) => {
-        const { runDevicesApproveCommand } = await loadDevicesRuntime();
+        const { runDevicesApproveCommand } = await import("./devices-cli.runtime.js");
         await runDevicesApproveCommand(requestId, opts);
       }),
   );
@@ -91,7 +83,7 @@ export function registerDevicesCli(program: Command) {
       .description("Reject a pending device pairing request")
       .argument("<requestId>", "Pending request id")
       .action(async (requestId: string, opts: DevicesRpcOpts) => {
-        const { runDevicesRejectCommand } = await loadDevicesRuntime();
+        const { runDevicesRejectCommand } = await import("./devices-cli.runtime.js");
         await runDevicesRejectCommand(requestId, opts);
       }),
   );
@@ -104,7 +96,7 @@ export function registerDevicesCli(program: Command) {
       .requiredOption("--role <role>", "Role name")
       .option("--scope <scope...>", "Scopes to attach to the token (repeatable)")
       .action(async (opts: DevicesRpcOpts) => {
-        const { runDevicesRotateCommand } = await loadDevicesRuntime();
+        const { runDevicesRotateCommand } = await import("./devices-cli.runtime.js");
         await runDevicesRotateCommand(opts);
       }),
   );
@@ -116,7 +108,7 @@ export function registerDevicesCli(program: Command) {
       .requiredOption("--device <id>", "Device id")
       .requiredOption("--role <role>", "Role name")
       .action(async (opts: DevicesRpcOpts) => {
-        const { runDevicesRevokeCommand } = await loadDevicesRuntime();
+        const { runDevicesRevokeCommand } = await import("./devices-cli.runtime.js");
         await runDevicesRevokeCommand(opts);
       }),
   );

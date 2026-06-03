@@ -110,7 +110,7 @@ export async function resetLifecycleTestState() {
   vi.clearAllMocks();
   (await importCachedWebhookModule()).clearZaloWebhookSecurityStateForTest();
   for (const module of loadedMonitorModules) {
-    module.testing.clearHostedMediaRouteRefsForTest();
+    module.__testing.clearHostedMediaRouteRefsForTest();
   }
   setActivePluginRegistry(createEmptyPluginRegistry());
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { buildOpenShellSandboxName, buildOpenShellSshExecEnv } from "./backend.js";
+import { buildOpenShellSshExecEnv } from "./backend.js";
 
 describe("openshell backend env", () => {
   const originalEnv = { ...process.env };
@@ -25,16 +25,5 @@ describe("openshell backend env", () => {
     expect(env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(env.LANG).toBe("en_US.UTF-8");
     expect(env.NODE_ENV).toBe("test");
-  });
-});
-
-describe("openshell sandbox names", () => {
-  it("generates Kubernetes-safe names from OpenClaw session scope keys", () => {
-    const name = buildOpenShellSandboxName("agent:somalley_alice:dashboard-8");
-
-    expect(name).toMatch(/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/);
-    expect(name).toContain("somalley-alice");
-    expect(name).not.toContain("_");
-    expect(name.length).toBeLessThanOrEqual(63);
   });
 });

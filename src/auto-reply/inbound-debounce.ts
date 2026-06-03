@@ -53,7 +53,6 @@ export type InboundDebounceCreateParams<T> = {
   serializeImmediate?: boolean;
   onFlush: (items: T[]) => Promise<void>;
   onError?: (err: unknown, items: T[]) => void;
-  onCancel?: (items: T[]) => void;
 };
 
 export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>) {
@@ -171,36 +170,12 @@ export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>
     await flushBuffer(key, buffer);
   };
 
-  const cancelKey = (key: string): boolean => {
-    const buffer = buffers.get(key);
-    if (!buffer) {
-      return false;
-    }
-    if (buffers.get(key) === buffer) {
-      buffers.delete(key);
-    }
-    if (buffer.timeout) {
-      clearTimeout(buffer.timeout);
-      buffer.timeout = null;
-    }
-    const canceledItems = buffer.items;
-    buffer.items = [];
-    try {
-      params.onCancel?.(canceledItems);
-    } catch {
-      // Cancellation observers release caller-owned resources; debounce state
-      // must still drain even if an observer fails.
-    }
-    releaseBuffer(buffer);
-    return true;
-  };
-
   const scheduleFlush = (key: string, buffer: DebounceBuffer<T>) => {
     if (buffer.timeout) {
       clearTimeout(buffer.timeout);
     }
-    buffer.timeout = setTimeout(() => {
-      void flushBuffer(key, buffer);
+    buffer.timeout = setTimeout(async () => {
+      await flushBuffer(key, buffer);
     }, buffer.debounceMs);
     buffer.timeout.unref?.();
   };
@@ -267,13 +242,15 @@ export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>
       });
       return;
     }
+
+    let buffer!: DebounceBuffer<T>;
     const reservedTask = enqueueReservedKeyTask(key, async () => {
       if (buffer.items.length === 0) {
         return;
       }
       await runFlush(buffer.items);
     });
-    const buffer: DebounceBuffer<T> = {
+    buffer = {
       items: [item],
       timeout: null,
       debounceMs,
@@ -285,5 +262,5 @@ export function createInboundDebouncer<T>(params: InboundDebounceCreateParams<T>
     scheduleFlush(key, buffer);
   };
 
-  return { enqueue, flushKey, cancelKey };
+  return { enqueue, flushKey };
 }

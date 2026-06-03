@@ -34,7 +34,7 @@ enum VoiceWakeForwarder {
 
     struct ForwardOptions {
         var sessionKey: String = "main"
-        var thinking: String?
+        var thinking: String = "low"
         var deliver: Bool = true
         var to: String?
         var channel: GatewayAgentChannel = .webchat
@@ -97,6 +97,7 @@ enum VoiceWakeForwarder {
 
         return ForwardOptions(
             sessionKey: sessionKey,
+            thinking: "low",
             deliver: true,
             to: to,
             channel: channel,

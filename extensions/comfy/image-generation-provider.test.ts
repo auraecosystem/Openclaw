@@ -1,7 +1,6 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  setComfyFetchGuardForTesting,
+  _setComfyFetchGuardForTesting,
   buildComfyImageGenerationProvider,
 } from "./image-generation-provider.js";
 import {
@@ -19,7 +18,6 @@ const { fetchWithSsrFGuardMock } = vi.hoisted(() => ({
 type FetchGuardRequest = {
   url?: unknown;
   auditContext?: unknown;
-  timeoutMs?: unknown;
   init?: {
     method?: unknown;
     headers?: HeadersInit;
@@ -45,7 +43,7 @@ describe("comfy image-generation provider", () => {
   });
 
   afterEach(() => {
-    setComfyFetchGuardForTesting(null);
+    _setComfyFetchGuardForTesting(null);
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
@@ -116,7 +114,7 @@ describe("comfy image-generation provider", () => {
   });
 
   it("submits a local workflow, waits for history, and downloads images", async () => {
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     fetchWithSsrFGuardMock
       .mockResolvedValueOnce({
         response: new Response(JSON.stringify({ prompt_id: "local-prompt-1" }), {
@@ -203,114 +201,8 @@ describe("comfy image-generation provider", () => {
     });
   });
 
-  it("caps oversized local workflow timeouts", async () => {
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
-    const nowSpy = vi.spyOn(Date, "now");
-    nowSpy
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(0)
-      .mockReturnValueOnce(MAX_TIMER_TIMEOUT_MS + 1);
-    fetchWithSsrFGuardMock
-      .mockResolvedValueOnce({
-        response: new Response(JSON.stringify({ prompt_id: "local-prompt-1" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-        release: vi.fn(async () => {}),
-      })
-      .mockResolvedValueOnce({
-        response: new Response(JSON.stringify({ "local-prompt-1": { outputs: {} } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-        release: vi.fn(async () => {}),
-      });
-
-    try {
-      const provider = buildComfyImageGenerationProvider();
-      await expect(
-        provider.generateImage({
-          provider: "comfy",
-          model: "workflow",
-          prompt: "draw a bounded timer",
-          cfg: buildComfyConfig({
-            workflow: {
-              "6": { inputs: { text: "" } },
-              "9": { inputs: {} },
-            },
-            promptNodeId: "6",
-            outputNodeId: "9",
-            timeoutMs: Number.MAX_SAFE_INTEGER,
-          }),
-        }),
-      ).rejects.toThrow("Comfy workflow did not finish within 2147000s");
-
-      expect(fetchRequest(1).timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-      expect(fetchRequest(2).timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-    } finally {
-      nowSpy.mockRestore();
-    }
-  });
-
-  it("rejects generated image downloads that exceed the configured media cap", async () => {
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
-    fetchWithSsrFGuardMock
-      .mockResolvedValueOnce({
-        response: new Response(JSON.stringify({ prompt_id: "local-prompt-1" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        }),
-        release: vi.fn(async () => {}),
-      })
-      .mockResolvedValueOnce({
-        response: new Response(
-          JSON.stringify({
-            "local-prompt-1": {
-              outputs: {
-                "9": {
-                  images: [{ filename: "generated.png", subfolder: "", type: "output" }],
-                },
-              },
-            },
-          }),
-          {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          },
-        ),
-        release: vi.fn(async () => {}),
-      })
-      .mockResolvedValueOnce({
-        response: new Response(Buffer.from("too-large"), {
-          status: 200,
-          headers: { "content-type": "image/png" },
-        }),
-        release: vi.fn(async () => {}),
-      });
-
-    const provider = buildComfyImageGenerationProvider();
-    await expect(
-      provider.generateImage({
-        provider: "comfy",
-        model: "workflow",
-        prompt: "draw a lobster",
-        cfg: {
-          ...buildComfyConfig({
-            workflow: {
-              "6": { inputs: { text: "" } },
-              "9": { inputs: {} },
-            },
-            promptNodeId: "6",
-            outputNodeId: "9",
-          }),
-          agents: { defaults: { mediaMaxMb: 0.000001 } },
-        } as never,
-      }),
-    ).rejects.toThrow("Comfy image output download exceeds 1 bytes");
-  });
-
   it("reports malformed local workflow submit JSON as a provider error", async () => {
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     const release = vi.fn(async () => {});
     fetchWithSsrFGuardMock.mockResolvedValueOnce({
       response: new Response("{ nope", {
@@ -340,7 +232,7 @@ describe("comfy image-generation provider", () => {
   });
 
   it("uploads reference images for local edit workflows", async () => {
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     fetchWithSsrFGuardMock
       .mockResolvedValueOnce({
         response: new Response(JSON.stringify({ name: "upload.png" }), {
@@ -428,7 +320,7 @@ describe("comfy image-generation provider", () => {
 
   it("uses cloud endpoints, auth headers, and partner-node extra_data", async () => {
     mockComfyProviderApiKey();
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     mockComfyCloudJobResponses(fetchWithSsrFGuardMock, {
       body: Buffer.from("cloud-data"),
       contentType: "image/png",
@@ -491,7 +383,7 @@ describe("comfy image-generation provider", () => {
 
   it("uses plugin config env SecretRef auth for cloud workflows", async () => {
     vi.stubEnv("COMFY_TEST_API_KEY", "comfy-secret-ref-key");
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     mockComfyCloudJobResponses(fetchWithSsrFGuardMock, {
       body: Buffer.from("cloud-data"),
       contentType: "image/png",
@@ -529,7 +421,7 @@ describe("comfy image-generation provider", () => {
   it("uses provider auth fallback for cloud workflows without plugin config API keys", async () => {
     vi.stubEnv("COMFY_API_KEY", "stale-env-key");
     mockComfyProviderApiKey("profile-key");
-    setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
+    _setComfyFetchGuardForTesting(fetchWithSsrFGuardMock);
     mockComfyCloudJobResponses(fetchWithSsrFGuardMock, {
       body: Buffer.from("cloud-data"),
       contentType: "image/png",

@@ -237,12 +237,8 @@ async function runCommandWithExternalOutput(params: {
     },
   });
   if (deferredError) {
-    throw toErrorObject(deferredError);
+    throw deferredError;
   }
-}
-
-function toErrorObject(error: unknown): Error {
-  return error instanceof Error ? error : new Error(formatErrorMessage(error));
 }
 
 function buildVisualDriverArgs(params: {
@@ -520,12 +516,7 @@ export async function runMantisVisualDriver(
       runner,
       stdio: "inherit",
     });
-    const settleMs = opts.settleMs ?? DEFAULT_SETTLE_MS;
-    if (settleMs > 0) {
-      await new Promise((resolve) => {
-        setTimeout(resolve, settleMs);
-      });
-    }
+    await new Promise((resolve) => setTimeout(resolve, opts.settleMs ?? DEFAULT_SETTLE_MS));
     await runCommandWithExternalOutput({
       command: crabboxBin,
       outputPath: screenshotPath,

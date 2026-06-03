@@ -1,4 +1,4 @@
-import type { AcpSessionUpdateTag } from "@openclaw/acp-core/runtime/types";
+import type { AcpSessionUpdateTag } from "../acp/runtime/types.js";
 
 export type AcpDispatchConfig = {
   /** Master switch for ACP turn dispatch in the reply pipeline. */

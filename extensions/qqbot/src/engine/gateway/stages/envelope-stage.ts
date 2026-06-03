@@ -7,7 +7,6 @@
  * dispatcher needs. No decisions / gating.
  */
 
-import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ProcessedAttachments } from "../inbound-attachments.js";
 import type { InboundGroupInfo, InboundPipelineDeps, ReplyToInfo } from "../inbound-context.js";
 import type { QueuedMessage } from "../message-queue.js";
@@ -126,8 +125,8 @@ export function classifyMedia(processed: ProcessedAttachments): MediaClassificat
     }
   }
 
-  const uniqueVoicePaths = uniqueStrings(processed.voiceAttachmentPaths);
-  const uniqueVoiceUrls = uniqueStrings(processed.voiceAttachmentUrls);
+  const uniqueVoicePaths = [...new Set(processed.voiceAttachmentPaths)];
+  const uniqueVoiceUrls = [...new Set(processed.voiceAttachmentUrls)];
   const voiceMediaTypes = [...uniqueVoicePaths, ...uniqueVoiceUrls].map(() => "audio/wav");
 
   return {
@@ -137,7 +136,7 @@ export function classifyMedia(processed: ProcessedAttachments): MediaClassificat
     remoteMediaTypes,
     uniqueVoicePaths,
     uniqueVoiceUrls,
-    uniqueVoiceAsrReferTexts: uniqueStrings(processed.voiceAsrReferTexts).filter(Boolean),
+    uniqueVoiceAsrReferTexts: [...new Set(processed.voiceAsrReferTexts)].filter(Boolean),
     voiceMediaTypes,
     hasAsrReferFallback: processed.voiceTranscriptSources.includes("asr"),
     voiceTranscriptSources: processed.voiceTranscriptSources,

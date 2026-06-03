@@ -1,6 +1,5 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { expectExplicitMusicGenerationCapabilities } from "openclaw/plugin-sdk/provider-test-contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildOpenRouterMusicGenerationProvider } from "./music-generation-provider.js";
 
 const {
@@ -74,33 +73,12 @@ function postRequest(): Record<string, unknown> {
   return request as Record<string, unknown>;
 }
 
-function resetOpenRouterMusicMocks() {
-  assertOkOrThrowHttpErrorMock.mockResolvedValue(undefined);
-  postJsonRequestMock.mockReset();
-  resolveApiKeyForProviderMock.mockResolvedValue({
-    apiKey: "openrouter-key",
-    source: "env",
-    mode: "api-key",
-  });
-  resolveProviderHttpRequestConfigMock.mockImplementation((params: Record<string, unknown>) => ({
-    baseUrl: params.baseUrl ?? params.defaultBaseUrl,
-    allowPrivateNetwork: false,
-    headers: new Headers(params.defaultHeaders as HeadersInit | undefined),
-    dispatcherPolicy: undefined,
-  }));
-}
-
 describe("openrouter music generation provider", () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    resetOpenRouterMusicMocks();
-  });
-
   afterEach(() => {
-    resetOpenRouterMusicMocks();
-    vi.restoreAllMocks();
-    vi.useRealTimers();
+    assertOkOrThrowHttpErrorMock.mockClear();
+    postJsonRequestMock.mockReset();
+    resolveApiKeyForProviderMock.mockClear();
+    resolveProviderHttpRequestConfigMock.mockClear();
   });
 
   it("declares explicit mode capabilities", () => {
@@ -226,36 +204,6 @@ describe("openrouter music generation provider", () => {
         timeoutMs: 1,
       }),
     ).rejects.toThrow("OpenRouter music generation timed out after 1ms");
-  });
-
-  it("caps oversized OpenRouter music stream timeouts", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(1_000);
-    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
-    try {
-      postJsonRequestMock.mockResolvedValue({
-        response: sseResponse(["data: [DONE]\n"]),
-        release: vi.fn(async () => {}),
-      });
-
-      await expect(
-        buildOpenRouterMusicGenerationProvider().generateMusic({
-          provider: "openrouter",
-          model: "google/lyria-3-clip-preview",
-          prompt: "huge timeout",
-          cfg: {},
-          timeoutMs: Number.MAX_SAFE_INTEGER,
-        }),
-      ).rejects.toThrow("OpenRouter music generation response missing audio data");
-
-      expect(postRequest().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-      const streamTimeoutMs = timeoutSpy.mock.calls.at(-1)?.[1];
-      expect(streamTimeoutMs).toBeGreaterThan(MAX_TIMER_TIMEOUT_MS - 1_000);
-      expect(streamTimeoutMs).toBeLessThanOrEqual(MAX_TIMER_TIMEOUT_MS);
-    } finally {
-      timeoutSpy.mockRestore();
-      vi.useRealTimers();
-    }
   });
 
   it("rejects OpenRouter streams that end before completion", async () => {

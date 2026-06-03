@@ -176,8 +176,9 @@ async function applyApprovalFinalAction(params: {
         entry: params.wrapped.entry,
         phase: params.phase,
       });
-
+      return;
     case "leave":
+      return;
   }
 }
 

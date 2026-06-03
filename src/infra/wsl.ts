@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 let wslCached: boolean | null = null;
 

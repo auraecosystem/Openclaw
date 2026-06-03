@@ -1,13 +1,9 @@
-import {
-  normalizeStringEntries,
-  uniqueStrings,
-} from "../../packages/normalization-core/src/string-normalization.js";
-import { sanitizeForLog } from "../../packages/terminal-core/src/ansi.js";
 import { createAllowlistProviderRestrictSendersWarningCollector } from "../channels/plugins/group-policy-warnings.js";
 import type { ChannelSecurityAdapter } from "../channels/plugins/types.adapters.js";
 import { collectProviderDangerousNameMatchingScopes } from "../config/dangerous-name-matching.js";
 import type { GroupPolicy } from "../config/types.base.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { sanitizeForLog } from "../terminal/ansi.js";
 import { createScopedDmSecurityResolver } from "./channel-config-helpers.js";
 /** Shared policy warnings and DM/group policy helpers for channel plugins. */
 export type {
@@ -62,15 +58,13 @@ export {
 } from "./group-access.js";
 export { createAllowlistProviderRestrictSendersWarningCollector };
 
-/** Normalizes allowFrom entries into trimmed unique string identifiers. */
 export function normalizeAllowFromList(list: Array<string | number> | undefined | null): string[] {
   if (!Array.isArray(list)) {
     return [];
   }
-  return normalizeStringEntries(list);
+  return list.map((value) => String(value).trim()).filter(Boolean);
 }
 
-/** Coerces native feature settings to the supported boolean/auto shape. */
 export function coerceNativeSetting(value: unknown): boolean | "auto" | undefined {
   if (value === true || value === false || value === "auto") {
     return value;
@@ -78,7 +72,6 @@ export function coerceNativeSetting(value: unknown): boolean | "auto" | undefine
   return undefined;
 }
 
-/** Candidate mutable allowlist path inspected for dangerous name-matching warnings. */
 export type ChannelMutableAllowlistCandidate = {
   pathLabel: string;
   list: unknown;
@@ -100,10 +93,9 @@ function collectMutableAllowlistWarningLines(
   const exampleLines = hits
     .slice(0, 8)
     .map((hit) => `- ${sanitizeForLog(hit.path)}: ${sanitizeForLog(hit.entry)}`);
-  // Keep doctor output actionable without dumping large allowlists into logs.
   const remaining =
     hits.length > 8 ? `- +${hits.length - 8} more mutable allowlist entries.` : null;
-  const flagPaths = uniqueStrings(hits.map((hit) => hit.dangerousFlagPath));
+  const flagPaths = Array.from(new Set(hits.map((hit) => hit.dangerousFlagPath)));
   const flagHint =
     flagPaths.length === 1
       ? sanitizeForLog(flagPaths[0] ?? "")
@@ -117,7 +109,6 @@ function collectMutableAllowlistWarningLines(
   ];
 }
 
-/** Creates a warning collector for mutable name/email/nick allowlists when matching is disabled. */
 export function createDangerousNameMatchingMutableAllowlistWarningCollector(params: {
   channel: string;
   detector: (entry: string) => boolean;

@@ -1,4 +1,3 @@
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import type { SandboxToolPolicy } from "./sandbox/types.js";
 
 export const IMPLICIT_ALLOW_ALL_FROM_ALSO_ALLOW = Symbol.for(
@@ -16,12 +15,12 @@ function unionAllow(base?: string[], extra?: string[]): string[] | undefined {
     return base;
   }
   if (!Array.isArray(base)) {
-    return uniqueStrings(["*", ...extra]);
+    return Array.from(new Set(["*", ...extra]));
   }
   if (base.length === 0) {
-    return uniqueStrings(["*", ...extra]);
+    return Array.from(new Set(["*", ...extra]));
   }
-  return uniqueStrings([...base, ...extra]);
+  return Array.from(new Set([...base, ...extra]));
 }
 
 function hasExplicitAllowAll(list?: string[]): boolean {

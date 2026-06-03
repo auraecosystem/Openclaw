@@ -1,12 +1,10 @@
-export { asFiniteNumber } from "../../packages/normalization-core/src/number-coercion.js";
-import { readResponseWithLimit } from "@openclaw/media-core/read-response-with-limit";
-import { normalizeOptionalString as trimToUndefined } from "../../packages/normalization-core/src/string-coerce.js";
-import { redactSensitiveText } from "../logging/redact.js";
-export { asBoolean } from "../utils/boolean.js";
-export { normalizeOptionalString as trimToUndefined } from "../../packages/normalization-core/src/string-coerce.js";
+export { asFiniteNumber } from "../shared/number-coercion.js";
+import { normalizeOptionalString as trimToUndefined } from "../shared/string-coerce.js";
+export { normalizeOptionalString as trimToUndefined } from "../shared/string-coerce.js";
 
-const ERROR_BODY_METADATA_LIMIT = 500;
-const PROVIDER_BINARY_RESPONSE_MAX_BYTES = 16 * 1024 * 1024;
+export function asBoolean(value: unknown): boolean | undefined {
+  return typeof value === "boolean" ? value : undefined;
+}
 
 export function asObject(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -16,10 +14,6 @@ export function asObject(value: unknown): Record<string, unknown> | undefined {
 
 export function truncateErrorDetail(detail: string, limit = 220): string {
   return detail.length <= limit ? detail : `${detail.slice(0, limit - 1)}…`;
-}
-
-export function redactProviderErrorBody(body: string): string {
-  return truncateErrorDetail(redactSensitiveText(body), ERROR_BODY_METADATA_LIMIT);
 }
 
 export async function readResponseTextLimited(
@@ -78,18 +72,14 @@ export function formatProviderErrorPayload(payload: unknown): string | undefined
   if (!subject) {
     return undefined;
   }
-  const errorDescription =
-    trimToUndefined(subject.error_description) ?? trimToUndefined(root?.error_description);
-  const oauthCode = errorDescription ? trimToUndefined(root?.error) : undefined;
   const message =
     trimToUndefined(subject.message) ??
     trimToUndefined(subject.detail) ??
-    errorDescription ??
     trimToUndefined(root?.message) ??
     trimToUndefined(root?.error) ??
     trimToUndefined(root?.detail);
   const type = trimToUndefined(subject.type);
-  const code = trimToUndefined(subject.code) ?? trimToUndefined(subject.status) ?? oauthCode;
+  const code = trimToUndefined(subject.code) ?? trimToUndefined(subject.status);
   const metadata = [type ? `type=${type}` : undefined, code ? `code=${code}` : undefined]
     .filter((value): value is string => Boolean(value))
     .join(", ");
@@ -105,68 +95,16 @@ export function formatProviderErrorPayload(payload: unknown): string | undefined
   return undefined;
 }
 
-type ProviderErrorPayloadMetadata = {
-  detail?: string;
-  code?: string;
-  type?: string;
-};
-
-function extractProviderErrorPayloadMetadata(payload: unknown): ProviderErrorPayloadMetadata {
-  const root = asObject(payload);
-  const detailObject = asObject(root?.detail);
-  const subject = asObject(root?.error) ?? detailObject ?? root;
-  if (!subject) {
-    return {};
-  }
-
-  const detail = formatProviderErrorPayload(payload);
-  const type = trimToUndefined(subject.type);
-  const errorDescription =
-    trimToUndefined(subject.error_description) ?? trimToUndefined(root?.error_description);
-  const oauthCode = errorDescription ? trimToUndefined(root?.error) : undefined;
-  const code = trimToUndefined(subject.code) ?? trimToUndefined(subject.status) ?? oauthCode;
-  return {
-    ...(detail ? { detail: redactSensitiveText(detail) } : {}),
-    ...(code ? { code } : {}),
-    ...(type ? { type } : {}),
-  };
-}
-
-export type ProviderHttpErrorInfo = {
-  detail?: string;
-  code?: string;
-  type?: string;
-  body?: string;
-  requestId?: string;
-};
-
-export async function extractProviderErrorInfo(response: Response): Promise<ProviderHttpErrorInfo> {
-  const rawBody = trimToUndefined(await readResponseTextLimited(response).catch(() => ""));
-  const requestId = extractProviderRequestId(response);
-  if (!rawBody) {
-    return requestId ? { requestId } : {};
-  }
-  const body = redactProviderErrorBody(rawBody);
-  try {
-    const metadata = extractProviderErrorPayloadMetadata(JSON.parse(rawBody));
-    return {
-      ...(metadata.detail ? { detail: metadata.detail } : { detail: body }),
-      ...(metadata.code ? { code: metadata.code } : {}),
-      ...(metadata.type ? { type: metadata.type } : {}),
-      body,
-      ...(requestId ? { requestId } : {}),
-    };
-  } catch {
-    return {
-      detail: body,
-      body,
-      ...(requestId ? { requestId } : {}),
-    };
-  }
-}
-
 export async function extractProviderErrorDetail(response: Response): Promise<string | undefined> {
-  return (await extractProviderErrorInfo(response)).detail;
+  const rawBody = trimToUndefined(await readResponseTextLimited(response));
+  if (!rawBody) {
+    return undefined;
+  }
+  try {
+    return formatProviderErrorPayload(JSON.parse(rawBody)) ?? truncateErrorDetail(rawBody);
+  } catch {
+    return truncateErrorDetail(rawBody);
+  }
 }
 
 export function extractProviderRequestId(response: Response): string | undefined {
@@ -174,37 +112,6 @@ export function extractProviderRequestId(response: Response): string | undefined
     trimToUndefined(response.headers.get("x-request-id")) ??
     trimToUndefined(response.headers.get("request-id"))
   );
-}
-
-export class ProviderHttpError extends Error {
-  readonly status: number;
-  readonly statusCode: number;
-  readonly code?: string;
-  readonly errorCode?: string;
-  readonly errorType?: string;
-  readonly errorBody?: string;
-  readonly requestId?: string;
-
-  constructor(
-    message: string,
-    params: {
-      status: number;
-      code?: string;
-      type?: string;
-      body?: string;
-      requestId?: string;
-    },
-  ) {
-    super(message);
-    this.name = "ProviderHttpError";
-    this.status = params.status;
-    this.statusCode = params.status;
-    this.code = params.code;
-    this.errorCode = params.code;
-    this.errorType = params.type;
-    this.errorBody = params.body;
-    this.requestId = params.requestId;
-  }
 }
 
 export function formatProviderHttpErrorMessage(params: {
@@ -227,22 +134,16 @@ export async function createProviderHttpError(
   label: string,
   options?: { statusPrefix?: string },
 ): Promise<Error> {
-  const info = await extractProviderErrorInfo(response);
-  return new ProviderHttpError(
+  const detail = await extractProviderErrorDetail(response);
+  const requestId = extractProviderRequestId(response);
+  return new Error(
     formatProviderHttpErrorMessage({
       label,
       status: response.status,
-      detail: info.detail,
-      requestId: info.requestId,
+      detail,
+      requestId,
       statusPrefix: options?.statusPrefix,
     }),
-    {
-      status: response.status,
-      code: info.code,
-      type: info.type,
-      body: info.body,
-      requestId: info.requestId,
-    },
   );
 }
 
@@ -323,16 +224,9 @@ export async function readProviderBinaryResponse(
   response: Response,
   label: string,
   kind = "binary",
-  opts?: {
-    maxBytes?: number;
-  },
 ): Promise<Uint8Array> {
   assertProviderBinaryResponseContent(response, label, kind);
-  const maxBytes = opts?.maxBytes ?? PROVIDER_BINARY_RESPONSE_MAX_BYTES;
-  const bytes = await readResponseWithLimit(response, maxBytes, {
-    onOverflow: ({ maxBytes: maxBytesLocal }) =>
-      new Error(`${label}: ${kind} response exceeds ${maxBytesLocal} bytes`),
-  });
+  const bytes = new Uint8Array(await response.arrayBuffer());
   if (bytes.byteLength === 0) {
     throw new Error(`${label}: malformed ${kind} response`);
   }

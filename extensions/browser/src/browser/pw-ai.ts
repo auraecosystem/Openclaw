@@ -10,16 +10,9 @@ export {
   ensurePageState,
   forceDisconnectPlaywrightForTarget,
   focusPageByTargetIdViaPlaywright,
-  createObservedDialogAbortSignalForPage,
-  getObservedBrowserStateForPage,
-  getObservedBrowserStateViaPlaywright,
   getPageForTargetId,
-  isBrowserObservedDialogBlockedError,
   listPagesViaPlaywright,
-  markObservedDialogsHandledRemotelyForPage,
   refLocator,
-  respondToObservedDialogOnPage,
-  respondToObservedDialogViaPlaywright,
 } from "./pw-session.js";
 
 export {

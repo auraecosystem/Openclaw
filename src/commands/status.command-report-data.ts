@@ -1,10 +1,9 @@
-import { timestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
-import type { ConnectPairingRequiredReason } from "../../packages/gateway-protocol/src/connect-error-details.js";
-import type { RenderTableOptions, TableColumn } from "../../packages/terminal-core/src/table.js";
+import type { ConnectPairingRequiredReason } from "../gateway/protocol/connect-error-details.js";
 import type { HeartbeatEventPayload } from "../infra/heartbeat-events.js";
 import type { resolveOsSummary } from "../infra/os-summary.js";
 import type { PluginCompatibilityNotice } from "../plugins/status.js";
 import type { SecurityAuditReport } from "../security/audit.js";
+import type { RenderTableOptions, TableColumn } from "../terminal/table.js";
 import type { HealthSummary } from "./health.js";
 import {
   buildStatusChannelsTableRows,
@@ -16,7 +15,6 @@ import type { AgentLocalStatus } from "./status.agent-local.js";
 import {
   buildStatusFooterLines,
   buildStatusHealthRows,
-  buildStatusModelSelectionLines,
   buildStatusPairingRecoveryLines,
   buildStatusPluginCompatibilityLines,
   buildStatusSecurityAuditLines,
@@ -139,13 +137,6 @@ export async function buildStatusCommandReportData(
         ),
         params.theme.muted(`Deep probe: ${params.formatCliCommand("openclaw status --deep")}`),
       ];
-  const retainedLost = params.summary.taskAuditRetainedLost;
-  const retainedLostLine =
-    (params.opts.deep || params.opts.verbose) && retainedLost && retainedLost.count > 0
-      ? params.theme.muted(
-          `${retainedLost.count} lost task${retainedLost.count === 1 ? "" : "s"} retained until ${timestampMsToIsoString(retainedLost.nextCleanupAfter) ?? "cleanupAfter"}`,
-        )
-      : null;
 
   return {
     heading: params.theme.heading,
@@ -155,7 +146,6 @@ export async function buildStatusCommandReportData(
     overviewRows,
     showTaskMaintenanceHint: params.summary.taskAudit.errors > 0,
     taskMaintenanceHint: `Task maintenance: ${params.formatCliCommand("openclaw tasks maintenance --apply")}`,
-    retainedLostTaskLine: retainedLostLine,
     pluginCompatibilityLines: buildStatusPluginCompatibilityLines({
       notices: params.pluginCompatibility,
       formatNotice: params.formatPluginCompatibilityNotice,
@@ -167,12 +157,6 @@ export async function buildStatusCommandReportData(
       warn: params.theme.warn,
       muted: params.theme.muted,
       formatCliCommand: params.formatCliCommand,
-    }),
-    modelSelectionLines: buildStatusModelSelectionLines({
-      recent: params.summary.sessions.recent,
-      shortenText: params.shortenText,
-      warn: params.theme.warn,
-      muted: params.theme.muted,
     }),
     securityAuditLines,
     channelsColumns: statusChannelsTableColumns,

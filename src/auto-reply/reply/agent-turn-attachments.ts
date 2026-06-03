@@ -1,10 +1,10 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { AcpTurnAttachment as AgentTurnAttachment } from "../../acp/control-plane/manager.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
 import type { MediaAttachment } from "../../media-understanding/types.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
-import type { MsgContext } from "../templating.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
+import type { FinalizedMsgContext } from "../templating.js";
 import {
   type RecentInboundHistoryImage,
   resolveRecentInboundHistoryImages,
@@ -34,31 +34,26 @@ function isImageAgentTurnAttachment(attachment: MediaAttachment): boolean {
   return attachment.mime?.startsWith("image/") === true;
 }
 
-function hasInboundHistoryMedia(ctx: MsgContext): boolean {
+function hasInboundHistoryMedia(ctx: FinalizedMsgContext): boolean {
   return (
     Array.isArray(ctx.InboundHistory) &&
     ctx.InboundHistory.some((entry) => Array.isArray(entry.media) && entry.media.length > 0)
   );
 }
 
-export function hasPotentialAgentTurnAttachments(ctx: MsgContext): boolean {
+export function hasPotentialAgentTurnAttachments(ctx: FinalizedMsgContext): boolean {
   return hasInboundMedia(ctx) || hasInboundHistoryMedia(ctx);
 }
 
 export async function resolveAgentTurnAttachments(params: {
-  ctx: MsgContext;
+  ctx: FinalizedMsgContext;
   cfg: OpenClawConfig;
   runtime?: AgentTurnAttachmentRuntime;
-  includeRecentHistoryImages?: boolean;
 }): Promise<{
   attachments: AgentTurnAttachment[];
   recentHistoryImages: RecentInboundHistoryImage[];
 }> {
-  const includeRecentHistoryImages = params.includeRecentHistoryImages ?? true;
-  if (
-    !hasInboundMedia(params.ctx) &&
-    !(includeRecentHistoryImages && hasInboundHistoryMedia(params.ctx))
-  ) {
+  if (!hasPotentialAgentTurnAttachments(params.ctx)) {
     return { attachments: [], recentHistoryImages: [] };
   }
   const runtime = params.runtime ?? (await loadAgentTurnMediaRuntime());
@@ -69,9 +64,7 @@ export async function resolveAgentTurnAttachments(params: {
         ? Object.assign({}, attachment, { url: undefined })
         : attachment,
     );
-  const recentHistoryImages = includeRecentHistoryImages
-    ? resolveRecentInboundHistoryImages({ ctx: params.ctx })
-    : [];
+  const recentHistoryImages = resolveRecentInboundHistoryImages({ ctx: params.ctx });
   const firstHistoryAttachmentIndex =
     currentAttachments.reduce(
       (maxIndex, attachment) =>
@@ -139,11 +132,7 @@ export async function resolveAgentTurnAttachments(params: {
   for (const attachment of currentAttachments) {
     currentImageResolved = (await resolveImageAttachment(attachment)) || currentImageResolved;
   }
-  if (
-    includeRecentHistoryImages &&
-    !currentImageResolved &&
-    (!hasCurrentMedia || hasCurrentImageCandidate)
-  ) {
+  if (!currentImageResolved && (!hasCurrentMedia || hasCurrentImageCandidate)) {
     for (const attachment of historyAttachments) {
       await resolveImageAttachment(attachment);
     }
@@ -152,7 +141,7 @@ export async function resolveAgentTurnAttachments(params: {
 }
 
 export async function resolveAgentAttachments(params: {
-  ctx: MsgContext;
+  ctx: FinalizedMsgContext;
   cfg: OpenClawConfig;
   runtime?: AgentTurnAttachmentRuntime;
 }): Promise<AgentTurnAttachment[]> {

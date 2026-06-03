@@ -10,55 +10,55 @@ const WebSearchSchema = {
   type: "object",
   required: ["query"],
   properties: {
-    query: { type: "string", description: "Search query." },
+    query: { type: "string", description: "Search query string." },
     count: {
       type: "number",
-      description: "Result count.",
+      description: "Number of results to return.",
       minimum: 1,
       maximum: MAX_SEARCH_COUNT,
     },
     country: {
       type: "string",
-      description: "2-letter country code.",
+      description: "2-letter country code for region-specific results.",
     },
     language: {
       type: "string",
-      description: "ISO 639-1 language.",
+      description: "ISO 639-1 language code for results.",
     },
     freshness: {
       type: "string",
-      description: "Time filter: day/week/month/year.",
+      description: "Filter by time: day, week, month, or year.",
     },
     date_after: {
       type: "string",
-      description: "Published after YYYY-MM-DD.",
+      description: "Only results published after this date (YYYY-MM-DD).",
     },
     date_before: {
       type: "string",
-      description: "Published before YYYY-MM-DD.",
+      description: "Only results published before this date (YYYY-MM-DD).",
     },
     search_lang: {
       type: "string",
-      description: "Brave result language.",
+      description: "Brave search result language code.",
     },
     ui_lang: {
       type: "string",
-      description: "Brave UI locale.",
+      description: "Brave UI locale code in language-region format.",
     },
     domain_filter: {
       type: "array",
       items: { type: "string" },
-      description: "Perplexity domain filter.",
+      description: "Perplexity native Search API domain filter.",
     },
     max_tokens: {
       type: "number",
-      description: "Perplexity total token budget.",
+      description: "Perplexity native Search API total content budget.",
       minimum: 1,
       maximum: 1000000,
     },
     max_tokens_per_page: {
       type: "number",
-      description: "Perplexity tokens per page.",
+      description: "Perplexity native Search API max tokens extracted per page.",
       minimum: 1,
     },
   },
@@ -71,7 +71,6 @@ function isWebSearchDisabled(config?: OpenClawConfig): boolean {
 
 export function createWebSearchTool(options?: {
   config?: OpenClawConfig;
-  agentDir?: string;
   sandboxed?: boolean;
   runtimeWebSearch?: RuntimeWebSearchMetadata;
   lateBindRuntimeConfig?: boolean;
@@ -83,7 +82,8 @@ export function createWebSearchTool(options?: {
   return {
     label: "Web Search",
     name: "web_search",
-    description: "Search web for current info; returns normalized provider results.",
+    description:
+      "Search the web. Returns provider-normalized results for current information lookup.",
     parameters: WebSearchSchema,
     execute: async (_toolCallId, args, signal) => {
       const { config, preferRuntimeProviders, runtimeWebSearch } =
@@ -97,7 +97,6 @@ export function createWebSearchTool(options?: {
       }
       const result = await runWebSearch({
         config,
-        agentDir: options?.agentDir,
         sandboxed: options?.sandboxed,
         runtimeWebSearch,
         preferRuntimeProviders,
@@ -112,9 +111,8 @@ export function createWebSearchTool(options?: {
   };
 }
 
-export const testing = {
+export const __testing = {
   SEARCH_CACHE,
   resolveSearchProvider: (search?: Parameters<typeof resolveWebSearchProviderId>[0]["search"]) =>
     resolveWebSearchProviderId({ search }),
 };
-export { testing as __testing };

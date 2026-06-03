@@ -46,5 +46,5 @@ export async function wakeImageGenerationTaskCompletion(params: {
   mediaUrls?: string[];
   statsLine?: string;
 }) {
-  return await imageGenerationTaskLifecycle.wakeTaskCompletion(params);
+  await imageGenerationTaskLifecycle.wakeTaskCompletion(params);
 }

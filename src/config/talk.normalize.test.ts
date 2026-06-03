@@ -43,12 +43,10 @@ describe("talk normalization", () => {
           },
         },
         model: "gpt-realtime",
-        speakerVoice: "alloy",
-        speakerVoiceId: "voice-123",
+        voice: "alloy",
         mode: "realtime",
         transport: "webrtc",
         brain: "agent-consult",
-        consultRouting: "force-agent-consult",
       },
       interruptOnSpeech: true,
     });
@@ -69,12 +67,10 @@ describe("talk normalization", () => {
           },
         },
         model: "gpt-realtime",
-        speakerVoice: "alloy",
-        speakerVoiceId: "voice-123",
+        voice: "alloy",
         mode: "realtime",
         transport: "webrtc",
         brain: "agent-consult",
-        consultRouting: "force-agent-consult",
       },
       interruptOnSpeech: true,
     });
@@ -144,7 +140,7 @@ describe("talk normalization", () => {
         providers: {
           openai: {
             model: "gpt-realtime",
-            speakerVoice: "alloy",
+            voice: "alloy",
           },
         },
         instructions: " Speak with crisp diction. ",
@@ -153,19 +149,6 @@ describe("talk normalization", () => {
 
     expect(payload?.realtime?.provider).toBe("openai");
     expect(payload?.realtime?.instructions).toBe("Speak with crisp diction.");
-  });
-
-  it("maps legacy realtime voice to speakerVoice while preserving legacy output", () => {
-    const normalized = normalizeTalkSection({
-      realtime: {
-        voice: " alloy ",
-      },
-    });
-
-    expect(normalized?.realtime).toEqual({
-      speakerVoice: "alloy",
-      voice: "alloy",
-    });
   });
 
   it("does not report an active provider when the configured speech provider cannot resolve", () => {

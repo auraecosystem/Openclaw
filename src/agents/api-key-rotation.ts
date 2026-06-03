@@ -1,4 +1,3 @@
-import { normalizeUniqueStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { sleepWithAbort } from "../infra/backoff.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import {
@@ -26,7 +25,17 @@ type ExecuteWithApiKeyRotationOptions<T> = {
 };
 
 function dedupeApiKeys(raw: string[]): string[] {
-  return normalizeUniqueStringEntries(raw);
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  for (const value of raw) {
+    const apiKey = value.trim();
+    if (!apiKey || seen.has(apiKey)) {
+      continue;
+    }
+    seen.add(apiKey);
+    keys.push(apiKey);
+  }
+  return keys;
 }
 
 export function collectProviderApiKeysForExecution(params: {
@@ -93,19 +102,5 @@ export async function executeWithApiKeyRotation<T>(
   if (lastError === undefined) {
     throw new Error(`Failed to run API request for ${params.provider}.`);
   }
-  throw toLintErrorObject(lastError, "Non-Error thrown");
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
+  throw lastError;
 }

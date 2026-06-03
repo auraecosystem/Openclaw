@@ -1,5 +1,4 @@
 import { html, nothing } from "lit";
-import { keyed } from "lit/directives/keyed.js";
 import { unsafeHTML } from "lit/directives/unsafe-html.js";
 import { resolveCanvasIframeUrl } from "../canvas-url.ts";
 import { resolveEmbedSandbox, type EmbedSandboxMode } from "../embed-sandbox.ts";
@@ -26,22 +25,6 @@ export type MarkdownSidebarProps = {
 
 export function renderMarkdownSidebar(props: MarkdownSidebarProps) {
   const content = props.content;
-  const markdownHtml =
-    content?.kind === "markdown" && content.content.trim()
-      ? toSanitizedMarkdownHtml(content.content)
-      : "";
-  const canvasSandbox =
-    content?.kind === "canvas"
-      ? resolveSidebarCanvasSandbox(content, props.embedSandboxMode ?? "scripts")
-      : "";
-  const canvasSrc =
-    content?.kind === "canvas"
-      ? resolveCanvasIframeUrl(
-          content.entryUrl,
-          props.canvasPluginSurfaceUrl,
-          props.allowExternalEmbedUrls ?? false,
-        )
-      : null;
   return html`
     <div class="sidebar-panel">
       <div class="sidebar-header">
@@ -66,38 +49,36 @@ export function renderMarkdownSidebar(props: MarkdownSidebarProps) {
         ${props.error
           ? html`
               <div class="callout danger">${props.error}</div>
-              ${content?.rawText?.trim()
-                ? html`
-                    <button
-                      @click=${props.onViewRawText}
-                      class="btn"
-                      type="button"
-                      style="margin-top: 12px;"
-                    >
-                      View Raw Text
-                    </button>
-                  `
-                : nothing}
+              <button
+                @click=${props.onViewRawText}
+                class="btn"
+                type="button"
+                style="margin-top: 12px;"
+              >
+                View Raw Text
+              </button>
             `
           : content
             ? content.kind === "canvas"
               ? html`
                   <div class="chat-tool-card__preview" data-kind="canvas">
                     <div class="chat-tool-card__preview-panel" data-side="front">
-                      ${keyed(
-                        `${canvasSandbox}\u0000${canvasSrc ?? ""}\u0000${content.preferredHeight ?? ""}`,
-                        html`
-                          <iframe
-                            class="chat-tool-card__preview-frame"
-                            title=${content.title?.trim() || "Render preview"}
-                            sandbox=${canvasSandbox}
-                            src=${canvasSrc ?? nothing}
-                            style=${content.preferredHeight
-                              ? `height:${content.preferredHeight}px`
-                              : ""}
-                          ></iframe>
-                        `,
-                      )}
+                      <iframe
+                        class="chat-tool-card__preview-frame"
+                        title=${content.title?.trim() || "Render preview"}
+                        sandbox=${resolveSidebarCanvasSandbox(
+                          content,
+                          props.embedSandboxMode ?? "scripts",
+                        )}
+                        src=${resolveCanvasIframeUrl(
+                          content.entryUrl,
+                          props.canvasPluginSurfaceUrl,
+                          props.allowExternalEmbedUrls ?? false,
+                        ) ?? nothing}
+                        style=${content.preferredHeight
+                          ? `height:${content.preferredHeight}px`
+                          : ""}
+                      ></iframe>
                     </div>
                     ${content.rawText?.trim()
                       ? html`
@@ -126,15 +107,9 @@ export function renderMarkdownSidebar(props: MarkdownSidebarProps) {
                         View Raw Text
                       </button>
                     </div>
-                    ${markdownHtml
-                      ? html`
-                          <article class="sidebar-markdown-reader sidebar-markdown">
-                            ${unsafeHTML(markdownHtml)}
-                          </article>
-                        `
-                      : html`
-                          <div class="sidebar-markdown-empty">No previewable markdown content.</div>
-                        `}
+                    <article class="sidebar-markdown-reader sidebar-markdown">
+                      ${unsafeHTML(toSanitizedMarkdownHtml(content.content))}
+                    </article>
                   </section>
                 `
             : html` <div class="muted">No content available</div> `}

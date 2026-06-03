@@ -2,12 +2,13 @@ import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  CURRENT_SESSION_VERSION,
   migrateSessionEntries,
   parseSessionEntries,
   type FileEntry,
-  type SessionEntry as AgentSessionEntry,
+  type SessionEntry as PiSessionEntry,
   type SessionHeader,
-} from "../../agents/sessions/session-manager.js";
+} from "@earendil-works/pi-coding-agent";
 import { derivePromptTokens } from "../../agents/usage.js";
 import {
   resolveSessionFilePath,
@@ -17,7 +18,6 @@ import {
   resolveFreshSessionTotalTokens,
   type SessionEntry as StoreSessionEntry,
 } from "../../config/sessions/types.js";
-import { CURRENT_SESSION_VERSION } from "../../config/sessions/version.js";
 import { readLatestRecentSessionUsageFromTranscriptAsync } from "../../gateway/session-utils.fs.js";
 import { readRegularFile } from "../../infra/fs-safe.js";
 
@@ -25,7 +25,7 @@ type ForkSourceTranscript = {
   cwd: string;
   sessionDir: string;
   leafId: string | null;
-  branchEntries: AgentSessionEntry[];
+  branchEntries: PiSessionEntry[];
   labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }>;
 };
 
@@ -106,7 +106,7 @@ export async function resolveParentForkTokenCountRuntime(params: {
   return maxPositiveTokenCount(cachedTokens, byteEstimateTokens);
 }
 
-function isSessionEntry(entry: FileEntry): entry is AgentSessionEntry {
+function isSessionEntry(entry: FileEntry): entry is PiSessionEntry {
   return (
     entry.type !== "session" &&
     typeof (entry as { id?: unknown }).id === "string" &&
@@ -115,15 +115,15 @@ function isSessionEntry(entry: FileEntry): entry is AgentSessionEntry {
   );
 }
 
-function buildEntryIndex(entries: AgentSessionEntry[]): Map<string, AgentSessionEntry> {
+function buildEntryIndex(entries: PiSessionEntry[]): Map<string, PiSessionEntry> {
   return new Map(entries.map((entry) => [entry.id, entry]));
 }
 
 function readBranch(params: {
-  byId: Map<string, AgentSessionEntry>;
+  byId: Map<string, PiSessionEntry>;
   leafId: string | null;
-}): AgentSessionEntry[] {
-  const branchEntries: AgentSessionEntry[] = [];
+}): PiSessionEntry[] {
+  const branchEntries: PiSessionEntry[] = [];
   let current = params.leafId ? params.byId.get(params.leafId) : undefined;
   while (current) {
     branchEntries.unshift(current);
@@ -146,7 +146,7 @@ function generateEntryId(existingIds: Set<string>): string {
 }
 
 function collectBranchLabels(params: {
-  allEntries: AgentSessionEntry[];
+  allEntries: PiSessionEntry[];
   pathEntryIds: Set<string>;
 }): Array<{ targetId: string; label: string; timestamp: string }> {
   const labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }> = [];
@@ -195,9 +195,9 @@ function buildBranchLabelEntries(params: {
   labelsToWrite: Array<{ targetId: string; label: string; timestamp: string }>;
   pathEntryIds: Set<string>;
   lastEntryId: string | null;
-}): AgentSessionEntry[] {
+}): PiSessionEntry[] {
   let parentId = params.lastEntryId;
-  const labelEntries: AgentSessionEntry[] = [];
+  const labelEntries: PiSessionEntry[] = [];
   for (const { targetId, label, timestamp } of params.labelsToWrite) {
     const labelEntry = {
       type: "label",
@@ -206,7 +206,7 @@ function buildBranchLabelEntries(params: {
       timestamp,
       targetId,
       label,
-    } satisfies AgentSessionEntry;
+    } satisfies PiSessionEntry;
     params.pathEntryIds.add(labelEntry.id);
     labelEntries.push(labelEntry);
     parentId = labelEntry.id;

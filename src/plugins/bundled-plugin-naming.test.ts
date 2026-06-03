@@ -44,8 +44,9 @@ const ALLOWED_PACKAGE_SUFFIXES = [
   "-media-understanding",
 ] as const;
 
-function readJsonFile(filePath: string): unknown {
-  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+// oxlint-disable-next-line typescript/no-unnecessary-type-parameters -- Test helper lets assertions ascribe JSON file shape.
+function readJsonFile<T>(filePath: string): T {
+  return JSON.parse(fs.readFileSync(filePath, "utf8")) as T;
 }
 
 function normalizeText(value: unknown): string | undefined {
@@ -141,8 +142,8 @@ function readBundledPluginRecords(): BundledPluginRecord[] {
       return [];
     }
 
-    const manifest = readJsonFile(manifestPath) as PluginManifestShape;
-    const pkg = readJsonFile(packagePath) as OpenClawPackageShape;
+    const manifest = readJsonFile<PluginManifestShape>(manifestPath);
+    const pkg = readJsonFile<OpenClawPackageShape>(packagePath);
     const manifestId = normalizeText(manifest.id);
     const packageName = normalizeText(pkg.name);
     if (!manifestId || !packageName) {

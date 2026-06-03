@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { readPositiveIntegerParam } from "openclaw/plugin-sdk/param-readers";
 import type {
   OpenClawPluginNodeInvokePolicy,
   OpenClawPluginNodeInvokePolicyContext,
@@ -16,10 +15,8 @@ const FILE_FETCH_DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 const FILE_FETCH_HARD_MAX_BYTES = 16 * 1024 * 1024;
 const DIR_FETCH_DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
 const DIR_FETCH_HARD_MAX_BYTES = 16 * 1024 * 1024;
-const DIR_FETCH_MAX_ENTRIES = 5000;
 const DIR_FETCH_ARCHIVE_LIST_TIMEOUT_MS = 30_000;
 const DIR_FETCH_ARCHIVE_LIST_MAX_OUTPUT_BYTES = 32 * 1024 * 1024;
-const DIR_FETCH_ARCHIVE_LIST_STDERR_TAIL_CHARS = 4096;
 
 type FileTransferCommand = FileTransferNodeInvokeCommand;
 
@@ -27,11 +24,6 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
-}
-
-function appendBoundedTextTail(current: string, chunk: Buffer, maxChars: number): string {
-  const next = current + chunk.toString();
-  return next.length > maxChars ? next.slice(-maxChars) : next;
 }
 
 function readPath(params: Record<string, unknown>): string {
@@ -44,26 +36,16 @@ function readMaxBytes(input: {
   hardMax: number;
   policyMax?: number;
 }): number {
-  const parsed =
-    input.value === undefined
-      ? input.defaultValue
-      : readPositiveIntegerParam({ maxBytes: input.value }, "maxBytes");
-  const requested = parsed ?? input.defaultValue;
+  const requested =
+    typeof input.value === "number" && Number.isFinite(input.value)
+      ? Math.floor(input.value)
+      : input.defaultValue;
   const clamped = Math.max(1, Math.min(requested, input.hardMax));
   return input.policyMax ? Math.min(clamped, input.policyMax) : clamped;
 }
 
 function commandKind(command: FileTransferCommand): FilePolicyKind {
   return command === "file.write" ? "write" : "read";
-}
-
-function validateFetchMaxBytesParam(command: FileTransferCommand, params: Record<string, unknown>) {
-  if (command !== "file.fetch" && command !== "dir.fetch") {
-    return;
-  }
-  if (params.maxBytes !== undefined) {
-    readPositiveIntegerParam(params, "maxBytes");
-  }
 }
 
 function promptVerb(command: FileTransferCommand): string {
@@ -325,115 +307,72 @@ async function listDirFetchArchiveEntries(
   >((resolve) => {
     const tarBin = process.platform !== "win32" ? "/usr/bin/tar" : "tar";
     const child = spawn(tarBin, ["-tzf", "-"], { stdio: ["pipe", "pipe", "pipe"] });
-    const entries: string[] = [];
-    let pending = "";
-    let outputBytes = 0;
+    let stdout = "";
     let stderr = "";
-    let settled = false;
-    const finish = (
-      result: { ok: true; entries: string[] } | { ok: false; code: string; reason: string },
-    ): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(watchdog);
-      resolve(result);
-    };
-    const stopChild = (): void => {
+    let aborted = false;
+    const watchdog = setTimeout(() => {
+      aborted = true;
       try {
         child.kill("SIGKILL");
       } catch {
         /* gone */
       }
-    };
-    const appendLine = (line: string): boolean => {
-      if (settled) {
-        return false;
-      }
-      const entry = normalizeTarEntryPath(line);
-      if (entry !== null) {
-        entries.push(entry);
-        if (entries.length > DIR_FETCH_MAX_ENTRIES) {
-          stopChild();
-          finish({
-            ok: false,
-            code: "ARCHIVE_ENTRIES_TOO_MANY",
-            reason: `dir.fetch archive contains more than ${DIR_FETCH_MAX_ENTRIES} entries`,
-          });
-          return false;
-        }
-      }
-      return true;
-    };
-    const watchdog = setTimeout(() => {
-      stopChild();
-      finish({
+      resolve({
         ok: false,
         code: "ARCHIVE_ENTRIES_UNREADABLE",
         reason: "tar -tzf timed out",
       });
     }, DIR_FETCH_ARCHIVE_LIST_TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => {
-      if (settled) {
-        return;
-      }
-      outputBytes += chunk.byteLength;
-      if (outputBytes > DIR_FETCH_ARCHIVE_LIST_MAX_OUTPUT_BYTES) {
-        stopChild();
-        finish({
+      stdout += chunk.toString();
+      if (stdout.length > DIR_FETCH_ARCHIVE_LIST_MAX_OUTPUT_BYTES) {
+        aborted = true;
+        clearTimeout(watchdog);
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* gone */
+        }
+        resolve({
           ok: false,
           code: "ARCHIVE_ENTRIES_UNREADABLE",
           reason: "tar -tzf output too large",
         });
-        return;
-      }
-      const lines = `${pending}${chunk.toString()}`.split("\n");
-      pending = lines.pop() ?? "";
-      for (const line of lines) {
-        if (!appendLine(line)) {
-          return;
-        }
       }
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      stderr = appendBoundedTextTail(stderr, chunk, DIR_FETCH_ARCHIVE_LIST_STDERR_TAIL_CHARS);
+      stderr += chunk.toString();
     });
     child.on("close", (code) => {
-      if (settled) {
+      clearTimeout(watchdog);
+      if (aborted) {
         return;
       }
       if (code !== 0) {
-        finish({
+        resolve({
           ok: false,
           code: "ARCHIVE_ENTRIES_UNREADABLE",
-          reason: `tar -tzf exited ${code}: ${stderr.slice(-200)}`,
+          reason: `tar -tzf exited ${code}: ${stderr.slice(0, 200)}`,
         });
         return;
       }
-      if (pending) {
-        if (!appendLine(pending)) {
-          return;
-        }
-      }
-      finish({ ok: true, entries });
+      resolve({
+        ok: true,
+        entries: stdout
+          .split("\n")
+          .map(normalizeTarEntryPath)
+          .filter((entry): entry is string => entry !== null),
+      });
     });
     child.on("error", (error) => {
-      finish({
-        ok: false,
-        code: "ARCHIVE_ENTRIES_UNREADABLE",
-        reason: `tar -tzf error: ${String(error)}`,
-      });
-    });
-    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
-      if (settled && error.code === "EPIPE") {
-        return;
+      clearTimeout(watchdog);
+      if (!aborted) {
+        resolve({
+          ok: false,
+          code: "ARCHIVE_ENTRIES_UNREADABLE",
+          reason: `tar -tzf error: ${String(error)}`,
+        });
       }
-      finish({
-        ok: false,
-        code: "ARCHIVE_ENTRIES_UNREADABLE",
-        reason: `tar -tzf input error: ${String(error)}`,
-      });
     });
     child.stdin.end(tarBuffer);
   });
@@ -453,8 +392,6 @@ async function validateDirFetchEntries(input: {
     input.phase === "preflight" ? "PREFLIGHT_ENTRIES_MISSING" : "ARCHIVE_ENTRIES_MISSING";
   const invalidCode =
     input.phase === "preflight" ? "PREFLIGHT_ENTRY_INVALID" : "ARCHIVE_ENTRY_INVALID";
-  const tooManyCode =
-    input.phase === "preflight" ? "PREFLIGHT_ENTRIES_TOO_MANY" : "ARCHIVE_ENTRIES_TOO_MANY";
   if (!Array.isArray(input.entries)) {
     await appendFileTransferAudit({
       op: input.op,
@@ -472,26 +409,6 @@ async function validateDirFetchEntries(input: {
       code: missingCode,
       message: `dir.fetch ${input.phase} did not return entries; refusing archive transfer`,
       details: { path: input.canonicalPath },
-    });
-  }
-  if (input.entries.length > DIR_FETCH_MAX_ENTRIES) {
-    const reason = `dir.fetch ${input.phase} contains ${input.entries.length} entries; limit ${DIR_FETCH_MAX_ENTRIES}`;
-    await appendFileTransferAudit({
-      op: input.op,
-      nodeId: input.ctx.nodeId,
-      nodeDisplayName,
-      requestedPath: input.requestedPath,
-      canonicalPath: input.canonicalPath,
-      decision: "denied:policy",
-      errorCode: tooManyCode,
-      reason,
-      durationMs: Date.now() - input.startedAt,
-    });
-    return policyDeniedResult({
-      op: input.op,
-      code: tooManyCode,
-      message: `${reason}; refusing archive transfer`,
-      details: { path: input.canonicalPath, reason },
     });
   }
 
@@ -749,15 +666,6 @@ async function handleFileTransferInvoke(
   if (!requestedPath) {
     return { ok: false, code: "INVALID_PARAMS", message: `${op} path required` };
   }
-  try {
-    validateFetchMaxBytesParam(command, params);
-  } catch (error) {
-    return {
-      ok: false,
-      code: "INVALID_PARAMS",
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
 
   const gate = await requestApproval({
     ctx,
@@ -770,21 +678,12 @@ async function handleFileTransferInvoke(
     return { ok: false, code: gate.code, message: gate.message };
   }
 
-  let forwardedParams: Record<string, unknown>;
-  try {
-    forwardedParams = prepareParams({
-      command,
-      params,
-      followSymlinks: gate.followSymlinks,
-      maxBytes: gate.maxBytes,
-    });
-  } catch (error) {
-    return {
-      ok: false,
-      code: "INVALID_PARAMS",
-      message: error instanceof Error ? error.message : String(error),
-    };
-  }
+  const forwardedParams = prepareParams({
+    command,
+    params,
+    followSymlinks: gate.followSymlinks,
+    maxBytes: gate.maxBytes,
+  });
   if (command === "file.fetch") {
     const preflightDeny = await runPathPreflight({
       ctx,

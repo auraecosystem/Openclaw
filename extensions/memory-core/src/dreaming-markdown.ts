@@ -10,7 +10,6 @@ import {
   replaceManagedMarkdownBlock,
   withTrailingNewline,
 } from "openclaw/plugin-sdk/memory-host-markdown";
-import { resolveMemoryCoreNowMs, resolveMemoryCoreTimestamp } from "./time.js";
 
 const DAILY_PHASE_HEADINGS: Record<Exclude<MemoryDreamingPhaseName, "deep">, string> = {
   light: "## Light Sleep",
@@ -64,7 +63,7 @@ export async function writeDailyDreamingPhaseBlock(params: {
   timezone?: string;
   storage: MemoryDreamingStorageConfig;
 }): Promise<{ inlinePath?: string; reportPath?: string }> {
-  const nowMs = resolveMemoryCoreNowMs(params.nowMs);
+  const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
   const body = params.bodyLines.length > 0 ? params.bodyLines.join("\n") : "- No notable updates.";
   let inlinePath: string | undefined;
   let reportPath: string | undefined;
@@ -108,7 +107,7 @@ export async function writeDailyDreamingPhaseBlock(params: {
 
   await appendMemoryHostEvent(params.workspaceDir, {
     type: "memory.dream.completed",
-    timestamp: resolveMemoryCoreTimestamp(nowMs),
+    timestamp: new Date(nowMs).toISOString(),
     phase: params.phase,
     ...(inlinePath ? { inlinePath } : {}),
     ...(reportPath ? { reportPath } : {}),
@@ -132,14 +131,14 @@ export async function writeDeepDreamingReport(params: {
   if (!shouldWriteSeparate(params.storage)) {
     return undefined;
   }
-  const nowMs = resolveMemoryCoreNowMs(params.nowMs);
+  const nowMs = Number.isFinite(params.nowMs) ? (params.nowMs as number) : Date.now();
   const reportPath = resolveSeparateReportPath(params.workspaceDir, "deep", nowMs, params.timezone);
   await fs.mkdir(path.dirname(reportPath), { recursive: true });
   const body = params.bodyLines.length > 0 ? params.bodyLines.join("\n") : "- No durable changes.";
   await fs.writeFile(reportPath, `# Deep Sleep\n\n${body}\n`, "utf-8");
   await appendMemoryHostEvent(params.workspaceDir, {
     type: "memory.dream.completed",
-    timestamp: resolveMemoryCoreTimestamp(nowMs),
+    timestamp: new Date(nowMs).toISOString(),
     phase: "deep",
     reportPath,
     lineCount: params.bodyLines.length,

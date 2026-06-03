@@ -1,10 +1,6 @@
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-runtime";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeStringEntries,
-  normalizeStringEntriesLower,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveDefaultSlackAccountId, resolveSlackAccount } from "./accounts.js";
 
 const SLACK_BUTTON_MAX_ITEMS = 5;
@@ -102,7 +98,10 @@ function buildButtonsBlock(
 function buildSelectBlock(
   raw: string,
 ): NonNullable<ReplyPayload["interactive"]>["blocks"][number] | null {
-  const parts = normalizeStringEntries(raw.split("|"));
+  const parts = raw
+    .split("|")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
   if (parts.length === 0) {
     return null;
   }
@@ -128,14 +127,17 @@ function hasSlackBlocks(payload: ReplyPayload): boolean {
 }
 
 function parseSimpleSlackOptions(raw: string): SlackChoice[] | null {
-  const entries = normalizeStringEntries(raw.split(","));
+  const entries = raw
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
   if (entries.length < 2 || entries.length > SLACK_AUTO_SELECT_MAX_ITEMS) {
     return null;
   }
   if (!entries.every((entry) => SLACK_SIMPLE_OPTION_RE.test(entry))) {
     return null;
   }
-  const deduped = new Set(normalizeStringEntriesLower(entries));
+  const deduped = new Set(entries.map((entry) => normalizeLowercaseStringOrEmpty(entry)));
   if (deduped.size !== entries.length) {
     return null;
   }
@@ -160,9 +162,6 @@ function resolveInteractiveRepliesFromCapabilities(capabilities: unknown): boole
   return false;
 }
 
-/**
- * @deprecated Only needed for legacy Slack reply directives. New producers should emit presentation payloads.
- */
 export function isSlackInteractiveRepliesEnabled(params: {
   cfg: OpenClawConfig;
   accountId?: string | null;
@@ -174,9 +173,6 @@ export function isSlackInteractiveRepliesEnabled(params: {
   return resolveInteractiveRepliesFromCapabilities(account.config.capabilities);
 }
 
-/**
- * @deprecated Slack reply directives are legacy. New producers should emit presentation payloads.
- */
 export function compileSlackInteractiveReplies(payload: ReplyPayload): ReplyPayload {
   const text = payload.text;
   if (!text) {
@@ -234,9 +230,6 @@ export function compileSlackInteractiveReplies(payload: ReplyPayload): ReplyPayl
   };
 }
 
-/**
- * @deprecated Legacy Slack directive fallback. New producers should emit presentation payloads.
- */
 export function parseSlackOptionsLine(payload: ReplyPayload): ReplyPayload {
   const text = payload.text;
   if (!text || payload.interactive?.blocks?.length || hasSlackBlocks(payload)) {

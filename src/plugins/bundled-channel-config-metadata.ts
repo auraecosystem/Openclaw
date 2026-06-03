@@ -63,7 +63,7 @@ function isJsonSchemaConfigSurface(value: unknown): value is JsonSchemaObject {
     Array.isArray(candidate.oneOf) ||
     Array.isArray(candidate.allOf) ||
     Array.isArray(candidate.enum) ||
-    Object.hasOwn(candidate, "const")
+    Object.prototype.hasOwnProperty.call(candidate, "const")
   );
 }
 

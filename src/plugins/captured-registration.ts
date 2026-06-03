@@ -1,4 +1,3 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type {
   AgentToolResultMiddleware,
@@ -7,7 +6,6 @@ import type {
 import { normalizeAgentToolResultMiddlewareRuntimes } from "./agent-tool-result-middleware.js";
 import { buildPluginApi } from "./api-builder.js";
 import type { CodexAppServerExtensionFactory } from "./codex-app-server-extension-types.js";
-import type { EmbeddingProviderAdapter } from "./embedding-providers.js";
 import type {
   PluginAgentEventSubscriptionRegistration,
   PluginControlUiDescriptor,
@@ -28,7 +26,6 @@ import type {
   OpenClawPluginApi,
   ImageGenerationProviderPlugin,
   MediaUnderstandingProviderPlugin,
-  TranscriptSourceProvider,
   MigrationProviderPlugin,
   MusicGenerationProviderPlugin,
   OpenClawPluginCliCommandDescriptor,
@@ -60,12 +57,10 @@ export type CapturedPluginRegistration = {
   textTransforms: PluginTextTransformRegistration[];
   codexAppServerExtensionFactories: CodexAppServerExtensionFactory[];
   agentToolResultMiddlewares: PluginAgentToolResultMiddlewareRegistration[];
-  embeddingProviders: EmbeddingProviderAdapter[];
   speechProviders: SpeechProviderPlugin[];
   realtimeTranscriptionProviders: RealtimeTranscriptionProviderPlugin[];
   realtimeVoiceProviders: RealtimeVoiceProviderPlugin[];
   mediaUnderstandingProviders: MediaUnderstandingProviderPlugin[];
-  transcriptSourceProviders: TranscriptSourceProvider[];
   imageGenerationProviders: ImageGenerationProviderPlugin[];
   videoGenerationProviders: VideoGenerationProviderPlugin[];
   musicGenerationProviders: MusicGenerationProviderPlugin[];
@@ -99,12 +94,10 @@ export function createCapturedPluginRegistration(params?: {
   const textTransforms: PluginTextTransformRegistration[] = [];
   const codexAppServerExtensionFactories: CodexAppServerExtensionFactory[] = [];
   const agentToolResultMiddlewares: PluginAgentToolResultMiddlewareRegistration[] = [];
-  const embeddingProviders: EmbeddingProviderAdapter[] = [];
   const speechProviders: SpeechProviderPlugin[] = [];
   const realtimeTranscriptionProviders: RealtimeTranscriptionProviderPlugin[] = [];
   const realtimeVoiceProviders: RealtimeVoiceProviderPlugin[] = [];
   const mediaUnderstandingProviders: MediaUnderstandingProviderPlugin[] = [];
-  const transcriptSourceProviders: TranscriptSourceProvider[] = [];
   const imageGenerationProviders: ImageGenerationProviderPlugin[] = [];
   const videoGenerationProviders: VideoGenerationProviderPlugin[] = [];
   const musicGenerationProviders: MusicGenerationProviderPlugin[] = [];
@@ -141,12 +134,10 @@ export function createCapturedPluginRegistration(params?: {
     textTransforms,
     codexAppServerExtensionFactories,
     agentToolResultMiddlewares,
-    embeddingProviders,
     speechProviders,
     realtimeTranscriptionProviders,
     realtimeVoiceProviders,
     mediaUnderstandingProviders,
-    transcriptSourceProviders,
     imageGenerationProviders,
     videoGenerationProviders,
     musicGenerationProviders,
@@ -175,7 +166,9 @@ export function createCapturedPluginRegistration(params?: {
       resolvePath: (input) => input,
       handlers: {
         registerCli(registrar, opts) {
-          const parentPath = normalizeStringEntries(opts?.parentPath ?? []);
+          const parentPath = (opts?.parentPath ?? [])
+            .map((segment) => segment.trim())
+            .filter(Boolean);
           const descriptors = (opts?.descriptors ?? [])
             .map((descriptor) => ({
               name: descriptor.name.trim(),
@@ -183,10 +176,12 @@ export function createCapturedPluginRegistration(params?: {
               hasSubcommands: descriptor.hasSubcommands,
             }))
             .filter((descriptor) => descriptor.name && descriptor.description);
-          const commands = normalizeStringEntries([
+          const commands = [
             ...(opts?.commands ?? []),
             ...descriptors.map((descriptor) => descriptor.name),
-          ]);
+          ]
+            .map((command) => command.trim())
+            .filter(Boolean);
           if (commands.length === 0) {
             return;
           }
@@ -229,9 +224,6 @@ export function createCapturedPluginRegistration(params?: {
         registerTextTransforms(transforms: PluginTextTransformRegistration) {
           textTransforms.push(transforms);
         },
-        registerEmbeddingProvider(provider: EmbeddingProviderAdapter) {
-          embeddingProviders.push(provider);
-        },
         registerSpeechProvider(provider: SpeechProviderPlugin) {
           speechProviders.push(provider);
         },
@@ -243,9 +235,6 @@ export function createCapturedPluginRegistration(params?: {
         },
         registerMediaUnderstandingProvider(provider: MediaUnderstandingProviderPlugin) {
           mediaUnderstandingProviders.push(provider);
-        },
-        registerTranscriptSourceProvider(provider: TranscriptSourceProvider) {
-          transcriptSourceProviders.push(provider);
         },
         registerImageGenerationProvider(provider: ImageGenerationProviderPlugin) {
           imageGenerationProviders.push(provider);

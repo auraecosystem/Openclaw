@@ -1,9 +1,7 @@
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { parseStrictFiniteNumber } from "../infra/parse-finite-number.js";
-import { redactToolPayloadText } from "../logging/redact.js";
+} from "../shared/string-coerce.js";
 import { resolveExecDetail, type ToolDetailMode } from "./tool-display-exec.js";
 import { asRecord } from "./tool-display-record.js";
 
@@ -117,14 +115,12 @@ function coerceDisplayValue(
     if (!trimmed) {
       return undefined;
     }
-    const rawLine = normalizeOptionalString(trimmed.split(/\r?\n/)[0]) ?? "";
-    if (!rawLine) {
+    const firstLine = normalizeOptionalString(trimmed.split(/\r?\n/)[0]) ?? "";
+    if (!firstLine) {
       return undefined;
     }
-    const firstLine = redactToolPayloadText(rawLine);
     if (firstLine.length > maxStringChars) {
-      const half = Math.floor((maxStringChars - 1) / 2);
-      return `${firstLine.slice(0, half)}…${firstLine.slice(-(maxStringChars - 1 - half))}`;
+      return `${firstLine.slice(0, Math.max(0, maxStringChars - 3))}…`;
     }
     return firstLine;
   }
@@ -451,7 +447,7 @@ function parseToolSearchCallArgs(raw: string | undefined): Record<string, unknow
   }
   const args: Record<string, unknown> = {};
   const propertyPattern =
-    /(?:^|[,{\s])([A-Za-z_$][\w$]*)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|true|false|null|[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:e[+-]?\d+)?)/gi;
+    /(?:^|[,{\s])([A-Za-z_$][\w$]*)\s*:\s*("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|true|false|null|-?\d+(?:\.\d+)?)/g;
   for (const match of source.matchAll(propertyPattern)) {
     const key = match[1];
     const value = match[2];
@@ -519,9 +515,8 @@ function parseSimpleToolSearchArgValue(raw: string): unknown {
   if (raw === "null") {
     return null;
   }
-  const numeric = parseStrictFiniteNumber(raw);
-  if (numeric !== undefined) {
-    return numeric;
+  if (/^-?\d+(?:\.\d+)?$/.test(raw)) {
+    return Number(raw);
   }
   const quote = raw[0];
   const inner = raw.slice(1, -1);

@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { buildNpmInstallRecordFields } from "../../cli/npm-resolution.js";
 import { resolveOfficialExternalNpmPackageTrust } from "../../cli/plugin-install-plan.js";
 import {
@@ -34,8 +33,11 @@ import {
   formatPluginCompatibilityNotice,
   type PluginStatusReport,
 } from "../../plugins/status.js";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { resolveUserPath } from "../../utils.js";
+import { isInternalMessageChannel } from "../../utils/message-channel.js";
 import {
+  rejectNonOwnerCommand,
   rejectUnauthorizedCommand,
   requireCommandFlagEnabled,
   requireGatewayClientScope,
@@ -397,6 +399,13 @@ export const handlePluginsCommand: CommandHandler = async (params, allowTextComm
   const unauthorized = rejectUnauthorizedCommand(params, "/plugins");
   if (unauthorized) {
     return unauthorized;
+  }
+  const allowInternalReadOnly =
+    (pluginsCommand.action === "list" || pluginsCommand.action === "inspect") &&
+    isInternalMessageChannel(params.command.channel);
+  const nonOwner = allowInternalReadOnly ? null : rejectNonOwnerCommand(params, "/plugins");
+  if (nonOwner) {
+    return nonOwner;
   }
   const disabled = requireCommandFlagEnabled(params.cfg, {
     label: "/plugins",

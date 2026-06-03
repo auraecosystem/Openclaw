@@ -60,14 +60,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
-/** Result of applying a stored chat draft to the current composer input. */
 internal data class DraftApplication(
   val input: String,
   val lastAppliedDraft: String?,
   val consumed: Boolean,
 )
 
-/** Applies a draft exactly once so restored prompts do not overwrite user edits. */
 internal fun applyDraftText(
   draftText: String?,
   currentInput: String,
@@ -93,7 +91,6 @@ internal fun applyDraftText(
   )
 }
 
-/** Chat input surface for text, image attachments, thinking level, and run controls. */
 @Composable
 fun ChatComposer(
   draftText: String?,
@@ -118,14 +115,10 @@ fun ChatComposer(
     input = next.input
     lastAppliedDraft = next.lastAppliedDraft
     if (next.consumed) {
-      // Consume only after the composer state has accepted the draft so
-      // recomposition cannot reapply it over user edits.
       onDraftApplied()
     }
   }
 
-  // One in-flight run owns the composer actions; attachments alone are enough
-  // to send when the gateway is healthy.
   val canSend = pendingRunCount == 0 && (input.trim().isNotEmpty() || attachments.isNotEmpty()) && healthOk
   val sendBusy = pendingRunCount > 0
 
@@ -148,7 +141,7 @@ fun ChatComposer(
 
     if (!healthOk) {
       Text(
-        text = "Gateway is offline. Open Settings to reconnect.",
+        text = "Gateway is offline. Connect first in the Connect tab.",
         style = mobileCallout,
         color = ai.openclaw.app.ui.mobileWarning,
       )

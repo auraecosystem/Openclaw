@@ -1,15 +1,8 @@
 import { die, run, say, warn } from "./host-command.ts";
 
-const PRLCTL_STATUS_TIMEOUT_MS = 30_000;
-const PRLCTL_TRANSITION_TIMEOUT_MS = 120_000;
-
 interface PrlctlVmListItem {
   name?: string;
   status?: string;
-}
-
-export interface WaitForVmStatusOptions {
-  probeTimeoutMs?: () => number | undefined;
 }
 
 export function listVmNames(): string[] {
@@ -22,18 +15,12 @@ export function vmStatus(vmName: string): string {
   return listVms().find((vm) => vm.name === vmName)?.status || "missing";
 }
 
-export function waitForVmStatus(
-  vmName: string,
-  expected: string,
-  timeoutSeconds: number,
-  options: WaitForVmStatusOptions = {},
-): void {
+export function waitForVmStatus(vmName: string, expected: string, timeoutSeconds: number): void {
   const deadline = Date.now() + timeoutSeconds * 1000;
   while (Date.now() < deadline) {
     const status = run("prlctl", ["status", vmName], {
       check: false,
       quiet: true,
-      timeoutMs: options.probeTimeoutMs?.() ?? PRLCTL_STATUS_TIMEOUT_MS,
     }).stdout;
     if (status.includes(` ${expected}`)) {
       return;
@@ -52,16 +39,10 @@ export function ensureVmRunning(vmName: string, timeoutSeconds = 180): void {
     }
     if (status === "stopped") {
       say(`Start ${vmName} before update phase`);
-      run("prlctl", ["start", vmName], {
-        quiet: true,
-        timeoutMs: PRLCTL_TRANSITION_TIMEOUT_MS,
-      });
+      run("prlctl", ["start", vmName], { quiet: true });
     } else if (status === "suspended" || status === "paused") {
       say(`Resume ${vmName} before update phase`);
-      run("prlctl", ["resume", vmName], {
-        quiet: true,
-        timeoutMs: PRLCTL_TRANSITION_TIMEOUT_MS,
-      });
+      run("prlctl", ["resume", vmName], { quiet: true });
     } else if (status === "missing") {
       die(`VM not found before update phase: ${vmName}`);
     }
@@ -87,7 +68,7 @@ export function resolveUbuntuVmName(requested: string, explicit = false): string
         parts: item.version.split(".").map(Number),
       }))
       .filter((item) => item.parts[0] >= 24)
-      .toSorted((a, b) => compareVersions(b.parts, a.parts))[0]?.name ??
+      .toSorted((a, b) => compareVersions(a.parts, b.parts))[0]?.name ??
     names.find((name) => /ubuntu/i.test(name));
   if (!fallback) {
     die(`VM not found: ${requested}`);
@@ -98,10 +79,7 @@ export function resolveUbuntuVmName(requested: string, explicit = false): string
 
 function listVms(): PrlctlVmListItem[] {
   return JSON.parse(
-    run("prlctl", ["list", "--all", "--json"], {
-      quiet: true,
-      timeoutMs: PRLCTL_STATUS_TIMEOUT_MS,
-    }).stdout,
+    run("prlctl", ["list", "--all", "--json"], { quiet: true }).stdout,
   ) as PrlctlVmListItem[];
 }
 

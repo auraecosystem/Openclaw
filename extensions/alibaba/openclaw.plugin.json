@@ -4,13 +4,8 @@
     "onStartup": false
   },
   "enabledByDefault": true,
-  "setup": {
-    "providers": [
-      {
-        "id": "alibaba",
-        "envVars": ["MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "alibaba": ["MODELSTUDIO_API_KEY", "DASHSCOPE_API_KEY", "QWEN_API_KEY"]
   },
   "providerAuthChoices": [
     {

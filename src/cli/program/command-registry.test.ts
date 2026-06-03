@@ -5,14 +5,9 @@ import type { ProgramContext } from "./context.js";
 // Perf: `registerCoreCliByName(...)` dynamically imports registrar modules.
 // Mock the heavy registrars so this suite stays focused on command-registry wiring.
 vi.mock("./register.agent.js", () => ({
-  registerAgentsCommands: (program: Command) => {
-    program.command("agents");
-  },
-}));
-
-vi.mock("./register.agent-turn.js", () => ({
-  registerAgentTurnCommand: (program: Command) => {
+  registerAgentCommands: (program: Command) => {
     program.command("agent");
+    program.command("agents");
   },
 }));
 
@@ -100,17 +95,15 @@ describe("command-registry", () => {
     expect(names).not.toContain("doctor");
   });
 
-  it("registerCoreCliByName resolves agent and agents separately", async () => {
+  it("registerCoreCliByName resolves agents to the agent entry", async () => {
     const program = createProgram();
     const found = await registerCoreCliByName(program, testProgramContext, "agents");
     expect(found).toBe(true);
-    expect(program.commands.map((command) => command.name())).toEqual(["agents"]);
-
-    const agentProgram = createProgram();
-    await expect(registerCoreCliByName(agentProgram, testProgramContext, "agent")).resolves.toBe(
-      true,
-    );
-    expect(agentProgram.commands.map((command) => command.name())).toEqual(["agent"]);
+    // The registrar also installs the singular "agent" command from the same entry.
+    expect(program.commands.map((command) => command.name()).toSorted()).toEqual([
+      "agent",
+      "agents",
+    ]);
   });
 
   it("registerCoreCliByName returns false for unknown commands", async () => {

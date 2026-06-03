@@ -8,7 +8,7 @@ import type { MatrixRawEvent } from "./types.js";
 import { EventType } from "./types.js";
 
 type RoomEventListener = (roomId: string, event: MatrixRawEvent) => void;
-type FailedDecryptListener = (roomId: string, event: MatrixRawEvent, error: Error) => void;
+type FailedDecryptListener = (roomId: string, event: MatrixRawEvent, error: Error) => Promise<void>;
 type VerificationSummaryListener = (summary: MatrixVerificationSummary) => void;
 
 function getSentNoticeBody(sendMessage: ReturnType<typeof vi.fn>, index = 0): string {
@@ -112,7 +112,7 @@ function createHarness(params?: {
   const runDetachedTask = vi.fn((_label: string, task: () => Promise<void>) => {
     const promise = Promise.resolve()
       .then(task)
-      .catch((error: unknown) => {
+      .catch((error) => {
         throw error;
       })
       .finally(() => {
@@ -1489,7 +1489,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
   });
 
   it("adds self-device guidance when decrypt failures come from the same Matrix user", async () => {
-    const { logger, failedDecryptListener, flushTasks } = createHarness({
+    const { logger, failedDecryptListener } = createHarness({
       accountId: "ops",
       selfUserId: "@gumadeiras:matrix.example.org",
     });
@@ -1497,7 +1497,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       throw new Error("room.failed_decryption listener was not registered");
     }
 
-    failedDecryptListener(
+    await failedDecryptListener(
       "!room:example.org",
       {
         event_id: "$enc-self",
@@ -1508,7 +1508,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       },
       new Error("The sender's device has not sent us the keys for this message."),
     );
-    await flushTasks();
 
     expectWarnContextFields(logger, 1, "Failed to decrypt message", {
       roomId: "!room:example.org",
@@ -1528,7 +1527,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
   });
 
   it("does not add self-device guidance for decrypt failures from another sender", async () => {
-    const { logger, failedDecryptListener, flushTasks } = createHarness({
+    const { logger, failedDecryptListener } = createHarness({
       accountId: "ops",
       selfUserId: "@gumadeiras:matrix.example.org",
     });
@@ -1536,7 +1535,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       throw new Error("room.failed_decryption listener was not registered");
     }
 
-    failedDecryptListener(
+    await failedDecryptListener(
       "!room:example.org",
       {
         event_id: "$enc-other",
@@ -1547,7 +1546,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       },
       new Error("The sender's device has not sent us the keys for this message."),
     );
-    await flushTasks();
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expectWarnContextFields(logger, 1, "Failed to decrypt message", {
@@ -1563,7 +1561,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
     try {
       const healthySyncSinceMs = Date.now() - 60_000;
-      const { logger, failedDecryptListener, flushTasks } = createHarness({
+      const { logger, failedDecryptListener } = createHarness({
         accountId: "ops",
         getHealthySyncSinceMs: () => healthySyncSinceMs,
       });
@@ -1576,7 +1574,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         "!room-b:example.org",
         "!room-c:example.org",
       ].entries()) {
-        failedDecryptListener(
+        await failedDecryptListener(
           roomId,
           {
             event_id: `$enc-fresh-${index + 1}`,
@@ -1587,7 +1585,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
           },
           new Error("The sender's device has not sent us the keys for this message."),
         );
-        await flushTasks();
       }
 
       expectWarnContextFields(logger, 1, "Failed to decrypt fresh post-healthy-sync message", {
@@ -1626,16 +1623,16 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
     try {
-      const healthySync = { sinceMs: undefined as number | undefined };
-      const { logger, failedDecryptListener, flushTasks } = createHarness({
+      let healthySyncSinceMs: number | undefined;
+      const { logger, failedDecryptListener } = createHarness({
         accountId: "ops",
-        getHealthySyncSinceMs: () => healthySync.sinceMs,
+        getHealthySyncSinceMs: () => healthySyncSinceMs,
       });
       if (!failedDecryptListener) {
         throw new Error("room.failed_decryption listener was not registered");
       }
 
-      failedDecryptListener(
+      await failedDecryptListener(
         "!room:example.org",
         {
           event_id: "$enc-old",
@@ -1646,7 +1643,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         },
         new Error("The sender's device has not sent us the keys for this message."),
       );
-      await flushTasks();
 
       expect(logger.warn).toHaveBeenCalledTimes(1);
       expectWarnContextFields(logger, 1, "Failed to decrypt message", {
@@ -1654,9 +1650,9 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         freshAfterHealthySync: false,
       });
 
-      healthySync.sinceMs = Date.now();
+      healthySyncSinceMs = Date.now();
 
-      failedDecryptListener(
+      await failedDecryptListener(
         "!room:example.org",
         {
           event_id: "$enc-fresh-after-ready",
@@ -1667,7 +1663,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
         },
         new Error("The sender's device has not sent us the keys for this message."),
       );
-      await flushTasks();
 
       expectWarnContextFields(logger, 2, "Failed to decrypt fresh post-healthy-sync message", {
         eventId: "$enc-fresh-after-ready",
@@ -1684,7 +1679,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
     try {
       const healthySyncSinceMs = Date.now() - 60_000;
-      const { logger, failedDecryptListener, flushTasks } = createHarness({
+      const { logger, failedDecryptListener } = createHarness({
         accountId: "ops",
         getHealthySyncSinceMs: () => healthySyncSinceMs,
       });
@@ -1694,7 +1689,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
 
       for (const wave of [1, 2]) {
         for (const index of [1, 2, 3]) {
-          failedDecryptListener(
+          await failedDecryptListener(
             `!room-${wave}-${index}:example.org`,
             {
               event_id: `$enc-wave-${wave}-${index}`,
@@ -1705,7 +1700,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
             },
             new Error("The sender's device has not sent us the keys for this message."),
           );
-          await flushTasks();
         }
 
         if (wave === 1) {
@@ -1739,7 +1733,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
     vi.setSystemTime(new Date("2026-04-10T16:21:00.000Z"));
     try {
       let healthySyncSinceMs = Date.now() - 60_000;
-      const { logger, failedDecryptListener, flushTasks } = createHarness({
+      const { logger, failedDecryptListener } = createHarness({
         accountId: "ops",
         getHealthySyncSinceMs: () => healthySyncSinceMs,
       });
@@ -1748,7 +1742,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       }
 
       for (const index of [1, 2, 3]) {
-        failedDecryptListener(
+        await failedDecryptListener(
           `!room-first-${index}:example.org`,
           {
             event_id: `$enc-first-${index}`,
@@ -1759,13 +1753,12 @@ describe("registerMatrixMonitorEvents verification routing", () => {
           },
           new Error("The sender's device has not sent us the keys for this message."),
         );
-        await flushTasks();
       }
 
       healthySyncSinceMs = Date.now();
 
       for (const index of [1, 2, 3]) {
-        failedDecryptListener(
+        await failedDecryptListener(
           `!room-second-${index}:example.org`,
           {
             event_id: `$enc-second-${index}`,
@@ -1776,7 +1769,6 @@ describe("registerMatrixMonitorEvents verification routing", () => {
           },
           new Error("The sender's device has not sent us the keys for this message."),
         );
-        await flushTasks();
       }
 
       expectWarnContextFields(logger, 5, "Failed to decrypt fresh post-healthy-sync message", {
@@ -1808,7 +1800,7 @@ describe("registerMatrixMonitorEvents verification routing", () => {
   });
 
   it("logs decrypt guidance when getUserId fails during lookup", async () => {
-    const { logger, logVerboseMessage, failedDecryptListener, flushTasks } = createHarness({
+    const { logger, logVerboseMessage, failedDecryptListener } = createHarness({
       accountId: "ops",
       selfUserIdError: new Error("lookup failed"),
     });
@@ -1816,18 +1808,19 @@ describe("registerMatrixMonitorEvents verification routing", () => {
       throw new Error("room.failed_decryption listener was not registered");
     }
 
-    failedDecryptListener(
-      "!room:example.org",
-      {
-        event_id: "$enc-lookup-fail",
-        sender: "@gumadeiras:matrix.example.org",
-        type: EventType.RoomMessageEncrypted,
-        origin_server_ts: Date.now(),
-        content: {},
-      },
-      new Error("The sender's device has not sent us the keys for this message."),
-    );
-    await flushTasks();
+    await expect(
+      failedDecryptListener(
+        "!room:example.org",
+        {
+          event_id: "$enc-lookup-fail",
+          sender: "@gumadeiras:matrix.example.org",
+          type: EventType.RoomMessageEncrypted,
+          origin_server_ts: Date.now(),
+          content: {},
+        },
+        new Error("The sender's device has not sent us the keys for this message."),
+      ),
+    ).resolves.toBeUndefined();
 
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expectWarnContextFields(logger, 1, "Failed to decrypt message", {

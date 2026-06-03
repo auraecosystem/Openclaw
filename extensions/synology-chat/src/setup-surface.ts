@@ -12,10 +12,7 @@ import {
   type ChannelSetupWizard,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/setup";
-import {
-  normalizeOptionalString,
-  normalizeStringEntries,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import type { SynologyChatAccountRaw, SynologyChatChannelConfig } from "./types.js";
 
@@ -150,7 +147,10 @@ function resolveExistingAllowedUserIds(cfg: OpenClawConfig, accountId: string): 
   if (Array.isArray(raw)) {
     return raw.map(normalizeSynologyAllowedUserId).filter(Boolean);
   }
-  return normalizeStringEntries(normalizeSynologyAllowedUserId(raw).split(","));
+  return normalizeSynologyAllowedUserId(raw)
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }
 
 export const synologyChatSetupAdapter: ChannelSetupAdapter = {

@@ -93,8 +93,8 @@ vi.mock("./reply-threading.js", () => ({
   resolveReplyToMode: () => toolsTestState.replyToMode,
 }));
 
-let buildCommandTestParamsImpl: typeof import("./commands.test-harness.js").buildCommandTestParams;
-let handleToolsCommandImpl: typeof import("./commands-info.js").handleToolsCommand;
+let buildCommandTestParams: typeof import("./commands.test-harness.js").buildCommandTestParams;
+let handleToolsCommand: typeof import("./commands-info.js").handleToolsCommand;
 
 async function loadToolsHarness(options?: { resolveTools?: () => EffectiveToolInventoryResult }) {
   toolsTestState.resolveToolsImpl = options?.resolveTools ?? (() => makeDefaultInventory());
@@ -103,8 +103,8 @@ async function loadToolsHarness(options?: { resolveTools?: () => EffectiveToolIn
   );
 
   return {
-    buildCommandTestParamsLocal: buildCommandTestParamsImpl,
-    handleToolsCommandLocal: handleToolsCommandImpl,
+    buildCommandTestParams,
+    handleToolsCommand,
     resolveToolsMock: toolsTestState.resolveToolsMock,
   };
 }
@@ -126,9 +126,8 @@ function resolveToolsArg(resolveToolsMock: { mock: { calls: unknown[][] } }, ind
 
 describe("handleToolsCommand", () => {
   beforeAll(async () => {
-    ({ buildCommandTestParams: buildCommandTestParamsImpl } =
-      await import("./commands.test-harness.js"));
-    ({ handleToolsCommand: handleToolsCommandImpl } = await import("./commands-info.js"));
+    ({ buildCommandTestParams } = await import("./commands.test-harness.js"));
+    ({ handleToolsCommand } = await import("./commands-info.js"));
   });
 
   beforeEach(() => {
@@ -138,9 +137,9 @@ describe("handleToolsCommand", () => {
   });
 
   it("renders a product-facing tool list", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.agentId = "main";
@@ -160,7 +159,7 @@ describe("handleToolsCommand", () => {
       ChatType: "group",
     };
 
-    const result = await handleToolsCommandLocal(params, true);
+    const result = await handleToolsCommand(params, true);
 
     expect(result?.reply?.text).toContain("Available tools");
     expect(result?.reply?.text).toContain("Profile: coding");
@@ -170,7 +169,7 @@ describe("handleToolsCommand", () => {
     expect(result?.reply?.text).toContain("docs_lookup (docs)");
     expect(result?.reply?.text).not.toContain("unavailable right now");
     const toolsArg = resolveToolsArg(resolveToolsMock);
-    expect(toolsArg).not.toHaveProperty("senderIsOwner");
+    expect(toolsArg.senderIsOwner).toBe(false);
     expect(toolsArg.senderId).toBeUndefined();
     expect(toolsArg.senderName).toBe("User Name");
     expect(toolsArg.senderUsername).toBe("user_name");
@@ -186,11 +185,9 @@ describe("handleToolsCommand", () => {
   });
 
   it("returns usage when arguments are provided", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal } = await loadToolsHarness();
-    const result = await handleToolsCommandLocal(
-      buildCommandTestParamsLocal("/tools extra", buildConfig(), undefined, {
-        workspaceDir: "/tmp",
-      }),
+    const { buildCommandTestParams, handleToolsCommand } = await loadToolsHarness();
+    const result = await handleToolsCommand(
+      buildCommandTestParams("/tools extra", buildConfig(), undefined, { workspaceDir: "/tmp" }),
       true,
     );
 
@@ -201,9 +198,9 @@ describe("handleToolsCommand", () => {
   });
 
   it("does not synthesize group ids for direct-chat sender ids", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.ctx = {
@@ -213,15 +210,15 @@ describe("handleToolsCommand", () => {
       ChatType: "dm",
     };
 
-    await handleToolsCommandLocal(params, true);
+    await handleToolsCommand(params, true);
 
     expect(resolveToolsArg(resolveToolsMock).groupId).toBeUndefined();
   });
 
   it("prefers the target session entry for tool inventory group metadata", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.sessionEntry = {
@@ -249,7 +246,7 @@ describe("handleToolsCommand", () => {
       GroupSpace: "ctx-space",
     };
 
-    await handleToolsCommandLocal(params, true);
+    await handleToolsCommand(params, true);
 
     const toolsArg = resolveToolsArg(resolveToolsMock);
     expect(toolsArg.groupId).toBe("target-group");
@@ -258,11 +255,9 @@ describe("handleToolsCommand", () => {
   });
 
   it("renders the detailed tool list in verbose mode", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal } = await loadToolsHarness();
-    const result = await handleToolsCommandLocal(
-      buildCommandTestParamsLocal("/tools verbose", buildConfig(), undefined, {
-        workspaceDir: "/tmp",
-      }),
+    const { buildCommandTestParams, handleToolsCommand } = await loadToolsHarness();
+    const result = await handleToolsCommand(
+      buildCommandTestParams("/tools verbose", buildConfig(), undefined, { workspaceDir: "/tmp" }),
       true,
     );
 
@@ -273,11 +268,9 @@ describe("handleToolsCommand", () => {
   });
 
   it("accepts explicit compact mode", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal } = await loadToolsHarness();
-    const result = await handleToolsCommandLocal(
-      buildCommandTestParamsLocal("/tools compact", buildConfig(), undefined, {
-        workspaceDir: "/tmp",
-      }),
+    const { buildCommandTestParams, handleToolsCommand } = await loadToolsHarness();
+    const result = await handleToolsCommand(
+      buildCommandTestParams("/tools compact", buildConfig(), undefined, { workspaceDir: "/tmp" }),
       true,
     );
 
@@ -286,8 +279,8 @@ describe("handleToolsCommand", () => {
   });
 
   it("ignores unauthorized senders", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal } = await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const { buildCommandTestParams, handleToolsCommand } = await loadToolsHarness();
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.command = {
@@ -296,7 +289,7 @@ describe("handleToolsCommand", () => {
       senderId: "unauthorized",
     };
 
-    const result = await handleToolsCommandLocal(params, true);
+    const result = await handleToolsCommand(params, true);
 
     expect(result).toEqual({ shouldContinue: false });
   });
@@ -322,9 +315,9 @@ describe("handleToolsCommand", () => {
       ]),
     );
 
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal(
+    const params = buildCommandTestParams(
       "/tools",
       {
         commands: { text: true },
@@ -349,20 +342,20 @@ describe("handleToolsCommand", () => {
       channel: "telegram",
     };
 
-    await handleToolsCommandLocal(params, true);
+    await handleToolsCommand(params, true);
 
     expect(resolveToolsArg(resolveToolsMock).accountId).toBe("work");
   });
 
   it("returns a concise fallback error on effective inventory failures", async () => {
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal } = await loadToolsHarness({
+    const { buildCommandTestParams, handleToolsCommand } = await loadToolsHarness({
       resolveTools: () => {
         throw new Error("boom");
       },
     });
 
-    const result = await handleToolsCommandLocal(
-      buildCommandTestParamsLocal("/tools", buildConfig(), undefined, { workspaceDir: "/tmp" }),
+    const result = await handleToolsCommand(
+      buildCommandTestParams("/tools", buildConfig(), undefined, { workspaceDir: "/tmp" }),
       true,
     );
 
@@ -375,15 +368,15 @@ describe("handleToolsCommand", () => {
   it("uses the canonical target session agent for /tools inventory", async () => {
     const { resolveSessionAgentId } = await import("../../agents/agent-scope.js");
     vi.mocked(resolveSessionAgentId).mockReturnValue("target");
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.agentId = "main";
     params.sessionKey = "agent:target:whatsapp:direct:12345";
 
-    const result = await handleToolsCommandLocal(params, true);
+    const result = await handleToolsCommand(params, true);
 
     expect(result?.shouldContinue).toBe(false);
     const toolsArg = resolveToolsArg(resolveToolsMock);
@@ -394,16 +387,16 @@ describe("handleToolsCommand", () => {
   it("does not forward a stale ambient agentDir for session-bound /tools", async () => {
     const { resolveSessionAgentId } = await import("../../agents/agent-scope.js");
     vi.mocked(resolveSessionAgentId).mockReturnValue("target");
-    const { buildCommandTestParamsLocal, handleToolsCommandLocal, resolveToolsMock } =
+    const { buildCommandTestParams, handleToolsCommand, resolveToolsMock } =
       await loadToolsHarness();
-    const params = buildCommandTestParamsLocal("/tools", buildConfig(), undefined, {
+    const params = buildCommandTestParams("/tools", buildConfig(), undefined, {
       workspaceDir: "/tmp",
     });
     params.agentId = "main";
     params.agentDir = "/tmp/agents/main/agent";
     params.sessionKey = "agent:target:whatsapp:direct:12345";
 
-    const result = await handleToolsCommandLocal(params, true);
+    const result = await handleToolsCommand(params, true);
 
     expect(result?.shouldContinue).toBe(false);
     const toolsArg = resolveToolsArg(resolveToolsMock);

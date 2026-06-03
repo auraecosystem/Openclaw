@@ -12,7 +12,6 @@ import {
 import { runAgentStep } from "./agent-step.js";
 import { resolveAnnounceTarget } from "./sessions-announce-target.js";
 import {
-  type AnnounceTarget,
   buildAgentToAgentAnnounceContext,
   buildAgentToAgentReplyContext,
   isAnnounceSkip,
@@ -34,38 +33,6 @@ const defaultSessionsSendA2ADeps = {
 let sessionsSendA2ADeps: {
   callGateway: GatewayCaller;
 } = defaultSessionsSendA2ADeps;
-
-async function deliverAnnounceReply(params: {
-  announceTarget: AnnounceTarget;
-  message: string;
-  runContextId: string;
-}) {
-  const message = params.message.trim();
-  if (!message) {
-    return;
-  }
-  try {
-    await sessionsSendA2ADeps.callGateway({
-      method: "send",
-      params: {
-        to: params.announceTarget.to,
-        message,
-        channel: params.announceTarget.channel,
-        accountId: params.announceTarget.accountId,
-        threadId: params.announceTarget.threadId,
-        idempotencyKey: crypto.randomUUID(),
-      },
-      timeoutMs: 10_000,
-    });
-  } catch (err) {
-    log.warn("sessions_send announce delivery failed", {
-      runId: params.runContextId,
-      channel: params.announceTarget.channel,
-      to: params.announceTarget.to,
-      error: formatErrorMessage(err),
-    });
-  }
-}
 
 export async function runSessionsSendA2AFlow(params: {
   targetSessionKey: string;
@@ -115,27 +82,6 @@ export async function runSessionsSendA2AFlow(params: {
       displayKey: params.displayKey,
     });
     const targetChannel = announceTarget?.channel ?? "unknown";
-
-    // A same-session send is a human-facing source-channel reply, not a true
-    // agent-to-agent announcement. Asking the same session to decide whether to
-    // announce can learn stale ANNOUNCE_SKIP patterns from its own history and
-    // silently drop a normal channel response.
-    if (
-      announceTarget &&
-      params.requesterSessionKey &&
-      params.requesterSessionKey === params.targetSessionKey &&
-      params.requesterChannel === announceTarget.channel
-    ) {
-      if (params.waitRunId && !params.roundOneReply && !params.baseline) {
-        return;
-      }
-      await deliverAnnounceReply({
-        announceTarget,
-        message: latestReply,
-        runContextId,
-      });
-      return;
-    }
 
     if (
       params.maxPingPongTurns > 0 &&
@@ -206,11 +152,27 @@ export async function runSessionsSendA2AFlow(params: {
       !isAnnounceSkip(announceReply) &&
       !isNonDeliverableSessionsReply(announceReply)
     ) {
-      await deliverAnnounceReply({
-        announceTarget,
-        message: announceReply,
-        runContextId,
-      });
+      try {
+        await sessionsSendA2ADeps.callGateway({
+          method: "send",
+          params: {
+            to: announceTarget.to,
+            message: announceReply.trim(),
+            channel: announceTarget.channel,
+            accountId: announceTarget.accountId,
+            threadId: announceTarget.threadId,
+            idempotencyKey: crypto.randomUUID(),
+          },
+          timeoutMs: 10_000,
+        });
+      } catch (err) {
+        log.warn("sessions_send announce delivery failed", {
+          runId: runContextId,
+          channel: announceTarget.channel,
+          to: announceTarget.to,
+          error: formatErrorMessage(err),
+        });
+      }
     }
   } catch (err) {
     log.warn("sessions_send announce flow failed", {
@@ -220,7 +182,7 @@ export async function runSessionsSendA2AFlow(params: {
   }
 }
 
-export const testing = {
+export const __testing = {
   setDepsForTest(overrides?: Partial<{ callGateway: GatewayCaller }>) {
     sessionsSendA2ADeps = overrides
       ? {
@@ -230,4 +192,3 @@ export const testing = {
       : defaultSessionsSendA2ADeps;
   },
 };
-export { testing as __testing };

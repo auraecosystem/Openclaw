@@ -1,7 +1,7 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { enqueueCommandInLane } from "../../process/command-queue.js";
 import { CommandLane } from "../../process/lanes.js";
 import { DEFAULT_AGENT_ID } from "../../routing/session-key.js";
+import { normalizeLowercaseStringOrEmpty } from "../../shared/string-coerce.js";
 import {
   completeTaskRunByRunId,
   createRunningTaskRun,
@@ -12,8 +12,6 @@ import { resolveCronDeliveryPlan, resolveFailureDestination } from "../delivery-
 import { createCronRunDiagnosticsFromError } from "../run-diagnostics.js";
 import { createCronExecutionId } from "../run-id.js";
 import type { CronJob, CronJobCreate, CronJobPatch } from "../types.js";
-import { normalizeCronRunErrorText } from "./execution-errors.js";
-import { failureNotificationDeliveryFromJobState } from "./failure-alerts.js";
 import {
   applyJobPatch,
   assertSupportedJobSpec,
@@ -29,8 +27,6 @@ import {
 } from "./jobs.js";
 import type {
   CronJobsEnabledFilter,
-  CronJobsLastRunStatusFilter,
-  CronJobsScheduleKindFilter,
   CronJobsSortBy,
   CronListPageOptions,
   CronListPageResult,
@@ -40,16 +36,17 @@ import { locked } from "./locked.js";
 import { normalizeOptionalAgentId } from "./normalize.js";
 import type { CronServiceState, CronWakeMode } from "./state.js";
 import { ensureLoaded, persist, warnIfDisabled } from "./store.js";
-import { CRON_TASK_RUNNING_PROGRESS_SUMMARY } from "./task-ledger.js";
 import {
   applyJobResult,
   armTimer,
   emit,
   executeJobCoreWithTimeout,
+  failureNotificationDeliveryFromJobState,
+  normalizeCronRunErrorText,
   runMissedJobs,
   stopTimer,
+  wake,
 } from "./timer.js";
-import { wake } from "./wake.js";
 
 const STARTUP_INTERRUPTED_ERROR = "cron: job interrupted by gateway restart";
 
@@ -163,7 +160,6 @@ async function ensureLoadedForRead(state: CronServiceState) {
   }
 }
 
-/** Starts the cron service, recovers interrupted runs, catches up missed jobs, and arms the timer. */
 export async function start(state: CronServiceState) {
   if (!state.deps.cronEnabled) {
     state.deps.log.info({ enabled: false }, "cron: disabled");
@@ -239,12 +235,10 @@ export async function start(state: CronServiceState) {
   });
 }
 
-/** Stops the cron service timer without mutating persisted job state. */
 export function stop(state: CronServiceState) {
   stopTimer(state);
 }
 
-/** Returns cron service status after a read-only maintenance pass. */
 export async function status(state: CronServiceState) {
   return await locked(state, async () => {
     await ensureLoadedForRead(state);
@@ -257,7 +251,6 @@ export async function status(state: CronServiceState) {
   });
 }
 
-/** Lists cron jobs sorted by next run time, excluding disabled jobs unless requested. */
 export async function list(state: CronServiceState, opts?: { includeDisabled?: boolean }) {
   return await locked(state, async () => {
     await ensureLoadedForRead(state);
@@ -267,7 +260,6 @@ export async function list(state: CronServiceState, opts?: { includeDisabled?: b
   });
 }
 
-/** Reads one cron job by id without advancing due schedules. */
 export async function readJob(state: CronServiceState, id: string) {
   return await locked(state, async () => {
     await ensureLoadedForRead(state);
@@ -282,39 +274,10 @@ function resolveEnabledFilter(opts?: CronListPageOptions): CronJobsEnabledFilter
   return opts?.includeDisabled ? "all" : "enabled";
 }
 
-function resolveScheduleKindFilter(opts?: CronListPageOptions): CronJobsScheduleKindFilter {
-  if (
-    opts?.scheduleKind === "all" ||
-    opts?.scheduleKind === "at" ||
-    opts?.scheduleKind === "every" ||
-    opts?.scheduleKind === "cron"
-  ) {
-    return opts.scheduleKind;
-  }
-  return "all";
-}
-
-function resolveLastRunStatusFilter(opts?: CronListPageOptions): CronJobsLastRunStatusFilter {
-  if (
-    opts?.lastRunStatus === "all" ||
-    opts?.lastRunStatus === "ok" ||
-    opts?.lastRunStatus === "error" ||
-    opts?.lastRunStatus === "skipped" ||
-    opts?.lastRunStatus === "unknown"
-  ) {
-    return opts.lastRunStatus;
-  }
-  return "all";
-}
-
-function resolveJobLastRunStatus(job: CronJob): CronJobsLastRunStatusFilter {
-  return job.state.lastRunStatus ?? job.state.lastStatus ?? "unknown";
-}
-
 function sortJobs(jobs: CronJob[], sortBy: CronJobsSortBy, sortDir: CronSortDir) {
   const dir = sortDir === "desc" ? -1 : 1;
   return jobs.toSorted((a, b) => {
-    let cmp;
+    let cmp = 0;
     if (sortBy === "name") {
       const aName = typeof a.name === "string" ? a.name : "";
       const bName = typeof b.name === "string" ? b.name : "";
@@ -351,14 +314,11 @@ function resolveEffectiveJobAgentId(job: CronJob, defaultAgentId: string | undef
   );
 }
 
-/** Lists a filtered, sorted, bounded page of cron jobs for CLI/RPC callers. */
 export async function listPage(state: CronServiceState, opts?: CronListPageOptions) {
   return await locked(state, async () => {
     await ensureLoadedForRead(state);
     const query = normalizeLowercaseStringOrEmpty(opts?.query);
     const enabledFilter = resolveEnabledFilter(opts);
-    const scheduleKindFilter = resolveScheduleKindFilter(opts);
-    const lastRunStatusFilter = resolveLastRunStatusFilter(opts);
     const sortBy = opts?.sortBy ?? "nextRunAtMs";
     const sortDir = opts?.sortDir ?? "asc";
     const requestedAgentId = normalizeOptionalAgentId(opts?.agentId);
@@ -376,17 +336,11 @@ export async function listPage(state: CronServiceState, opts?: CronListPageOptio
       ) {
         return false;
       }
-      if (scheduleKindFilter !== "all" && job.schedule.kind !== scheduleKindFilter) {
-        return false;
-      }
-      if (lastRunStatusFilter !== "all" && resolveJobLastRunStatus(job) !== lastRunStatusFilter) {
-        return false;
-      }
       if (!query) {
         return true;
       }
       const haystack = normalizeLowercaseStringOrEmpty(
-        [job.id, job.name, job.description ?? "", job.agentId ?? ""].join(" "),
+        [job.name, job.description ?? "", job.agentId ?? ""].join(" "),
       );
       return haystack.includes(query);
     });
@@ -408,7 +362,6 @@ export async function listPage(state: CronServiceState, opts?: CronListPageOptio
   });
 }
 
-/** Adds a cron job, recomputes scheduler state, persists, and re-arms the timer. */
 export async function add(state: CronServiceState, input: CronJobCreate) {
   return await locked(state, async () => {
     warnIfDisabled(state, "add");
@@ -444,7 +397,6 @@ export async function add(state: CronServiceState, input: CronJobCreate) {
   });
 }
 
-/** Updates a cron job patch in-place, recomputes affected schedule state, and persists it. */
 export async function update(state: CronServiceState, id: string, patch: CronJobPatch) {
   return await locked(state, async () => {
     warnIfDisabled(state, "update");
@@ -507,7 +459,6 @@ export async function update(state: CronServiceState, id: string, patch: CronJob
   });
 }
 
-/** Removes a cron job by id and re-arms the timer when the in-memory store changes. */
 export async function remove(state: CronServiceState, id: string) {
   return await locked(state, async () => {
     warnIfDisabled(state, "remove");
@@ -617,7 +568,7 @@ function tryCreateManualTaskRun(params: {
 }): string | undefined {
   const runId = createCronExecutionId(params.job.id, params.startedAt);
   try {
-    const task = createRunningTaskRun({
+    createRunningTaskRun({
       runtime: "cron",
       sourceId: params.job.id,
       ownerKey: "",
@@ -631,15 +582,7 @@ function tryCreateManualTaskRun(params: {
       notifyPolicy: "silent",
       startedAt: params.startedAt,
       lastEventAt: params.startedAt,
-      progressSummary: CRON_TASK_RUNNING_PROGRESS_SUMMARY,
     });
-    if (!task) {
-      params.state.deps.log.warn(
-        { jobId: params.job.id },
-        "cron: task ledger record was not persisted",
-      );
-      return undefined;
-    }
     return runId;
   } catch (error) {
     params.state.deps.log.warn(
@@ -731,8 +674,6 @@ async function inspectManualRunDisposition(
   id: string,
   mode?: "due" | "force",
 ): Promise<ManualRunDisposition | { ok: false }> {
-  // Queue callers need a cheap eligibility check before entering the command
-  // lane; the real reservation happens later under lock in prepareManualRun.
   const result = await inspectManualRunPreflight(state, id, mode);
   if (!result.ok) {
     return result;
@@ -779,8 +720,6 @@ async function prepareManualRun(
       startedAt: preflight.now,
     });
     markCronJobActive(job.id);
-    // Execute against a snapshot so later reload/merge can preserve delivery
-    // target writeback from disk without mutating the running object.
     const executionJob = structuredClone(job);
     return {
       ok: true,
@@ -834,7 +773,6 @@ async function finishPreparedManualRun(
           error: coreResult.error,
           diagnostics: coreResult.diagnostics,
           delivered: coreResult.delivered,
-          provider: coreResult.provider,
           startedAt,
           endedAt,
         },
@@ -899,7 +837,6 @@ async function finishPreparedManualRun(
   }
 }
 
-/** Runs a cron job manually, reserving it under lock before executing outside the lock. */
 export async function run(
   state: CronServiceState,
   id: string,
@@ -914,7 +851,6 @@ export async function run(
   return { ok: true, ran: true } as const;
 }
 
-/** Queues a manual cron run behind the cron command lane and returns an immediate run id. */
 export async function enqueueRun(state: CronServiceState, id: string, mode?: "due" | "force") {
   const disposition = await inspectManualRunDisposition(state, id, mode);
   if (!disposition.ok || !("runnable" in disposition && disposition.runnable)) {
@@ -943,7 +879,7 @@ export async function enqueueRun(state: CronServiceState, id: string, mode?: "du
         );
       },
     },
-  ).catch((err: unknown) => {
+  ).catch((err) => {
     state.deps.log.error(
       { jobId: id, runId, err: String(err) },
       "cron: queued manual run background execution failed",
@@ -952,7 +888,6 @@ export async function enqueueRun(state: CronServiceState, id: string, mode?: "du
   return { ok: true, enqueued: true, runId } as const;
 }
 
-/** Enqueues manual wake text through the cron wake API. */
 export function wakeNow(
   state: CronServiceState,
   opts: { mode: CronWakeMode; text: string; sessionKey?: string },

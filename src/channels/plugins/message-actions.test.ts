@@ -8,7 +8,7 @@ import {
   createTestRegistry,
 } from "../../test-utils/channel-plugins.js";
 import {
-  testing,
+  __testing,
   channelSupportsMessageCapability,
   channelSupportsMessageCapabilityForChannel,
   listCrossChannelSchemaSupportedMessageActions,
@@ -75,7 +75,7 @@ describe("message action capability checks", () => {
 
   afterEach(() => {
     setActivePluginRegistry(emptyRegistry);
-    testing.resetLoggedMessageActionErrors();
+    __testing.resetLoggedMessageActionErrors();
     errorSpy.mockClear();
   });
 

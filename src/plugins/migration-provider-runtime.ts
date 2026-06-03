@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { getLoadedRuntimePluginRegistry } from "./active-runtime-registry.js";
 import {
+  withBundledPluginAllowlistCompat,
   withBundledPluginEnablementCompat,
   withBundledPluginVitestCompat,
 } from "./bundled-compat.js";
@@ -19,8 +20,12 @@ function resolveMigrationProviderConfig(params: {
   cfg?: OpenClawConfig;
   bundledCompatPluginIds: readonly string[];
 }): OpenClawConfig | undefined {
-  const enablementCompat = withBundledPluginEnablementCompat({
+  const allowlistCompat = withBundledPluginAllowlistCompat({
     config: params.cfg,
+    pluginIds: [...params.bundledCompatPluginIds],
+  });
+  const enablementCompat = withBundledPluginEnablementCompat({
+    config: allowlistCompat,
     pluginIds: [...params.bundledCompatPluginIds],
   });
   return withBundledPluginVitestCompat({

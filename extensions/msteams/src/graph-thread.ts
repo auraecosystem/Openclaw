@@ -1,7 +1,3 @@
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { fetchGraphJson, type GraphResponse } from "./graph.js";
 
 export type GraphThreadMessage = {
@@ -17,13 +13,6 @@ export type GraphThreadMessage = {
 // TTL cache for team ID -> group GUID mapping.
 const teamGroupIdCache = new Map<string, { groupId: string; expiresAt: number }>();
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-
-function resolveTeamGroupIdCacheExpiresAt(nowRaw = Date.now()): number | undefined {
-  const now = asDateTimestampMs(nowRaw);
-  return now === undefined
-    ? undefined
-    : resolveExpiresAtMsFromDurationMs(CACHE_TTL_MS, { nowMs: now });
-}
 
 /**
  * Strip HTML tags from Teams message content, preserving @mention display names.
@@ -55,13 +44,8 @@ export async function resolveTeamGroupId(
   conversationTeamId: string,
 ): Promise<string> {
   const cached = teamGroupIdCache.get(conversationTeamId);
-  if (cached) {
-    const now = asDateTimestampMs(Date.now());
-    const expiresAt = asDateTimestampMs(cached.expiresAt);
-    if (now !== undefined && expiresAt !== undefined && expiresAt > now) {
-      return cached.groupId;
-    }
-    teamGroupIdCache.delete(conversationTeamId);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.groupId;
   }
 
   // The team ID in channelData is typically the group ID itself for standard teams.
@@ -75,13 +59,10 @@ export async function resolveTeamGroupId(
     // Only cache when the Graph lookup succeeds — caching a fallback raw ID
     // can cause silent failures for the entire TTL if the ID is not a valid
     // Graph team GUID (e.g. Bot Framework conversation key).
-    const expiresAt = resolveTeamGroupIdCacheExpiresAt();
-    if (expiresAt !== undefined) {
-      teamGroupIdCache.set(conversationTeamId, {
-        groupId,
-        expiresAt,
-      });
-    }
+    teamGroupIdCache.set(conversationTeamId, {
+      groupId,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
 
     return groupId;
   } catch {

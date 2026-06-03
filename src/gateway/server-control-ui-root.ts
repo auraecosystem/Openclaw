@@ -8,23 +8,6 @@ import {
 import type { RuntimeEnv } from "../runtime.js";
 import type { ControlUiRootState } from "./control-ui.js";
 
-function startControlUiAssetsBuild(params: {
-  gatewayRuntime: RuntimeEnv;
-  log: { warn: (message: string) => void };
-}): void {
-  void ensureControlUiAssetsBuilt(params.gatewayRuntime)
-    .then((result) => {
-      if (!result.ok && result.message) {
-        params.log.warn(`gateway: ${result.message}`);
-      }
-    })
-    .catch((error: unknown) => {
-      params.log.warn(
-        `gateway: Control UI assets build failed: ${error instanceof Error ? error.message : String(error)}`,
-      );
-    });
-}
-
 export async function resolveGatewayControlUiRootState(params: {
   controlUiRootOverride?: string;
   controlUiEnabled: boolean;
@@ -53,13 +36,17 @@ export async function resolveGatewayControlUiRootState(params: {
       cwd: process.cwd(),
     });
 
-  const resolvedRoot = resolveRoot();
+  let resolvedRoot = resolveRoot();
   if (!resolvedRoot) {
-    startControlUiAssetsBuild({
-      gatewayRuntime: params.gatewayRuntime,
-      log: params.log,
-    });
-    return undefined;
+    const ensureResult = await ensureControlUiAssetsBuilt(params.gatewayRuntime);
+    if (!ensureResult.ok && ensureResult.message) {
+      params.log.warn(`gateway: ${ensureResult.message}`);
+    }
+    resolvedRoot = resolveRoot();
+  }
+
+  if (!resolvedRoot) {
+    return { kind: "missing" };
   }
 
   return {

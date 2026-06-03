@@ -4,13 +4,13 @@ import { handleAbortTrigger } from "./commands-session-abort.js";
 import "./commands-session-abort.test-support.js";
 import type { HandleCommandsParams } from "./commands-types.js";
 
-const abortEmbeddedAgentRunMock = vi.hoisted(() => vi.fn());
+const abortEmbeddedPiRunMock = vi.hoisted(() => vi.fn());
 const persistAbortTargetEntryMock = vi.hoisted(() => vi.fn());
 const setAbortMemoryMock = vi.hoisted(() => vi.fn());
 const abortSessionRunTargetMock = vi.hoisted(() => vi.fn());
 
-vi.mock("../../agents/embedded-agent.js", () => ({
-  abortEmbeddedAgentRun: abortEmbeddedAgentRunMock,
+vi.mock("../../agents/pi-embedded.js", () => ({
+  abortEmbeddedPiRun: abortEmbeddedPiRunMock,
 }));
 
 vi.mock("../../globals.js", () => ({
@@ -96,7 +96,7 @@ describe("handleAbortTrigger", () => {
     const result = await handleAbortTrigger(buildAbortParams(), true);
     expect(result).toEqual({ shouldContinue: false });
     expect(abortSessionRunTargetMock).not.toHaveBeenCalled();
-    expect(abortEmbeddedAgentRunMock).not.toHaveBeenCalled();
+    expect(abortEmbeddedPiRunMock).not.toHaveBeenCalled();
     expect(persistAbortTargetEntryMock).not.toHaveBeenCalled();
     expect(setAbortMemoryMock).not.toHaveBeenCalled();
   });

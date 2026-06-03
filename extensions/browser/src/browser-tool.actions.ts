@@ -1,8 +1,4 @@
-import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
-import {
-  readNonNegativeIntegerParam,
-  readPositiveIntegerParam,
-} from "openclaw/plugin-sdk/param-readers";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import {
   DEFAULT_AI_SNAPSHOT_MAX_CHARS,
   browserAct,
@@ -17,13 +13,9 @@ import {
   readStringValue,
   resolveBrowserConfig,
   resolveProfile,
-  resolveRuntimeImageSanitization,
   wrapExternalContent,
 } from "./browser-tool.runtime.js";
-import {
-  DEFAULT_BROWSER_ACTION_TIMEOUT_MS,
-  DEFAULT_BROWSER_SNAPSHOT_TIMEOUT_MS,
-} from "./browser/constants.js";
+import { DEFAULT_BROWSER_ACTION_TIMEOUT_MS } from "./browser/constants.js";
 
 const browserToolActionDeps = {
   browserAct,
@@ -40,15 +32,9 @@ type BrowserActRequest = Parameters<typeof browserAct>[1];
 type BrowserActRequestWithTimeout = BrowserActRequest & { timeoutMs?: number };
 
 function normalizePositiveTimeoutMs(value: unknown): number | undefined {
-  return readPositiveIntegerParam({ value }, "value", {
-    message: "timeoutMs must be a positive integer.",
-  });
-}
-
-function normalizeNonNegativeDurationMs(value: unknown): number | undefined {
-  return readNonNegativeIntegerParam({ value }, "value", {
-    message: "timeMs must be a non-negative integer.",
-  });
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : undefined;
 }
 
 function supportsBrowserActTimeout(request: BrowserActRequest): boolean {
@@ -120,7 +106,7 @@ function resolveActProxyTimeoutMs(request: BrowserActRequest): number | undefine
     candidateTimeouts.push(explicitTimeout + BROWSER_ACT_REQUEST_TIMEOUT_SLACK_MS);
   }
   if (request.kind === "wait") {
-    const waitDuration = normalizeNonNegativeDurationMs(request.timeMs);
+    const waitDuration = normalizePositiveTimeoutMs(request.timeMs);
     if (waitDuration !== undefined) {
       candidateTimeouts.push(waitDuration + BROWSER_ACT_REQUEST_TIMEOUT_SLACK_MS);
     }
@@ -128,7 +114,7 @@ function resolveActProxyTimeoutMs(request: BrowserActRequest): number | undefine
   return candidateTimeouts.length ? Math.max(...candidateTimeouts) : undefined;
 }
 
-export const testing = {
+export const __testing = {
   setDepsForTest(
     overrides: Partial<{
       browserAct: typeof browserAct;
@@ -356,18 +342,16 @@ export async function executeSnapshotAction(params: {
     input.refs === "aria" || input.refs === "role" ? input.refs : undefined;
   const hasMaxChars = Object.hasOwn(input, "maxChars");
   const targetId = normalizeOptionalString(input.targetId);
-  const limit = readPositiveIntegerParam(input, "limit", {
-    message: "limit must be a positive integer.",
-  });
-  const maxCharsRaw = readNonNegativeIntegerParam(input, "maxChars", {
-    message: "maxChars must be a non-negative integer.",
-  });
-  const maxChars = maxCharsRaw !== undefined && maxCharsRaw > 0 ? maxCharsRaw : undefined;
+  const limit =
+    typeof input.limit === "number" && Number.isFinite(input.limit) ? input.limit : undefined;
+  const maxChars =
+    typeof input.maxChars === "number" && Number.isFinite(input.maxChars) && input.maxChars > 0
+      ? Math.floor(input.maxChars)
+      : undefined;
   const interactive = typeof input.interactive === "boolean" ? input.interactive : undefined;
   const compact = typeof input.compact === "boolean" ? input.compact : undefined;
-  const depth = readNonNegativeIntegerParam(input, "depth", {
-    message: "depth must be a non-negative integer.",
-  });
+  const depth =
+    typeof input.depth === "number" && Number.isFinite(input.depth) ? input.depth : undefined;
   const selector = normalizeOptionalString(input.selector);
   const frame = normalizeOptionalString(input.frame);
   const resolvedMaxChars =
@@ -380,10 +364,6 @@ export async function executeSnapshotAction(params: {
       : hasMaxChars
         ? maxChars
         : undefined;
-  const snapshotTimeoutMs =
-    readPositiveIntegerParam(input, "timeoutMs", {
-      message: "timeoutMs must be a positive integer.",
-    }) ?? DEFAULT_BROWSER_SNAPSHOT_TIMEOUT_MS;
   const snapshotQuery = {
     ...(format ? { format } : {}),
     targetId,
@@ -398,7 +378,6 @@ export async function executeSnapshotAction(params: {
     labels,
     urls,
     mode,
-    timeoutMs: snapshotTimeoutMs,
   };
   let refsFallback: "role" | undefined;
   const readSnapshot = async (query: typeof snapshotQuery) =>
@@ -408,7 +387,6 @@ export async function executeSnapshotAction(params: {
           path: "/snapshot",
           profile,
           query,
-          timeoutMs: snapshotTimeoutMs,
         })) as Awaited<ReturnType<typeof browserSnapshot>>)
       : await browserToolActionDeps.browserSnapshot(baseUrl, {
           ...query,
@@ -426,31 +404,6 @@ export async function executeSnapshotAction(params: {
   }
   params.onTabActivity?.(readStringValue(snapshot.targetId) ?? targetId);
   if (snapshot.format === "ai") {
-    const dialogStateFields = {
-      ...(snapshot.blockedByDialog ? { blockedByDialog: true } : {}),
-      ...(snapshot.browserState !== undefined ? { browserState: snapshot.browserState } : {}),
-    };
-    if (snapshot.blockedByDialog) {
-      const wrapped = wrapBrowserExternalJson({
-        kind: "snapshot",
-        payload: {
-          format: snapshot.format,
-          targetId: snapshot.targetId,
-          url: snapshot.url,
-          ...dialogStateFields,
-        },
-      });
-      return {
-        content: [{ type: "text" as const, text: wrapped.wrappedText }],
-        details: {
-          ...wrapped.safeDetails,
-          format: snapshot.format,
-          targetId: snapshot.targetId,
-          url: snapshot.url,
-          ...dialogStateFields,
-        },
-      };
-    }
     const extractedText = snapshot.snapshot ?? "";
     const wrappedSnapshot = wrapExternalContent(extractedText, {
       source: "browser",
@@ -470,7 +423,6 @@ export async function executeSnapshotAction(params: {
       imagePath: snapshot.imagePath,
       imageType: snapshot.imageType,
       refsFallback,
-      ...dialogStateFields,
       externalContent: {
         untrusted: true,
         source: "browser",
@@ -485,7 +437,6 @@ export async function executeSnapshotAction(params: {
         path: snapshot.imagePath,
         extraText: wrappedSnapshot,
         details: safeDetails,
-        imageSanitization: resolveRuntimeImageSanitization(),
       });
     }
     return {
@@ -506,8 +457,6 @@ export async function executeSnapshotAction(params: {
         targetId: snapshot.targetId,
         url: snapshot.url,
         nodeCount: snapshot.nodes.length,
-        ...(snapshot.blockedByDialog ? { blockedByDialog: true } : {}),
-        ...(snapshot.browserState !== undefined ? { browserState: snapshot.browserState } : {}),
         externalContent: {
           untrusted: true,
           source: "browser",
@@ -625,4 +574,3 @@ export async function executeActAction(params: {
     throw err;
   }
 }
-export { testing as __testing };

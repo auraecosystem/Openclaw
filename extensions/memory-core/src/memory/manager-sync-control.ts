@@ -91,6 +91,7 @@ export async function runMemorySyncWithReadonlyRecovery(
 ): Promise<void> {
   try {
     await state.runSync(params);
+    return;
   } catch (err) {
     if (!isMemoryReadonlyDbError(err) || state.closed) {
       throw err;
@@ -166,7 +167,7 @@ export function enqueueMemoryTargetedSessionSync(
   return state.getQueuedSessionSync() ?? Promise.resolve();
 }
 
-export function createMemorySyncControlConfigForTests(
+export function _createMemorySyncControlConfigForTests(
   workspaceDir: string,
   indexPath: string,
 ): OpenClawConfig {

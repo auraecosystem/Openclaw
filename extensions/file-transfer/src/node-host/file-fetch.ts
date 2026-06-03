@@ -1,12 +1,11 @@
 import crypto from "node:crypto";
 import path from "node:path";
 import { detectMime } from "openclaw/plugin-sdk/media-mime";
-import { root } from "openclaw/plugin-sdk/security-runtime";
 import {
-  classifyFsSafeReadError,
-  readAbsolutePath,
-  resolveCanonicalReadPath,
-} from "./path-errors.js";
+  FsSafeError,
+  resolveAbsolutePathForRead,
+  root,
+} from "openclaw/plugin-sdk/security-runtime";
 
 export const FILE_FETCH_HARD_MAX_BYTES = 16 * 1024 * 1024;
 export const FILE_FETCH_DEFAULT_MAX_BYTES = 8 * 1024 * 1024;
@@ -56,14 +55,21 @@ function clampMaxBytes(input: unknown): number {
 }
 
 function classifyFsError(err: unknown): FileFetchErrCode {
-  const safeCode = classifyFsSafeReadError(err);
-  if (safeCode) {
-    return safeCode;
+  if (err instanceof FsSafeError) {
+    if (err.code === "not-found") {
+      return "NOT_FOUND";
+    }
+    if (err.code === "symlink") {
+      return "SYMLINK_REDIRECT";
+    }
+    if (err.code === "invalid-path") {
+      return "INVALID_PATH";
+    }
+    if (err.code === "not-file") {
+      return "IS_DIRECTORY";
+    }
   }
   const code = (err as { code?: string } | null)?.code;
-  if (code === "not-file") {
-    return "IS_DIRECTORY";
-  }
   if (code === "ENOENT") {
     return "NOT_FOUND";
   }
@@ -110,23 +116,49 @@ async function detectFetchedFileMime(params: {
 }
 
 export async function handleFileFetch(params: FileFetchParams): Promise<FileFetchResult> {
-  const requestedPath = readAbsolutePath(params.path);
-  if (typeof requestedPath !== "string") {
-    return requestedPath;
+  const requestedPath = params.path;
+  if (typeof requestedPath !== "string" || requestedPath.length === 0) {
+    return { ok: false, code: "INVALID_PATH", message: "path required" };
+  }
+  if (requestedPath.includes("\0")) {
+    return { ok: false, code: "INVALID_PATH", message: "path contains NUL byte" };
+  }
+  if (!path.isAbsolute(requestedPath)) {
+    return { ok: false, code: "INVALID_PATH", message: "path must be absolute" };
   }
 
   const maxBytes = clampMaxBytes(params.maxBytes);
   const followSymlinks = params.followSymlinks === true;
   const preflightOnly = params.preflightOnly === true;
 
-  const canonical = await resolveCanonicalReadPath({
-    requestedPath,
-    followSymlinks,
-    classifyError: classifyFsError,
-    notFoundMessage: "file not found",
-  });
-  if (typeof canonical !== "string") {
-    return canonical;
+  let canonical: string;
+  try {
+    canonical = (
+      await resolveAbsolutePathForRead(requestedPath, {
+        symlinks: followSymlinks ? "follow" : "reject",
+      })
+    ).canonicalPath;
+  } catch (err) {
+    const code = classifyFsError(err);
+    const canonicalPath =
+      err instanceof FsSafeError &&
+      err.cause &&
+      typeof err.cause === "object" &&
+      "canonicalPath" in err.cause &&
+      typeof err.cause.canonicalPath === "string"
+        ? err.cause.canonicalPath
+        : undefined;
+    return {
+      ok: false,
+      code,
+      message:
+        code === "NOT_FOUND"
+          ? "file not found"
+          : code === "SYMLINK_REDIRECT"
+            ? "path traverses a symlink; refusing because followSymlinks=false (set plugins.entries.file-transfer.config.nodes.<node>.followSymlinks=true to allow, or update allowReadPaths to the canonical path)"
+            : `realpath failed: ${String(err)}`,
+      ...(canonicalPath ? { canonicalPath } : {}),
+    };
   }
 
   let opened: Awaited<ReturnType<Awaited<ReturnType<typeof root>>["open"]>>;

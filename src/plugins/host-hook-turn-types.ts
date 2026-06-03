@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { PluginJsonValue } from "./host-hook-json.js";
 
 export type PluginNextTurnInjectionPlacement = "prepend_context" | "append_context";
@@ -27,7 +28,7 @@ export type PluginNextTurnInjectionEnqueueResult = {
 
 export type PluginAgentTurnPrepareEvent = {
   prompt: string;
-  messages: unknown[];
+  messages: AgentMessage[] | unknown[];
   queuedInjections: PluginNextTurnInjectionRecord[];
 };
 

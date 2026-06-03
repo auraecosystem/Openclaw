@@ -9,28 +9,24 @@ coverage:
     - telemetry.otel
   secondary:
     - harness.qa-lab
-objective: Verify a QA-lab gateway run emits bounded OpenTelemetry traces, metrics, and logs through the diagnostics-otel plugin.
+objective: Verify a QA-lab gateway run emits bounded OpenTelemetry trace spans through the diagnostics-otel plugin.
 successCriteria:
-  - The diagnostics-otel plugin starts with trace, metric, and log export enabled.
+  - The diagnostics-otel plugin starts with trace export enabled.
   - A minimal QA-channel agent turn completes.
   - The trace includes the selected agent harness lifecycle span.
-  - The run emits low-cardinality OpenTelemetry signals without content or raw diagnostic identifiers.
+  - The run emits low-cardinality OpenTelemetry trace spans without content or raw diagnostic identifiers.
 plugins:
   - diagnostics-otel
 gatewayConfigPatch:
-  logging:
-    file: .artifacts/qa-e2e/otel-smoke-gateway.jsonl
-    level: info
   diagnostics:
     enabled: true
     otel:
       enabled: true
       protocol: http/protobuf
       traces: true
-      metrics: true
-      logs: true
+      metrics: false
+      logs: false
       sampleRate: 1
-      flushIntervalMs: 1000
       captureContent:
         enabled: false
 docsRefs:
@@ -38,14 +34,13 @@ docsRefs:
   - docs/concepts/qa-e2e-automation.md
 codeRefs:
   - extensions/diagnostics-otel/src/service.ts
-  - src/agents/harness/lifecycle.ts
+  - src/agents/harness/v2.ts
   - extensions/qa-lab/src/suite.ts
 execution:
   kind: flow
-  summary: Emit minimal QA-lab telemetry with diagnostics-otel enabled.
+  summary: Emit a minimal QA-lab trace with diagnostics-otel enabled.
   config:
-    prompt: "OTEL QA marker: reply exactly `OTEL-QA-OK`. Do not repeat OTEL-QA-SECRET."
-    expectedReply: OTEL-QA-OK
+    prompt: Reply exactly OTEL-QA-OK.
 ```
 
 ```yaml qa-flow
@@ -82,7 +77,4 @@ steps:
       - assert:
           expr: "String(outbound.text ?? '').trim().length > 0"
           message: "expected non-empty qa output"
-      - assert:
-          expr: "String(outbound.text ?? '').includes(config.expectedReply)"
-          message: "expected qa output to include the response sentinel"
 ```

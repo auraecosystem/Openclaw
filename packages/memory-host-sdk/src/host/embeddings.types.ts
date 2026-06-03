@@ -11,7 +11,6 @@ export type EmbeddingProvider = {
     inputs: EmbeddingInput[],
     options?: EmbeddingProviderCallOptions,
   ) => Promise<number[][]>;
-  close?: () => Promise<void> | void;
 };
 
 export type EmbeddingProviderCallOptions = {

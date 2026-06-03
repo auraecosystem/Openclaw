@@ -1,5 +1,4 @@
 import fs from "node:fs/promises";
-import { formatErrorMessage } from "../infra/errors.js";
 
 type UpdateFileChunk = {
   changeContext?: string;
@@ -18,8 +17,8 @@ export async function applyUpdateHunk(
   options?: { readFile?: (filePath: string) => Promise<string> },
 ): Promise<string> {
   const reader = options?.readFile ?? defaultReadFile;
-  const originalContents = await reader(filePath).catch((err: unknown) => {
-    throw new Error(`Failed to read file to update ${filePath}: ${formatErrorMessage(err)}`);
+  const originalContents = await reader(filePath).catch((err) => {
+    throw new Error(`Failed to read file to update ${filePath}: ${err}`);
   });
 
   const originalLines = originalContents.split("\n");
@@ -54,13 +53,10 @@ function computeReplacements(
 
     if (chunk.oldLines.length === 0) {
       const insertionIndex =
-        chunk.changeContext && !chunk.isEndOfFile
-          ? lineIndex
-          : originalLines.length > 0 && originalLines[originalLines.length - 1] === ""
-            ? originalLines.length - 1
-            : originalLines.length;
+        originalLines.length > 0 && originalLines[originalLines.length - 1] === ""
+          ? originalLines.length - 1
+          : originalLines.length;
       replacements.push([insertionIndex, 0, chunk.newLines]);
-      lineIndex = insertionIndex;
       continue;
     }
 

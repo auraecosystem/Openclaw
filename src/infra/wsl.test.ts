@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { captureEnv } from "../test-utils/env.js";
-import { mockProcessPlatform } from "../test-utils/vitest-spies.js";
 
 const readFileSyncMock = vi.hoisted(() => vi.fn());
 const readFileMock = vi.hoisted(() => vi.fn());
@@ -31,8 +30,13 @@ let isWSL2Sync: typeof import("./wsl.js").isWSL2Sync;
 let isWSL: typeof import("./wsl.js").isWSL;
 let resetWSLStateForTests: typeof import("./wsl.js").resetWSLStateForTests;
 
+const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
 function setPlatform(platform: NodeJS.Platform): void {
-  mockProcessPlatform(platform);
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true,
+  });
 }
 
 describe("wsl detection", () => {
@@ -56,7 +60,9 @@ describe("wsl detection", () => {
   afterEach(() => {
     envSnapshot.restore();
     resetWSLStateForTests();
-    vi.restoreAllMocks();
+    if (originalPlatformDescriptor) {
+      Object.defineProperty(process, "platform", originalPlatformDescriptor);
+    }
   });
 
   it.each([

@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  resetActiveManagedProxyStateForTests,
+  _resetActiveManagedProxyStateForTests,
   registerActiveManagedProxyUrl,
 } from "./active-proxy-state.js";
 import {
@@ -24,14 +24,14 @@ describe("managed proxy undici TLS options", () => {
   const tempDirs: string[] = [];
 
   beforeEach(() => {
-    resetActiveManagedProxyStateForTests();
+    _resetActiveManagedProxyStateForTests();
     for (const key of envKeys) {
       vi.stubEnv(key, "");
     }
   });
 
   afterEach(() => {
-    resetActiveManagedProxyStateForTests();
+    _resetActiveManagedProxyStateForTests();
     for (const dir of tempDirs.splice(0)) {
       rmSync(dir, { recursive: true, force: true });
     }

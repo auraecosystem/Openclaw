@@ -52,35 +52,10 @@ describe("normalizeReplyPayloadsForDelivery", () => {
     ]);
   });
 
-  it("strips unsupported citation control markers from reply payload text", () => {
-    const payloads: ReplyPayload[] = [{ text: "v2026.5.20 release note citeturn2view0" }];
-
-    expect(normalizeReplyPayloadsForDelivery(payloads)).toMatchObject([
-      { text: "v2026.5.20 release note" },
-    ]);
-    expect(resolveMirrorProjection(payloads).text).toBe("v2026.5.20 release note");
-    expect(normalizeOutboundPayloadsForJson(payloads)).toMatchObject([
-      { text: "v2026.5.20 release note" },
-    ]);
-  });
-
-  it("suppresses silent replies after removing citation control markers", () => {
-    expect(
-      normalizeReplyPayloadsForDelivery([
-        { text: "NO_REPLY citeturn2view0" },
-        { text: '{"action":"NO_REPLY"} citeturn2view0' },
-      ]),
-    ).toStrictEqual([]);
-  });
-
   it("drops silent payloads without media and suppresses reasoning payloads", () => {
     expect(
       normalizeReplyPayloadsForDelivery([
         { text: "NO_REPLY" },
-        { text: "NO_REPLY\n\nNO_REPLY" },
-        {
-          text: "<think>Cav is talking about a follow-up conversation.</think>\nI will stay quiet here.NO_REPLY",
-        },
         { text: "Reasoning:\n_step_", isReasoning: true },
         { text: "final answer" },
       ]),
@@ -161,7 +136,6 @@ describe("normalizeReplyPayloadsForDelivery", () => {
       normalizeReplyPayloadsForDelivery([
         { text: "NO_REPLY thanks for the update" },
         { text: "NO_REPLY" },
-        { text: "NO_REPLY\n\nNO_REPLY" },
         { text: "thanks NO_REPLY" },
       ]),
     ).toEqual([
@@ -437,9 +411,6 @@ describe("normalizeOutboundPayloadsForJson", () => {
             mediaUrl: null,
             mediaUrls: ["https://x.test/a.png", "https://x.test/b.png"],
             audioAsVoice: undefined,
-            presentation: undefined,
-            delivery: undefined,
-            interactive: undefined,
             channelData: undefined,
           },
         ],
@@ -594,12 +565,12 @@ describe("formatOutboundPayloadLog", () => {
       expected: string;
     }>([
       {
-        name: "text with attachment lines",
+        name: "text with media lines",
         input: {
           text: "hello  ",
           mediaUrls: ["https://x.test/a.png", "https://x.test/b.png"],
         },
-        expected: "hello\nAttachment: https://x.test/a.png\nAttachment: https://x.test/b.png",
+        expected: "hello\nMEDIA:https://x.test/a.png\nMEDIA:https://x.test/b.png",
       },
       {
         name: "media only",
@@ -607,7 +578,7 @@ describe("formatOutboundPayloadLog", () => {
           text: "",
           mediaUrls: ["https://x.test/a.png"],
         },
-        expected: "Attachment: https://x.test/a.png",
+        expected: "MEDIA:https://x.test/a.png",
       },
     ]),
   )("$name", ({ input, expected }) => {
@@ -631,14 +602,6 @@ describe("summarizeOutboundPayloadForTransport", () => {
     expect(summary.hookContent).toBeUndefined();
   });
 
-  it("strips unsupported citation control markers from transport text", () => {
-    const summary = summarizeOutboundPayloadForTransport({
-      text: "v2026.5.20 release note citeturn2view0",
-    });
-
-    expect(summary.text).toBe("v2026.5.20 release note");
-  });
-
   it("surfaces spokenText only as hook content for audio-only payloads", () => {
     const summary = summarizeOutboundPayloadForTransport({
       mediaUrl: "/tmp/reply.opus",
@@ -650,17 +613,6 @@ describe("summarizeOutboundPayloadForTransport", () => {
     expect(summary.hookContent).toBe("Hi Ivy, good morning.");
     expect(summary.mediaUrls).toEqual(["/tmp/reply.opus"]);
     expect(summary.audioAsVoice).toBe(true);
-  });
-
-  it("strips unsupported citation control markers from hook-only spoken text", () => {
-    const summary = summarizeOutboundPayloadForTransport({
-      mediaUrl: "/tmp/reply.opus",
-      audioAsVoice: true,
-      spokenText: "Hi Ivy citeturn2view0",
-    });
-
-    expect(summary.text).toBe("");
-    expect(summary.hookContent).toBe("Hi Ivy");
   });
 
   it("ignores blank spokenText", () => {

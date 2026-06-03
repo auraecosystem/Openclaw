@@ -70,9 +70,7 @@ final class ExecApprovalsGatewayPrompter {
                     timeoutMs: 10000)
                 return
             }
-            guard let decision = ExecApprovalsPromptPresenter.prompt(request.request) else {
-                return
-            }
+            let decision = ExecApprovalsPromptPresenter.prompt(request.request)
             try await GatewayConnection.shared.requestVoid(
                 method: .execApprovalResolve,
                 params: [

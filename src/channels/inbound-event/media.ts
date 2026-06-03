@@ -1,4 +1,3 @@
-import { normalizeOptionalString as normalizeString } from "@openclaw/normalization-core/string-coerce";
 import type { HistoryMediaEntry } from "../../auto-reply/reply/history.types.js";
 import type { InboundMediaFacts } from "../turn/types.js";
 
@@ -26,6 +25,11 @@ function alignedStrings(values: Array<string | undefined>): string[] | undefined
     return undefined;
   }
   return values.map((value) => value ?? "");
+}
+
+function normalizeString(value: string | null | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
 }
 
 function normalizeKind(value: InboundMediaFacts["kind"] | null | undefined) {

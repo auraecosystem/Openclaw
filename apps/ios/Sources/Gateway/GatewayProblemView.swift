@@ -3,8 +3,6 @@ import SwiftUI
 import UIKit
 
 struct GatewayProblemBanner: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     let problem: GatewayConnectionProblem
     var primaryActionTitle: String?
     var onPrimaryAction: (() -> Void)?
@@ -59,15 +57,9 @@ struct GatewayProblemBanner: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(14)
-        .background {
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(.ultraThickMaterial)
-                .overlay {
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .strokeBorder(Color.primary.opacity(self.colorScheme == .dark ? 0.12 : 0.07), lineWidth: 1)
-                }
-                .shadow(color: .black.opacity(self.colorScheme == .dark ? 0.18 : 0.08), radius: 18, y: 8)
-        }
+        .background(
+            .thinMaterial,
+            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
     private var iconName: String {
@@ -111,7 +103,7 @@ struct GatewayProblemBanner: View {
         case .gateway:
             "Fix on gateway"
         case .iphone:
-            "Fix on this device"
+            "Fix on iPhone"
         case .both:
             "Check both"
         case .network:
@@ -227,9 +219,9 @@ struct GatewayProblemDetailsSheet: View {
         case .gateway:
             "Primary fix: gateway"
         case .iphone:
-            "Primary fix: this device"
+            "Primary fix: this iPhone"
         case .both:
-            "Primary fix: check both this device and the gateway"
+            "Primary fix: check both this iPhone and the gateway"
         case .network:
             "Primary fix: network or remote access"
         case .unknown:

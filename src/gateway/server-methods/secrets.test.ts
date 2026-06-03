@@ -26,18 +26,14 @@ async function invokeSecretsResolve(params: {
   respond: ReturnType<typeof vi.fn>;
   commandName: unknown;
   targetIds: unknown;
-  allowedPaths?: unknown;
-  forcedActivePaths?: unknown;
+  providerOverrides?: unknown;
 }) {
   await params.handlers["secrets.resolve"]({
     req: { type: "req", id: "1", method: "secrets.resolve" },
     params: {
       commandName: params.commandName,
       targetIds: params.targetIds,
-      ...(params.allowedPaths !== undefined ? { allowedPaths: params.allowedPaths } : {}),
-      ...(params.forcedActivePaths !== undefined
-        ? { forcedActivePaths: params.forcedActivePaths }
-        : {}),
+      ...(params.providerOverrides ? { providerOverrides: params.providerOverrides } : {}),
     },
     client: null,
     isWebchatConnect: () => false,
@@ -48,6 +44,13 @@ async function invokeSecretsResolve(params: {
   });
 }
 
+function requireRecord(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Expected a non-array record");
+  }
+  return value as Record<string, unknown>;
+}
+
 function expectRespondError(
   respond: ReturnType<typeof vi.fn>,
   expected: { code: string; message?: string },
@@ -55,38 +58,15 @@ function expectRespondError(
   const call = respond.mock.calls.at(0);
   expect(call?.[0]).toBe(false);
   expect(call?.[1]).toBeUndefined();
-  const error = call?.[2];
-  if (!error || typeof error !== "object" || Array.isArray(error)) {
-    throw new Error("Expected a non-array error record");
-  }
-  const errorRecord = error as Record<string, unknown>;
-  expect(errorRecord.code).toBe(expected.code);
+  const error = requireRecord(call?.[2]);
+  expect(error.code).toBe(expected.code);
   if (expected.message !== undefined) {
-    expect(errorRecord.message).toBe(expected.message);
+    expect(error.message).toBe(expected.message);
   }
 }
 
 function expectWarnMessageWith(warn: ReturnType<typeof vi.fn>, text: string): void {
   expect(warn.mock.calls.map(([message]) => String(message)).join("\n")).toContain(text);
-}
-
-async function expectMemoryStatusResolveUnavailable(params: {
-  handlers: ReturnType<typeof createSecretsHandlers>;
-  warn: ReturnType<typeof vi.fn>;
-  warningText: string;
-}) {
-  const respond = vi.fn();
-  await invokeSecretsResolve({
-    handlers: params.handlers,
-    respond,
-    commandName: "memory status",
-    targetIds: ["talk.providers.*.apiKey"],
-  });
-  expectRespondError(respond, {
-    code: "UNAVAILABLE",
-    message: "secrets.resolve failed",
-  });
-  expectWarnMessageWith(params.warn, params.warningText);
 }
 
 describe("secrets handlers", () => {
@@ -95,8 +75,7 @@ describe("secrets handlers", () => {
     resolveSecrets?: (params: {
       commandName: string;
       targetIds: string[];
-      allowedPaths?: string[];
-      forcedActivePaths?: string[];
+      providerOverrides?: { webSearch?: string; webFetch?: string };
     }) => Promise<{
       assignments: Array<{ path: string; pathSegments: string[]; value: unknown }>;
       diagnostics: string[];
@@ -162,14 +141,10 @@ describe("secrets handlers", () => {
       respond,
       commandName: "memory status",
       targetIds: ["talk.providers.*.apiKey"],
-      allowedPaths: [TALK_TEST_PROVIDER_API_KEY_PATH],
-      forcedActivePaths: [TALK_TEST_PROVIDER_API_KEY_PATH],
     });
     expect(resolveSecrets).toHaveBeenCalledWith({
       commandName: "memory status",
       targetIds: ["talk.providers.*.apiKey"],
-      allowedPaths: [TALK_TEST_PROVIDER_API_KEY_PATH],
-      forcedActivePaths: [TALK_TEST_PROVIDER_API_KEY_PATH],
     });
     expect(respond).toHaveBeenCalledWith(true, {
       ok: true,
@@ -183,6 +158,36 @@ describe("secrets handlers", () => {
       diagnostics: ["note"],
       inactiveRefPaths: [TALK_TEST_PROVIDER_API_KEY_PATH],
     });
+  });
+
+  it("passes trimmed provider overrides to secrets.resolve", async () => {
+    const resolveSecrets = vi.fn().mockResolvedValue({
+      assignments: [],
+      diagnostics: [],
+      inactiveRefPaths: [],
+    });
+    const handlers = createHandlers({ resolveSecrets });
+    const respond = vi.fn();
+
+    await invokeSecretsResolve({
+      handlers,
+      respond,
+      commandName: "infer web search",
+      targetIds: ["talk.providers.*.apiKey"],
+      providerOverrides: { webSearch: " tavily ", webFetch: " " },
+    });
+
+    expect(resolveSecrets).toHaveBeenCalledWith({
+      commandName: "infer web search",
+      targetIds: ["talk.providers.*.apiKey"],
+      providerOverrides: { webSearch: "tavily" },
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        ok: true,
+      }),
+    );
   });
 
   it("rejects invalid secrets.resolve params", async () => {
@@ -239,11 +244,18 @@ describe("secrets handlers", () => {
       inactiveRefPaths: [],
     });
     const handlers = createHandlers({ resolveSecrets, log: { warn } });
-    await expectMemoryStatusResolveUnavailable({
+    const respond = vi.fn();
+    await invokeSecretsResolve({
       handlers,
-      warn,
-      warningText: "secrets.resolve returned invalid payload.",
+      respond,
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
     });
+    expectRespondError(respond, {
+      code: "UNAVAILABLE",
+      message: "secrets.resolve failed",
+    });
+    expectWarnMessageWith(warn, "secrets.resolve returned invalid payload.");
   });
 
   it("logs error details when secrets.resolve throws", async () => {
@@ -252,10 +264,17 @@ describe("secrets handlers", () => {
       resolveSecrets: vi.fn().mockRejectedValue(new Error("EACCES: permission denied")),
       log: { warn },
     });
-    await expectMemoryStatusResolveUnavailable({
+    const respond = vi.fn();
+    await invokeSecretsResolve({
       handlers,
-      warn,
-      warningText: "EACCES: permission denied",
+      respond,
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
     });
+    expectRespondError(respond, {
+      code: "UNAVAILABLE",
+      message: "secrets.resolve failed",
+    });
+    expectWarnMessageWith(warn, "EACCES: permission denied");
   });
 });

@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 import { resolveOpenClawPackageRootSync } from "../../infra/openclaw-root.js";
 
 const PRIVATE_QA_DIST_RELATIVE_PATH = path.join("dist", "plugin-sdk", "qa-lab.js");
-const SOURCE_CHECKOUT_MARKER_RELATIVE_PATHS = [".git", "pnpm-workspace.yaml"] as const;
 
 export function isPrivateQaCliEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.OPENCLAW_ENABLE_PRIVATE_QA_CLI === "1";
@@ -33,11 +32,8 @@ function resolvePrivateQaSourceModuleSpecifier(params?: {
   }
   const existsSync = params?.existsSync ?? fs.existsSync;
   const sourceModulePath = path.join(packageRoot, PRIVATE_QA_DIST_RELATIVE_PATH);
-  const hasSourceCheckoutMarker = SOURCE_CHECKOUT_MARKER_RELATIVE_PATHS.some((relativePath) =>
-    existsSync(path.join(packageRoot, relativePath)),
-  );
   if (
-    !hasSourceCheckoutMarker ||
+    !existsSync(path.join(packageRoot, ".git")) ||
     !existsSync(path.join(packageRoot, "src")) ||
     !existsSync(sourceModulePath)
   ) {

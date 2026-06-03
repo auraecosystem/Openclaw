@@ -12,10 +12,6 @@ import {
   type PinnedDispatcherPolicy,
 } from "openclaw/plugin-sdk/fetch-runtime";
 import {
-  isFutureDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
-import {
   captureHttpExchange,
   resolveEffectiveDebugProxyUrl,
 } from "openclaw/plugin-sdk/proxy-capture";
@@ -117,7 +113,6 @@ type LookupFunction = (
 
 const FALLBACK_RETRY_ERROR_CODES = [
   "ETIMEDOUT",
-  "ENETDOWN",
   "ENETUNREACH",
   "EHOSTUNREACH",
   "UND_ERR_CONNECT_TIMEOUT",
@@ -163,8 +158,6 @@ function createDnsResultOrderLookup(
   };
 }
 
-const TELEGRAM_KEEPALIVE_INITIAL_DELAY_MS = 30_000;
-
 function buildTelegramConnectOptions(params: {
   autoSelectFamily: boolean | null;
   dnsResultOrder: TelegramDnsResultOrder | null;
@@ -173,21 +166,14 @@ function buildTelegramConnectOptions(params: {
   autoSelectFamily?: boolean;
   autoSelectFamilyAttemptTimeout?: number;
   family?: number;
-  keepAlive?: boolean;
-  keepAliveInitialDelay?: number;
   lookup?: LookupFunction;
-} {
+} | null {
   const connect: {
     autoSelectFamily?: boolean;
     autoSelectFamilyAttemptTimeout?: number;
     family?: number;
-    keepAlive?: boolean;
-    keepAliveInitialDelay?: number;
     lookup?: LookupFunction;
-  } = {
-    keepAlive: true,
-    keepAliveInitialDelay: TELEGRAM_KEEPALIVE_INITIAL_DELAY_MS,
-  };
+  } = {};
 
   if (params.forceIpv4) {
     connect.family = 4;
@@ -202,7 +188,7 @@ function buildTelegramConnectOptions(params: {
     connect.lookup = lookup;
   }
 
-  return connect;
+  return Object.keys(connect).length > 0 ? connect : null;
 }
 
 function shouldBypassEnvProxyForTelegramApi(env: NodeJS.ProcessEnv = process.env): boolean {
@@ -216,7 +202,8 @@ function shouldBypassEnvProxyForTelegramApi(env: NodeJS.ProcessEnv = process.env
   const targetHostname = normalizeLowercaseStringOrEmpty(TELEGRAM_API_HOSTNAME);
   const targetPort = 443;
   const noProxyEntries = noProxyValue.split(/[,\s]/);
-  for (const entry of noProxyEntries) {
+  for (let i = 0; i < noProxyEntries.length; i++) {
+    const entry = noProxyEntries[i];
     if (!entry) {
       continue;
     }
@@ -264,12 +251,18 @@ function resolveTelegramDispatcherPolicy(params: {
   const explicitProxyUrl = params.proxyUrl?.trim();
   if (explicitProxyUrl) {
     return {
-      policy: {
-        mode: "explicit-proxy",
-        proxyUrl: explicitProxyUrl,
-        allowPrivateProxy: true,
-        proxyTls: { ...connect },
-      },
+      policy: connect
+        ? {
+            mode: "explicit-proxy",
+            proxyUrl: explicitProxyUrl,
+            allowPrivateProxy: true,
+            proxyTls: { ...connect },
+          }
+        : {
+            mode: "explicit-proxy",
+            proxyUrl: explicitProxyUrl,
+            allowPrivateProxy: true,
+          },
       mode: "explicit-proxy",
     };
   }
@@ -277,8 +270,7 @@ function resolveTelegramDispatcherPolicy(params: {
     return {
       policy: {
         mode: "env-proxy",
-        connect: { ...connect },
-        proxyTls: { ...connect },
+        ...(connect ? { connect: { ...connect }, proxyTls: { ...connect } } : {}),
       },
       mode: "env-proxy",
     };
@@ -286,7 +278,7 @@ function resolveTelegramDispatcherPolicy(params: {
   return {
     policy: {
       mode: "direct",
-      connect: { ...connect },
+      ...(connect ? { connect: { ...connect } } : {}),
     },
     mode: "direct",
   };
@@ -670,7 +662,7 @@ export function resolveTelegramTransport(
 
   const getAttemptCooldownError = (attemptIndex: number): Error | null => {
     const health = attemptHealth[attemptIndex];
-    if (!isFutureDateTimestampMs(health.unhealthyUntilMs)) {
+    if (health.unhealthyUntilMs <= Date.now()) {
       return null;
     }
     return new TelegramTransportAttemptUnhealthyError(health.unhealthyUntilMs);
@@ -691,12 +683,7 @@ export function resolveTelegramTransport(
     );
     health.consecutiveFailures = 0;
     health.cooldownMs = Math.min(TELEGRAM_TRANSPORT_ATTEMPT_MAX_COOLDOWN_MS, cooldownMs * 2);
-    const unhealthyUntilMs = resolveExpiresAtMsFromDurationMs(cooldownMs);
-    if (unhealthyUntilMs === undefined) {
-      health.unhealthyUntilMs = 0;
-      return;
-    }
-    health.unhealthyUntilMs = unhealthyUntilMs;
+    health.unhealthyUntilMs = Date.now() + cooldownMs;
     log.warn(
       `telegram transport attempt marked temporarily unhealthy for ${cooldownMs}ms (codes=${formatErrorCodes(err)})`,
     );

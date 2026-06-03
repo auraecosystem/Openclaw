@@ -11,6 +11,7 @@ const PLUGIN_TOOL_DESCRIPTOR_CACHE_LIMIT = 256;
 export type CachedPluginToolDescriptor = {
   descriptor: ToolDescriptor;
   displaySummary?: string;
+  ownerOnly?: boolean;
   optional: boolean;
 };
 
@@ -109,6 +110,7 @@ function buildDescriptorContextCacheKey(params: {
     agentAccountId: ctx.agentAccountId ?? null,
     deliveryContext: ctx.deliveryContext ?? null,
     requesterSenderId: ctx.requesterSenderId ?? null,
+    senderIsOwner: ctx.senderIsOwner ?? null,
     sandboxed: ctx.sandboxed ?? null,
   });
 }
@@ -150,6 +152,7 @@ export function capturePluginToolDescriptor(params: {
   const title = typeof label === "string" && label.trim() ? label.trim() : undefined;
   return {
     ...(params.tool.displaySummary ? { displaySummary: params.tool.displaySummary } : {}),
+    ...(params.tool.ownerOnly === true ? { ownerOnly: true } : {}),
     optional: params.optional,
     descriptor: {
       name: params.tool.name,

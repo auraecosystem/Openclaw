@@ -278,7 +278,7 @@ describe("resolveMatrixOutboundSessionRoute", () => {
     const route = resolveMatrixOutboundSessionRoute({
       cfg: {},
       agentId: "main",
-      target: "room:!ops:example.org",
+      target: "room:!Ops:Example.Org",
       currentSessionKey: "agent:main:matrix:channel:!ops:example.org:thread:$RootEvent:Example.Org",
     });
 

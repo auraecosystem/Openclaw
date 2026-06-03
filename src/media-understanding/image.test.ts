@@ -76,8 +76,9 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-vi.mock("../llm/stream.js", async () => {
-  const actual = await vi.importActual<typeof import("../llm/stream.js")>("../llm/stream.js");
+vi.mock("@earendil-works/pi-ai", async () => {
+  const actual =
+    await vi.importActual<typeof import("@earendil-works/pi-ai")>("@earendil-works/pi-ai");
   return {
     ...actual,
     complete: completeMock,
@@ -101,7 +102,7 @@ vi.mock("../agents/provider-stream.js", () => ({
   registerProviderStreamForModel: registerProviderStreamForModelMock,
 }));
 
-vi.mock("../agents/agent-model-discovery.js", () => ({
+vi.mock("../agents/pi-model-discovery-runtime.js", () => ({
   discoverAuthStorage: () => ({
     setRuntimeApiKey: setRuntimeApiKeyMock,
   }),
@@ -115,7 +116,7 @@ vi.mock("../plugins/provider-runtime.js", async () => ({
   prepareProviderDynamicModel: prepareProviderDynamicModelMock,
 }));
 
-vi.mock("../agents/embedded-agent-runner/model.js", () => ({
+vi.mock("../agents/pi-embedded-runner/model.js", () => ({
   resolveModelAsync: resolveModelAsyncMock,
 }));
 
@@ -334,135 +335,6 @@ describe("describeImageWithModel", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("uses canonical MiniMax CN baseUrl for VLM alias fallback", async () => {
-    const authStorage = {
-      setRuntimeApiKey: setRuntimeApiKeyMock,
-    };
-    resolveModelAsyncMock.mockResolvedValue({
-      authStorage,
-      modelRegistry: { find: vi.fn(() => null) },
-      error: "Unknown model: minimax-cn/MiniMax-VL-01",
-    });
-
-    await expect(
-      describeImageWithModel({
-        cfg: {
-          models: {
-            providers: {
-              minimax: {
-                apiKey: "minimax-test-key",
-                baseUrl: "https://api.minimaxi.com/anthropic",
-                models: [],
-              },
-            },
-          },
-        },
-        agentDir: "/tmp/openclaw-agent",
-        provider: "minimax-cn",
-        model: "MiniMax-VL-01",
-        buffer: Buffer.from("png-bytes"),
-        fileName: "image.png",
-        mime: "image/png",
-        prompt: "Describe the image.",
-        timeoutMs: 1000,
-      }),
-    ).resolves.toEqual({
-      text: "portal ok",
-      model: "MiniMax-VL-01",
-    });
-
-    expect(resolveApiKeyForProviderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "minimax",
-      }),
-    );
-    const [fetchUrl] = requireFirstMockCall(fetchMock, "fetch");
-    expect(fetchUrl).toBe("https://api.minimaxi.com/v1/coding_plan/vlm");
-  });
-
-  it("uses MiniMax CN alias auth when the alias apiKey is a SecretRef", async () => {
-    const authStorage = {
-      setRuntimeApiKey: setRuntimeApiKeyMock,
-    };
-    resolveModelAsyncMock.mockResolvedValue({
-      authStorage,
-      modelRegistry: { find: vi.fn(() => null) },
-      error: "Unknown model: minimax-cn/MiniMax-VL-01",
-    });
-
-    await expect(
-      describeImageWithModel({
-        cfg: {
-          models: {
-            providers: {
-              "minimax-cn": {
-                apiKey: { source: "file", provider: "default", id: "/providers/minimax-cn/apiKey" },
-                baseUrl: "https://api.minimaxi.com/anthropic",
-                models: [],
-              },
-            },
-          },
-        },
-        agentDir: "/tmp/openclaw-agent",
-        provider: "minimax-cn",
-        model: "MiniMax-VL-01",
-        buffer: Buffer.from("png-bytes"),
-        fileName: "image.png",
-        mime: "image/png",
-        prompt: "Describe the image.",
-        timeoutMs: 1000,
-      }),
-    ).resolves.toEqual({
-      text: "portal ok",
-      model: "MiniMax-VL-01",
-    });
-
-    expect(resolveApiKeyForProviderMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        provider: "minimax-cn",
-      }),
-    );
-    const [fetchUrl] = requireFirstMockCall(fetchMock, "fetch");
-    expect(fetchUrl).toBe("https://api.minimaxi.com/v1/coding_plan/vlm");
-  });
-
-  it("does not inherit global MiniMax baseUrl for CN VLM aliases", async () => {
-    const authStorage = {
-      setRuntimeApiKey: setRuntimeApiKeyMock,
-    };
-    resolveModelAsyncMock.mockResolvedValue({
-      authStorage,
-      modelRegistry: { find: vi.fn(() => null) },
-      error: "Unknown model: minimax-cn/MiniMax-VL-01",
-    });
-
-    await expect(
-      describeImageWithModel({
-        cfg: {
-          models: {
-            providers: {
-              minimax: { baseUrl: "https://api.minimax.io/anthropic", models: [] },
-            },
-          },
-        },
-        agentDir: "/tmp/openclaw-agent",
-        provider: "minimax-cn",
-        model: "MiniMax-VL-01",
-        buffer: Buffer.from("png-bytes"),
-        fileName: "image.png",
-        mime: "image/png",
-        prompt: "Describe the image.",
-        timeoutMs: 1000,
-      }),
-    ).resolves.toEqual({
-      text: "portal ok",
-      model: "MiniMax-VL-01",
-    });
-
-    const [fetchUrl] = requireFirstMockCall(fetchMock, "fetch");
-    expect(fetchUrl).toBe("https://api.minimaxi.com/v1/coding_plan/vlm");
-  });
-
   it("carries workspaceDir through image model and stream resolution", async () => {
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
@@ -504,7 +376,7 @@ describe("describeImageWithModel", () => {
       {},
       {
         allowBundledStaticCatalogFallback: true,
-        skipAgentDiscovery: true,
+        skipPiDiscovery: true,
         skipProviderRuntimeHooks: true,
         workspaceDir: "/tmp/openclaw-workspace",
       },
@@ -580,7 +452,7 @@ describe("describeImageWithModel", () => {
       {},
       {
         allowBundledStaticCatalogFallback: true,
-        skipAgentDiscovery: true,
+        skipPiDiscovery: true,
         skipProviderRuntimeHooks: true,
       },
     );
@@ -592,7 +464,7 @@ describe("describeImageWithModel", () => {
       {},
       {
         allowBundledStaticCatalogFallback: true,
-        skipAgentDiscovery: true,
+        skipPiDiscovery: true,
       },
     );
     const [completeModel] = requireFirstMockCall(completeMock, "complete");
@@ -765,7 +637,7 @@ describe("describeImageWithModel", () => {
   it("passes image prompt as system instructions for codex image requests", async () => {
     discoverModelsMock.mockReturnValue({
       find: vi.fn(() => ({
-        provider: "openai",
+        provider: "openai-codex",
         id: "gpt-5.4",
         input: ["text", "image"],
         baseUrl: "https://chatgpt.com/backend-api",
@@ -773,8 +645,8 @@ describe("describeImageWithModel", () => {
     });
     completeMock.mockResolvedValue({
       role: "assistant",
-      api: "openai-chatgpt-responses",
-      provider: "openai",
+      api: "openai-codex-responses",
+      provider: "openai-codex",
       model: "gpt-5.4",
       stopReason: "stop",
       timestamp: Date.now(),
@@ -784,7 +656,7 @@ describe("describeImageWithModel", () => {
     const result = await describeImageWithModel({
       cfg: {},
       agentDir: "/tmp/openclaw-agent",
-      provider: "openai",
+      provider: "openai-codex",
       model: "gpt-5.4",
       buffer: Buffer.from("png-bytes"),
       fileName: "image.png",
@@ -801,7 +673,7 @@ describe("describeImageWithModel", () => {
     const firstCall = requireFirstMockCall(completeMock, "image completion");
     const [completionModel, context, options] = firstCall;
     expect(completionModel).toEqual({
-      provider: "openai",
+      provider: "openai-codex",
       id: "gpt-5.4",
       input: ["text", "image"],
       baseUrl: "https://chatgpt.com/backend-api",
@@ -810,7 +682,7 @@ describe("describeImageWithModel", () => {
     expect(context.messages).toHaveLength(1);
     expect(Object.keys(options).toSorted()).toEqual(["apiKey", "maxTokens", "signal", "timeoutMs"]);
     expect(options.apiKey).toBe("oauth-test");
-    expect(options.maxTokens).toBe(4096);
+    expect(options.maxTokens).toBe(512);
     expect(options.signal).toBeInstanceOf(AbortSignal);
     expect(options.timeoutMs).toBeGreaterThan(0);
     expect(options.timeoutMs).toBeLessThanOrEqual(1000);
@@ -1029,7 +901,7 @@ describe("describeImageWithModel", () => {
     await vi.advanceTimersByTimeAsync(25);
     await assertion;
     const firstCall = requireFirstMockCall(completeMock, "timed image completion");
-    const options = firstCall[2];
+    const [, , options] = firstCall;
     if (!options?.signal) {
       throw new Error("Expected image completion abort signal");
     }
@@ -1104,13 +976,13 @@ describe("describeImageWithModel", () => {
     expect(setRuntimeApiKeyMock).toHaveBeenCalledWith("google", "oauth-test");
   });
 
-  it("keeps stable GA gemini 3.1 flash-lite ids during lookup and keeps profile auth selection", async () => {
+  it("normalizes gemini 3.1 flash-lite ids before lookup and keeps profile auth selection", async () => {
     const findMock = vi.fn((provider: string, modelId: string) => {
       expect(provider).toBe("google");
-      expect(modelId).toBe("gemini-3.1-flash-lite");
+      expect(modelId).toBe("gemini-3.1-flash-lite-preview");
       return {
         provider: "google",
-        id: "gemini-3.1-flash-lite",
+        id: "gemini-3.1-flash-lite-preview",
         input: ["text", "image"],
         baseUrl: "https://generativelanguage.googleapis.com/v1beta",
       };
@@ -1120,7 +992,7 @@ describe("describeImageWithModel", () => {
       role: "assistant",
       api: "google-generative-ai",
       provider: "google",
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-3.1-flash-lite-preview",
       stopReason: "stop",
       timestamp: Date.now(),
       content: [{ type: "text", text: "flash lite ok" }],
@@ -1141,7 +1013,7 @@ describe("describeImageWithModel", () => {
 
     expect(result).toEqual({
       text: "flash lite ok",
-      model: "gemini-3.1-flash-lite",
+      model: "gemini-3.1-flash-lite-preview",
     });
     expect(findMock).toHaveBeenCalled();
     const authRequest = getApiKeyForModelCall();
@@ -1288,78 +1160,5 @@ describe("describeImageWithModel", () => {
     const contentTypes = userMessage!.content.map((block) => (block as { type: string }).type);
     expect(contentTypes).not.toContain("text");
     expect(contentTypes).toContain("image");
-  });
-
-  it("defaults image-describe maxTokens to 4096 for reasoning-capable VLMs", async () => {
-    discoverModelsMock.mockReturnValue({
-      find: vi.fn(() => ({
-        api: "openai-completions",
-        provider: "agent-plan",
-        id: "doubao-seed-2.0-pro",
-        input: ["text", "image"],
-        baseUrl: "https://ark.cn-beijing.volces.com/api/plan/v3",
-      })),
-    });
-    completeMock.mockResolvedValue({
-      role: "assistant",
-      api: "openai-completions",
-      provider: "agent-plan",
-      model: "doubao-seed-2.0-pro",
-      stopReason: "stop",
-      timestamp: Date.now(),
-      content: [{ type: "text", text: "ok" }],
-    });
-
-    await describeImageWithModel({
-      cfg: {},
-      agentDir: "/tmp/openclaw-agent",
-      provider: "agent-plan",
-      model: "doubao-seed-2.0-pro",
-      buffer: Buffer.from("png-bytes"),
-      fileName: "image.png",
-      mime: "image/png",
-      prompt: "Describe the image.",
-      timeoutMs: 1000,
-    });
-
-    const options = requireFirstMockCall(completeMock, "image completion")[2];
-    expect(options.maxTokens).toBe(4096);
-  });
-
-  it("caps image-describe maxTokens by the resolved model's own maxTokens", async () => {
-    discoverModelsMock.mockReturnValue({
-      find: vi.fn(() => ({
-        api: "openai-completions",
-        provider: "fake",
-        id: "small-vlm",
-        input: ["text", "image"],
-        baseUrl: "https://example.test",
-        maxTokens: 1024,
-      })),
-    });
-    completeMock.mockResolvedValue({
-      role: "assistant",
-      api: "openai-completions",
-      provider: "fake",
-      model: "small-vlm",
-      stopReason: "stop",
-      timestamp: Date.now(),
-      content: [{ type: "text", text: "ok" }],
-    });
-
-    await describeImageWithModel({
-      cfg: {},
-      agentDir: "/tmp/openclaw-agent",
-      provider: "fake",
-      model: "small-vlm",
-      buffer: Buffer.from("png-bytes"),
-      fileName: "image.png",
-      mime: "image/png",
-      prompt: "Describe the image.",
-      timeoutMs: 1000,
-    });
-
-    const options = requireFirstMockCall(completeMock, "image completion")[2];
-    expect(options.maxTokens).toBe(1024);
   });
 });

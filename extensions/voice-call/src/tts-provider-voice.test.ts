@@ -2,14 +2,14 @@ import { describe, expect, it } from "vitest";
 import { resolvePreferredTtsVoice } from "./tts-provider-voice.js";
 
 describe("resolvePreferredTtsVoice", () => {
-  it("returns provider speakerVoice when present", () => {
+  it("returns provider voice when present", () => {
     expect(
       resolvePreferredTtsVoice({
         tts: {
           provider: "openai",
           providers: {
             openai: {
-              speakerVoice: "coral",
+              voice: "coral",
             },
           },
         },
@@ -17,34 +17,18 @@ describe("resolvePreferredTtsVoice", () => {
     ).toBe("coral");
   });
 
-  it("returns provider speakerVoiceId when present", () => {
+  it("falls back to voiceId for providers that use that field", () => {
     expect(
       resolvePreferredTtsVoice({
         tts: {
           provider: "elevenlabs",
           providers: {
             elevenlabs: {
-              speakerVoiceId: "voice-123",
+              voiceId: "voice-123",
             },
           },
         },
       }),
     ).toBe("voice-123");
-  });
-
-  it("keeps legacy voice and voiceId fallback compatibility", () => {
-    expect(
-      resolvePreferredTtsVoice({
-        tts: {
-          provider: "openai",
-          providers: {
-            openai: {
-              voice: "legacy-voice",
-              voiceId: "legacy-id",
-            },
-          },
-        },
-      }),
-    ).toBe("legacy-voice");
   });
 });

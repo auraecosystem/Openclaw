@@ -1,26 +1,18 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { note } from "../../packages/terminal-core/src/note.js";
 import { resolveDmAllowAuditState } from "../channels/message-access/dm-allow-state.js";
 import { listReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
 import type { ChannelId } from "../channels/plugins/types.public.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig, GatewayBindMode } from "../config/config.js";
 import type { AgentConfig } from "../config/types.agents.js";
-import { hasConfiguredSecretInput, resolveSecretInputRef } from "../config/types.secrets.js";
+import { hasConfiguredSecretInput } from "../config/types.secrets.js";
 import { resolveGatewayAuthTokenSourceConflict } from "../gateway/auth-token-source-conflict.js";
 import { resolveGatewayAuth } from "../gateway/auth.js";
 import { isLoopbackHost, resolveGatewayBindHost } from "../gateway/net.js";
 import { resolveExecPolicyScopeSnapshot } from "../infra/exec-approvals-effective.js";
-import {
-  loadExecApprovals,
-  type ExecAsk,
-  type ExecMode,
-  type ExecSecurity,
-} from "../infra/exec-approvals.js";
-import { isLikelySensitiveModelProviderHeaderName } from "../secrets/model-provider-header-policy.js";
-import { hasConfiguredPlaintextSecretValue } from "../secrets/secret-value.js";
-import { discoverConfigSecretTargets } from "../secrets/target-registry.js";
+import { loadExecApprovals, type ExecAsk, type ExecSecurity } from "../infra/exec-approvals.js";
 import { collectExecFilesystemPolicyDriftHits } from "../security/exec-filesystem-policy.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { note } from "../terminal/note.js";
 import { resolveDefaultChannelAccountContext } from "./channel-account-context.js";
 
 function collectImplicitHeartbeatDirectPolicyWarnings(cfg: OpenClawConfig): string[] {
@@ -94,17 +86,15 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
 
   const maybeWarn = (params: {
     scopeLabel: string;
-    scopeExecConfig: { mode?: ExecMode; security?: ExecSecurity; ask?: ExecAsk } | undefined;
-    globalExecConfig?: { mode?: ExecMode; security?: ExecSecurity; ask?: ExecAsk } | undefined;
+    scopeExecConfig: { security?: ExecSecurity; ask?: ExecAsk } | undefined;
+    globalExecConfig?: { security?: ExecSecurity; ask?: ExecAsk } | undefined;
     agentId?: string;
   }) => {
     const scopeExecConfig = params.scopeExecConfig;
     const globalExecConfig = params.globalExecConfig;
     if (
-      !scopeExecConfig?.mode &&
       !scopeExecConfig?.security &&
       !scopeExecConfig?.ask &&
-      !globalExecConfig?.mode &&
       !globalExecConfig?.security &&
       !globalExecConfig?.ask
     ) {
@@ -190,56 +180,9 @@ function collectExecFilesystemPolicyWarnings(cfg: OpenClawConfig): string[] {
   );
 }
 
-function collectPlaintextConfigSecretWarnings(cfg: OpenClawConfig): string[] {
-  const plaintextPaths: string[] = [];
-  const defaults = cfg.secrets?.defaults;
-
-  for (const target of discoverConfigSecretTargets(cfg)) {
-    if (!target.entry.includeInAudit) {
-      continue;
-    }
-    if (
-      target.entry.id === "models.providers.*.headers.*" &&
-      !isLikelySensitiveModelProviderHeaderName(target.pathSegments.at(-1) ?? "")
-    ) {
-      continue;
-    }
-    const { ref } = resolveSecretInputRef({
-      value: target.value,
-      refValue: target.refValue,
-      defaults,
-    });
-    if (ref) {
-      continue;
-    }
-    if (!hasConfiguredPlaintextSecretValue(target.value, target.entry.expectedResolvedValue)) {
-      continue;
-    }
-    plaintextPaths.push(target.path);
-  }
-
-  if (plaintextPaths.length === 0) {
-    return [];
-  }
-
-  const samplePaths = plaintextPaths.slice(0, 5);
-  const extraCount = plaintextPaths.length - samplePaths.length;
-  const pathLine =
-    extraCount > 0 ? `${samplePaths.join(", ")} (+${extraCount} more)` : samplePaths.join(", ");
-
-  return [
-    "- WARNING: openclaw.json contains plaintext secret-bearing config fields.",
-    `  Paths: ${pathLine}`,
-    "  Agents or workspace tools that can read config files may see these API keys/tokens.",
-    `  Migrate them to SecretRefs with ${formatCliCommand("openclaw secrets configure")} or ${formatCliCommand("openclaw secrets apply")}, then verify with ${formatCliCommand("openclaw secrets audit --check")}.`,
-  ];
-}
-
-export async function collectSecurityWarnings(
-  cfg: OpenClawConfig,
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<string[]> {
+export async function noteSecurityWarnings(cfg: OpenClawConfig) {
   const warnings: string[] = [];
+  const auditHint = `- Run: ${formatCliCommand("openclaw security audit --deep")}`;
 
   if (cfg.approvals?.exec?.enabled === false) {
     warnings.push(
@@ -252,7 +195,6 @@ export async function collectSecurityWarnings(
   warnings.push(...collectImplicitHeartbeatDirectPolicyWarnings(cfg));
   warnings.push(...collectExecPolicyConflictWarnings(cfg));
   warnings.push(...collectExecFilesystemPolicyWarnings(cfg));
-  warnings.push(...collectPlaintextConfigSecretWarnings(cfg));
   warnings.push(...collectDurableExecApprovalWarnings(cfg));
 
   // ===========================================
@@ -275,7 +217,7 @@ export async function collectSecurityWarnings(
 
   const resolvedAuth = resolveGatewayAuth({
     authConfig: cfg.gateway?.auth,
-    env,
+    env: process.env,
     tailscaleMode,
   });
   const authToken = normalizeOptionalString(resolvedAuth.token) ?? "";
@@ -327,7 +269,7 @@ export async function collectSecurityWarnings(
     }
   }
 
-  const tokenConflict = resolveGatewayAuthTokenSourceConflict({ cfg, env });
+  const tokenConflict = resolveGatewayAuthTokenSourceConflict({ cfg, env: process.env });
   if (tokenConflict) {
     warnings.push(...tokenConflict.warningLines);
   }
@@ -435,12 +377,6 @@ export async function collectSecurityWarnings(
       }
     }
   }
-  return warnings;
-}
-
-export async function noteSecurityWarnings(cfg: OpenClawConfig) {
-  const warnings = await collectSecurityWarnings(cfg);
-  const auditHint = `- Run: ${formatCliCommand("openclaw security audit --deep")}`;
 
   const lines = warnings.length > 0 ? warnings : ["- No channel security warnings detected."];
   lines.push(auditHint);

@@ -4,7 +4,6 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
-import { renderCatFacePngBase64 } from "../../test/helpers/live-image-probe.js";
 import { getAcpRuntimeBackend } from "../acp/runtime/registry.js";
 import { isLiveTestEnabled } from "../agents/live-test-helpers.js";
 import {
@@ -33,16 +32,14 @@ import {
   runOpenClawCliJson,
   shouldRunLiveImageProbe,
 } from "./live-agent-probes.js";
+import { renderCatFacePngBase64 } from "./live-image-probe.js";
 import { startGatewayServer } from "./server.js";
 
 const LIVE = isLiveTestEnabled();
 const ACP_BIND_LIVE = isTruthyEnvValue(process.env.OPENCLAW_LIVE_ACP_BIND);
 const describeLive = LIVE && ACP_BIND_LIVE ? describe : describe.skip;
 
-const CONNECT_TIMEOUT_MS = resolveLiveTimeoutMs(
-  process.env.OPENCLAW_LIVE_ACP_BIND_REQUEST_TIMEOUT_MS,
-  90_000,
-);
+const CONNECT_TIMEOUT_MS = 90_000;
 const LIVE_TIMEOUT_MS = 240_000;
 const ACP_CRON_MCP_PROBE_MAX_ATTEMPTS = 2;
 const ACP_CRON_MCP_PROBE_VERIFY_POLLS = 5;
@@ -50,11 +47,6 @@ const ACP_CRON_MCP_PROBE_VERIFY_POLL_MS = 1_000;
 const DEFAULT_LIVE_CODEX_MODEL = "gpt-5.5";
 const DEFAULT_LIVE_PARENT_MODEL = "openai/gpt-5.4";
 type LiveAcpAgent = "claude" | "codex" | "droid" | "gemini" | "opencode";
-
-function resolveLiveTimeoutMs(raw: string | undefined, fallback: number): number {
-  const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
-}
 
 class AcpBindSkipError extends Error {
   override readonly name = "AcpBindSkipError";
@@ -199,43 +191,18 @@ function resolveModelObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
-async function prepareCodexHomeForLiveBindTest(tempRoot: string): Promise<void> {
+async function prepareCodexHomeForLiveBindTest(): Promise<void> {
   const home = process.env.HOME?.trim();
-  const sourceCodexHome = process.env.CODEX_HOME?.trim() || (home ? path.join(home, ".codex") : "");
+  if (!home) {
+    return;
+  }
   const model = process.env.OPENCLAW_LIVE_ACP_BIND_CODEX_MODEL?.trim() || DEFAULT_LIVE_CODEX_MODEL;
-  const codexHome = path.join(tempRoot, "codex-home");
+  const codexHome = path.join(home, ".codex");
   await fs.mkdir(codexHome, { recursive: true });
-  const targetAuthPath = path.join(codexHome, "auth.json");
-  let hasAuthFile = false;
-  if (sourceCodexHome) {
-    await fs.copyFile(path.join(sourceCodexHome, "auth.json"), targetAuthPath).then(
-      () => {
-        hasAuthFile = true;
-      },
-      (error: unknown) => {
-        if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
-          throw error;
-        }
-      },
-    );
-  }
-  const apiKey = process.env.CODEX_API_KEY?.trim() || process.env.OPENAI_API_KEY?.trim();
-  if (apiKey && !hasAuthFile) {
-    await fs.writeFile(
-      targetAuthPath,
-      `${JSON.stringify({
-        OPENAI_API_KEY: apiKey,
-        tokens: null,
-        last_refresh: null,
-      })}\n`,
-      { mode: 0o600 },
-    );
-  }
   const configPath = path.join(codexHome, "config.toml");
-  const sourceConfigPath = sourceCodexHome ? path.join(sourceCodexHome, "config.toml") : "";
   let rawConfig = "";
   try {
-    rawConfig = sourceConfigPath ? await fs.readFile(sourceConfigPath, "utf8") : "";
+    rawConfig = await fs.readFile(configPath, "utf8");
   } catch (error) {
     if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") {
       throw error;
@@ -395,7 +362,7 @@ async function bindConversationAndWait(params: {
         logLiveStep(`acpx backend became healthy before bind attempt ${attempt}`);
       } else {
         if (runtime?.doctor && (attempt === 1 || attempt % 6 === 0)) {
-          const report = await runtime.doctor().catch((error: unknown) => ({
+          const report = await runtime.doctor().catch((error) => ({
             message: error instanceof Error ? error.message : String(error),
             details: [],
           }));
@@ -634,7 +601,7 @@ describeLive("gateway live (ACP bind)", () => {
       process.env.OPENCLAW_GATEWAY_TOKEN = token;
       process.env.OPENCLAW_GATEWAY_PORT = String(port);
       if (liveAgent === "codex" && !agentCommandOverride) {
-        await prepareCodexHomeForLiveBindTest(tempRoot);
+        await prepareCodexHomeForLiveBindTest();
       }
 
       const cfg = getRuntimeConfig();
@@ -1008,37 +975,20 @@ describeLive("gateway live (ACP bind)", () => {
             sessionKey: spawnedSessionKey,
           });
           lastCronProbeName = cronProbe.name;
-          try {
-            await sendChatAndWait({
-              client,
-              sessionKey: originalSessionKey,
-              idempotencyKey: `idem-cron-${attempt}-${randomUUID()}`,
-              message: buildLiveCronProbeMessage({
-                agent: liveAgent,
-                argsJson: cronProbe.argsJson,
-                attempt,
-                exactReply: cronProbe.name,
-              }),
-              originatingChannel: "slack",
-              originatingTo: conversationId,
-              originatingAccountId: accountId,
-            });
-          } catch (error) {
-            lastCronMismatch = error instanceof Error ? error.message : String(error);
-            logLiveStep(
-              `cron mcp turn failed after attempt ${String(attempt + 1)}: ${lastCronMismatch}`,
-            );
-            if (!requireCronMcpProbe) {
-              logLiveStep(
-                `cron mcp turn ${lastCronProbeName} failed; continuing after bind/image verification`,
-              );
-              break;
-            }
-            if (attempt === ACP_CRON_MCP_PROBE_MAX_ATTEMPTS - 1) {
-              throw error;
-            }
-            continue;
-          }
+          await sendChatAndWait({
+            client,
+            sessionKey: originalSessionKey,
+            idempotencyKey: `idem-cron-${attempt}-${randomUUID()}`,
+            message: buildLiveCronProbeMessage({
+              agent: liveAgent,
+              argsJson: cronProbe.argsJson,
+              attempt,
+              exactReply: cronProbe.name,
+            }),
+            originatingChannel: "slack",
+            originatingTo: conversationId,
+            originatingAccountId: accountId,
+          });
           logLiveStep(`cron mcp turn completed (attempt ${String(attempt + 1)})`);
 
           let cronHistory: Awaited<ReturnType<typeof waitForAssistantText>> | null = null;

@@ -1,17 +1,18 @@
-import type { ReplyDispatchKind } from "../../auto-reply/reply/reply-dispatcher.types.js";
+import path from "node:path";
+import {
+  ackJsonDurableQueueEntry,
+  ensureJsonDurableQueueDirs,
+  loadJsonDurableQueueEntry,
+  loadPendingJsonDurableQueueEntries,
+  moveJsonDurableQueueEntryToFailed,
+  readJsonDurableQueueEntry,
+  resolveJsonDurableQueueEntryPaths,
+  writeJsonDurableQueueEntry,
+} from "@openclaw/fs-safe/store";
 import type { ReplyPayload } from "../../auto-reply/types.js";
 import type { RenderedMessageBatchPlanItem } from "../../channels/message/types.js";
+import { resolveStateDir } from "../../config/paths.js";
 import type { ReplyToMode } from "../../config/types.js";
-import type { PluginHookReplyPayloadSendingContext } from "../../plugins/hook-types.js";
-import {
-  deleteDeliveryQueueEntry,
-  loadDeliveryQueueEntries,
-  loadDeliveryQueueEntry,
-  moveDeliveryQueueEntryToFailed,
-  updateDeliveryQueueEntry,
-  upsertDeliveryQueueEntry,
-  type DeliveryQueueRowMetadata,
-} from "../delivery-queue-sqlite.js";
 import { generateSecureUuid } from "../secure-random.js";
 import type { OutboundDeliveryFormattingOptions } from "./formatting.js";
 import type { OutboundIdentity } from "./identity.js";
@@ -19,7 +20,9 @@ import type { OutboundMirror } from "./mirror.js";
 import type { OutboundSessionContext } from "./session-context.js";
 import type { OutboundChannel } from "./targets.js";
 
-const QUEUE_NAME = "outbound";
+const QUEUE_DIRNAME = "delivery-queue";
+const FAILED_DIRNAME = "failed";
+const QUEUE_TEMP_PREFIX = ".delivery-queue";
 
 export type QueuedRenderedMessageBatchPlan = {
   payloadCount: number;
@@ -30,14 +33,6 @@ export type QueuedRenderedMessageBatchPlan = {
   interactiveCount: number;
   channelDataCount: number;
   items: readonly RenderedMessageBatchPlanItem[];
-};
-
-export type QueuedReplyPayloadSendingHook = {
-  kind: ReplyDispatchKind;
-  channel?: string;
-  sessionKey?: string;
-  runId?: string;
-  context: PluginHookReplyPayloadSendingContext;
 };
 
 export type QueuedDeliveryPayload = {
@@ -60,8 +55,6 @@ export type QueuedDeliveryPayload = {
   bestEffort?: boolean;
   gifPlayback?: boolean;
   forceDocument?: boolean;
-  /** Replayable reply payload hook context for recovery and live delivery. */
-  replyPayloadSendingHook?: QueuedReplyPayloadSendingHook;
   silent?: boolean;
   mirror?: OutboundMirror;
   /** Session context needed to preserve outbound media policy on recovery. */
@@ -80,23 +73,82 @@ export interface QueuedDelivery extends QueuedDeliveryPayload {
   recoveryState?: "send_attempt_started" | "unknown_after_send";
 }
 
-function queuedDeliveryMetadata(entry: QueuedDelivery): DeliveryQueueRowMetadata {
+export function resolveQueueDir(stateDir?: string): string {
+  const base = stateDir ?? resolveStateDir();
+  return path.join(base, QUEUE_DIRNAME);
+}
+
+function resolveFailedDir(stateDir?: string): string {
+  return path.join(resolveQueueDir(stateDir), FAILED_DIRNAME);
+}
+
+function resolveQueueEntryPaths(
+  id: string,
+  stateDir?: string,
+): {
+  jsonPath: string;
+  deliveredPath: string;
+} {
+  return resolveJsonDurableQueueEntryPaths(resolveQueueDir(stateDir), id);
+}
+
+async function writeQueueEntry(filePath: string, entry: QueuedDelivery): Promise<void> {
+  await writeJsonDurableQueueEntry({
+    filePath,
+    entry,
+    tempPrefix: QUEUE_TEMP_PREFIX,
+  });
+}
+
+async function readQueueEntry(filePath: string): Promise<QueuedDelivery> {
+  return await readJsonDurableQueueEntry<QueuedDelivery>(filePath);
+}
+
+function normalizeLegacyQueuedDeliveryEntry(entry: QueuedDelivery): {
+  entry: QueuedDelivery;
+  migrated: boolean;
+} {
+  const hasAttemptTimestamp =
+    typeof entry.lastAttemptAt === "number" &&
+    Number.isFinite(entry.lastAttemptAt) &&
+    entry.lastAttemptAt > 0;
+  if (hasAttemptTimestamp || entry.retryCount <= 0) {
+    return { entry, migrated: false };
+  }
+  const hasEnqueuedTimestamp =
+    typeof entry.enqueuedAt === "number" &&
+    Number.isFinite(entry.enqueuedAt) &&
+    entry.enqueuedAt > 0;
+  if (!hasEnqueuedTimestamp) {
+    return { entry, migrated: false };
+  }
   return {
-    entryKind: "outbound",
-    sessionKey: entry.session?.key,
-    channel: entry.channel,
-    target: entry.to,
-    accountId: entry.accountId,
+    entry: {
+      ...entry,
+      lastAttemptAt: entry.enqueuedAt,
+    },
+    migrated: true,
   };
 }
 
-/** Persist a delivery entry before attempting send. Returns the entry ID. */
+/** Ensure the queue directory (and failed/ subdirectory) exist. */
+export async function ensureQueueDir(stateDir?: string): Promise<string> {
+  const queueDir = resolveQueueDir(stateDir);
+  await ensureJsonDurableQueueDirs({
+    queueDir,
+    failedDir: resolveFailedDir(stateDir),
+  });
+  return queueDir;
+}
+
+/** Persist a delivery entry to disk before attempting send. Returns the entry ID. */
 export async function enqueueDelivery(
   params: QueuedDeliveryPayload,
   stateDir?: string,
 ): Promise<string> {
+  const queueDir = await ensureQueueDir(stateDir);
   const id = generateSecureUuid();
-  const entry: QueuedDelivery = {
+  await writeQueueEntry(path.join(queueDir, `${id}.json`), {
     id,
     enqueuedAt: Date.now(),
     channel: params.channel,
@@ -112,65 +164,58 @@ export async function enqueueDelivery(
     bestEffort: params.bestEffort,
     gifPlayback: params.gifPlayback,
     forceDocument: params.forceDocument,
-    replyPayloadSendingHook: params.replyPayloadSendingHook,
     silent: params.silent,
     mirror: params.mirror,
     session: params.session,
     gatewayClientScopes: params.gatewayClientScopes,
     retryCount: 0,
-  };
-  upsertDeliveryQueueEntry({
-    queueName: QUEUE_NAME,
-    entry,
-    metadata: queuedDeliveryMetadata(entry),
-    stateDir,
   });
   return id;
 }
 
-/** Remove a successfully delivered entry from the queue. */
+/** Remove a successfully delivered entry from the queue.
+ *
+ * Uses a two-phase approach so that a crash between delivery and cleanup
+ * does not cause the message to be replayed on the next recovery scan:
+ *   Phase 1: atomic rename  {id}.json → {id}.delivered
+ *   Phase 2: unlink the .delivered marker
+ * If the process dies between phase 1 and phase 2 the marker is cleaned up
+ * by {@link loadPendingDeliveries} on the next startup without re-sending.
+ */
 export async function ackDelivery(id: string, stateDir?: string): Promise<void> {
-  deleteDeliveryQueueEntry(QUEUE_NAME, id, stateDir);
+  await ackJsonDurableQueueEntry(resolveQueueEntryPaths(id, stateDir));
 }
 
 /** Update a queue entry after a failed delivery attempt. */
 export async function failDelivery(id: string, error: string, stateDir?: string): Promise<void> {
-  updateQueuedDelivery(id, stateDir, (entry) => ({
-    ...entry,
-    retryCount: entry.retryCount + 1,
-    lastAttemptAt: Date.now(),
-    lastError: error,
-  }));
-}
-
-function updateQueuedDelivery(
-  id: string,
-  stateDir: string | undefined,
-  update: (entry: QueuedDelivery) => QueuedDelivery,
-): void {
-  updateDeliveryQueueEntry(QUEUE_NAME, id, stateDir, (entry) => update(entry as QueuedDelivery));
+  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+  const entry = await readQueueEntry(filePath);
+  entry.retryCount += 1;
+  entry.lastAttemptAt = Date.now();
+  entry.lastError = error;
+  await writeQueueEntry(filePath, entry);
 }
 
 export async function markDeliveryPlatformSendAttemptStarted(
   id: string,
   stateDir?: string,
 ): Promise<void> {
-  updateQueuedDelivery(id, stateDir, (entry) => ({
-    ...entry,
-    platformSendStartedAt: entry.platformSendStartedAt ?? Date.now(),
-    recoveryState: "send_attempt_started",
-  }));
+  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+  const entry = await readQueueEntry(filePath);
+  entry.platformSendStartedAt = entry.platformSendStartedAt ?? Date.now();
+  entry.recoveryState = "send_attempt_started";
+  await writeQueueEntry(filePath, entry);
 }
 
 export async function markDeliveryPlatformOutcomeUnknown(
   id: string,
   stateDir?: string,
 ): Promise<void> {
-  updateQueuedDelivery(id, stateDir, (entry) => ({
-    ...entry,
-    platformSendStartedAt: entry.platformSendStartedAt ?? Date.now(),
-    recoveryState: "unknown_after_send",
-  }));
+  const filePath = path.join(resolveQueueDir(stateDir), `${id}.json`);
+  const entry = await readQueueEntry(filePath);
+  entry.platformSendStartedAt = entry.platformSendStartedAt ?? Date.now();
+  entry.recoveryState = "unknown_after_send";
+  await writeQueueEntry(filePath, entry);
 }
 
 /** Load a single pending delivery entry by ID from the queue directory. */
@@ -178,15 +223,28 @@ export async function loadPendingDelivery(
   id: string,
   stateDir?: string,
 ): Promise<QueuedDelivery | null> {
-  return loadDeliveryQueueEntry(QUEUE_NAME, id, stateDir) as QueuedDelivery | null;
+  return await loadJsonDurableQueueEntry({
+    paths: resolveQueueEntryPaths(id, stateDir),
+    tempPrefix: QUEUE_TEMP_PREFIX,
+    read: async (entry) => normalizeLegacyQueuedDeliveryEntry(entry),
+  });
 }
 
-/** Load all pending delivery entries from the queue. */
+/** Load all pending delivery entries from the queue directory. */
 export async function loadPendingDeliveries(stateDir?: string): Promise<QueuedDelivery[]> {
-  return loadDeliveryQueueEntries(QUEUE_NAME, stateDir) as QueuedDelivery[];
+  const queueDir = resolveQueueDir(stateDir);
+  return await loadPendingJsonDurableQueueEntries({
+    queueDir,
+    tempPrefix: QUEUE_TEMP_PREFIX,
+    read: async (entry) => normalizeLegacyQueuedDeliveryEntry(entry),
+  });
 }
 
-/** Move a queue entry out of the pending retry set. */
+/** Move a queue entry to the failed/ subdirectory. */
 export async function moveToFailed(id: string, stateDir?: string): Promise<void> {
-  moveDeliveryQueueEntryToFailed(QUEUE_NAME, id, stateDir);
+  await moveJsonDurableQueueEntryToFailed({
+    queueDir: resolveQueueDir(stateDir),
+    failedDir: resolveFailedDir(stateDir),
+    id,
+  });
 }

@@ -9,8 +9,8 @@ const sessionsConfigState = vi.hoisted<{ loadConfig: () => Record<string, unknow
   loadConfig: () => ({
     agents: {
       defaults: {
-        model: { primary: "test:opus" },
-        models: { "test:opus": {} },
+        model: { primary: "pi:opus" },
+        models: { "pi:opus": {} },
         contextTokens: 32000,
       },
     },

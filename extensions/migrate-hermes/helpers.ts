@@ -7,19 +7,14 @@ import {
 } from "openclaw/plugin-sdk/migration";
 import type { MigrationItem } from "openclaw/plugin-sdk/plugin-entry";
 import { appendRegularFile, pathExists } from "openclaw/plugin-sdk/security-runtime";
-import {
-  isRecord as sharedIsRecord,
-  normalizeOptionalString,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
 import { parse as parseYaml } from "yaml";
 
-const HOME_SHORTHAND_RE = /^~(?=$|[\\/])/u;
-const UNSAFE_NAME_CHARS_RE = /[^a-z0-9._-]+/g;
-const EDGE_DASHES_RE = /^-+|-+$/g;
-
 export function resolveHomePath(input: string): string {
-  const value = input.trim();
-  return value ? path.resolve(value.replace(HOME_SHORTHAND_RE, os.homedir())) : value;
+  const trimmed = input.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  return path.resolve(trimmed.replace(/^~(?=$|[\\/])/u, os.homedir()));
 }
 
 export async function exists(filePath: string): Promise<boolean> {
@@ -27,17 +22,30 @@ export async function exists(filePath: string): Promise<boolean> {
 }
 
 export async function isDirectory(dirPath: string): Promise<boolean> {
-  const stat = await fs.stat(dirPath).catch(() => undefined);
-  return stat?.isDirectory() === true;
+  try {
+    return (await fs.stat(dirPath)).isDirectory();
+  } catch {
+    return false;
+  }
 }
 
 export function sanitizeName(name: string): string {
-  const normalized = name.trim().toLowerCase().replaceAll(UNSAFE_NAME_CHARS_RE, "-");
-  return normalized.replaceAll(EDGE_DASHES_RE, "");
+  return name
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9._-]+/g, "-")
+    .replaceAll(/^-+|-+$/g, "");
 }
 
 export async function readText(filePath: string | undefined): Promise<string | undefined> {
-  return filePath ? await fs.readFile(filePath, "utf8").catch(() => undefined) : undefined;
+  if (!filePath) {
+    return undefined;
+  }
+  try {
+    return await fs.readFile(filePath, "utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseEnv(content: string | undefined): Record<string, string> {
@@ -81,7 +89,9 @@ export function parseHermesConfig(content: string | undefined): Record<string, u
   }
 }
 
-export const isRecord = sharedIsRecord;
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 export function childRecord(
   root: Record<string, unknown> | undefined,
@@ -91,7 +101,9 @@ export function childRecord(
   return isRecord(value) ? value : {};
 }
 
-export const readString = normalizeOptionalString;
+export function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
 export function readStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {

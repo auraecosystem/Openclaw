@@ -200,10 +200,10 @@ async function statMtimeMs(p: string): Promise<number | null> {
   }
 }
 
-async function resolveDepsMarker(params: { root: string; manager: PackageManager }): Promise<{
+function resolveDepsMarker(params: { root: string; manager: PackageManager }): {
   lockfilePath: string | null;
   markerPath: string | null;
-}> {
+} {
   const root = params.root;
   if (params.manager === "pnpm") {
     return {
@@ -218,11 +218,8 @@ async function resolveDepsMarker(params: { root: string; manager: PackageManager
     };
   }
   if (params.manager === "npm") {
-    const shrinkwrapPath = path.join(root, "npm-shrinkwrap.json");
     return {
-      lockfilePath: (await exists(shrinkwrapPath))
-        ? shrinkwrapPath
-        : path.join(root, "package-lock.json"),
+      lockfilePath: path.join(root, "package-lock.json"),
       markerPath: path.join(root, "node_modules"),
     };
   }
@@ -234,7 +231,7 @@ export async function checkDepsStatus(params: {
   manager: PackageManager;
 }): Promise<DepsStatus> {
   const root = path.resolve(params.root);
-  const { lockfilePath, markerPath } = await resolveDepsMarker({
+  const { lockfilePath, markerPath } = resolveDepsMarker({
     root,
     manager: params.manager,
   });

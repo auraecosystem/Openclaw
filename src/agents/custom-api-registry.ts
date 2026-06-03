@@ -1,6 +1,10 @@
-import { getApiProvider, registerApiProvider } from "../llm/api-registry.js";
-import type { Api, StreamOptions } from "../llm/types.js";
-import type { StreamFn } from "./runtime/index.js";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
+import {
+  getApiProvider,
+  registerApiProvider,
+  type Api,
+  type StreamOptions,
+} from "@earendil-works/pi-ai";
 
 const CUSTOM_API_SOURCE_PREFIX = "openclaw-custom-api:";
 

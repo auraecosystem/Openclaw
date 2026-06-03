@@ -2,7 +2,6 @@ import { beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
   cleanupCommandLogMessages,
   createCleanupCommandRuntime,
-  removeWorkspaceAttestationPaths,
   resetCleanupCommandMocks,
   silenceCleanupCommandRuntime,
 } from "./cleanup-command.test-support.js";
@@ -48,20 +47,5 @@ describe("resetCommand", () => {
         message.includes("openclaw backup create"),
       ),
     ).toBe(false);
-  });
-
-  it("removes workspace attestations during full reset", async () => {
-    await resetCommand(runtime, {
-      scope: "full",
-      yes: true,
-      nonInteractive: true,
-      dryRun: true,
-    });
-
-    expect(removeWorkspaceAttestationPaths).toHaveBeenCalledWith(
-      ["/tmp/.openclaw/workspace"],
-      runtime,
-      { dryRun: true },
-    );
   });
 });

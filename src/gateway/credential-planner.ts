@@ -1,7 +1,7 @@
-import { normalizeOptionalString } from "../../packages/normalization-core/src/string-coerce.js";
 import { containsEnvVarReference } from "../config/env-substitution.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { hasConfiguredSecretInput, resolveSecretInputRef } from "../config/types.secrets.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 type GatewayCredentialInputPath =
   | "gateway.auth.token"
@@ -17,7 +17,6 @@ type GatewayConfiguredCredentialInput = {
   hasSecretRef: boolean;
 };
 
-/** Precomputed Gateway credential surfaces used by startup, secret resolution, and clients. */
 export type GatewayCredentialPlan = {
   configuredMode: "local" | "remote";
   authMode?: string;
@@ -44,7 +43,6 @@ export type GatewayCredentialPlan = {
 
 type GatewaySecretDefaults = NonNullable<OpenClawConfig["secrets"]>["defaults"];
 
-/** Normalize optional Gateway credential strings to nonempty values. */
 export const trimToUndefined = normalizeOptionalString;
 
 /**
@@ -62,17 +60,14 @@ export function trimCredentialToUndefined(value: unknown): string | undefined {
   return trimmed;
 }
 
-/** True when the process env supplies a nonempty Gateway token candidate. */
 export function hasGatewayTokenEnvCandidate(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(trimToUndefined(env.OPENCLAW_GATEWAY_TOKEN));
 }
 
-/** True when the process env supplies a nonempty Gateway password candidate. */
 export function hasGatewayPasswordEnvCandidate(env: NodeJS.ProcessEnv = process.env): boolean {
   return Boolean(trimToUndefined(env.OPENCLAW_GATEWAY_PASSWORD));
 }
 
-/** Classify one configured credential input without resolving secret refs. */
 function resolveConfiguredGatewayCredentialInput(params: {
   value: unknown;
   defaults?: GatewaySecretDefaults;
@@ -91,7 +86,6 @@ function resolveConfiguredGatewayCredentialInput(params: {
   };
 }
 
-/** Build the shared credential plan for Gateway startup, local auth, and remote client auth. */
 export function createGatewayCredentialPlan(params: {
   config: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
@@ -126,8 +120,6 @@ export function createGatewayCredentialPlan(params: {
     path: "gateway.remote.password",
   });
 
-  // The local token surface is disabled by password/none/trusted-proxy modes so
-  // token refs do not get resolved for auth modes that cannot consume them.
   const localTokenCanWin =
     authMode !== "password" && authMode !== "none" && authMode !== "trusted-proxy";
   const tokenCanWin = Boolean(envToken || localToken.configured || remoteToken.configured);
@@ -146,8 +138,6 @@ export function createGatewayCredentialPlan(params: {
   const tailscaleRemoteExposure =
     gateway?.tailscale?.mode === "serve" || gateway?.tailscale?.mode === "funnel";
   const remoteConfiguredSurface = remoteMode || remoteUrlConfigured || tailscaleRemoteExposure;
-  // Remote credentials may borrow local auth credentials only when the remote
-  // surface exists but no explicit remote/env candidate can satisfy the mode.
   const remoteTokenFallbackActive = localTokenCanWin && !envToken && !localToken.configured;
   const remotePasswordFallbackActive =
     authMode !== "trusted-proxy" && !envPassword && !localPassword.configured && passwordCanWin;

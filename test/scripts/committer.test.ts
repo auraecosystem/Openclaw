@@ -1,13 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createScriptTestHarness } from "./test-helpers.js";
 
 const scriptPath = path.join(process.cwd(), "scripts", "committer");
 const { createTempDir } = createScriptTestHarness();
-let templateRepo: string;
 
 function run(cwd: string, command: string, args: string[]) {
   return execFileSync(command, args, {
@@ -22,12 +20,7 @@ function git(cwd: string, ...args: string[]) {
 
 function createRepo() {
   const repo = createTempDir("committer-test-");
-  cpSync(templateRepo, repo, { recursive: true });
-  return repo;
-}
 
-function createTemplateRepo() {
-  const repo = mkdtempSync(path.join(tmpdir(), "committer-template-"));
   git(repo, "init", "-q");
   git(repo, "config", "user.email", "test@example.com");
   git(repo, "config", "user.name", "Test User");
@@ -78,14 +71,6 @@ function committedFileContents(repo: string, relativePath: string) {
 }
 
 describe("scripts/committer", () => {
-  beforeAll(() => {
-    templateRepo = createTemplateRepo();
-  });
-
-  afterAll(() => {
-    rmSync(templateRepo, { recursive: true, force: true });
-  });
-
   it("accepts supported path argument shapes", () => {
     const cases = [
       {

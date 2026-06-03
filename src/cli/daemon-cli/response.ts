@@ -90,7 +90,7 @@ export function buildDaemonServiceSnapshot(service: GatewayService, loaded: bool
   };
 }
 
-export function createNullWriter(): Writable {
+function createNullWriter(): Writable {
   return new Writable({
     write(_chunk, _encoding, callback) {
       callback();
@@ -167,7 +167,7 @@ export async function installDaemonServiceAndEmit(params: {
     return;
   }
 
-  let installed;
+  let installed = true;
   try {
     installed = await params.service.isLoaded({ env: process.env });
   } catch {

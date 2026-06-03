@@ -1,10 +1,12 @@
-import type { AgentToolResult } from "../agents/runtime/index.js";
+import type { AgentToolResult as PiAgentToolResult } from "@earendil-works/pi-agent-core";
 
-export type OpenClawAgentToolResult<TResult = unknown> = AgentToolResult<TResult>;
+export type OpenClawAgentToolResult<TResult = unknown> = PiAgentToolResult<TResult>;
 
-export type AgentToolResultMiddlewareRuntime = "openclaw" | "codex";
+export type AgentToolResultMiddlewareRuntime = "pi" | "codex";
 /** @deprecated Use AgentToolResultMiddlewareRuntime. */
-export type AgentToolResultMiddlewareHarness = AgentToolResultMiddlewareRuntime | "codex-app-server";
+export type AgentToolResultMiddlewareHarness =
+  | AgentToolResultMiddlewareRuntime
+  | "codex-app-server";
 
 export type AgentToolResultMiddlewareEvent = {
   threadId?: string;

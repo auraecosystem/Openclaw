@@ -22,7 +22,7 @@ vi.mock("../config/config.js", async () => ({
   replaceConfigFile: configMocks.replaceConfigFile,
 }));
 
-import { agentsSetIdentityCommand } from "./agents.commands.identity.js";
+import { agentsSetIdentityCommand } from "./agents.js";
 
 const runtime = createTestRuntime();
 type ConfigWritePayload = {

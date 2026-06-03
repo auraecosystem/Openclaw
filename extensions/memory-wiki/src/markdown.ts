@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import {
-  asFiniteNumber,
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
   normalizeSingleOrTrimmedStringList,
@@ -277,7 +276,7 @@ export function normalizeWikiClaims(value: unknown): WikiClaim[] {
 }
 
 function normalizeOptionalNumber(value: unknown): number | undefined {
-  return asFiniteNumber(value);
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function normalizeWikiPersonCard(value: unknown): WikiPersonCard | undefined {

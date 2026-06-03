@@ -27,7 +27,6 @@ export type UsageDataState = {
   loading: boolean;
   error: string | null;
   sessions: UsageSessionEntry[];
-  agents: string[];
   sessionsLimitReached: boolean; // True if 1000 session cap was hit
   totals: UsageTotals | null;
   aggregates: UsageAggregates | null;
@@ -42,7 +41,6 @@ export type UsageFilterState = {
   selectedSessions: string[]; // Support multiple session selection
   selectedDays: string[]; // Support multiple day selection
   selectedHours: number[]; // Support multiple hour selection
-  agentId: string | null;
   query: string;
   queryDraft: string;
   timeZone: "local" | "utc";
@@ -83,7 +81,6 @@ export type UsageCallbacks = {
     onStartDateChange: (date: string) => void;
     onEndDateChange: (date: string) => void;
     onScopeChange: (scope: "instance" | "family") => void;
-    onAgentChange: (agentId: string | null) => void;
     onRefresh: () => void;
     onTimeZoneChange: (zone: "local" | "utc") => void;
     onToggleHeaderPinned: () => void;

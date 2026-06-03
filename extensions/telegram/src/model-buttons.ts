@@ -8,7 +8,6 @@
  * - mdl_sel/{model}       - select model (compact fallback when standard is >64 bytes)
  * - mdl_back              - back to providers list
  */
-import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import { fitsTelegramCallbackData } from "./approval-callback-data.js";
 
 export type ButtonRow = Array<{ text: string; callback_data: string }>;
@@ -67,8 +66,8 @@ export function parseModelCallbackData(data: string): ParsedModelCallback | null
   const listMatch = trimmed.match(/^mdl_list_([a-z0-9_.-]+)_(\d+)$/i);
   if (listMatch) {
     const [, provider, pageStr] = listMatch;
-    const page = parseStrictPositiveInteger(pageStr);
-    if (provider && page !== undefined) {
+    const page = Number.parseInt(pageStr ?? "1", 10);
+    if (provider && Number.isFinite(page) && page >= 1) {
       return { type: "list", provider, page };
     }
   }

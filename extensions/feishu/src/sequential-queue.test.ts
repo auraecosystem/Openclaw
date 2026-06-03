@@ -1,4 +1,3 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createSequentialQueue } from "./sequential-queue.js";
 
@@ -85,12 +84,14 @@ describe("createSequentialQueue", () => {
         }),
       ).rejects.toThrow("boom");
 
-      await new Promise<void>((resolve) => {
-        setImmediate(resolve);
-      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
       expect(unhandled).toStrictEqual([]);
 
-      await expect(enqueue("feishu:default:chat-1", async () => {})).resolves.toBeUndefined();
+      await expect(
+        enqueue("feishu:default:chat-1", async () => {
+          return;
+        }),
+      ).resolves.toBeUndefined();
     } finally {
       process.off("unhandledRejection", onUnhandledRejection);
     }
@@ -129,25 +130,6 @@ describe("createSequentialQueue", () => {
     // Drain the leaked stuck task so it doesn't trip the unhandled-rejection guard.
     stuckGate.resolve();
     await stuck;
-  });
-
-  it("clamps oversized task timeouts before scheduling", async () => {
-    vi.useFakeTimers();
-    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
-    const enqueue = createSequentialQueue({
-      taskTimeoutMs: Number.MAX_SAFE_INTEGER,
-    });
-    const gate = createDeferred();
-
-    const first = enqueue("feishu:default:chat-large-timeout", async () => {
-      await gate.promise;
-    });
-
-    await Promise.resolve();
-    expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-
-    gate.resolve();
-    await first;
   });
 
   it("disables the timeout cap when taskTimeoutMs is 0 (legacy behavior)", async () => {

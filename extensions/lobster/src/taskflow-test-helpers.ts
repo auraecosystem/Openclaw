@@ -15,12 +15,10 @@ export function createFakeTaskFlow(overrides?: Partial<BoundTaskFlow>): BoundTas
     status: "running" as const,
     goal: "Run Lobster workflow",
   };
-  const createManaged = vi.fn().mockReturnValue(baseFlow);
 
   return {
     sessionKey: "agent:main:main",
-    createManaged,
-    tryCreateManaged: vi.fn((params) => createManaged(params)),
+    createManaged: vi.fn().mockReturnValue(baseFlow),
     get: vi.fn(),
     list: vi.fn().mockReturnValue([]),
     findLatest: vi.fn(),

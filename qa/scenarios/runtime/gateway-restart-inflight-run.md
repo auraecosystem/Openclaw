@@ -4,7 +4,6 @@
 id: gateway-restart-inflight-run
 title: Gateway restart in-flight recovery
 surface: runtime
-runtimeParityTier: live-only
 coverage:
   primary:
     - runtime.restart-recovery
@@ -41,11 +40,11 @@ steps:
       - call: waitForGatewayHealthy
         args:
           - ref: env
-          - 180000
+          - 60000
       - call: waitForQaChannelReady
         args:
           - ref: env
-          - 180000
+          - 60000
       - call: reset
       - set: startIndex
         value:
@@ -62,7 +61,7 @@ steps:
             message:
               expr: config.prompt
             timeoutMs:
-              expr: liveTurnTimeoutMs(env, 180000)
+              expr: liveTurnTimeoutMs(env, 30000)
       - call: readConfigSnapshot
         saveAs: current
         args:
@@ -86,19 +85,19 @@ steps:
       - call: waitForGatewayHealthy
         args:
           - ref: env
-          - 180000
+          - 60000
       - call: waitForQaChannelReady
         args:
           - ref: env
-          - 180000
+          - 60000
       - call: waitForAgentRun
         saveAs: waited
         args:
           - ref: env
           - expr: started.runId
-          - expr: liveTurnTimeoutMs(env, 180000)
+          - expr: liveTurnTimeoutMs(env, 20000)
       - assert:
-          expr: "waited.status === 'ok' || waited.status === 'timeout' || (waited.status === 'error' && (String(waited.error ?? '').includes('EmbeddedAttemptSessionTakeoverError') || String(waited.error ?? '').includes('AbortError') || String(waited.error ?? '').includes('This operation was aborted')))"
+          expr: "waited.status === 'ok' || waited.status === 'timeout'"
           message:
             expr: "`interrupted agent run ended with unexpected status: ${JSON.stringify(waited)}`"
       - set: interruptedMatches
@@ -116,7 +115,7 @@ steps:
             message:
               expr: config.recoveryPrompt
             timeoutMs:
-              expr: liveTurnTimeoutMs(env, 180000)
+              expr: liveTurnTimeoutMs(env, 45000)
       - call: waitForOutboundMessage
         saveAs: outbound
         args:
@@ -124,7 +123,7 @@ steps:
           - lambda:
               params: [candidate]
               expr: "candidate.conversation.id === 'qa-operator' && candidate.text.includes(config.recoveryMarker)"
-          - expr: liveTurnTimeoutMs(env, 180000)
+          - expr: liveTurnTimeoutMs(env, 30000)
           - sinceIndex:
               ref: startIndex
       - set: matchingOutbounds

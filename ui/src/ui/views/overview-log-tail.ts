@@ -2,16 +2,10 @@ import { html, nothing } from "lit";
 import { t } from "../../i18n/index.ts";
 import { icons } from "../icons.ts";
 
-const ESCAPE = String.fromCharCode(0x1b);
-const OSC8_LINK_RE = new RegExp(
-  `${ESCAPE}\\]8;;.*?${ESCAPE}\\\\|${ESCAPE}\\]8;;${ESCAPE}\\\\`,
-  "g",
-);
-const SGR_RE = new RegExp(`${ESCAPE}\\[[0-9;]*m`, "g");
-
 /** Strip ANSI escape codes (SGR, OSC-8) for readable log display. */
 function stripAnsi(text: string): string {
-  return text.replace(OSC8_LINK_RE, "").replace(SGR_RE, "");
+  /* eslint-disable no-control-regex -- stripping ANSI escape sequences requires matching ESC */
+  return text.replace(/\x1b\]8;;.*?\x1b\\|\x1b\]8;;\x1b\\/g, "").replace(/\x1b\[[0-9;]*m/g, "");
 }
 
 export type OverviewLogTailProps = {

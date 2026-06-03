@@ -1,7 +1,7 @@
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
+} from "../shared/string-coerce.js";
 import type {
   ChannelApprovalNativeDeliveryPlan,
   ChannelApprovalNativePlannedTarget,
@@ -396,13 +396,13 @@ export function createApprovalNativeRouteReporter(params: {
       });
       registered = true;
     },
-    async reportSkipped(paramsValue: {
+    async reportSkipped(params: {
       approvalKind: ChannelApprovalKind;
       request: ApprovalRequest;
     }): Promise<void> {
       await report({
-        approvalKind: paramsValue.approvalKind,
-        request: paramsValue.request,
+        approvalKind: params.approvalKind,
+        request: params.request,
         deliveryPlan: {
           targets: [],
           originTarget: null,
@@ -411,13 +411,13 @@ export function createApprovalNativeRouteReporter(params: {
         deliveredTargets: [],
       });
     },
-    async reportDelivery(paramsLocal: {
+    async reportDelivery(params: {
       approvalKind: ChannelApprovalKind;
       request: ApprovalRequest;
       deliveryPlan: ChannelApprovalNativeDeliveryPlan;
       deliveredTargets: readonly ChannelApprovalNativePlannedTarget[];
     }): Promise<void> {
-      await report(paramsLocal);
+      await report(params);
     },
     async stop(): Promise<void> {
       if (!registered) {

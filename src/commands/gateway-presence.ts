@@ -1,4 +1,4 @@
-import { readStringValue } from "@openclaw/normalization-core/string-coerce";
+import { readStringValue } from "../shared/string-coerce.js";
 
 type GatewaySelfPresence = {
   host?: string;

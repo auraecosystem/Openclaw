@@ -52,8 +52,6 @@ class SessionDeltaHarness extends MemoryManagerSyncOps {
   };
   protected readonly vector = { enabled: false, available: false };
   protected readonly cache = { enabled: false };
-  protected providerUnavailableReason?: string;
-  protected providerLifecycle = { mode: "active" as const, providerId: "test" };
   protected db = null as unknown as DatabaseSync;
 
   readonly syncCalls: SyncParams[] = [];
@@ -99,8 +97,6 @@ class SessionDeltaHarness extends MemoryManagerSyncOps {
   }
 
   protected pruneEmbeddingCacheIfNeeded(): void {}
-
-  protected resetProviderInitializationForRetry(): void {}
 
   protected async indexFile(
     _entry: MemoryIndexEntry,

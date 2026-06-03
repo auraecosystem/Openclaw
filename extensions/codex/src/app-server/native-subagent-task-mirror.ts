@@ -1,5 +1,8 @@
-import type { AgentHarnessTaskRuntime } from "openclaw/plugin-sdk/agent-harness-task-runtime";
-import { CODEX_NATIVE_SUBAGENT_RUN_ID_PREFIX } from "./native-subagent-task-ids.js";
+import {
+  createRunningTaskRun,
+  finalizeTaskRunByRunId,
+  recordTaskRunProgressByRunId,
+} from "openclaw/plugin-sdk/codex-native-task-runtime";
 import type {
   CodexServerNotification,
   CodexSessionSource,
@@ -13,10 +16,14 @@ import type {
 } from "./protocol.js";
 import { isJsonObject } from "./protocol.js";
 
-export type TaskLifecycleRuntime = Pick<
-  AgentHarnessTaskRuntime,
-  "tryCreateRunningTaskRun" | "recordTaskRunProgressByRunId" | "finalizeTaskRunByRunId"
->;
+const CODEX_NATIVE_SUBAGENT_RUNTIME = "subagent";
+const CODEX_NATIVE_SUBAGENT_TASK_KIND = "codex-native";
+
+export type TaskLifecycleRuntime = {
+  createRunningTaskRun: typeof createRunningTaskRun;
+  recordTaskRunProgressByRunId: typeof recordTaskRunProgressByRunId;
+  finalizeTaskRunByRunId: typeof finalizeTaskRunByRunId;
+};
 
 export type CodexNativeSubagentTaskMirrorParams = {
   parentThreadId: string;
@@ -25,15 +32,20 @@ export type CodexNativeSubagentTaskMirrorParams = {
   now?: () => number;
 };
 
+const defaultRuntime: TaskLifecycleRuntime = {
+  createRunningTaskRun,
+  recordTaskRunProgressByRunId,
+  finalizeTaskRunByRunId,
+};
+
 export class CodexNativeSubagentTaskMirror {
   private readonly mirroredThreadIds = new Set<string>();
-  private readonly failedMirrorThreadIds = new Set<string>();
   private readonly terminalRunIds = new Set<string>();
   private readonly now: () => number;
 
   constructor(
     private readonly params: CodexNativeSubagentTaskMirrorParams,
-    private readonly runtime: TaskLifecycleRuntime,
+    private readonly runtime: TaskLifecycleRuntime = defaultRuntime,
   ) {
     this.now = params.now ?? Date.now;
   }
@@ -82,8 +94,17 @@ export class CodexNativeSubagentTaskMirror {
       trimOptional(thread.preview) ??
       `Codex native subagent${label === "Codex subagent" ? "" : ` ${label}`}`;
     const createdAt = secondsToMillis(thread.createdAt) ?? this.now();
-    const taskRecord = this.runtime.tryCreateRunningTaskRun({
+    this.runtime.createRunningTaskRun({
+      runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
+      taskKind: CODEX_NATIVE_SUBAGENT_TASK_KIND,
       sourceId: runId,
+      requesterSessionKey: this.params.requesterSessionKey,
+      ...(this.params.requesterSessionKey
+        ? {
+            ownerKey: this.params.requesterSessionKey,
+            scopeKind: "session" as const,
+          }
+        : {}),
       agentId: this.params.agentId,
       runId,
       label,
@@ -95,13 +116,6 @@ export class CodexNativeSubagentTaskMirror {
       lastEventAt: this.now(),
       progressSummary: "Codex native subagent started.",
     });
-    if (!taskRecord) {
-      this.mirroredThreadIds.delete(threadId);
-      this.failedMirrorThreadIds.add(threadId);
-      return;
-    }
-    this.failedMirrorThreadIds.delete(threadId);
-    this.terminalRunIds.delete(runId);
     this.applyStatus(threadId, thread.status);
   }
 
@@ -114,9 +128,6 @@ export class CodexNativeSubagentTaskMirror {
   }
 
   private applyStatus(threadId: string, status: CodexThreadStatus | null | undefined): void {
-    if (!this.mirroredThreadIds.has(threadId) && this.failedMirrorThreadIds.has(threadId)) {
-      return;
-    }
     const statusType = status?.type;
     if (!statusType) {
       return;
@@ -129,6 +140,7 @@ export class CodexNativeSubagentTaskMirror {
     if (statusType === "active") {
       this.runtime.recordTaskRunProgressByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         lastEventAt: eventAt,
         progressSummary: "Codex native subagent is active.",
       });
@@ -138,6 +150,7 @@ export class CodexNativeSubagentTaskMirror {
       this.terminalRunIds.add(runId);
       this.runtime.finalizeTaskRunByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         status: "succeeded",
         endedAt: eventAt,
         lastEventAt: eventAt,
@@ -150,6 +163,7 @@ export class CodexNativeSubagentTaskMirror {
       this.terminalRunIds.add(runId);
       this.runtime.finalizeTaskRunByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         status: "failed",
         endedAt: eventAt,
         lastEventAt: eventAt,
@@ -162,6 +176,7 @@ export class CodexNativeSubagentTaskMirror {
     if (statusType === "notLoaded") {
       this.runtime.recordTaskRunProgressByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         lastEventAt: eventAt,
         progressSummary: "Codex native subagent is not loaded.",
       });
@@ -173,51 +188,18 @@ export class CodexNativeSubagentTaskMirror {
     if (!item || readString(item, "type") !== "collabAgentToolCall") {
       return;
     }
-    const senderThreadId = readString(item, "senderThreadId") ?? readString(params, "threadId");
-    if (senderThreadId !== this.params.parentThreadId) {
+    if (readString(item, "senderThreadId") !== this.params.parentThreadId) {
       return;
     }
-    const isSpawnAgentTool = normalizeToolName(readString(item, "tool")) === "spawnagent";
     const receiverThreadIds = readStringArray(item.receiverThreadIds);
+    if (normalizeToolName(readString(item, "tool")) === "spawnagent") {
+      for (const receiverThreadId of receiverThreadIds) {
+        this.createTaskFromCollabSpawnItem(receiverThreadId, item);
+      }
+    }
     const agentsStates = readAgentsStates(item.agentsStates);
-    const spawnChildThreadIds = new Set([...receiverThreadIds, ...agentsStates.keys()]);
-    if (isSpawnAgentTool) {
-      for (const childThreadId of spawnChildThreadIds) {
-        this.createTaskFromCollabSpawnItem(childThreadId, item);
-      }
-    }
-    const toolCallStatus = normalizeCollabToolCallStatus(readString(item, "status"));
-    const terminalToolCallThreadIds = new Set<string>();
-    if (isSpawnAgentTool && isBlockedOrFailedCollabToolCallStatus(toolCallStatus)) {
-      for (const threadId of spawnChildThreadIds) {
-        terminalToolCallThreadIds.add(threadId);
-      }
-      for (const threadId of agentsStates.keys()) {
-        terminalToolCallThreadIds.add(threadId);
-      }
-    }
-    const terminalAgentStateThreadIds = new Set<string>();
     for (const [threadId, state] of agentsStates) {
-      const normalizedStatus = normalizeAgentStateStatus(state.status);
-      if (
-        terminalToolCallThreadIds.has(threadId) &&
-        isNonTerminalAgentStateStatus(normalizedStatus)
-      ) {
-        continue;
-      }
-      this.applyCollabAgentStatus(threadId, normalizedStatus, state.message);
-      if (isTerminalAgentStateStatus(normalizedStatus)) {
-        terminalAgentStateThreadIds.add(threadId);
-      }
-    }
-    if (isBlockedOrFailedCollabToolCallStatus(toolCallStatus)) {
-      for (const threadId of terminalToolCallThreadIds) {
-        if (terminalAgentStateThreadIds.has(threadId)) {
-          continue;
-        }
-        const state = agentsStates.get(threadId);
-        this.applyCollabAgentStatus(threadId, toolCallStatus, state?.message);
-      }
+      this.applyCollabAgentStatus(threadId, state.status, state.message);
     }
   }
 
@@ -230,8 +212,17 @@ export class CodexNativeSubagentTaskMirror {
     const prompt = trimOptional(readString(item, "prompt"));
     const runId = codexNativeSubagentRunId(normalizedThreadId);
     const createdAt = this.now();
-    const taskRecord = this.runtime.tryCreateRunningTaskRun({
+    this.runtime.createRunningTaskRun({
+      runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
+      taskKind: CODEX_NATIVE_SUBAGENT_TASK_KIND,
       sourceId: runId,
+      requesterSessionKey: this.params.requesterSessionKey,
+      ...(this.params.requesterSessionKey
+        ? {
+            ownerKey: this.params.requesterSessionKey,
+            scopeKind: "session" as const,
+          }
+        : {}),
       agentId: this.params.agentId,
       runId,
       label: "Codex subagent",
@@ -243,13 +234,6 @@ export class CodexNativeSubagentTaskMirror {
       lastEventAt: createdAt,
       progressSummary: "Codex native subagent spawned.",
     });
-    if (!taskRecord) {
-      this.mirroredThreadIds.delete(normalizedThreadId);
-      this.failedMirrorThreadIds.add(normalizedThreadId);
-      return;
-    }
-    this.failedMirrorThreadIds.delete(normalizedThreadId);
-    this.terminalRunIds.delete(runId);
   }
 
   private applyCollabAgentStatus(
@@ -257,21 +241,16 @@ export class CodexNativeSubagentTaskMirror {
     status: string | undefined,
     message: string | null | undefined,
   ): void {
-    if (!this.mirroredThreadIds.has(threadId) && this.failedMirrorThreadIds.has(threadId)) {
-      return;
-    }
     const normalizedStatus = normalizeAgentStateStatus(status);
     if (!normalizedStatus) {
       return;
     }
     const runId = codexNativeSubagentRunId(threadId);
-    if (this.terminalRunIds.has(runId) && isNonTerminalAgentStateStatus(normalizedStatus)) {
-      return;
-    }
     const eventAt = this.now();
     if (normalizedStatus === "pendingInit" || normalizedStatus === "running") {
       this.runtime.recordTaskRunProgressByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         lastEventAt: eventAt,
         progressSummary:
           trimOptional(message) ??
@@ -285,6 +264,7 @@ export class CodexNativeSubagentTaskMirror {
       this.terminalRunIds.add(runId);
       this.runtime.finalizeTaskRunByRunId({
         runId,
+        runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
         status: "succeeded",
         endedAt: eventAt,
         lastEventAt: eventAt,
@@ -293,22 +273,10 @@ export class CodexNativeSubagentTaskMirror {
       });
       return;
     }
-    if (normalizedStatus === "blocked") {
-      this.terminalRunIds.add(runId);
-      this.runtime.finalizeTaskRunByRunId({
-        runId,
-        status: "succeeded",
-        endedAt: eventAt,
-        lastEventAt: eventAt,
-        progressSummary: trimOptional(message) ?? "Codex native subagent blocked.",
-        terminalSummary: trimOptional(message) ?? "Codex native subagent blocked.",
-        terminalOutcome: "blocked",
-      });
-      return;
-    }
     this.terminalRunIds.add(runId);
     this.runtime.finalizeTaskRunByRunId({
       runId,
+      runtime: CODEX_NATIVE_SUBAGENT_RUNTIME,
       status:
         normalizedStatus === "interrupted" || normalizedStatus === "shutdown"
           ? "cancelled"
@@ -323,7 +291,7 @@ export class CodexNativeSubagentTaskMirror {
 }
 
 export function codexNativeSubagentRunId(threadId: string): string {
-  return `${CODEX_NATIVE_SUBAGENT_RUN_ID_PREFIX}${threadId.trim()}`;
+  return `codex-thread:${threadId.trim()}`;
 }
 
 export function readSubagentThreadSpawnSource(
@@ -413,35 +381,6 @@ function normalizeToolName(value: string | undefined): string | undefined {
   return value?.replace(/[^a-z0-9]/giu, "").toLowerCase();
 }
 
-function normalizeCollabToolCallStatus(value: string | undefined): string | undefined {
-  const key = value?.replace(/[^a-z0-9]/giu, "").toLowerCase();
-  if (key === "completed" || key === "succeeded" || key === "success") {
-    return "completed";
-  }
-  if (key === "failed" || key === "error" || key === "errored") {
-    return "failed";
-  }
-  if (key === "blocked" || key === "declined") {
-    return "blocked";
-  }
-  if (key === "inprogress" || key === "running") {
-    return "running";
-  }
-  return value?.trim();
-}
-
-function isBlockedOrFailedCollabToolCallStatus(value: string | undefined): boolean {
-  return value === "failed" || value === "blocked";
-}
-
-function isNonTerminalAgentStateStatus(value: string | undefined): boolean {
-  return value === "pendingInit" || value === "running";
-}
-
-function isTerminalAgentStateStatus(value: string | undefined): boolean {
-  return value !== undefined && !isNonTerminalAgentStateStatus(value);
-}
-
 function normalizeAgentStateStatus(value: string | undefined): string | undefined {
   const key = value?.replace(/[^a-z0-9]/giu, "").toLowerCase();
   if (!key) {
@@ -461,9 +400,6 @@ function normalizeAgentStateStatus(value: string | undefined): string | undefine
   }
   if (key === "failed" || key === "error" || key === "systemerror") {
     return "failed";
-  }
-  if (key === "blocked" || key === "declined") {
-    return "blocked";
   }
   return value?.trim();
 }

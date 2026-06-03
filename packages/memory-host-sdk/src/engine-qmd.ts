@@ -26,9 +26,5 @@ export {
 export {
   checkQmdBinaryAvailability,
   resolveCliSpawnInvocation,
-  resolveQmdBinaryUnavailableReason,
   runCliCommand,
-  type QmdBinaryAvailability,
-  type QmdBinaryUnavailable,
-  type QmdBinaryUnavailableReason,
 } from "./host/qmd-process.js";

@@ -1,4 +1,4 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 export function resolveThreadBindingConversationIdFromBindingId(params: {
   accountId: string;

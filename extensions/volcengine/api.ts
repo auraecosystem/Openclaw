@@ -1,5 +1,4 @@
 import type { ModelCompatConfig } from "openclaw/plugin-sdk/provider-model-shared";
-import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export const VOLCENGINE_UNSUPPORTED_TOOL_SCHEMA_KEYWORDS = [
   "minLength",
@@ -11,7 +10,7 @@ export const VOLCENGINE_UNSUPPORTED_TOOL_SCHEMA_KEYWORDS = [
 ] as const;
 
 function mergeUnsupportedToolSchemaKeywords(existing: readonly string[] | undefined): string[] {
-  return uniqueStrings([...(existing ?? []), ...VOLCENGINE_UNSUPPORTED_TOOL_SCHEMA_KEYWORDS]);
+  return Array.from(new Set([...(existing ?? []), ...VOLCENGINE_UNSUPPORTED_TOOL_SCHEMA_KEYWORDS]));
 }
 
 export function resolveVolcengineToolSchemaCompatPatch(

@@ -10,7 +10,6 @@ export type DocumentExtractionRequest = {
   maxPages: number;
   maxPixels: number;
   minTextChars: number;
-  password?: string;
   pageNumbers?: number[];
   onImageExtractionError?: (error: unknown) => void;
 };

@@ -2,16 +2,45 @@
 
 import { html, nothing, render } from "lit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  getRenderedModalDialog,
-  installDialogPolyfill,
-  nextFrame,
-} from "../../test-helpers/modal-dialog.ts";
-import type { OpenClawModalDialog } from "./modal-dialog.ts";
+import { type OpenClawModalDialog } from "./modal-dialog.ts";
 import "./modal-dialog.ts";
 
 let container: HTMLDivElement;
-let restoreDialogPolyfill: () => void;
+
+const showModalDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLDialogElement.prototype,
+  "showModal",
+);
+const closeDescriptor = Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, "close");
+
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function installDialogPolyfill() {
+  Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.setAttribute("open", "");
+    },
+  });
+  Object.defineProperty(HTMLDialogElement.prototype, "close", {
+    configurable: true,
+    value(this: HTMLDialogElement) {
+      this.removeAttribute("open");
+    },
+  });
+}
+
+function restoreDescriptor(name: "showModal" | "close", descriptor?: PropertyDescriptor) {
+  if (descriptor) {
+    Object.defineProperty(HTMLDialogElement.prototype, name, descriptor);
+    return;
+  }
+  delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>)[name];
+}
 
 async function renderModal() {
   render(
@@ -30,7 +59,19 @@ async function renderModal() {
     `,
     container,
   );
-  return await getRenderedModalDialog(container);
+  const modal = container.querySelector<OpenClawModalDialog>("openclaw-modal-dialog");
+  expect(modal).toBeInstanceOf(HTMLElement);
+  if (!modal) {
+    throw new Error("Expected openclaw-modal-dialog");
+  }
+  await modal.updateComplete;
+  await nextFrame();
+  const dialog = modal.shadowRoot?.querySelector("dialog");
+  expect(dialog).toBeInstanceOf(HTMLDialogElement);
+  if (!(dialog instanceof HTMLDialogElement)) {
+    throw new Error("Expected rendered dialog");
+  }
+  return { modal, dialog };
 }
 
 function expectShadowElement(modal: OpenClawModalDialog, id: string): HTMLElement {
@@ -43,7 +84,7 @@ function expectShadowElement(modal: OpenClawModalDialog, id: string): HTMLElemen
 
 describe("openclaw-modal-dialog", () => {
   beforeEach(() => {
-    restoreDialogPolyfill = installDialogPolyfill();
+    installDialogPolyfill();
     container = document.createElement("div");
     document.body.append(container);
   });
@@ -51,7 +92,8 @@ describe("openclaw-modal-dialog", () => {
   afterEach(() => {
     render(nothing, container);
     container.remove();
-    restoreDialogPolyfill();
+    restoreDescriptor("showModal", showModalDescriptor);
+    restoreDescriptor("close", closeDescriptor);
     vi.restoreAllMocks();
   });
 

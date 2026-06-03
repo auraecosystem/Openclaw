@@ -1,4 +1,4 @@
-import type { AgentToolResult } from "openclaw/plugin-sdk/agent-core";
+import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveMatrixAccountConfig } from "./matrix/accounts.js";
 import {
@@ -37,7 +37,7 @@ import { applyMatrixProfileUpdate } from "./profile-update.js";
 import {
   createActionGate,
   jsonResult,
-  readPositiveIntegerParam,
+  readNumberParam,
   readReactionParams,
   readStringArrayParam,
   readStringParam,
@@ -118,29 +118,33 @@ function readStringAliasParam(
   return undefined;
 }
 
-function readPositiveIntegerArrayParam(params: Record<string, unknown>, key: string): number[] {
+function readNumericArrayParam(
+  params: Record<string, unknown>,
+  key: string,
+  options: { integer?: boolean } = {},
+): number[] {
+  const { integer = false } = options;
   const raw = readRawParam(params, key);
-  if (raw == null) {
+  if (raw === undefined) {
     return [];
   }
-  return (Array.isArray(raw) ? raw : [raw]).flatMap((value) => {
-    if (value == null || value === "") {
-      return [];
-    }
-    if (typeof value === "string") {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return [];
+  return (Array.isArray(raw) ? raw : [raw])
+    .map((value) => {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        return value;
       }
-      if (!/^[+-]?(?:(?:\d+\.?\d*)|(?:\.\d+))(?:e[+-]?\d+)?$/i.test(trimmed)) {
-        return [];
+      if (typeof value === "string") {
+        const trimmed = value.trim();
+        if (!trimmed) {
+          return null;
+        }
+        const parsed = Number(trimmed);
+        return Number.isFinite(parsed) ? parsed : null;
       }
-    }
-    const index = readPositiveIntegerParam({ [key]: value }, key, {
-      message: `${key} must contain positive integers.`,
-    });
-    return index === undefined ? [] : [index];
-  });
+      return null;
+    })
+    .filter((value): value is number => value !== null)
+    .map((value) => (integer ? Math.trunc(value) : value));
 }
 
 export async function handleMatrixAction(
@@ -176,9 +180,7 @@ export async function handleMatrixAction(
       await reactMatrixMessage(roomId, messageId, emoji, clientOpts);
       return jsonResult({ ok: true, added: emoji });
     }
-    const limit = readPositiveIntegerParam(params, "limit", {
-      message: "limit must be a positive integer.",
-    });
+    const limit = readNumberParam(params, "limit", { integer: true });
     const reactions = await listMatrixReactions(roomId, messageId, {
       ...clientOpts,
       limit: limit ?? undefined,
@@ -193,15 +195,13 @@ export async function handleMatrixAction(
       throw new Error("pollId required");
     }
     const optionId = readStringParam(params, "pollOptionId");
-    const optionIndex = readPositiveIntegerParam(params, "pollOptionIndex", {
-      message: "pollOptionIndex must be a positive integer.",
-    });
+    const optionIndex = readNumberParam(params, "pollOptionIndex", { integer: true });
     const optionIds = [
       ...(readStringArrayParam(params, "pollOptionIds") ?? []),
       ...(optionId ? [optionId] : []),
     ];
     const optionIndexes = [
-      ...readPositiveIntegerArrayParam(params, "pollOptionIndexes"),
+      ...readNumericArrayParam(params, "pollOptionIndexes", { integer: true }),
       ...(optionIndex !== undefined ? [optionIndex] : []),
     ];
     const result = await voteMatrixPoll(roomId, pollId, {
@@ -266,9 +266,7 @@ export async function handleMatrixAction(
       }
       case "readMessages": {
         const roomId = readRoomId(params);
-        const limit = readPositiveIntegerParam(params, "limit", {
-          message: "limit must be a positive integer.",
-        });
+        const limit = readNumberParam(params, "limit", { integer: true });
         const before = readStringParam(params, "before");
         const after = readStringParam(params, "after");
         const result = await readMatrixMessages(roomId, {

@@ -1,4 +1,3 @@
-import { uniqueStrings } from "../../packages/normalization-core/src/string-normalization.js";
 import {
   ACCESS_GROUP_ALLOW_FROM_PREFIX,
   parseAccessGroupAllowFromEntry,
@@ -9,7 +8,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 
 export { ACCESS_GROUP_ALLOW_FROM_PREFIX, parseAccessGroupAllowFromEntry };
 
-/** Resolves membership for an access group using the full OpenClaw config. */
 export type AccessGroupMembershipResolver = (params: {
   cfg: OpenClawConfig;
   name: string;
@@ -19,7 +17,6 @@ export type AccessGroupMembershipResolver = (params: {
   senderId: string;
 }) => boolean | Promise<boolean>;
 
-/** Resolves membership for one access group when the caller already selected the config group. */
 export type AccessGroupMembershipLookup = (params: {
   name: string;
   group: AccessGroupConfig;
@@ -28,7 +25,6 @@ export type AccessGroupMembershipLookup = (params: {
   senderId: string;
 }) => boolean | Promise<boolean>;
 
-/** Reports how access-group allowlist entries resolved for a channel sender. */
 export type ResolvedAccessGroupAllowFromState = {
   referenced: string[];
   matched: string[];
@@ -50,7 +46,6 @@ function resolveMessageSenderGroupEntries(params: {
   return [...(params.group.members["*"] ?? []), ...(params.group.members[params.channel] ?? [])];
 }
 
-/** Resolves `accessGroup:<name>` allowlist entries without changing the original allowlist. */
 export async function resolveAccessGroupAllowFromState(params: {
   accessGroups?: Record<string, AccessGroupConfig>;
   allowFrom: Array<string | number> | null | undefined;
@@ -104,7 +99,7 @@ export async function resolveAccessGroupAllowFromState(params: {
       continue;
     }
 
-    let allowed;
+    let allowed = false;
     try {
       allowed = await params.resolveMembership({
         name,
@@ -128,7 +123,6 @@ export async function resolveAccessGroupAllowFromState(params: {
   return state;
 }
 
-/** Returns the matched `accessGroup:<name>` allowlist entries for a sender. */
 export async function resolveAccessGroupAllowFromMatches(params: {
   cfg?: OpenClawConfig;
   allowFrom: Array<string | number> | null | undefined;
@@ -159,7 +153,6 @@ export async function resolveAccessGroupAllowFromMatches(params: {
   return state.matchedAllowFromEntries;
 }
 
-/** Expands a matching access-group allowlist with the concrete sender entry. */
 export async function expandAllowFromWithAccessGroups(params: {
   cfg?: OpenClawConfig;
   allowFrom: Array<string | number> | null | undefined;
@@ -184,6 +177,5 @@ export async function expandAllowFromWithAccessGroups(params: {
     return allowFrom;
   }
   const senderEntry = params.senderAllowEntry ?? params.senderId;
-  // Downstream legacy sender checks still expect a concrete allowlist entry after a group match.
-  return uniqueStrings([...allowFrom, senderEntry]);
+  return Array.from(new Set([...allowFrom, senderEntry]));
 }

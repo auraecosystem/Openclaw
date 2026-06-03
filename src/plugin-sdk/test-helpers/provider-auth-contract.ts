@@ -86,7 +86,7 @@ function buildOpenAICodexOAuthResult(params: {
         profileId: params.profileId,
         credential: {
           type: "oauth" as const,
-          provider: "openai",
+          provider: "openai-codex",
           access: params.access,
           refresh: params.refresh,
           expires: params.expires,
@@ -147,12 +147,12 @@ export function describeOpenAICodexProviderAuthContract(
   };
   const { loginOpenAICodexOAuthMock } = options;
 
-  describe("openai provider ChatGPT auth contract", () => {
+  describe("openai-codex provider auth contract", () => {
     installSharedAuthProfileStoreHooks(state);
 
     async function expectStableFallbackProfile(params: { access: string; profileId: string }) {
       const { default: openAIPlugin } = await load();
-      const provider = requireProvider(await registerProviders(openAIPlugin), "openai");
+      const provider = requireProvider(await registerProviders(openAIPlugin), "openai-codex");
       loginOpenAICodexOAuthMock.mockResolvedValueOnce({
         refresh: "refresh-token",
         access: params.access,
@@ -171,7 +171,7 @@ export function describeOpenAICodexProviderAuthContract(
 
     async function getProvider() {
       const { default: openAIPlugin } = await load();
-      return requireProvider(await registerProviders(openAIPlugin), "openai");
+      return requireProvider(await registerProviders(openAIPlugin), "openai-codex");
     }
 
     it("keeps OAuth auth results provider-owned", async () => {
@@ -187,7 +187,7 @@ export function describeOpenAICodexProviderAuthContract(
 
       expect(result).toEqual(
         buildOpenAICodexOAuthResult({
-          profileId: "openai:user@example.com",
+          profileId: "openai-codex:user@example.com",
           access: "access-token",
           refresh: "refresh-token",
           expires: 1_700_000_000_000,
@@ -213,7 +213,7 @@ export function describeOpenAICodexProviderAuthContract(
 
       expect(result).toEqual(
         buildOpenAICodexOAuthResult({
-          profileId: "openai:jwt-user@example.com",
+          profileId: "openai-codex:jwt-user@example.com",
           access,
           refresh: "refresh-token",
           expires: 1_700_000_000_000,
@@ -231,7 +231,7 @@ export function describeOpenAICodexProviderAuthContract(
       const expectedStableId = Buffer.from("user-123__acct-456", "utf8").toString("base64url");
       await expectStableFallbackProfile({
         access,
-        profileId: `openai:id-${expectedStableId}`,
+        profileId: `openai-codex:id-${expectedStableId}`,
       });
     });
 
@@ -245,7 +245,7 @@ export function describeOpenAICodexProviderAuthContract(
       );
       await expectStableFallbackProfile({
         access,
-        profileId: `openai:id-${expectedStableId}`,
+        profileId: `openai-codex:id-${expectedStableId}`,
       });
     });
 
@@ -256,7 +256,7 @@ export function describeOpenAICodexProviderAuthContract(
       const expectedStableId = Buffer.from("user-abc").toString("base64url");
       await expectStableFallbackProfile({
         access,
-        profileId: `openai:id-${expectedStableId}`,
+        profileId: `openai-codex:id-${expectedStableId}`,
       });
     });
 
@@ -272,7 +272,7 @@ export function describeOpenAICodexProviderAuthContract(
 
       expect(result).toEqual(
         buildOpenAICodexOAuthResult({
-          profileId: "openai:default",
+          profileId: "openai-codex:default",
           access: "not-a-jwt-token",
           refresh: "refresh-token",
           expires: 1_700_000_000_000,
@@ -313,7 +313,7 @@ export function describeGithubCopilotProviderAuthContract(load: ProviderAuthCont
       };
 
       const stdin = process.stdin as NodeJS.ReadStream & { isTTY?: boolean };
-      const hadOwnIsTTY = Object.hasOwn(stdin, "isTTY");
+      const hadOwnIsTTY = Object.prototype.hasOwnProperty.call(stdin, "isTTY");
       const previousIsTTYDescriptor = Object.getOwnPropertyDescriptor(stdin, "isTTY");
       Object.defineProperty(stdin, "isTTY", {
         configurable: true,
@@ -444,7 +444,7 @@ export function describeGithubCopilotProviderAuthContract(load: ProviderAuthCont
     it("supports non-interactive (GUI/RPC) auth contexts without a TTY", async () => {
       const provider = await getProvider();
       const stdin = process.stdin as NodeJS.ReadStream & { isTTY?: boolean };
-      const hadOwnIsTTY = Object.hasOwn(stdin, "isTTY");
+      const hadOwnIsTTY = Object.prototype.hasOwnProperty.call(stdin, "isTTY");
       const previousIsTTYDescriptor = Object.getOwnPropertyDescriptor(stdin, "isTTY");
       Object.defineProperty(stdin, "isTTY", {
         configurable: true,

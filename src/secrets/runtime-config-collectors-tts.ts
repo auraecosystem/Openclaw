@@ -52,5 +52,6 @@ export function collectTtsApiKeyAssignments(params: {
         inactiveReason: params.inactiveReason,
       });
     }
+    return;
   }
 }

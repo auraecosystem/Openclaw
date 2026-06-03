@@ -39,19 +39,17 @@ function resolveExtensionDirByManifestId(pluginId: string): string {
 }
 
 function resolveWorkspacePackageDir(packageName: string): string {
-  for (const rootName of ["extensions", "packages"]) {
-    const rootDir = path.resolve(repoRoot, rootName);
-    for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) {
-        continue;
-      }
-      const packageDir = path.join(rootDir, entry.name);
-      const manifest = readJson(path.join(packageDir, "package.json")) as
-        | { name?: unknown }
-        | undefined;
-      if (manifest?.name === packageName) {
-        return packageDir;
-      }
+  const extensionsDir = path.resolve(repoRoot, "extensions");
+  for (const entry of fs.readdirSync(extensionsDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const packageDir = path.join(extensionsDir, entry.name);
+    const manifest = readJson(path.join(packageDir, "package.json")) as
+      | { name?: unknown }
+      | undefined;
+    if (manifest?.name === packageName) {
+      return packageDir;
     }
   }
   throw new Error(`Unknown workspace package: ${packageName}`);

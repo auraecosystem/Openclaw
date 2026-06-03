@@ -5,13 +5,8 @@
   },
   "enabledByDefault": true,
   "providers": ["fireworks"],
-  "setup": {
-    "providers": [
-      {
-        "id": "fireworks",
-        "envVars": ["FIREWORKS_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "fireworks": ["FIREWORKS_API_KEY"]
   },
   "providerAuthChoices": [
     {

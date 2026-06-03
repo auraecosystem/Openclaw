@@ -1,4 +1,4 @@
-import type { Api, Model } from "openclaw/plugin-sdk/llm";
+import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { attachModelProviderLocalService } from "./provider-local-service.js";
 import { attachModelProviderRequestTransport } from "./provider-request-config.js";
@@ -45,8 +45,8 @@ describe("provider transport stream contracts", () => {
         alias: "openclaw-openai-responses-transport",
       },
       {
-        api: "openai-chatgpt-responses" as const,
-        provider: "openai",
+        api: "openai-codex-responses" as const,
+        provider: "openai-codex",
         id: "codex-mini-latest",
         baseUrl: "https://chatgpt.com/backend-api",
         alias: "openclaw-openai-responses-transport",
@@ -197,10 +197,10 @@ describe("provider transport stream contracts", () => {
     expect(preparedModel.id).toBe("google/gemma-4-E2B-it");
   });
 
-  it("keeps Codex defaults on the OpenClaw transport until OpenClaw preserves attribution", () => {
-    const model = buildModel("openai-chatgpt-responses", {
+  it("keeps Codex defaults on the OpenClaw transport until PI preserves attribution", () => {
+    const model = buildModel("openai-codex-responses", {
       id: "gpt-5.4",
-      provider: "openai",
+      provider: "openai-codex",
       baseUrl: "https://chatgpt.com/backend-api",
     });
 

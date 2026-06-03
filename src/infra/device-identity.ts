@@ -4,7 +4,6 @@ import path from "node:path";
 import { resolveStateDir } from "../config/paths.js";
 import { privateFileStoreSync } from "./private-file-store.js";
 
-/** Gateway/device Ed25519 identity used for APNs relay and gateway authentication. */
 export type DeviceIdentity = {
   deviceId: string;
   publicKeyPem: string;
@@ -52,7 +51,6 @@ function pemEncode(label: "PUBLIC KEY" | "PRIVATE KEY", der: Buffer): string {
   return `-----BEGIN ${label}-----\n${body}\n-----END ${label}-----\n`;
 }
 
-// Swift stores raw Ed25519 key bytes; Node crypto needs DER/PEM wrappers around them.
 function publicKeyPemFromRaw(publicKeyRaw: Buffer): string {
   return pemEncode("PUBLIC KEY", Buffer.concat([ED25519_SPKI_PREFIX, publicKeyRaw]));
 }
@@ -114,7 +112,7 @@ type NormalizedStoredIdentity =
   | { kind: "recognized-invalid" };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object";
+  return !!value && typeof value === "object";
 }
 
 function hasRecognizedIdentityShape(parsed: unknown): boolean {
@@ -183,7 +181,6 @@ function normalizeStoredIdentity(parsed: unknown): NormalizedStoredIdentity | nu
     if (!keyPairMatches(publicKeyPem, privateKeyPem)) {
       return { kind: "recognized-invalid" };
     }
-    // Migrate the legacy Swift raw-key shape only after the key pair proves valid.
     const derivedId = fingerprintPublicKey(publicKeyPem);
     const validForReadOnly = derivedId === stored.deviceId;
     const migrated: StoredIdentity = {
@@ -219,7 +216,6 @@ function identityFileExists(filePath: string): boolean {
   }
 }
 
-/** Load a valid persisted identity, repair/migrate when safe, or create a new one. */
 export function loadOrCreateDeviceIdentity(
   filePath: string = resolveDefaultIdentityPath(),
 ): DeviceIdentity {
@@ -240,7 +236,6 @@ export function loadOrCreateDeviceIdentity(
       return normalized.identity;
     }
     if (normalized?.kind === "recognized-invalid") {
-      // Avoid overwriting recognizable but invalid identity files; callers can still use a fresh key.
       return generateIdentity();
     }
   } catch {
@@ -263,7 +258,6 @@ export function loadOrCreateDeviceIdentity(
   return identity;
 }
 
-/** Load a valid persisted device identity without creating, repairing, or migrating files. */
 export function loadDeviceIdentityIfPresent(
   filePath: string = resolveDefaultIdentityPath(),
 ): DeviceIdentity | null {
@@ -281,14 +275,12 @@ export function loadDeviceIdentityIfPresent(
   }
 }
 
-/** Sign a UTF-8 payload with a PEM Ed25519 private key and return base64url bytes. */
 export function signDevicePayload(privateKeyPem: string, payload: string): string {
   const key = crypto.createPrivateKey(privateKeyPem);
   const sig = crypto.sign(null, Buffer.from(payload, "utf8"), key);
   return base64UrlEncode(sig);
 }
 
-/** Normalize PEM or raw base64/base64url public keys to canonical raw base64url bytes. */
 export function normalizeDevicePublicKeyBase64Url(publicKey: string): string | null {
   try {
     if (publicKey.includes("BEGIN")) {
@@ -304,7 +296,6 @@ export function normalizeDevicePublicKeyBase64Url(publicKey: string): string | n
   }
 }
 
-/** Derive the stable device id from PEM or raw base64/base64url public key material. */
 export function deriveDeviceIdFromPublicKey(publicKey: string): string | null {
   try {
     const raw = publicKey.includes("BEGIN")
@@ -319,12 +310,10 @@ export function deriveDeviceIdFromPublicKey(publicKey: string): string | null {
   }
 }
 
-/** Export a PEM Ed25519 public key as canonical raw base64url bytes. */
 export function publicKeyRawBase64UrlFromPem(publicKeyPem: string): string {
   return base64UrlEncode(derivePublicKeyRaw(publicKeyPem));
 }
 
-/** Verify a UTF-8 payload signature against PEM or raw base64/base64url public key material. */
 export function verifyDeviceSignature(
   publicKey: string,
   payload: string,

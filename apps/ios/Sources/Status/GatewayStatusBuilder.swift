@@ -1,16 +1,9 @@
 import Foundation
 import OpenClawKit
 
-enum GatewayDisplayState: Equatable {
-    case connected
-    case connecting
-    case error
-    case disconnected
-}
-
 enum GatewayStatusBuilder {
     @MainActor
-    static func build(appModel: NodeAppModel) -> GatewayDisplayState {
+    static func build(appModel: NodeAppModel) -> StatusPill.GatewayState {
         self.build(
             gatewayServerName: appModel.gatewayServerName,
             lastGatewayProblem: appModel.lastGatewayProblem,
@@ -20,7 +13,7 @@ enum GatewayStatusBuilder {
     static func build(
         gatewayServerName: String?,
         lastGatewayProblem: GatewayConnectionProblem?,
-        gatewayStatusText: String) -> GatewayDisplayState
+        gatewayStatusText: String) -> StatusPill.GatewayState
     {
         if gatewayServerName != nil { return .connected }
         if let lastGatewayProblem, lastGatewayProblem.pauseReconnect { return .error }

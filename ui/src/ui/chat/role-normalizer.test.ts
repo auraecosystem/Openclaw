@@ -17,13 +17,11 @@ describe("normalizeRoleForGrouping", () => {
     expect(normalizeRoleForGrouping("Function")).toBe("tool");
   });
 
-  it("normalizes core roles", () => {
+  it("preserves core roles", () => {
     expect(normalizeRoleForGrouping("user")).toBe("user");
-    expect(normalizeRoleForGrouping("User")).toBe("user");
+    expect(normalizeRoleForGrouping("User")).toBe("User");
     expect(normalizeRoleForGrouping("assistant")).toBe("assistant");
-    expect(normalizeRoleForGrouping("Assistant")).toBe("assistant");
     expect(normalizeRoleForGrouping("system")).toBe("system");
-    expect(normalizeRoleForGrouping("System")).toBe("system");
   });
 
   it("detects only tool result role variants", () => {

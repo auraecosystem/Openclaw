@@ -6,7 +6,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   getActiveRuntimeWebToolsMetadata: vi.fn(),
-  getActiveSecretsRuntimeConfigSnapshot: vi.fn(),
+  getActiveSecretsRuntimeSnapshot: vi.fn(),
   resolveManifestContractOwnerPluginId: vi.fn(),
 }));
 
@@ -18,8 +18,8 @@ vi.mock("../../secrets/runtime-web-tools-state.js", () => ({
   getActiveRuntimeWebToolsMetadata: mocks.getActiveRuntimeWebToolsMetadata,
 }));
 
-vi.mock("../../secrets/runtime-state.js", () => ({
-  getActiveSecretsRuntimeConfigSnapshot: mocks.getActiveSecretsRuntimeConfigSnapshot,
+vi.mock("../../secrets/runtime.js", () => ({
+  getActiveSecretsRuntimeSnapshot: mocks.getActiveSecretsRuntimeSnapshot,
 }));
 
 function latestOwnerLookupParams(): Record<string, unknown> {
@@ -34,8 +34,8 @@ describe("web tool runtime context", () => {
   beforeEach(() => {
     mocks.getActiveRuntimeWebToolsMetadata.mockReset();
     mocks.getActiveRuntimeWebToolsMetadata.mockReturnValue(null);
-    mocks.getActiveSecretsRuntimeConfigSnapshot.mockReset();
-    mocks.getActiveSecretsRuntimeConfigSnapshot.mockReturnValue(null);
+    mocks.getActiveSecretsRuntimeSnapshot.mockReset();
+    mocks.getActiveSecretsRuntimeSnapshot.mockReturnValue(null);
     mocks.resolveManifestContractOwnerPluginId.mockReset();
     mocks.resolveManifestContractOwnerPluginId.mockReturnValue(undefined);
   });
@@ -44,7 +44,7 @@ describe("web tool runtime context", () => {
     const runtimeConfig = {
       tools: { web: { search: { provider: "perplexity" } } },
     };
-    mocks.getActiveSecretsRuntimeConfigSnapshot.mockReturnValue({ config: runtimeConfig });
+    mocks.getActiveSecretsRuntimeSnapshot.mockReturnValue({ config: runtimeConfig });
     mocks.getActiveRuntimeWebToolsMetadata.mockReturnValue({
       search: {
         providerConfigured: "perplexity",
@@ -123,10 +123,9 @@ describe("web tool runtime context", () => {
 
   it("treats resolved global provider owners as explicit selections", async () => {
     mocks.resolveManifestContractOwnerPluginId.mockReturnValue("brave");
-    const { resolveWebSearchToolRuntimeContext: resolveWebSearchToolRuntimeContextLocal } =
-      await import("./web-tool-runtime-context.js");
+    const { resolveWebSearchToolRuntimeContext } = await import("./web-tool-runtime-context.js");
 
-    const resolved = resolveWebSearchToolRuntimeContextLocal({
+    const resolved = resolveWebSearchToolRuntimeContext({
       config: { tools: { web: { search: { provider: "brave" } } } },
     });
 

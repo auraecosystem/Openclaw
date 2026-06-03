@@ -45,6 +45,7 @@ import {
   resolveThreadBindingInactivityExpiresAt,
   resolveThreadBindingMaxAgeExpiresAt,
   resolveThreadBindingMaxAgeMs,
+  resolveThreadBindingsPath,
   saveBindingsToDisk,
   setBindingRecord,
   THREAD_BINDING_TOUCH_PERSIST_MIN_INTERVAL_MS,
@@ -273,8 +274,8 @@ export function createThreadBindingManager(params: {
       if (!key) {
         return null;
       }
-      const existingResult = BINDINGS_BY_THREAD_ID.get(key);
-      if (!existingResult || existingResult.accountId !== accountId) {
+      const existing = BINDINGS_BY_THREAD_ID.get(key);
+      if (!existing || existing.accountId !== accountId) {
         return null;
       }
       const now = Date.now();
@@ -283,8 +284,8 @@ export function createThreadBindingManager(params: {
           ? Math.max(0, Math.floor(touchParams.at))
           : now;
       const nextRecord: ThreadBindingRecord = {
-        ...existingResult,
-        lastActivityAt: Math.max(existingResult.lastActivityAt || 0, at),
+        ...existing,
+        lastActivityAt: Math.max(existing.lastActivityAt || 0, at),
       };
       setBindingRecord(nextRecord);
       if (touchParams.persist ?? persist) {
@@ -341,7 +342,7 @@ export function createThreadBindingManager(params: {
         return null;
       }
 
-      const existingValue = manager.getByThreadId(threadId);
+      const existing = manager.getByThreadId(threadId);
       const targetSessionKey = normalizeOptionalString(bindParams.targetSessionKey) ?? "";
       if (!targetSessionKey) {
         return null;
@@ -350,11 +351,11 @@ export function createThreadBindingManager(params: {
       const targetKind = normalizeTargetKind(bindParams.targetKind, targetSessionKey);
       let webhookId =
         normalizeOptionalString(bindParams.webhookId) ??
-        normalizeOptionalString(existingValue?.webhookId) ??
+        normalizeOptionalString(existing?.webhookId) ??
         "";
       let webhookToken =
         normalizeOptionalString(bindParams.webhookToken) ??
-        normalizeOptionalString(existingValue?.webhookToken) ??
+        normalizeOptionalString(existing?.webhookToken) ??
         "";
       if (!directConversationBinding && (!webhookId || !webhookToken)) {
         const cachedWebhook = findReusableWebhook({ accountId, channelId });
@@ -381,29 +382,26 @@ export function createThreadBindingManager(params: {
         targetSessionKey,
         agentId:
           normalizeOptionalString(bindParams.agentId) ??
-          normalizeOptionalString(existingValue?.agentId) ??
+          normalizeOptionalString(existing?.agentId) ??
           resolveAgentIdFromSessionKey(targetSessionKey),
         label:
-          normalizeOptionalString(bindParams.label) ??
-          normalizeOptionalString(existingValue?.label),
+          normalizeOptionalString(bindParams.label) ?? normalizeOptionalString(existing?.label),
         webhookId: webhookId || undefined,
         webhookToken: webhookToken || undefined,
         boundBy:
           normalizeOptionalString(bindParams.boundBy) ??
-          normalizeOptionalString(existingValue?.boundBy) ??
+          normalizeOptionalString(existing?.boundBy) ??
           "system",
         boundAt: now,
         lastActivityAt: now,
         idleTimeoutMs:
-          typeof existingValue?.idleTimeoutMs === "number"
-            ? existingValue.idleTimeoutMs
-            : idleTimeoutMs,
-        maxAgeMs: typeof existingValue?.maxAgeMs === "number" ? existingValue.maxAgeMs : maxAgeMs,
+          typeof existing?.idleTimeoutMs === "number" ? existing.idleTimeoutMs : idleTimeoutMs,
+        maxAgeMs: typeof existing?.maxAgeMs === "number" ? existing.maxAgeMs : maxAgeMs,
         metadata:
           bindParams.metadata && typeof bindParams.metadata === "object"
-            ? { ...existingValue?.metadata, ...bindParams.metadata }
-            : existingValue?.metadata
-              ? { ...existingValue.metadata }
+            ? { ...existing?.metadata, ...bindParams.metadata }
+            : existing?.metadata
+              ? { ...existing.metadata }
               : undefined,
       };
 
@@ -426,8 +424,8 @@ export function createThreadBindingManager(params: {
       if (!bindingKey) {
         return null;
       }
-      const existingLocal = BINDINGS_BY_THREAD_ID.get(bindingKey);
-      if (!existingLocal || existingLocal.accountId !== accountId) {
+      const existing = BINDINGS_BY_THREAD_ID.get(bindingKey);
+      if (!existing || existing.accountId !== accountId) {
         return null;
       }
       const removed = removeBindingRecord(bindingKey);
@@ -542,7 +540,8 @@ export function getThreadBindingManager(accountId?: string): ThreadBindingManage
   return MANAGERS_BY_ACCOUNT_ID.get(normalized) ?? null;
 }
 
-export const testing = {
+export const __testing = {
+  resolveThreadBindingsPath,
   resolveThreadBindingThreadName,
   resetThreadBindingsForTests,
   runThreadBindingSweepForAccount: async (accountId?: string) => {
@@ -552,4 +551,3 @@ export const testing = {
     }
   },
 };
-export { testing as __testing };

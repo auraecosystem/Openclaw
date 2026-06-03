@@ -8,7 +8,6 @@ import type {
   QaBusSearchMessagesInput,
   QaBusStateSnapshot,
   QaBusThread,
-  QaBusToolCall,
 } from "./protocol.js";
 
 export type {
@@ -29,7 +28,6 @@ export type {
   QaBusSearchMessagesInput,
   QaBusStateSnapshot,
   QaBusThread,
-  QaBusToolCall,
   QaBusWaitForInput,
 } from "./protocol.js";
 
@@ -79,7 +77,7 @@ async function postJson<T>(
           try {
             parsed = text ? (JSON.parse(text) as T | { error?: string }) : ({} as T);
           } catch (error) {
-            reject(toLintErrorObject(error, "Non-Error rejection"));
+            reject(error);
             return;
           }
           if ((response.statusCode ?? 500) < 200 || (response.statusCode ?? 500) >= 300) {
@@ -204,7 +202,6 @@ export async function sendQaBusMessage(params: {
   threadId?: string;
   replyToId?: string;
   attachments?: import("./protocol.js").QaBusAttachment[];
-  toolCalls?: QaBusToolCall[];
 }) {
   return await postJson<{ message: QaBusMessage }>(params.baseUrl, "/v1/outbound/message", params);
 }
@@ -294,18 +291,4 @@ export async function getQaBusState(baseUrl: string): Promise<QaBusStateSnapshot
   } finally {
     await release();
   }
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

@@ -1,6 +1,3 @@
-import { asNullableRecord } from "../../packages/normalization-core/src/record-coerce.js";
-import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
-import { normalizeUniqueStringEntries } from "../../packages/normalization-core/src/string-normalization.js";
 import {
   isBlockedHostnameOrIp,
   isPrivateIpAddress,
@@ -9,6 +6,8 @@ import {
   type LookupFn,
   type SsrFPolicy,
 } from "../infra/net/ssrf.js";
+import { asNullableRecord } from "../shared/record-coerce.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type {
   ChannelDoctorConfigMutation,
   ChannelDoctorLegacyConfigRule,
@@ -64,7 +63,7 @@ export function ssrfPolicyFromDangerouslyAllowPrivateNetwork(
 
 export function hasLegacyFlatAllowPrivateNetworkAlias(value: unknown): boolean {
   const entry = asNullableRecord(value);
-  return Boolean(entry && Object.hasOwn(entry, "allowPrivateNetwork"));
+  return Boolean(entry && Object.prototype.hasOwnProperty.call(entry, "allowPrivateNetwork"));
 }
 
 export function migrateLegacyFlatAllowPrivateNetworkAlias(params: {
@@ -286,11 +285,11 @@ export function normalizeHostnameSuffixAllowlist(
   if (!source || source.length === 0) {
     return [];
   }
-  const normalized = normalizeUniqueStringEntries(source.map(normalizeHostnameSuffix));
+  const normalized = source.map(normalizeHostnameSuffix).filter(Boolean);
   if (normalized.includes("*")) {
     return ["*"];
   }
-  return normalized;
+  return Array.from(new Set(normalized));
 }
 
 /** Check whether a URL is HTTPS and its hostname matches the normalized suffix allowlist. */

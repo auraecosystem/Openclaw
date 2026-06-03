@@ -417,17 +417,17 @@ export async function runFirecrawlSearch(
       errorLabel: "Firecrawl Search",
     },
     async (response) => {
-      const payloadValue = await readFirecrawlJsonResponse(response, "Firecrawl Search API error");
-      if (payloadValue.success === false) {
+      const payload = await readFirecrawlJsonResponse(response, "Firecrawl Search API error");
+      if (payload.success === false) {
         const error =
-          typeof payloadValue.error === "string"
-            ? payloadValue.error
-            : typeof payloadValue.message === "string"
-              ? payloadValue.message
+          typeof payload.error === "string"
+            ? payload.error
+            : typeof payload.message === "string"
+              ? payload.message
               : "unknown error";
         throw new Error(`Firecrawl Search API error: ${error}`);
       }
-      return payloadValue;
+      return payload;
     },
   );
   const result = buildSearchPayload({
@@ -573,19 +573,19 @@ export async function runFirecrawlScrape(
       },
     },
     async (response) => {
-      const payloadLocal = await readFirecrawlJsonResponse(response, "Firecrawl fetch failed");
-      if (payloadLocal.success === false) {
+      const payload = await readFirecrawlJsonResponse(response, "Firecrawl fetch failed");
+      if (payload.success === false) {
         const detail =
-          typeof payloadLocal.error === "string"
-            ? payloadLocal.error
-            : typeof payloadLocal.message === "string"
-              ? payloadLocal.message
+          typeof payload.error === "string"
+            ? payload.error
+            : typeof payload.message === "string"
+              ? payload.message
               : response.statusText;
         throw new Error(
           `Firecrawl fetch failed (${response.status}): ${wrapWebContent(detail, "web_fetch")}`.trim(),
         );
       }
-      return payloadLocal;
+      return payload;
     },
   );
   const result = parseFirecrawlScrapePayload({
@@ -603,7 +603,7 @@ export async function runFirecrawlScrape(
   return result;
 }
 
-export const testing = {
+export const __testing = {
   assertFirecrawlScrapeTargetAllowed,
   parseFirecrawlScrapePayload,
   postFirecrawlJson,
@@ -611,4 +611,3 @@ export const testing = {
   validateFirecrawlBaseUrl,
   resolveSearchItems,
 };
-export { testing as __testing };

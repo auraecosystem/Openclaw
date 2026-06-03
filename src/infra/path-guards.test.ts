@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { mockProcessPlatform } from "../test-utils/vitest-spies.js";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   hasNodeErrorCode,
   isNodeError,
@@ -9,12 +8,19 @@ import {
   normalizeWindowsPathForComparison,
 } from "./path-guards.js";
 
+const originalPlatformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+
 function setPlatform(platform: NodeJS.Platform): void {
-  mockProcessPlatform(platform);
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true,
+  });
 }
 
 afterEach(() => {
-  vi.restoreAllMocks();
+  if (originalPlatformDescriptor) {
+    Object.defineProperty(process, "platform", originalPlatformDescriptor);
+  }
 });
 
 describe("normalizeWindowsPathForComparison", () => {

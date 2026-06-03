@@ -2,10 +2,9 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { resolveOpenClawPackageRootSync } from "../infra/openclaw-root.js";
 import { isPathInside } from "../infra/path-guards.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import { resolveUserPath } from "../utils.js";
 
 const DISABLED_BUNDLED_PLUGINS_DIR = path.join(os.tmpdir(), "openclaw-empty-bundled-plugins");
@@ -30,6 +29,7 @@ function resolveDisabledBundledPluginsDir(): string {
 
 function isSourceCheckoutRoot(packageRoot: string): boolean {
   return (
+    fs.existsSync(path.join(packageRoot, ".git")) &&
     fs.existsSync(path.join(packageRoot, "pnpm-workspace.yaml")) &&
     fs.existsSync(path.join(packageRoot, "src")) &&
     fs.existsSync(path.join(packageRoot, "extensions"))
@@ -96,7 +96,9 @@ function trustedBundledPluginRootsForPackageRoot(packageRoot: string): string[] 
 function resolvePackageRootsForBundledPlugins(): string[] {
   const argvRoot = resolveOpenClawPackageRootSync({ argv1: process.argv[1] });
   const moduleRoot = resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url });
-  return uniqueStrings([argvRoot, moduleRoot].filter((entry): entry is string => Boolean(entry)));
+  return [argvRoot, moduleRoot].filter(
+    (entry, index, all): entry is string => Boolean(entry) && all.indexOf(entry) === index,
+  );
 }
 
 export function resolveSourceCheckoutDependencyDiagnostic(
@@ -248,8 +250,8 @@ function resolveBundledPluginsDirUncached(env: NodeJS.ProcessEnv): string | unde
     );
     const safeArgvRoot = rejectedOverrideUsesArgvRoot ? null : argvRoot;
     const moduleRoot = resolveOpenClawPackageRootSync({ moduleUrl: import.meta.url });
-    const packageRoots = uniqueStrings(
-      [safeArgvRoot, moduleRoot].filter((entry): entry is string => Boolean(entry)),
+    const packageRoots = [safeArgvRoot, moduleRoot].filter(
+      (entry, index, all): entry is string => Boolean(entry) && all.indexOf(entry) === index,
     );
     for (const packageRoot of packageRoots) {
       const bundledDir = resolveBundledDirFromPackageRoot(packageRoot);

@@ -1,7 +1,3 @@
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
 import type { CliDeps } from "../cli/deps.types.js";
 import type { CronFailureDestinationConfig } from "../config/types.cron.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -18,6 +14,10 @@ import { normalizeHttpWebhookUrl } from "../cron/webhook-url.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { fetchWithSsrFGuard } from "../infra/net/fetch-guard.js";
 import { SsrFBlockedError } from "../infra/net/ssrf.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../shared/string-coerce.js";
 
 const CRON_WEBHOOK_TIMEOUT_MS = 10_000;
 
@@ -32,7 +32,7 @@ type CronAgentResolver = (requested?: string | null) => {
 
 type CronWebhookTarget = {
   url: string;
-  source: "delivery" | "completionDestination";
+  source: "delivery" | "legacy";
 };
 
 function redactWebhookUrl(url: string): string {
@@ -44,38 +44,25 @@ function redactWebhookUrl(url: string): string {
   }
 }
 
-function redactOptionalWebhookUrl(url: unknown): string | undefined {
-  const normalized = normalizeOptionalString(url);
-  return normalized ? redactWebhookUrl(normalized) : undefined;
-}
-
-function resolveCronWebhookTargets(params: {
-  delivery?: {
-    mode?: string;
-    to?: string;
-    completionDestination?: { mode?: string; to?: string };
-  };
-}): CronWebhookTarget[] {
-  const targets: CronWebhookTarget[] = [];
+function resolveCronWebhookTarget(params: {
+  delivery?: { mode?: string; to?: string };
+  legacyNotify?: boolean;
+  legacyWebhook?: string;
+}): CronWebhookTarget | null {
   const mode = normalizeOptionalLowercaseString(params.delivery?.mode);
   if (mode === "webhook") {
     const url = normalizeHttpWebhookUrl(params.delivery?.to);
-    if (url) {
-      targets.push({ url, source: "delivery" });
+    return url ? { url, source: "delivery" } : null;
+  }
+
+  if (params.legacyNotify) {
+    const legacyUrl = normalizeHttpWebhookUrl(params.legacyWebhook);
+    if (legacyUrl) {
+      return { url: legacyUrl, source: "legacy" };
     }
   }
 
-  const completionMode = normalizeOptionalLowercaseString(
-    params.delivery?.completionDestination?.mode,
-  );
-  if (mode === "announce" && completionMode === "webhook") {
-    const url = normalizeHttpWebhookUrl(params.delivery?.completionDestination?.to);
-    if (url && targets.every((target) => target.url !== url)) {
-      targets.push({ url, source: "completionDestination" });
-    }
-  }
-
-  return targets;
+  return null;
 }
 
 function buildCronWebhookHeaders(webhookToken?: string): Record<string, string> {
@@ -213,60 +200,55 @@ export function dispatchGatewayCronFinishedNotifications(params: {
   logger: CronLogger;
   resolveCronAgent: CronAgentResolver;
   webhookToken?: unknown;
+  legacyWebhook?: unknown;
   globalFailureDestination?: CronFailureDestinationConfig;
+  warnedLegacyWebhookJobs: Set<string>;
 }): void {
   const webhookToken = normalizeOptionalString(params.webhookToken);
-  const webhookTargets = resolveCronWebhookTargets({
+  const legacyWebhook = normalizeOptionalString(params.legacyWebhook);
+  const legacyNotify = (params.job as { notify?: unknown } | undefined)?.notify === true;
+  const webhookTarget = resolveCronWebhookTarget({
     delivery:
       params.job?.delivery && typeof params.job.delivery.mode === "string"
-        ? {
-            mode: params.job.delivery.mode,
-            to: params.job.delivery.to,
-            completionDestination: params.job.delivery.completionDestination,
-          }
+        ? { mode: params.job.delivery.mode, to: params.job.delivery.to }
         : undefined,
+    legacyNotify,
+    legacyWebhook,
   });
 
-  if (
-    params.job?.delivery?.completionDestination?.mode === "webhook" &&
-    !normalizeHttpWebhookUrl(params.job.delivery.completionDestination.to)
-  ) {
+  if (!webhookTarget && params.job?.delivery?.mode === "webhook") {
     params.logger.warn(
       {
         jobId: params.evt.jobId,
-        deliveryTo: redactOptionalWebhookUrl(params.job.delivery.completionDestination.to),
-      },
-      "cron: skipped completion webhook delivery, delivery.completionDestination.to must be a valid http(s) URL",
-    );
-  }
-
-  if (
-    !webhookTargets.some((target) => target.source === "delivery") &&
-    params.job?.delivery?.mode === "webhook"
-  ) {
-    params.logger.warn(
-      {
-        jobId: params.evt.jobId,
-        deliveryTo: redactOptionalWebhookUrl(params.job.delivery.to),
+        deliveryTo: params.job.delivery.to,
       },
       "cron: skipped webhook delivery, delivery.to must be a valid http(s) URL",
     );
   }
 
-  if (params.evt.summary) {
-    for (const webhookTarget of webhookTargets) {
-      void (async () => {
-        await postCronWebhook({
-          webhookUrl: webhookTarget.url,
-          webhookToken,
-          payload: params.evt,
-          logContext: { jobId: params.evt.jobId, source: webhookTarget.source },
-          blockedLog: "cron: webhook delivery blocked by SSRF guard",
-          failedLog: "cron: webhook delivery failed",
-          logger: params.logger,
-        });
-      })();
-    }
+  if (webhookTarget?.source === "legacy" && !params.warnedLegacyWebhookJobs.has(params.evt.jobId)) {
+    params.warnedLegacyWebhookJobs.add(params.evt.jobId);
+    params.logger.warn(
+      {
+        jobId: params.evt.jobId,
+        legacyWebhook: redactWebhookUrl(webhookTarget.url),
+      },
+      "cron: deprecated notify+cron.webhook fallback in use, migrate to delivery.mode=webhook with delivery.to",
+    );
+  }
+
+  if (webhookTarget && params.evt.summary) {
+    void (async () => {
+      await postCronWebhook({
+        webhookUrl: webhookTarget.url,
+        webhookToken,
+        payload: params.evt,
+        logContext: { jobId: params.evt.jobId },
+        blockedLog: "cron: webhook delivery blocked by SSRF guard",
+        failedLog: "cron: webhook delivery failed",
+        logger: params.logger,
+      });
+    })();
   }
 
   dispatchCronFailureDestinationNotifications({

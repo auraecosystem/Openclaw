@@ -1,7 +1,7 @@
 import type { ApiClientOptions } from "grammy";
 import { normalizeOptionalLowercaseString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { TelegramTransport } from "./fetch.js";
-import { isTelegramMisdirectedRequestError, tagTelegramNetworkError } from "./network-errors.js";
+import { tagTelegramNetworkError } from "./network-errors.js";
 import { resolveTelegramRequestTimeoutMs } from "./request-timeouts.js";
 
 type TelegramFetchInput = Parameters<NonNullable<ApiClientOptions["fetch"]>>[0];
@@ -135,11 +135,6 @@ export function createTelegramClientFetch(params: {
       : undefined;
     const requestSignal = isTelegramAbortSignalLike(init?.signal) ? init.signal : undefined;
 
-    const canForceTransportFallback = (reason: string) =>
-      !shutdownSignal?.aborted &&
-      !requestSignal?.aborted &&
-      params.transport?.forceFallback?.(reason) === true;
-
     const runFetch = async () => {
       const controller = new AbortController();
       const abortWith = (signal: Pick<TelegramAbortSignalLike, "reason">) =>
@@ -200,22 +195,14 @@ export function createTelegramClientFetch(params: {
     };
 
     try {
-      const response = await runFetch();
-      if (response.status === 421 && canForceTransportFallback("misdirected-request")) {
-        return await runFetch();
-      }
-      return response;
+      return await runFetch();
     } catch (err) {
       if (
         requestTimeoutMs &&
         shouldRetryTimedOutTelegramControlRequest(method) &&
-        canForceTransportFallback("request-timeout")
-      ) {
-        return await runFetch();
-      }
-      if (
-        isTelegramMisdirectedRequestError(err) &&
-        canForceTransportFallback("misdirected-request")
+        !shutdownSignal?.aborted &&
+        !requestSignal?.aborted &&
+        params.transport?.forceFallback?.("request-timeout")
       ) {
         return await runFetch();
       }

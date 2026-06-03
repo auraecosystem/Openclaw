@@ -1,8 +1,4 @@
-import type {
-  AcpRuntime,
-  AcpRuntimeHandle,
-  AcpRuntimeSessionMode,
-} from "@openclaw/acp-core/runtime/types";
+import type { AcpRuntime, AcpRuntimeHandle, AcpRuntimeSessionMode } from "../runtime/types.js";
 
 export type CachedRuntimeState = {
   runtime: AcpRuntime;

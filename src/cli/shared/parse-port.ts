@@ -1,7 +1,8 @@
-import { parseTcpPort } from "../../infra/tcp-port.js";
-
-export { MAX_TCP_PORT, parseTcpPort } from "../../infra/tcp-port.js";
+import { parseStrictPositiveInteger } from "../../infra/parse-finite-number.js";
 
 export function parsePort(raw: unknown): number | null {
-  return parseTcpPort(raw);
+  if (raw === undefined || raw === null) {
+    return null;
+  }
+  return parseStrictPositiveInteger(raw) ?? null;
 }

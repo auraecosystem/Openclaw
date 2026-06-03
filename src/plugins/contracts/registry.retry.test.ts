@@ -228,7 +228,7 @@ describe("plugin contract registry scoped retries", () => {
       {
         pluginId: "openai",
         provider: {
-          id: "openai",
+          id: "openai-codex",
           label: "OpenAI Codex",
           docsPath: "/providers/openai",
           auth: [
@@ -254,7 +254,7 @@ describe("plugin contract registry scoped retries", () => {
 
     expect(
       resolveProviderContractProvidersForPluginIds(["openai"]).map((provider) => provider.id),
-    ).toEqual(["openai"]);
+    ).toEqual(["openai", "openai-codex"]);
     expect(resolveBundledExplicitProviderContractsFromPublicArtifacts).toHaveBeenCalledTimes(1);
     expect(loadBundledCapabilityRuntimeRegistry).not.toHaveBeenCalled();
   });

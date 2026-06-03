@@ -1,7 +1,3 @@
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeOptionalLowercaseString,
-} from "@openclaw/normalization-core/string-coerce";
 import type { ChannelPlugin } from "../../channels/plugins/types.plugin.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import {
@@ -17,6 +13,10 @@ import {
   type RoutePeer,
 } from "../../plugin-sdk/routing.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeOptionalLowercaseString,
+} from "../../shared/string-coerce.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -585,19 +585,9 @@ export function setMinimalOutboundSessionPluginRegistryForTests(): void {
         capabilities: { chatTypes: ["direct", "group", "channel"] },
       }),
       messaging: {
-        inferTargetChatType: ({ to }) => (to.startsWith("spaces/") ? "group" : undefined),
-        targetPrefixes: ["fallbackchat"],
-      },
-    },
-    {
-      ...createChannelTestPluginBase({
-        id: "legacyparser",
-        label: "Legacy Parser",
-        capabilities: { chatTypes: ["direct", "group", "channel"] },
-      }),
-      messaging: {
         parseExplicitTarget: ({ raw }) =>
-          raw === "team-ops" ? { to: raw, chatType: "group" } : null,
+          raw.startsWith("spaces/") ? { to: raw, chatType: "group" } : null,
+        targetPrefixes: ["fallbackchat"],
       },
     },
   ];

@@ -108,13 +108,13 @@ vi.mock("./openclaw-root.fs.runtime.js", () => ({
 describe("resolveOpenClawPackageRoot", () => {
   let resolveOpenClawPackageRoot: typeof import("./openclaw-root.js").resolveOpenClawPackageRoot;
   let resolveOpenClawPackageRootSync: typeof import("./openclaw-root.js").resolveOpenClawPackageRootSync;
-  let clearOpenClawPackageRootCaches: typeof import("./openclaw-root.js").testing.clearOpenClawPackageRootCaches;
+  let clearOpenClawPackageRootCaches: typeof import("./openclaw-root.js").__testing.clearOpenClawPackageRootCaches;
 
   beforeAll(async () => {
     ({
       resolveOpenClawPackageRoot,
       resolveOpenClawPackageRootSync,
-      testing: { clearOpenClawPackageRootCaches },
+      __testing: { clearOpenClawPackageRootCaches },
     } = await import("./openclaw-root.js"));
   });
 

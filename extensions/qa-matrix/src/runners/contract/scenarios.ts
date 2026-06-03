@@ -13,7 +13,7 @@ import {
   buildMatrixQaTopologyForScenarios,
   findMatrixQaScenarios,
   resolveMatrixQaScenarioRoomId,
-  matrixQaProfileTesting,
+  __matrixQaProfileTesting,
 } from "./scenario-catalog.js";
 import {
   buildMatrixReplyArtifact,
@@ -39,7 +39,7 @@ export type { MatrixQaCanaryArtifact, MatrixQaScenarioArtifacts };
 
 export type { MatrixQaScenarioContext };
 
-export const testing = {
+export const __testing = {
   MATRIX_QA_BOT_DM_ROOM_KEY,
   MATRIX_QA_DRIVER_DM_ROOM_KEY,
   MATRIX_QA_DRIVER_DM_SHARED_ROOM_KEY,
@@ -55,10 +55,9 @@ export const testing = {
   buildMatrixReplyArtifact,
   buildMentionPrompt,
   findMatrixQaScenarios,
-  getMatrixQaProfileScenarioIds: matrixQaProfileTesting.getMatrixQaProfileScenarioIds,
-  normalizeMatrixQaProfile: matrixQaProfileTesting.normalizeMatrixQaProfile,
+  getMatrixQaProfileScenarioIds: __matrixQaProfileTesting.getMatrixQaProfileScenarioIds,
+  normalizeMatrixQaProfile: __matrixQaProfileTesting.normalizeMatrixQaProfile,
   readMatrixQaSyncCursor,
   resolveMatrixQaScenarioRoomId,
   writeMatrixQaSyncCursor,
 };
-export { testing as __testing };

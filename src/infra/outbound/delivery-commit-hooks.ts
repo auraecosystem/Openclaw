@@ -2,7 +2,6 @@ import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { formatErrorMessage } from "../errors.js";
 import type { OutboundDeliveryResult } from "./deliver-types.js";
 
-/** Callback attached to a delivery result and run after durable send commit. */
 export type OutboundDeliveryCommitHook = () => Promise<void>;
 
 const log = createSubsystemLogger("outbound/deliver");
@@ -11,7 +10,6 @@ const outboundDeliveryCommitHooks = new WeakMap<
   OutboundDeliveryCommitHook[]
 >();
 
-/** Attaches an after-commit hook without changing the delivery result shape. */
 export function attachOutboundDeliveryCommitHook<T extends OutboundDeliveryResult>(
   result: T,
   hook?: OutboundDeliveryCommitHook,
@@ -25,7 +23,6 @@ export function attachOutboundDeliveryCommitHook<T extends OutboundDeliveryResul
   return result;
 }
 
-/** Runs after-commit hooks for delivered results while isolating hook failures. */
 export async function runOutboundDeliveryCommitHooks(
   results: readonly OutboundDeliveryResult[],
 ): Promise<void> {
@@ -34,8 +31,6 @@ export async function runOutboundDeliveryCommitHooks(
       try {
         await hook();
       } catch (err) {
-        // Commit hooks are side effects after successful send; failures are
-        // logged but must not turn the already-committed delivery into failure.
         log.warn("Plugin message adapter after-commit hook failed.", {
           channel: result.channel,
           messageId: result.messageId,
@@ -46,7 +41,6 @@ export async function runOutboundDeliveryCommitHooks(
   }
 }
 
-/** Type guard for batched outbound delivery results crossing loose boundaries. */
 export function isOutboundDeliveryResultArray(value: unknown): value is OutboundDeliveryResult[] {
   return Array.isArray(value);
 }

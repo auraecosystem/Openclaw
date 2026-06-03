@@ -1,13 +1,25 @@
-import type { GatewayRequestContext } from "./server-methods/types.js";
+import type { createSubsystemLogger } from "../logging/subsystem.js";
+import type { GatewayMethodRegistry } from "./methods/registry.js";
+import type { GatewayRequestContext, GatewayRequestHandlers } from "./server-methods/types.js";
 import {
   attachGatewayWsConnectionHandler,
-  type AttachGatewayWsConnectionHandlerParams,
+  type GatewayWsSharedHandlerParams,
 } from "./server/ws-connection.js";
 
-type GatewayWsRuntimeParams = Omit<
-  AttachGatewayWsConnectionHandlerParams,
-  "buildRequestContext" | "refreshHealthSnapshot"
-> & {
+type GatewayWsRuntimeParams = Omit<GatewayWsSharedHandlerParams, "refreshHealthSnapshot"> & {
+  logGateway: ReturnType<typeof createSubsystemLogger>;
+  logHealth: ReturnType<typeof createSubsystemLogger>;
+  logWsControl: ReturnType<typeof createSubsystemLogger>;
+  extraHandlers: GatewayRequestHandlers;
+  getMethodRegistry?: () => GatewayMethodRegistry;
+  broadcast: (
+    event: string,
+    payload: unknown,
+    opts?: {
+      dropIfSlow?: boolean;
+      stateVersion?: { presence?: number; health?: number };
+    },
+  ) => void;
   context: GatewayRequestContext;
 };
 

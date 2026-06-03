@@ -1,1 +1,4 @@
-export * from "../../packages/media-understanding-common/src/active-model.js";
+export type ActiveMediaModel = {
+  provider: string;
+  model?: string;
+};

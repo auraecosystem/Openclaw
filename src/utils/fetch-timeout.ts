@@ -1,5 +1,4 @@
 import { createSubsystemLogger } from "../logging/subsystem.js";
-import { resolveSafeTimeoutDelayMs } from "./timer-delay.js";
 
 const log = createSubsystemLogger("fetch-timeout");
 const LOG_URL_MAX_CHARS = 500;
@@ -107,7 +106,7 @@ export function buildTimeoutAbortSignal(params: TimeoutAbortSignalParams): {
   }
 
   const controller = new AbortController();
-  const normalizedTimeoutMs = resolveSafeTimeoutDelayMs(timeoutMs);
+  const normalizedTimeoutMs = Math.max(1, Math.floor(timeoutMs));
   let active = true;
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const scheduleTimeout = () => {

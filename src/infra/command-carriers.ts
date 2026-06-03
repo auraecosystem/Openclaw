@@ -1,6 +1,5 @@
 import { splitShellArgs } from "../utils/shell-argv.js";
 import { normalizeExecutableToken } from "./exec-wrapper-tokens.js";
-import { parseInlineOptionToken } from "./inline-option-token.js";
 
 export const COMMAND_CARRIER_EXECUTABLES = new Set(["sudo", "doas", "env", "command", "builtin"]);
 
@@ -98,7 +97,7 @@ export function isEnvAssignmentToken(token: string): boolean {
 }
 
 function optionName(token: string): string {
-  return parseInlineOptionToken(token).name;
+  return token.split("=", 1)[0] ?? token;
 }
 
 type ParsedCarrierOption = {
@@ -114,21 +113,20 @@ function parseCarrierOptionToken(
   nonExecutingOptions: ReadonlySet<string> = new Set(),
 ): ParsedCarrierOption[] | null {
   if (token.startsWith("--")) {
-    const option = parseInlineOptionToken(token);
-    const name = option.name;
+    const name = optionName(token);
     if (
       standaloneOptions.has(name) ||
       optionsWithValue.has(name) ||
       nonExecutingOptions.has(name)
     ) {
-      const parsedOption: ParsedCarrierOption = {
-        name,
-        hasInlineValue: option.hasInlineValue,
-      };
-      if (option.hasInlineValue) {
-        parsedOption.inlineValue = option.inlineValue;
-      }
-      return [parsedOption];
+      const valueDelimiter = token.indexOf("=");
+      return [
+        {
+          name,
+          hasInlineValue: valueDelimiter >= 0,
+          inlineValue: valueDelimiter >= 0 ? token.slice(valueDelimiter + 1) : undefined,
+        },
+      ];
     }
     return null;
   }

@@ -1,4 +1,3 @@
-import { finiteSecondsToTimerSafeMilliseconds } from "@openclaw/normalization-core/number-coercion";
 import {
   fetchWithSsrFGuard,
   type GuardedFetchOptions,
@@ -10,7 +9,6 @@ import {
   ssrfPolicyFromHttpBaseUrlFakeIpHostnameAllowlist,
   type SsrFPolicy,
 } from "../../infra/net/ssrf.js";
-import { readPositiveIntegerParam } from "./common.js";
 
 const WEB_TOOLS_SELF_HOSTED_NETWORK_SSRF_POLICY: SsrFPolicy = {
   dangerouslyAllowPrivateNetwork: true,
@@ -31,16 +29,11 @@ function resolveTimeoutMs(params: {
   timeoutMs?: number;
   timeoutSeconds?: number;
 }): number | undefined {
-  const timeoutMs = readPositiveIntegerParam(params as Record<string, unknown>, "timeoutMs");
-  if (timeoutMs !== undefined) {
-    return timeoutMs;
+  if (typeof params.timeoutMs === "number" && Number.isFinite(params.timeoutMs)) {
+    return params.timeoutMs;
   }
-  const timeoutSeconds = readPositiveIntegerParam(
-    params as Record<string, unknown>,
-    "timeoutSeconds",
-  );
-  if (timeoutSeconds !== undefined) {
-    return finiteSecondsToTimerSafeMilliseconds(timeoutSeconds, { floorSeconds: true });
+  if (typeof params.timeoutSeconds === "number" && Number.isFinite(params.timeoutSeconds)) {
+    return params.timeoutSeconds * 1000;
   }
   return undefined;
 }

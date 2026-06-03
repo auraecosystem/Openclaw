@@ -1,6 +1,6 @@
 ---
 name: node-connect
-description: "Diagnose OpenClaw Android, iOS, or macOS node pairing, QR/setup code, route, auth, and connection failures."
+description: Diagnose OpenClaw Android, iOS, or macOS node pairing, QR/setup code, route, auth, and connection failures.
 ---
 
 # Node Connect
@@ -104,8 +104,7 @@ If the app says `pairing required`:
 
 ```bash
 openclaw devices list
-openclaw devices approve --latest   # preview only; copy the requestId from output
-openclaw devices approve <requestId>
+openclaw devices approve --latest
 ```
 
 If the app says `bootstrap token invalid or expired`:

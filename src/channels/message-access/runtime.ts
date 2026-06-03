@@ -1,9 +1,6 @@
-import {
-  normalizeStringEntries,
-  uniqueStrings,
-} from "@openclaw/normalization-core/string-normalization";
 import { readChannelAllowFromStore } from "../../pairing/pairing-store.js";
 import type { PairingChannel } from "../../pairing/pairing-store.types.js";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import { mergeDmAllowFromSources, resolveGroupAllowFromSources } from "../allow-from.js";
 import { decideChannelIngress } from "./decision.js";
 import {
@@ -594,7 +591,7 @@ function appendAccessGroupMatchedEntry(params: {
   matchedEntry: string | null;
 }): string[] {
   return params.matchedEntry && params.allowlist.accessGroups.matched.length > 0
-    ? uniqueStrings([...params.entries, params.matchedEntry])
+    ? Array.from(new Set([...params.entries, params.matchedEntry]))
     : params.entries;
 }
 

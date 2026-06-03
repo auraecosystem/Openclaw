@@ -1,4 +1,3 @@
-#if Talk
 import Foundation
 
 @MainActor
@@ -15,4 +14,3 @@ public protocol PCMStreamingAudioPlaying {
 
 extension StreamingAudioPlayer: StreamingAudioPlaying {}
 extension PCMStreamingAudioPlayer: PCMStreamingAudioPlaying {}
-#endif

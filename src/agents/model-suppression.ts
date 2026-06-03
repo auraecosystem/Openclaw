@@ -1,75 +1,10 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import { getCurrentPluginMetadataSnapshotState } from "../plugins/current-plugin-metadata-state.js";
-import { buildManifestBuiltInModelSuppressionResolver } from "../plugins/manifest-model-suppression.js";
-import { resolvePluginControlPlaneFingerprint } from "../plugins/plugin-control-plane-context.js";
-import { registerPluginMetadataProcessMemoLifecycleClear } from "../plugins/plugin-metadata-lifecycle.js";
-import { resolvePluginMetadataSnapshotMemoEnvFingerprint } from "../plugins/plugin-metadata-snapshot.js";
-import { normalizeLowercaseStringOrEmpty } from "../../packages/normalization-core/src/string-coerce.js";
-
-type ManifestSuppressionResolver = ReturnType<typeof buildManifestBuiltInModelSuppressionResolver>;
-
-type CachedManifestSuppressionResolver = {
-  config: OpenClawConfig | undefined;
-  controlPlaneFingerprint: string;
-  cwd: string;
-  envFingerprint: string;
-  metadataSnapshot: unknown;
-  resolver: ManifestSuppressionResolver;
-  workspaceDir: string | undefined;
-};
-
-let cachedManifestSuppressionResolver: CachedManifestSuppressionResolver | undefined;
-
-export function clearModelSuppressionResolverCacheForTest(): void {
-  cachedManifestSuppressionResolver = undefined;
-}
-
-registerPluginMetadataProcessMemoLifecycleClear(clearModelSuppressionResolverCacheForTest);
-
-// Manifest suppressions come from plugin metadata snapshots. Keep one process-local
-// resolver per active config/workspace and clear it with the metadata lifecycle.
-function resolveCachedManifestSuppressionResolver(params: {
-  config?: OpenClawConfig;
-  env: NodeJS.ProcessEnv;
-  workspaceDir?: string;
-}): ManifestSuppressionResolver {
-  const cached = cachedManifestSuppressionResolver;
-  const controlPlaneFingerprint = resolvePluginControlPlaneFingerprint({
-    ...(params.config ? { config: params.config } : {}),
-    env: params.env,
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-  });
-  const cwd = process.cwd();
-  const envFingerprint = resolvePluginMetadataSnapshotMemoEnvFingerprint(params.env);
-  const metadataSnapshot = getCurrentPluginMetadataSnapshotState().snapshot;
-  if (
-    cached !== undefined &&
-    cached.config === params.config &&
-    cached.controlPlaneFingerprint === controlPlaneFingerprint &&
-    cached.cwd === cwd &&
-    cached.envFingerprint === envFingerprint &&
-    cached.metadataSnapshot === metadataSnapshot &&
-    cached.workspaceDir === params.workspaceDir
-  ) {
-    return cached.resolver;
-  }
-  const resolver = buildManifestBuiltInModelSuppressionResolver({
-    env: params.env,
-    ...(params.config ? { config: params.config } : {}),
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-  });
-  cachedManifestSuppressionResolver = {
-    config: params.config,
-    controlPlaneFingerprint,
-    cwd,
-    envFingerprint,
-    metadataSnapshot,
-    resolver,
-    workspaceDir: params.workspaceDir,
-  };
-  return resolver;
-}
+import {
+  buildManifestBuiltInModelSuppressionResolver,
+  resolveManifestBuiltInModelSuppression,
+} from "../plugins/manifest-model-suppression.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
+import { normalizeProviderId } from "./provider-id.js";
 
 function resolveBuiltInModelSuppressionFromManifest(params: {
   provider?: string | null;
@@ -77,24 +12,19 @@ function resolveBuiltInModelSuppressionFromManifest(params: {
   baseUrl?: string | null;
   config?: OpenClawConfig;
   unconditionalOnly?: boolean;
-  workspaceDir?: string;
 }) {
   const provider = normalizeProviderId(params.provider ?? "");
   const modelId = normalizeLowercaseStringOrEmpty(params.id);
   if (!provider || !modelId) {
     return undefined;
   }
-  return resolveCachedManifestSuppressionResolver({
-    env: process.env,
-    ...(params.config ? { config: params.config } : {}),
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
-  })({
+  return resolveManifestBuiltInModelSuppression({
     provider,
     id: modelId,
+    ...(params.config ? { config: params.config } : {}),
     ...(params.baseUrl ? { baseUrl: params.baseUrl } : {}),
-    ...(params.unconditionalOnly !== undefined
-      ? { unconditionalOnly: params.unconditionalOnly }
-      : {}),
+    unconditionalOnly: params.unconditionalOnly,
+    env: process.env,
   });
 }
 
@@ -103,7 +33,6 @@ function resolveBuiltInModelSuppression(params: {
   id?: string | null;
   baseUrl?: string | null;
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }) {
   const manifestResult = resolveBuiltInModelSuppressionFromManifest(params);
   if (manifestResult?.suppress) {
@@ -121,7 +50,6 @@ export function shouldSuppressBuiltInModelFromManifest(params: {
   provider?: string | null;
   id?: string | null;
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }) {
   return resolveBuiltInModelSuppressionFromManifest(params)?.suppress ?? false;
 }
@@ -131,7 +59,6 @@ export function shouldSuppressBuiltInModel(params: {
   id?: string | null;
   baseUrl?: string | null;
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }) {
   return resolveBuiltInModelSuppression(params)?.suppress ?? false;
 }
@@ -143,7 +70,6 @@ export function shouldUnconditionallySuppress(params: {
   provider?: string | null;
   id?: string | null;
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }): boolean {
   return (
     resolveBuiltInModelSuppressionFromManifest({ ...params, unconditionalOnly: true })?.suppress ??
@@ -156,19 +82,16 @@ export function buildSuppressedBuiltInModelError(params: {
   id?: string | null;
   baseUrl?: string | null;
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }): string | undefined {
   return resolveBuiltInModelSuppression(params)?.errorMessage;
 }
 
 export function buildShouldSuppressBuiltInModel(params: {
   config?: OpenClawConfig;
-  workspaceDir?: string;
 }): (input: { provider?: string | null; id?: string | null; baseUrl?: string | null }) => boolean {
   const resolver = buildManifestBuiltInModelSuppressionResolver({
+    config: params.config,
     env: process.env,
-    ...(params.config ? { config: params.config } : {}),
-    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
   });
 
   return (input) => {
@@ -177,12 +100,6 @@ export function buildShouldSuppressBuiltInModel(params: {
     if (!provider || !id) {
       return false;
     }
-    return (
-      resolver({
-        provider,
-        id,
-        ...(input.baseUrl ? { baseUrl: input.baseUrl } : {}),
-      })?.suppress ?? false
-    );
+    return resolver({ ...input, provider, id })?.suppress ?? false;
   };
 }

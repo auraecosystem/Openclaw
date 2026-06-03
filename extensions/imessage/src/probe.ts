@@ -1,17 +1,10 @@
 import path from "node:path";
 import type { BaseProbeResult } from "openclaw/plugin-sdk/channel-contract";
-import {
-  asDateTimestampMs,
-  resolveExpiresAtMsFromDurationMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { runCommandWithTimeout } from "openclaw/plugin-sdk/process-runtime";
 import { getRuntimeConfig } from "openclaw/plugin-sdk/runtime-config-snapshot";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { detectBinary } from "openclaw/plugin-sdk/setup";
-import {
-  normalizeLowercaseStringOrEmpty,
-  normalizeStringEntries,
-} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { createIMessageRpcClient } from "./client.js";
 import { DEFAULT_IMESSAGE_PROBE_TIMEOUT_MS } from "./constants.js";
 import {
@@ -57,41 +50,6 @@ type RpcSupportCacheEntry = { result: RpcSupportResult; expiresAt: number };
 
 const rpcSupportCache = new Map<string, RpcSupportCacheEntry>();
 
-function cacheIMessagePrivateApiStatus(
-  cliPath: string,
-  status: NonNullable<IMessageProbe["privateApi"]>,
-): void {
-  if (status.available) {
-    setCachedIMessagePrivateApiStatus(cliPath, status, 0);
-    return;
-  }
-  const expiresAt = resolveExpiresAtMsFromDurationMs(PRIVATE_API_NEGATIVE_TTL_MS);
-  if (expiresAt !== undefined) {
-    setCachedIMessagePrivateApiStatus(cliPath, status, expiresAt);
-  }
-}
-
-function getCachedRpcSupport(cliPath: string): RpcSupportResult | undefined {
-  const cached = rpcSupportCache.get(cliPath);
-  if (!cached) {
-    return undefined;
-  }
-  const now = asDateTimestampMs(Date.now());
-  if (now === undefined || cached.expiresAt <= now) {
-    rpcSupportCache.delete(cliPath);
-    return undefined;
-  }
-  return cached.result;
-}
-
-function setCachedRpcSupport(cliPath: string, result: RpcSupportResult): void {
-  const expiresAt = resolveExpiresAtMsFromDurationMs(RPC_SUPPORT_CACHE_TTL_MS);
-  if (expiresAt === undefined) {
-    return;
-  }
-  rpcSupportCache.set(cliPath, { result, expiresAt });
-}
-
 function isDefaultLocalIMessageCliPath(cliPath: string): boolean {
   const trimmed = cliPath.trim();
   return trimmed === "imsg" || (!trimmed.includes("/") && path.basename(trimmed) === "imsg");
@@ -108,9 +66,9 @@ export function resolveIMessageNonMacHostError(
 }
 
 async function probeRpcSupport(cliPath: string, timeoutMs: number): Promise<RpcSupportResult> {
-  const cached = getCachedRpcSupport(cliPath);
-  if (cached) {
-    return cached;
+  const cached = rpcSupportCache.get(cliPath);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result;
   }
   try {
     const result = await runCommandWithTimeout([cliPath, "rpc", "--help"], { timeoutMs });
@@ -122,12 +80,18 @@ async function probeRpcSupport(cliPath: string, timeoutMs: number): Promise<RpcS
         fatal: true,
         error: 'imsg CLI does not support the "rpc" subcommand (update imsg)',
       };
-      setCachedRpcSupport(cliPath, fatal);
+      rpcSupportCache.set(cliPath, {
+        result: fatal,
+        expiresAt: Date.now() + RPC_SUPPORT_CACHE_TTL_MS,
+      });
       return fatal;
     }
     if (result.code === 0) {
       const supported = { supported: true };
-      setCachedRpcSupport(cliPath, supported);
+      rpcSupportCache.set(cliPath, {
+        result: supported,
+        expiresAt: Date.now() + RPC_SUPPORT_CACHE_TTL_MS,
+      });
       return supported;
     }
     return {
@@ -143,7 +107,10 @@ function parseStatusPayload(stdout: string): {
   payload: Record<string, unknown> | null;
   firstLineSnippet?: string;
 } {
-  const lines = normalizeStringEntries(stdout.split(/\r?\n/));
+  const lines = stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   for (const line of lines.toReversed()) {
     try {
       const value = JSON.parse(line);
@@ -259,7 +226,11 @@ export async function probeIMessagePrivateApi(
           : {}
         : { error: combined || `imsg status --json failed (code ${String(result.code)})` }),
     };
-    cacheIMessagePrivateApiStatus(key, status);
+    setCachedIMessagePrivateApiStatus(
+      key,
+      status,
+      status.available ? 0 : Date.now() + PRIVATE_API_NEGATIVE_TTL_MS,
+    );
     return status;
   } catch (err) {
     const status: NonNullable<IMessageProbe["privateApi"]> = {
@@ -270,7 +241,7 @@ export async function probeIMessagePrivateApi(
       cliCapabilities: { sendRichSupportsAttachment: false },
       error: String(err),
     };
-    cacheIMessagePrivateApiStatus(key, status);
+    setCachedIMessagePrivateApiStatus(key, status, Date.now() + PRIVATE_API_NEGATIVE_TTL_MS);
     return status;
   }
 }

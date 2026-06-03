@@ -1,17 +1,18 @@
-import { accessSync, closeSync, constants, openSync, readSync, statSync } from "node:fs";
+import { closeSync, openSync, readSync } from "node:fs";
+import path from "node:path";
 
 const WINDOWS_UNSAFE_CMD_CHARS_RE = /[&|<>%\r\n]/;
-const PNPM_EXECUTABLE_RE = /^pnpm(?:-cli)?(?:\.(?:[cm]?js|cmd|exe))?$/;
-const NODE_RUNNABLE_EXTENSIONS = new Set([".js", ".cjs", ".mjs"]);
 
-function inspectExecutablePath(value) {
-  const basename = value.split(/[/\\]/).at(-1) ?? value;
-  const extension = basename.match(/(\.[^.]+)$/u)?.[1]?.toLowerCase() ?? "";
-  return { basename: basename.toLowerCase(), extension };
+function getPortableBasename(value) {
+  return value.split(/[/\\]/).at(-1) ?? value;
+}
+
+function getPortableExtension(value) {
+  return path.posix.extname(getPortableBasename(value)).toLowerCase();
 }
 
 function isPnpmExecPath(value) {
-  return PNPM_EXECUTABLE_RE.test(inspectExecutablePath(value).basename);
+  return /^pnpm(?:-cli)?(?:\.(?:[cm]?js|cmd|exe))?$/.test(getPortableBasename(value).toLowerCase());
 }
 
 function hasScriptShebang(value) {
@@ -33,24 +34,12 @@ function hasScriptShebang(value) {
   }
 }
 
-function isExecutableFile(value) {
-  try {
-    if (!statSync(value).isFile()) {
-      return false;
-    }
-    accessSync(value, constants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function isNodeRunnablePnpmExecPath(value) {
   if (!isPnpmExecPath(value)) {
     return false;
   }
-  const { extension } = inspectExecutablePath(value);
-  if (NODE_RUNNABLE_EXTENSIONS.has(extension)) {
+  const extension = getPortableExtension(value);
+  if (extension === ".js" || extension === ".cjs" || extension === ".mjs") {
     return true;
   }
   if (extension.length > 0) {
@@ -74,60 +63,53 @@ function buildCmdExeCommandLine(command, args) {
   return [escapeForCmdExe(command), ...args.map(escapeForCmdExe)].join(" ");
 }
 
-function windowsCmdSpec(command, args, comSpec) {
-  return {
-    args: ["/d", "/s", "/c", buildCmdExeCommandLine(command, args)],
-    command: comSpec,
-    shell: false,
-    windowsVerbatimArguments: true,
-  };
-}
-
-function resolveConfiguredPnpmExec(params) {
+export function resolvePnpmRunner(params = {}) {
+  const pnpmArgs = params.pnpmArgs ?? [];
+  const nodeArgs = params.nodeArgs ?? [];
   const npmExecPath = params.npmExecPath ?? process.env.npm_execpath;
-  if (typeof npmExecPath !== "string" || npmExecPath.length === 0 || !isPnpmExecPath(npmExecPath)) {
-    return undefined;
+  const nodeExecPath = params.nodeExecPath ?? process.execPath;
+  const platform = params.platform ?? process.platform;
+  const comSpec = params.comSpec ?? process.env.ComSpec ?? "cmd.exe";
+
+  if (typeof npmExecPath === "string" && npmExecPath.length > 0 && isPnpmExecPath(npmExecPath)) {
+    if (isNodeRunnablePnpmExecPath(npmExecPath)) {
+      return {
+        command: nodeExecPath,
+        args: [...nodeArgs, npmExecPath, ...pnpmArgs],
+        shell: false,
+      };
+    }
+
+    const npmExecExtension = getPortableExtension(npmExecPath);
+    if (platform === "win32" && npmExecExtension === ".exe") {
+      return {
+        command: npmExecPath,
+        args: pnpmArgs,
+        shell: false,
+      };
+    }
+    if (platform === "win32" && npmExecExtension === ".cmd") {
+      return {
+        command: comSpec,
+        args: ["/d", "/s", "/c", buildCmdExeCommandLine(npmExecPath, pnpmArgs)],
+        shell: false,
+        windowsVerbatimArguments: true,
+      };
+    }
   }
 
-  if (isNodeRunnablePnpmExecPath(npmExecPath)) {
+  if (platform === "win32") {
     return {
-      args: [...(params.nodeArgs ?? []), npmExecPath, ...(params.pnpmArgs ?? [])],
-      command: params.nodeExecPath ?? process.execPath,
+      command: comSpec,
+      args: ["/d", "/s", "/c", buildCmdExeCommandLine("pnpm.cmd", pnpmArgs)],
       shell: false,
+      windowsVerbatimArguments: true,
     };
   }
 
-  const { extension } = inspectExecutablePath(npmExecPath);
-  if ((params.platform ?? process.platform) !== "win32") {
-    return extension.length === 0 && isExecutableFile(npmExecPath)
-      ? { args: params.pnpmArgs ?? [], command: npmExecPath, shell: false }
-      : undefined;
-  }
-
-  if (extension === ".exe") {
-    return { args: params.pnpmArgs ?? [], command: npmExecPath, shell: false };
-  }
-  if (extension === ".cmd") {
-    return windowsCmdSpec(
-      npmExecPath,
-      params.pnpmArgs ?? [],
-      params.comSpec ?? process.env.ComSpec ?? "cmd.exe",
-    );
-  }
-  return undefined;
-}
-
-export function resolvePnpmRunner(params = {}) {
-  const configured = resolveConfiguredPnpmExec(params);
-  if (configured) {
-    return configured;
-  }
-
-  const pnpmArgs = params.pnpmArgs ?? [];
-  const platform = params.platform ?? process.platform;
-  if (platform === "win32") {
-    return windowsCmdSpec("pnpm.cmd", pnpmArgs, params.comSpec ?? process.env.ComSpec ?? "cmd.exe");
-  }
-
-  return { args: pnpmArgs, command: "pnpm", shell: false };
+  return {
+    command: "pnpm",
+    args: pnpmArgs,
+    shell: false,
+  };
 }

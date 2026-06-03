@@ -2,7 +2,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { saveCronStore } from "../cron/store.js";
 import {
   formatCronSessionDiagnosticFields,
   formatStoppedCronSessionDiagnosticFields,
@@ -46,25 +45,15 @@ describe("diagnostic session context", () => {
     });
   });
 
-  it("formats cron job and last assistant context for stalled session logs", async () => {
+  it("formats cron job and last assistant context for stalled session logs", () => {
     const stateDir = tempDir!;
-    await saveCronStore(path.join(stateDir, "cron", "jobs.json"), {
-      version: 1,
-      jobs: [
-        {
-          id: "job-123",
-          name: "Twitter Mention Moderation Agent",
-          enabled: true,
-          createdAtMs: 1_700_000_000_000,
-          updatedAtMs: 1_700_000_000_000,
-          schedule: { kind: "every", everyMs: 60_000 },
-          sessionTarget: "main",
-          wakeMode: "next-heartbeat",
-          payload: { kind: "systemEvent", text: "tick" },
-          state: {},
-        },
-      ],
-    });
+    fs.mkdirSync(path.join(stateDir, "cron"), { recursive: true });
+    fs.writeFileSync(
+      path.join(stateDir, "cron", "jobs.json"),
+      JSON.stringify({
+        jobs: [{ id: "job-123", name: "Twitter Mention Moderation Agent" }],
+      }),
+    );
     writeJsonl(path.join(stateDir, "agents", "clawblocker", "sessions", "run-456.jsonl"), [
       { message: { role: "user", content: "run" } },
       {

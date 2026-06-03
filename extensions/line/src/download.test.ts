@@ -75,11 +75,11 @@ describe("downloadLineMedia", () => {
     saveMediaStreamMock.mockReset();
     saveMediaStreamMock.mockImplementation(
       async (stream: AsyncIterable<Buffer>, contentType?: string, subdir?: string) => {
-        const chunksLocal: Buffer[] = [];
+        const chunks: Buffer[] = [];
         for await (const chunk of stream) {
-          chunksLocal.push(Buffer.from(chunk));
+          chunks.push(Buffer.from(chunk));
         }
-        const buffer = Buffer.concat(chunksLocal);
+        const buffer = Buffer.concat(chunks);
         return {
           path: `/home/user/.openclaw/media/${subdir ?? "unknown"}/saved-media`,
           contentType: detectMockContentType(buffer, contentType),

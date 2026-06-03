@@ -148,44 +148,6 @@ function firstCallParam(calls: readonly unknown[][], label: string) {
   return call[0];
 }
 
-type MockSessionEntry = {
-  sessionId?: string;
-  updatedAt?: number;
-  [key: string]: unknown;
-};
-
-function createMockSessionRuntime(sessionStore: Record<string, unknown>) {
-  return {
-    resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
-    loadSessionStore: vi.fn(() => sessionStore),
-    saveSessionStore: vi.fn(async () => {}),
-    updateSessionStore: vi.fn(async (_storePath, mutator: (store: never) => unknown) =>
-      mutator(sessionStore as never),
-    ),
-    getSessionEntry: vi.fn(
-      ({ sessionKey }: { sessionKey: string }) => sessionStore[sessionKey] as MockSessionEntry,
-    ),
-    patchSessionEntry: vi.fn(
-      async ({
-        sessionKey,
-        fallbackEntry,
-        update,
-      }: {
-        sessionKey: string;
-        fallbackEntry: MockSessionEntry;
-        update: (entry: MockSessionEntry) => Promise<MockSessionEntry> | MockSessionEntry;
-      }) => {
-        const current = (sessionStore[sessionKey] as MockSessionEntry | undefined) ?? fallbackEntry;
-        const patch = await update(current);
-        const next = { ...current, ...patch };
-        sessionStore[sessionKey] = next;
-        return next;
-      },
-    ),
-    resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
-  };
-}
-
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`expected ${label} to be a record`);
@@ -390,7 +352,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
       },
     ];
     const sessionStore: Record<string, unknown> = {};
-    const runEmbeddedAgent = vi.fn(async () => ({
+    const runEmbeddedPiAgent = vi.fn(async () => ({
       payloads: [{ text: "Use the shipment status." }],
       meta: {},
     }));
@@ -402,8 +364,14 @@ describe("createVoiceCallRuntime lifecycle", () => {
       resolveThinkingDefault: vi.fn(() => "high"),
       resolveAgentTimeoutMs: vi.fn(() => 30_000),
       ensureAgentWorkspace: vi.fn(async () => {}),
-      session: createMockSessionRuntime(sessionStore),
-      runEmbeddedAgent,
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
+        loadSessionStore: vi.fn(() => sessionStore),
+        saveSessionStore: vi.fn(async () => {}),
+        updateSessionStore: vi.fn(async (_storePath, mutator) => mutator(sessionStore as never)),
+        resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
+      },
+      runEmbeddedPiAgent,
     };
     mocks.managerGetCall.mockReturnValue({
       callId: "call-1",
@@ -440,10 +408,10 @@ describe("createVoiceCallRuntime lifecycle", () => {
     ).resolves.toEqual({
       text: "Use the shipment status.",
     });
-    expect(runEmbeddedAgent).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgent).toHaveBeenCalledOnce();
     const consultParams = requireRecord(
-      firstCallParam(runEmbeddedAgent.mock.calls as unknown[][], "embedded OpenClaw consult"),
-      "embedded OpenClaw consult params",
+      firstCallParam(runEmbeddedPiAgent.mock.calls as unknown[][], "embedded PI consult"),
+      "embedded PI consult params",
     );
     expect(consultParams.sessionKey).toBe("voice:15550009999");
     expect(consultParams.spawnedBy).toBe("agent:main:discord:channel:general");
@@ -469,7 +437,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
     config.inboundPolicy = "allowlist";
     config.realtime.enabled = true;
     config.sessionScope = "per-call";
-    const runEmbeddedAgent = vi.fn(async () => ({
+    const runEmbeddedPiAgent = vi.fn(async () => ({
       payloads: [{ text: "Per-call consult answer." }],
       meta: {},
     }));
@@ -482,8 +450,14 @@ describe("createVoiceCallRuntime lifecycle", () => {
       resolveThinkingDefault: vi.fn(() => "high"),
       resolveAgentTimeoutMs: vi.fn(() => 30_000),
       ensureAgentWorkspace: vi.fn(async () => {}),
-      session: createMockSessionRuntime(sessionStore),
-      runEmbeddedAgent,
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
+        loadSessionStore: vi.fn(() => sessionStore),
+        saveSessionStore: vi.fn(async () => {}),
+        updateSessionStore: vi.fn(async (_storePath, mutator) => mutator(sessionStore as never)),
+        resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
+      },
+      runEmbeddedPiAgent,
     };
     mocks.managerGetCall.mockReturnValue({
       callId: "call-1",
@@ -504,13 +478,10 @@ describe("createVoiceCallRuntime lifecycle", () => {
     await expect(handler({ question: "What should I say?" }, "call-1")).resolves.toEqual({
       text: "Per-call consult answer.",
     });
-    expect(runEmbeddedAgent).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgent).toHaveBeenCalledOnce();
     const consultParams = requireRecord(
-      firstCallParam(
-        runEmbeddedAgent.mock.calls as unknown[][],
-        "per-call embedded OpenClaw consult",
-      ),
-      "per-call embedded OpenClaw consult params",
+      firstCallParam(runEmbeddedPiAgent.mock.calls as unknown[][], "per-call embedded PI consult"),
+      "per-call embedded PI consult params",
     );
     expect(consultParams.sessionKey).toBe("voice:call:call-1");
   });
@@ -525,7 +496,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
       sources: ["memory"],
       fallbackToConsult: false,
     };
-    const runEmbeddedAgent = vi.fn(async () => ({
+    const runEmbeddedPiAgent = vi.fn(async () => ({
       payloads: [{ text: "slow answer" }],
       meta: {},
     }));
@@ -537,8 +508,14 @@ describe("createVoiceCallRuntime lifecycle", () => {
       resolveThinkingDefault: vi.fn(() => "high"),
       resolveAgentTimeoutMs: vi.fn(() => 30_000),
       ensureAgentWorkspace: vi.fn(async () => {}),
-      session: createMockSessionRuntime(sessionStore),
-      runEmbeddedAgent,
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
+        loadSessionStore: vi.fn(() => sessionStore),
+        saveSessionStore: vi.fn(async () => {}),
+        updateSessionStore: vi.fn(async (_storePath, mutator) => mutator(sessionStore as never)),
+        resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
+      },
+      runEmbeddedPiAgent,
     };
     mocks.managerGetCall.mockReturnValue({
       callId: "call-1",
@@ -583,7 +560,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
       },
       sessionKey: "voice:15550001234",
     });
-    expect(runEmbeddedAgent).not.toHaveBeenCalled();
+    expect(runEmbeddedPiAgent).not.toHaveBeenCalled();
   });
 
   it("uses the configured realtime consult thinking level when set", async () => {
@@ -593,7 +570,7 @@ describe("createVoiceCallRuntime lifecycle", () => {
     config.realtime.consultThinkingLevel = "low";
     config.realtime.consultFastMode = true;
     const sessionStore: Record<string, unknown> = {};
-    const runEmbeddedAgent = vi.fn(async () => ({
+    const runEmbeddedPiAgent = vi.fn(async () => ({
       payloads: [{ text: "Done." }],
       meta: {},
     }));
@@ -605,8 +582,14 @@ describe("createVoiceCallRuntime lifecycle", () => {
       resolveThinkingDefault: vi.fn(() => "high"),
       resolveAgentTimeoutMs: vi.fn(() => 30_000),
       ensureAgentWorkspace: vi.fn(async () => {}),
-      session: createMockSessionRuntime(sessionStore),
-      runEmbeddedAgent,
+      session: {
+        resolveStorePath: vi.fn(() => "/tmp/sessions.json"),
+        loadSessionStore: vi.fn(() => sessionStore),
+        saveSessionStore: vi.fn(async () => {}),
+        updateSessionStore: vi.fn(async (_storePath, mutator) => mutator(sessionStore)),
+        resolveSessionFilePath: vi.fn(() => "/tmp/session.json"),
+      },
+      runEmbeddedPiAgent,
     };
     mocks.managerGetCall.mockReturnValue({
       callId: "call-1",
@@ -628,13 +611,13 @@ describe("createVoiceCallRuntime lifecycle", () => {
     });
 
     expect(agentRuntime.resolveThinkingDefault).not.toHaveBeenCalled();
-    expect(runEmbeddedAgent).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgent).toHaveBeenCalledOnce();
     const consultParams = requireRecord(
       firstCallParam(
-        runEmbeddedAgent.mock.calls as unknown[][],
-        "configured embedded OpenClaw consult",
+        runEmbeddedPiAgent.mock.calls as unknown[][],
+        "configured embedded PI consult",
       ),
-      "configured embedded OpenClaw consult params",
+      "configured embedded PI consult params",
     );
     expect(consultParams.thinkLevel).toBe("low");
     expect(consultParams.fastMode).toBe(true);

@@ -1,10 +1,9 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { callGateway } from "../../gateway/call.js";
 import {
   GATEWAY_CLIENT_IDS,
   normalizeGatewayClientId,
-} from "../../../packages/gateway-protocol/src/client-info.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { callGateway } from "../../gateway/call.js";
+} from "../../gateway/protocol/client-info.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import {
   listSpawnedSessionKeys,
@@ -12,6 +11,7 @@ import {
 } from "../../plugin-sdk/session-visibility.js";
 import { isAcpSessionKey, normalizeMainKey } from "../../routing/session-key.js";
 import { looksLikeSessionId } from "../../sessions/session-id.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 
 type GatewayCaller = typeof callGateway;
 
@@ -469,7 +469,7 @@ export async function resolveVisibleSessionReference(params: {
 
 export const normalizeOptionalKey: (value?: string) => string | undefined = normalizeOptionalString;
 
-export const testing = {
+export const __testing = {
   setDepsForTest(overrides?: Partial<{ callGateway: GatewayCaller }>) {
     sessionsResolutionDeps = overrides
       ? {
@@ -482,4 +482,3 @@ export const testing = {
     );
   },
 };
-export { testing as __testing };

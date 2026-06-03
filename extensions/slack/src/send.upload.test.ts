@@ -54,16 +54,19 @@ vi.mock("./runtime-api.js", async () => {
   };
 });
 
-const { sendMessageSlack, clearSlackDmChannelCache, clearSlackSendQueuesForTest } =
-  await import("./send.js");
+let sendMessageSlack: typeof import("./send.js").sendMessageSlack;
+let clearSlackDmChannelCache: typeof import("./send.js").clearSlackDmChannelCache;
+let clearSlackSendQueuesForTest: typeof import("./send.js").clearSlackSendQueuesForTest;
+({ sendMessageSlack, clearSlackDmChannelCache, clearSlackSendQueuesForTest } =
+  await import("./send.js"));
 const SLACK_TEST_CFG = { channels: { slack: { botToken: "xoxb-test" } } };
 
 type UploadTestClient = WebClient & {
-  conversations: { open: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>> };
-  chat: { postMessage: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>> };
+  conversations: { open: ReturnType<typeof vi.fn> };
+  chat: { postMessage: ReturnType<typeof vi.fn> };
   files: {
-    getUploadURLExternal: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
-    completeUploadExternal: ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>;
+    getUploadURLExternal: ReturnType<typeof vi.fn>;
+    completeUploadExternal: ReturnType<typeof vi.fn>;
   };
 };
 
@@ -71,26 +74,30 @@ type MockCalls = {
   mock: { calls: unknown[][] };
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 function requireRecord(value: unknown, label: string): Record<string, unknown> {
-  const isObjectRecord = typeof value === "object" && value !== null && !Array.isArray(value);
-  expect(isObjectRecord, `${label} should be an object`).toBe(true);
-  if (!isObjectRecord) {
+  expect(isRecord(value), `${label} should be an object`).toBe(true);
+  if (!isRecord(value)) {
     throw new Error(`${label} should be an object`);
   }
-  return value as Record<string, unknown>;
+  return value;
 }
 
 function requireArray(value: unknown, label: string): unknown[] {
-  const values = Array.isArray(value) ? value : null;
-  expect(values, `${label} should be an array`).not.toBeNull();
-  if (!values) {
+  expect(Array.isArray(value), `${label} should be an array`).toBe(true);
+  if (!Array.isArray(value)) {
     throw new Error(`${label} should be an array`);
   }
-  return values;
+  return value;
 }
 
 function expectFields(record: Record<string, unknown>, expected: Record<string, unknown>) {
-  expect(record).toMatchObject(expected);
+  for (const [key, value] of Object.entries(expected)) {
+    expect(record[key], key).toEqual(value);
+  }
 }
 
 function expectCallFirstArg(
@@ -135,24 +142,18 @@ function expectCompletedUpload(params: {
 function createUploadTestClient(): UploadTestClient {
   return {
     conversations: {
-      open: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
-        channel: { id: "D99RESOLVED" },
-      })),
+      open: vi.fn(async () => ({ channel: { id: "D99RESOLVED" } })),
     },
     chat: {
-      postMessage: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
-        ts: "171234.567",
-      })),
+      postMessage: vi.fn(async () => ({ ts: "171234.567" })),
     },
     files: {
-      getUploadURLExternal: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
+      getUploadURLExternal: vi.fn(async () => ({
         ok: true,
         upload_url: "https://uploads.slack.test/upload",
         file_id: "F001",
       })),
-      completeUploadExternal: vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
-        ok: true,
-      })),
+      completeUploadExternal: vi.fn(async () => ({ ok: true })),
     },
   } as unknown as UploadTestClient;
 }
@@ -241,12 +242,8 @@ describe("sendMessageSlack file upload with user IDs", () => {
   it("serializes concurrent sends to the same Slack target", async () => {
     const client = createUploadTestClient();
     let resolveFirst: (() => void) | undefined;
-    client.chat.postMessage.mockImplementation(async (payload: unknown) => {
-      const text =
-        typeof payload === "object" && payload !== null && "text" in payload
-          ? payload.text
-          : undefined;
-      if (text === "first") {
+    client.chat.postMessage.mockImplementation(async (payload: { text?: string }) => {
+      if (payload.text === "first") {
         await new Promise<void>((resolve) => {
           resolveFirst = resolve;
         });

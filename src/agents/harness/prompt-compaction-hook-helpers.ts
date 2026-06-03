@@ -1,3 +1,4 @@
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../plugins/hook-runner-global.js";
 import type {
@@ -5,8 +6,6 @@ import type {
   PluginHookBeforePromptBuildResult,
 } from "../../plugins/types.js";
 import { joinPresentTextSegments } from "../../shared/text/join-segments.js";
-import { wrapPluginSystemContextSection } from "../hook-system-context-boundary.js";
-import type { AgentMessage } from "../runtime/index.js";
 import { buildAgentHookContext, type AgentHarnessHookContext } from "./hook-context.js";
 
 const log = createSubsystemLogger("agents/harness");
@@ -36,14 +35,14 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   };
 
   const promptBuildResult = hookRunner.hasHooks("before_prompt_build")
-    ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error: unknown) => {
+    ? await hookRunner.runBeforePromptBuild(promptEvent, hookCtx).catch((error) => {
         log.warn(`before_prompt_build hook failed: ${String(error)}`);
         return undefined;
       })
     : undefined;
-  const beforeAgentStartResult = hookRunner.hasHooks("before_agent_start")
-    ? await hookRunner.runBeforeAgentStart(promptEvent, hookCtx).catch((error: unknown) => {
-        log.warn(`deprecated before_agent_start hook failed during prompt build: ${String(error)}`);
+  const legacyResult = hookRunner.hasHooks("before_agent_start")
+    ? await hookRunner.runBeforeAgentStart(promptEvent, hookCtx).catch((error) => {
+        log.warn(`before_agent_start hook (legacy prompt build path) failed: ${String(error)}`);
         return undefined;
       })
     : undefined;
@@ -51,22 +50,22 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
   const systemPrompt = resolvePromptBuildSystemPrompt({
     developerInstructions: params.developerInstructions,
     promptBuildResult,
-    beforeAgentStartResult,
+    legacyResult,
   });
   return {
     prompt:
       joinPresentTextSegments([
         promptBuildResult?.prependContext,
-        beforeAgentStartResult?.prependContext,
+        legacyResult?.prependContext,
         params.prompt,
       ]) ?? params.prompt,
     developerInstructions:
       joinPresentTextSegments([
-        wrapPluginSystemContextSection(promptBuildResult?.prependSystemContext),
-        wrapPluginSystemContextSection(beforeAgentStartResult?.prependSystemContext),
+        promptBuildResult?.prependSystemContext,
+        legacyResult?.prependSystemContext,
         systemPrompt,
-        wrapPluginSystemContextSection(promptBuildResult?.appendSystemContext),
-        wrapPluginSystemContextSection(beforeAgentStartResult?.appendSystemContext),
+        promptBuildResult?.appendSystemContext,
+        legacyResult?.appendSystemContext,
       ]) ?? systemPrompt,
   };
 }
@@ -74,13 +73,13 @@ export async function resolveAgentHarnessBeforePromptBuildResult(params: {
 function resolvePromptBuildSystemPrompt(params: {
   developerInstructions: string;
   promptBuildResult?: PluginHookBeforePromptBuildResult;
-  beforeAgentStartResult?: PluginHookBeforeAgentStartResult;
+  legacyResult?: PluginHookBeforeAgentStartResult;
 }): string {
   if (typeof params.promptBuildResult?.systemPrompt === "string") {
     return params.promptBuildResult.systemPrompt;
   }
-  if (typeof params.beforeAgentStartResult?.systemPrompt === "string") {
-    return params.beforeAgentStartResult.systemPrompt;
+  if (typeof params.legacyResult?.systemPrompt === "string") {
+    return params.legacyResult.systemPrompt;
   }
   return params.developerInstructions;
 }

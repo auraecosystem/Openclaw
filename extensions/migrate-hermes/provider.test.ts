@@ -137,7 +137,7 @@ describe("Hermes migration provider", () => {
     expect(secret?.status).toBe("skipped");
     expect(secret?.reason).toBe(HERMES_REASON_INCLUDE_SECRETS);
     expect(plan.warnings).toEqual([
-      "Auth credentials were detected but skipped. Re-run interactively or pass --include-secrets to import supported credentials.",
+      "Secrets were detected but skipped. Re-run with --include-secrets to import supported API keys.",
       "Conflicts were found. Re-run with --overwrite to replace conflicting targets after item-level backups.",
     ]);
   });

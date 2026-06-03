@@ -13,37 +13,6 @@ import {
 } from "./src/browser-gateway-contract.js";
 import { BrowserToolSchema } from "./src/browser-tool.schema.js";
 
-const EAGER_BROWSER_CONTROL_SERVICE_ENV = "OPENCLAW_EAGER_BROWSER_CONTROL_SERVER";
-
-let browserRegistrationRuntimeModulePromise: Promise<
-  typeof import("./register.runtime.js")
-> | null = null;
-
-const loadBrowserRegistrationRuntimeModule = async () => {
-  browserRegistrationRuntimeModulePromise ??= import("./register.runtime.js");
-  return await browserRegistrationRuntimeModulePromise;
-};
-
-function isTruthyEnvValue(value: string | undefined): boolean {
-  return /^(?:1|true|yes|on)$/iu.test(value?.trim() ?? "");
-}
-
-function deriveChatTypeFromSessionKey(
-  sessionKey: string | undefined,
-): "direct" | "group" | "channel" | undefined {
-  const tokens = new Set(sessionKey?.toLowerCase().split(":").filter(Boolean) ?? []);
-  if (tokens.has("group")) {
-    return "group";
-  }
-  if (tokens.has("channel")) {
-    return "channel";
-  }
-  if (tokens.has("direct") || tokens.has("dm")) {
-    return "direct";
-  }
-  return undefined;
-}
-
 const BROWSER_CLI_DESCRIPTOR = {
   name: "browser",
   description: "Manage OpenClaw's dedicated browser (Chrome/Chromium)",
@@ -54,17 +23,6 @@ function createLazyBrowserTool(opts?: {
   sandboxBridgeUrl?: string;
   allowHostControl?: boolean;
   agentSessionKey?: string;
-  agentDir?: string;
-  workspaceDir?: string;
-  activeModel?: {
-    provider?: string;
-    model?: string;
-  };
-  mediaScope?: {
-    sessionKey?: string;
-    channel?: string;
-    chatType?: string;
-  };
 }): AnyAgentTool {
   const targetDefault = opts?.sandboxBridgeUrl ? "sandbox" : "host";
   const hostHint =
@@ -87,56 +45,10 @@ function createLazyBrowserTool(opts?: {
     ].join(" "),
     parameters: BrowserToolSchema,
     execute: async (toolCallId, args, signal, onUpdate) => {
-      const { createBrowserTool } = await loadBrowserRegistrationRuntimeModule();
+      const { createBrowserTool } = await import("./register.runtime.js");
       const tool = createBrowserTool(opts);
       return await tool.execute(toolCallId, args, signal, onUpdate);
     },
-  };
-}
-
-function createBrowserToolOptions(ctx: OpenClawPluginToolContext): {
-  sandboxBridgeUrl?: string;
-  allowHostControl?: boolean;
-  agentSessionKey?: string;
-  agentDir?: string;
-  workspaceDir?: string;
-  activeModel?: {
-    provider?: string;
-    model?: string;
-  };
-  mediaScope?: {
-    sessionKey?: string;
-    channel?: string;
-    chatType?: string;
-  };
-} {
-  const mediaChannel = ctx.deliveryContext?.channel ?? ctx.messageChannel;
-  const mediaChatType = deriveChatTypeFromSessionKey(ctx.sessionKey);
-  return {
-    ...(ctx.browser?.sandboxBridgeUrl ? { sandboxBridgeUrl: ctx.browser.sandboxBridgeUrl } : {}),
-    ...(ctx.browser?.allowHostControl !== undefined
-      ? { allowHostControl: ctx.browser.allowHostControl }
-      : {}),
-    ...(ctx.sessionKey ? { agentSessionKey: ctx.sessionKey } : {}),
-    ...(ctx.agentDir ? { agentDir: ctx.agentDir } : {}),
-    ...(ctx.workspaceDir ? { workspaceDir: ctx.workspaceDir } : {}),
-    ...(ctx.activeModel?.provider || ctx.activeModel?.modelId
-      ? {
-          activeModel: {
-            provider: ctx.activeModel.provider,
-            model: ctx.activeModel.modelId,
-          },
-        }
-      : {}),
-    ...(ctx.sessionKey || mediaChannel
-      ? {
-          mediaScope: {
-            ...(ctx.sessionKey ? { sessionKey: ctx.sessionKey } : {}),
-            ...(mediaChannel ? { channel: mediaChannel } : {}),
-            ...(mediaChatType ? { chatType: mediaChatType } : {}),
-          },
-        }
-      : {}),
   };
 }
 
@@ -147,7 +59,7 @@ export const browserPluginNodeHostCommands: OpenClawPluginNodeHostCommand[] = [
     command: "browser.proxy",
     cap: "browser",
     handle: async (paramsJSON) => {
-      const { runBrowserProxyCommand } = await loadBrowserRegistrationRuntimeModule();
+      const { runBrowserProxyCommand } = await import("./register.runtime.js");
       return await runBrowserProxyCommand(paramsJSON);
     },
   },
@@ -155,7 +67,7 @@ export const browserPluginNodeHostCommands: OpenClawPluginNodeHostCommand[] = [
 
 export const browserSecurityAuditCollectors: OpenClawPluginSecurityAuditCollector[] = [
   async (ctx) => {
-    const { collectBrowserSecurityAuditFindings } = await loadBrowserRegistrationRuntimeModule();
+    const { collectBrowserSecurityAuditFindings } = await import("./register.runtime.js");
     return collectBrowserSecurityAuditFindings(ctx);
   },
 ];
@@ -164,7 +76,7 @@ function createLazyBrowserPluginService(): OpenClawPluginService {
   let service: OpenClawPluginService | null = null;
   const loadService = async () => {
     if (!service) {
-      const { createBrowserPluginService } = await loadBrowserRegistrationRuntimeModule();
+      const { createBrowserPluginService } = await import("./register.runtime.js");
       service = createBrowserPluginService();
     }
     return service;
@@ -172,26 +84,25 @@ function createLazyBrowserPluginService(): OpenClawPluginService {
   return {
     id: "browser-control",
     start: async (ctx) => {
-      if (!isTruthyEnvValue(process.env[EAGER_BROWSER_CONTROL_SERVICE_ENV])) {
-        return;
-      }
       const loaded = await loadService();
       await loaded.start(ctx);
     },
     stop: async (ctx) => {
-      if (!service) {
-        const { stopBrowserControlService } = await import("./src/control-service.js");
-        await stopBrowserControlService().catch(() => {});
+      if (!service?.stop) {
         return;
       }
-      await service.stop?.(ctx);
+      await service.stop(ctx);
     },
   };
 }
 
 export function registerBrowserPlugin(api: OpenClawPluginApi) {
   api.registerTool(((ctx: OpenClawPluginToolContext) =>
-    createLazyBrowserTool(createBrowserToolOptions(ctx))) as OpenClawPluginToolFactory);
+    createLazyBrowserTool({
+      sandboxBridgeUrl: ctx.browser?.sandboxBridgeUrl,
+      allowHostControl: ctx.browser?.allowHostControl,
+      agentSessionKey: ctx.sessionKey,
+    })) as OpenClawPluginToolFactory);
   api.registerCli(
     async ({ program }) => {
       const { registerBrowserCli } = await import("./src/cli/browser-cli.js");
@@ -202,7 +113,7 @@ export function registerBrowserPlugin(api: OpenClawPluginApi) {
   api.registerGatewayMethod(
     BROWSER_REQUEST_GATEWAY_METHOD,
     async (opts) => {
-      const { handleBrowserGatewayRequest } = await loadBrowserRegistrationRuntimeModule();
+      const { handleBrowserGatewayRequest } = await import("./register.runtime.js");
       return await handleBrowserGatewayRequest(opts);
     },
     {

@@ -1,6 +1,6 @@
 import {
   createActionGate,
-  readPositiveIntegerParam,
+  readNumberParam,
   readStringParam,
   ToolAuthorizationError,
 } from "openclaw/plugin-sdk/channel-actions";
@@ -218,9 +218,7 @@ export const matrixMessageActions: ChannelMessageActionAdapter = {
 
     if (action === "reactions") {
       const messageId = readStringParam(params, "messageId", { required: true });
-      const limit = readPositiveIntegerParam(params, "limit", {
-        message: "limit must be a positive integer.",
-      });
+      const limit = readNumberParam(params, "limit", { integer: true });
       return await dispatch({
         action: "reactions",
         roomId: resolveRoomId(),
@@ -230,9 +228,7 @@ export const matrixMessageActions: ChannelMessageActionAdapter = {
     }
 
     if (action === "read") {
-      const limit = readPositiveIntegerParam(params, "limit", {
-        message: "limit must be a positive integer.",
-      });
+      const limit = readNumberParam(params, "limit", { integer: true });
       return await dispatch({
         action: "readMessages",
         roomId: resolveRoomId(),

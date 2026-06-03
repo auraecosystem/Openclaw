@@ -35,8 +35,7 @@ export function resolveWhatsAppGroupSessionRoute(route: ResolvedAgentRoute): Res
   };
 }
 
-export const testing = {
+export const __testing = {
   resolveWhatsAppGroupAccountThreadId,
   resolveWhatsAppLegacyGroupSessionKey,
 };
-export { testing as __testing };

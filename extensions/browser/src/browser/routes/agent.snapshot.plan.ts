@@ -1,8 +1,3 @@
-import {
-  parseStrictNonNegativeInteger,
-  parseStrictPositiveInteger,
-} from "openclaw/plugin-sdk/number-runtime";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import type { ResolvedBrowserProfile } from "../config.js";
 import {
   DEFAULT_AI_SNAPSHOT_EFFICIENT_DEPTH,
@@ -14,8 +9,15 @@ import {
   shouldUsePlaywrightForAriaSnapshot,
   shouldUsePlaywrightForScreenshot,
 } from "../profile-capabilities.js";
-import { normalizeBrowserTimerDelayMs } from "../timer-delay.js";
-import { toBoolean, toStringOrEmpty } from "./utils.js";
+import { toBoolean, toNumber, toStringOrEmpty } from "./utils.js";
+
+function readStringValue(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function normalizeOptionalString(value: unknown): string | undefined {
+  return readStringValue(value)?.trim() || undefined;
+}
 
 type BrowserSnapshotPlan = {
   format: "ai" | "aria";
@@ -30,7 +32,6 @@ type BrowserSnapshotPlan = {
   refsMode?: "aria" | "role";
   selectorValue?: string;
   frameSelectorValue?: string;
-  timeoutMs?: number;
   wantsRoleSnapshot: boolean;
 };
 
@@ -50,25 +51,25 @@ export function resolveSnapshotPlan(params: {
     explicitFormat,
     mode,
   });
-  const limit = parseStrictPositiveInteger(params.query.limit);
+  const limitRaw = readStringValue(params.query.limit);
   const hasMaxChars = Object.hasOwn(params.query, "maxChars");
-  const maxCharsRaw = parseStrictNonNegativeInteger(params.query.maxChars);
-  const maxChars = maxCharsRaw !== undefined && maxCharsRaw > 0 ? maxCharsRaw : undefined;
+  const maxCharsRaw = readStringValue(params.query.maxChars);
+  const limit = Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : undefined;
+  const maxChars =
+    Number.isFinite(Number(maxCharsRaw)) && Number(maxCharsRaw) > 0
+      ? Math.floor(Number(maxCharsRaw))
+      : undefined;
   const resolvedMaxChars =
     format === "ai"
       ? hasMaxChars
-        ? maxCharsRaw === undefined
-          ? mode === "efficient"
-            ? DEFAULT_AI_SNAPSHOT_EFFICIENT_MAX_CHARS
-            : DEFAULT_AI_SNAPSHOT_MAX_CHARS
-          : maxChars
+        ? maxChars
         : mode === "efficient"
           ? DEFAULT_AI_SNAPSHOT_EFFICIENT_MAX_CHARS
           : DEFAULT_AI_SNAPSHOT_MAX_CHARS
       : undefined;
   const interactiveRaw = toBoolean(params.query.interactive);
   const compactRaw = toBoolean(params.query.compact);
-  const depthRaw = parseStrictNonNegativeInteger(params.query.depth);
+  const depthRaw = toNumber(params.query.depth);
   const refsModeRaw = toStringOrEmpty(params.query.refs).trim();
   const refsMode: "aria" | "role" | undefined =
     refsModeRaw === "aria" ? "aria" : refsModeRaw === "role" ? "role" : undefined;
@@ -78,9 +79,6 @@ export function resolveSnapshotPlan(params: {
     depthRaw ?? (mode === "efficient" ? DEFAULT_AI_SNAPSHOT_EFFICIENT_DEPTH : undefined);
   const selectorValue = normalizeOptionalString(toStringOrEmpty(params.query.selector));
   const frameSelectorValue = normalizeOptionalString(toStringOrEmpty(params.query.frame));
-  const timeoutMsRaw = parseStrictPositiveInteger(params.query.timeoutMs);
-  const timeoutMs =
-    timeoutMsRaw !== undefined ? normalizeBrowserTimerDelayMs(timeoutMsRaw) : undefined;
 
   return {
     format,
@@ -95,7 +93,6 @@ export function resolveSnapshotPlan(params: {
     refsMode,
     selectorValue,
     frameSelectorValue,
-    timeoutMs,
     wantsRoleSnapshot:
       labels === true ||
       urls === true ||

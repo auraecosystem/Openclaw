@@ -46,10 +46,9 @@ describe("requirements helpers", () => {
   it("resolveMissingOs allows remote platform", () => {
     expect(resolveMissingOs({ required: [], localPlatform: "linux" })).toStrictEqual([]);
     expect(resolveMissingOs({ required: ["linux"], localPlatform: "linux" })).toStrictEqual([]);
-    expect(resolveMissingOs({ required: ["macos"], localPlatform: "darwin" })).toStrictEqual([]);
     expect(
       resolveMissingOs({
-        required: ["macos"],
+        required: ["darwin"],
         localPlatform: "linux",
         remotePlatforms: ["darwin"],
       }),

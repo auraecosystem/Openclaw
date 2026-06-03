@@ -1,5 +1,4 @@
 import type { APIApplicationCommand, APIInteraction } from "discord-api-types/v10";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { DiscordCommandDeployer, type DeployCommandOptions } from "./command-deploy.js";
 import type { BaseCommand } from "./commands.js";
 import { BaseMessageInteractiveComponent, parseCustomId, type Modal } from "./components.js";
@@ -114,7 +113,7 @@ export class ComponentRegistry<
           this.oneOffComponents.delete(key);
           resolve({ success: false, message, reason: "timed out" });
         },
-        resolveTimerTimeoutMs(timeoutMs, 0, 0),
+        Math.max(0, timeoutMs),
       );
       timer.unref?.();
       this.oneOffComponents.set(key, {

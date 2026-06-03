@@ -20,8 +20,6 @@ type GatewayModelCatalogCache = {
   appliedGeneration: number;
 };
 
-const loadModelCatalogModule = async () => await import("../agents/model-catalog.js");
-
 function createGatewayModelCatalogCache(): GatewayModelCatalogCache {
   return {
     lastSuccessfulCatalog: null,
@@ -59,7 +57,7 @@ async function resolveLoadModelCatalog(
   if (params?.loadModelCatalog) {
     return params.loadModelCatalog;
   }
-  const { loadModelCatalog } = await loadModelCatalogModule();
+  const { loadModelCatalog } = await import("../agents/model-catalog.js");
   return loadModelCatalog;
 }
 
@@ -96,11 +94,10 @@ export function markGatewayModelCatalogStaleForReload(): void {
 // Test-only escape hatch: model catalog is cached at module scope for the
 // process lifetime, which is fine for the real gateway daemon, but makes
 // isolated unit tests harder. Keep this intentionally obscure.
-export async function resetModelCatalogCacheForTest(): Promise<void> {
+export async function __resetModelCatalogCacheForTest(): Promise<void> {
   resetGatewayModelCatalogState();
-  const { resetModelCatalogCacheForTest: resetModelCatalogCacheForTestLocal } =
-    await loadModelCatalogModule();
-  resetModelCatalogCacheForTestLocal();
+  const { resetModelCatalogCacheForTest } = await import("../agents/model-catalog.js");
+  resetModelCatalogCacheForTest();
 }
 
 export async function loadGatewayModelCatalog(

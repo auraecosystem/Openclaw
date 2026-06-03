@@ -1,4 +1,4 @@
-import type { ModelRegistry } from "../../llm/model-registry.js";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
 import {
   appendCatalogSupplementRows,
   appendAuthenticatedCatalogRows,

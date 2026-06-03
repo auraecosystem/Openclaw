@@ -1,7 +1,6 @@
-import type { AssistantMessageEvent } from "../llm/types.js";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
+import { streamSimple, type AssistantMessageEvent } from "@earendil-works/pi-ai";
 import type { PluginTextReplacement, PluginTextTransforms } from "../plugins/cli-backend.types.js";
-import type { StreamFn } from "./runtime/index.js";
-import type { MutableAssistantMessageEventStream } from "./stream-compat.js";
 import { createStreamIteratorWrapper } from "./stream-iterator-wrapper.js";
 
 export function mergePluginTextTransforms(
@@ -117,9 +116,9 @@ function transformAssistantEventText(
 }
 
 function wrapStreamTextTransforms(
-  stream: MutableAssistantMessageEventStream,
+  stream: ReturnType<typeof streamSimple>,
   replacements?: PluginTextReplacement[],
-): MutableAssistantMessageEventStream {
+): ReturnType<typeof streamSimple> {
   if (!replacements || replacements.length === 0) {
     return stream;
   }

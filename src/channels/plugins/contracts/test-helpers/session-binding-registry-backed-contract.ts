@@ -1,7 +1,7 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../../../config/config.js";
 import {
-  testing as sessionBindingTesting,
+  __testing as sessionBindingTesting,
   type SessionBindingCapabilities,
   type SessionBindingRecord,
 } from "../../../../infra/outbound/session-binding-service.js";
@@ -58,10 +58,6 @@ export function describeSessionBindingRegistryBackedContract(id: string) {
   }
 
   describe(`${entry.id} session binding contract`, () => {
-    beforeAll(async () => {
-      await entry.preload?.();
-    });
-
     beforeEach(async () => {
       resetPluginRuntimeStateForTest();
       clearRuntimeConfigSnapshot();

@@ -33,28 +33,14 @@ describe("OpenClawSchema talk validation", () => {
             providers: {
               openai: {
                 model: "gpt-realtime",
-                speakerVoice: "alloy",
-                speakerVoiceId: "voice-123",
+                voice: "alloy",
               },
             },
             instructions: "Speak with crisp diction.",
-            consultRouting: "force-agent-consult",
           },
         },
       }),
     ).not.toThrow();
-  });
-
-  it("rejects invalid realtime Talk consult routing", () => {
-    expect(() =>
-      OpenClawSchema.parse({
-        talk: {
-          realtime: {
-            consultRouting: "always",
-          },
-        },
-      }),
-    ).toThrow(/consultRouting/i);
   });
 
   it.each([

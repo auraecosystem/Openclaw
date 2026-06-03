@@ -20,11 +20,7 @@ const sharedClientMocks = vi.hoisted(() => ({
   getSharedCodexAppServerClient: vi.fn(),
 }));
 
-vi.mock("./app-server/shared-client.js", () => ({
-  ...sharedClientMocks,
-  getLeasedSharedCodexAppServerClient: sharedClientMocks.getSharedCodexAppServerClient,
-  releaseLeasedSharedCodexAppServerClient: vi.fn(),
-}));
+vi.mock("./app-server/shared-client.js", () => sharedClientMocks);
 
 describe("codex conversation controls", () => {
   beforeEach(async () => {
@@ -66,12 +62,11 @@ describe("codex conversation controls", () => {
 
   it("does not persist public OpenAI provider after model changes on native auth bindings", async () => {
     const sessionFile = path.join(tempDir, "session.jsonl");
-    const agentDir = path.join(tempDir, "agents", "bot-a", "agent");
     upsertAuthProfile({
       profileId: "work",
       credential: {
         type: "oauth",
-        provider: "openai",
+        provider: "openai-codex",
         access: "access-token",
         refresh: "refresh-token",
         expires: Date.now() + 60_000,
@@ -92,14 +87,12 @@ describe("codex conversation controls", () => {
       })),
     });
 
-    await expect(
-      setCodexConversationModel({ sessionFile, agentDir, model: "gpt-5.5" }),
-    ).resolves.toBe("Codex model set to gpt-5.5.");
+    await expect(setCodexConversationModel({ sessionFile, model: "gpt-5.5" })).resolves.toBe(
+      "Codex model set to gpt-5.5.",
+    );
 
     const raw = await fs.readFile(`${sessionFile}.codex-app-server.json`, "utf8");
     const binding = await readCodexAppServerBinding(sessionFile);
-    const sharedClientParams = sharedClientMocks.getSharedCodexAppServerClient.mock.calls[0]?.[0];
-    expect(sharedClientParams?.agentDir).toBe(agentDir);
     expect(raw).not.toContain('"modelProvider": "openai"');
     expect(binding?.threadId).toBe("thread-1");
     expect(binding?.authProfileId).toBe("work");

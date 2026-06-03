@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 
-const runEmbeddedAgentMock = vi.fn();
+const runEmbeddedPiAgentMock = vi.fn();
 
 vi.mock("../agents/agent-scope.js", () => ({
   resolveDefaultAgentId: vi.fn(() => "main"),
@@ -16,28 +16,28 @@ vi.mock("../agents/agent-scope.js", () => ({
   }),
 }));
 
-vi.mock("../agents/embedded-agent.js", () => ({
-  runEmbeddedAgent: (...args: unknown[]) => runEmbeddedAgentMock(...args),
+vi.mock("../agents/pi-embedded.js", () => ({
+  runEmbeddedPiAgent: (...args: unknown[]) => runEmbeddedPiAgentMock(...args),
 }));
 
 import { generateSlugViaLLM } from "./llm-slug-generator.js";
 
 function requireFirstRunOptions(): Record<string, unknown> {
-  const [call] = runEmbeddedAgentMock.mock.calls;
+  const [call] = runEmbeddedPiAgentMock.mock.calls;
   if (!call) {
-    throw new Error("expected embedded OpenClaw agent run");
+    throw new Error("expected embedded Pi agent run");
   }
   const [options] = call;
   if (!options || typeof options !== "object") {
-    throw new Error("expected embedded OpenClaw agent run options");
+    throw new Error("expected embedded Pi agent run options");
   }
   return options as Record<string, unknown>;
 }
 
 describe("generateSlugViaLLM", () => {
   beforeEach(() => {
-    runEmbeddedAgentMock.mockReset();
-    runEmbeddedAgentMock.mockResolvedValue({
+    runEmbeddedPiAgentMock.mockReset();
+    runEmbeddedPiAgentMock.mockResolvedValue({
       payloads: [{ text: "test-slug" }],
     });
   });
@@ -48,20 +48,10 @@ describe("generateSlugViaLLM", () => {
       cfg: {} as OpenClawConfig,
     });
 
-    expect(runEmbeddedAgentMock).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
     const options = requireFirstRunOptions();
     expect(options.timeoutMs).toBe(15_000);
     expect(options.cleanupBundleMcpOnRunEnd).toBe(true);
-  });
-
-  it("marks the run lane-local so internal-helper failures do not poison shared profile health (#71709)", async () => {
-    await generateSlugViaLLM({
-      sessionContent: "hello",
-      cfg: {} as OpenClawConfig,
-    });
-
-    expect(runEmbeddedAgentMock).toHaveBeenCalledOnce();
-    expect(requireFirstRunOptions().authProfileFailurePolicy).toBe("local");
   });
 
   it("honors configured agent timeoutSeconds for slow local providers", async () => {
@@ -76,7 +66,7 @@ describe("generateSlugViaLLM", () => {
       } as OpenClawConfig,
     });
 
-    expect(runEmbeddedAgentMock).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
     expect(requireFirstRunOptions().timeoutMs).toBe(500_000);
   });
 
@@ -91,7 +81,7 @@ describe("generateSlugViaLLM", () => {
         },
         models: {
           providers: {
-            openai: {
+            "openai-codex": {
               baseUrl: "https://chatgpt.com/backend-api/codex",
               models: [
                 {
@@ -110,9 +100,9 @@ describe("generateSlugViaLLM", () => {
       } as OpenClawConfig,
     });
 
-    expect(runEmbeddedAgentMock).toHaveBeenCalledOnce();
+    expect(runEmbeddedPiAgentMock).toHaveBeenCalledOnce();
     const options = requireFirstRunOptions();
-    expect(options.provider).toBe("openai");
+    expect(options.provider).toBe("openai-codex");
     expect(options.model).toBe("gpt-5.5");
   });
 });

@@ -1,10 +1,8 @@
 import { createSubsystemLogger } from "openclaw/plugin-sdk/logging-core";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { readProviderJsonArrayFieldResponse } from "openclaw/plugin-sdk/provider-http";
 import type { ModelDefinitionConfig } from "openclaw/plugin-sdk/provider-model-shared";
 import { SELF_HOSTED_DEFAULT_COST } from "openclaw/plugin-sdk/provider-setup";
 import { fetchWithSsrFGuard, type SsrFPolicy } from "openclaw/plugin-sdk/ssrf-runtime";
-import { asPositiveSafeInteger } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH } from "./defaults.js";
 import {
   buildLmstudioModelName,
@@ -45,12 +43,11 @@ async function fetchLmstudioEndpoint(params: {
   ssrfPolicy?: SsrFPolicy;
   auditContext: string;
 }): Promise<{ response: Response; release: () => Promise<void> }> {
-  const timeoutMs = resolveTimerTimeoutMs(params.timeoutMs, 1);
   if (params.ssrfPolicy) {
     return await fetchWithSsrFGuard({
       url: params.url,
       init: params.init,
-      timeoutMs,
+      timeoutMs: params.timeoutMs,
       fetchImpl: params.fetchImpl,
       policy: params.ssrfPolicy,
       auditContext: params.auditContext,
@@ -60,7 +57,7 @@ async function fetchLmstudioEndpoint(params: {
   return {
     response: await fetchFn(params.url, {
       ...params.init,
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(params.timeoutMs),
     }),
     release: async () => {},
   };
@@ -217,8 +214,18 @@ export async function ensureLmstudioModelLoaded(params: {
   }
   const matchingModel = preflight.models.find((entry) => entry.key?.trim() === modelKey);
   const loadedContextWindow = matchingModel ? resolveLoadedContextWindow(matchingModel) : null;
-  const advertisedContextLimit = asPositiveSafeInteger(matchingModel?.max_context_length) ?? null;
-  const requestedContextLength = asPositiveSafeInteger(params.requestedContextLength) ?? null;
+  const advertisedContextLimit =
+    matchingModel?.max_context_length !== undefined &&
+    Number.isFinite(matchingModel.max_context_length) &&
+    matchingModel.max_context_length > 0
+      ? Math.floor(matchingModel.max_context_length)
+      : null;
+  const requestedContextLength =
+    params.requestedContextLength !== undefined &&
+    Number.isFinite(params.requestedContextLength) &&
+    params.requestedContextLength > 0
+      ? Math.floor(params.requestedContextLength)
+      : null;
   const contextLengthForLoad =
     advertisedContextLimit === null
       ? (requestedContextLength ?? LMSTUDIO_DEFAULT_LOAD_CONTEXT_LENGTH)

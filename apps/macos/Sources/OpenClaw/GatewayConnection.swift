@@ -64,7 +64,6 @@ actor GatewayConnection {
         case configSet = "config.set"
         case configPatch = "config.patch"
         case configSchema = "config.schema"
-        case configSchemaLookup = "config.schema.lookup"
         case wizardStart = "wizard.start"
         case wizardNext = "wizard.next"
         case wizardCancel = "wizard.cancel"
@@ -514,16 +513,12 @@ extension GatewayConnection {
         var params: [String: AnyCodable] = [
             "message": AnyCodable(trimmed),
             "sessionKey": AnyCodable(sessionKey),
+            "thinking": AnyCodable(invocation.thinking ?? "default"),
             "deliver": AnyCodable(invocation.deliver),
             "to": AnyCodable(invocation.to ?? ""),
             "channel": AnyCodable(invocation.channel.rawValue),
             "idempotencyKey": AnyCodable(invocation.idempotencyKey),
         ]
-        if let thinking = invocation.thinking?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !thinking.isEmpty
-        {
-            params["thinking"] = AnyCodable(thinking)
-        }
         if let timeout = invocation.timeoutSeconds {
             params["timeout"] = AnyCodable(timeout)
         }
@@ -668,7 +663,7 @@ extension GatewayConnection {
     func chatSend(
         sessionKey: String,
         message: String,
-        thinking: String?,
+        thinking: String,
         idempotencyKey: String,
         attachments: [OpenClawChatAttachmentPayload],
         timeoutMs: Int = 30000) async throws -> OpenClawChatSendResponse
@@ -677,14 +672,10 @@ extension GatewayConnection {
         var params: [String: AnyCodable] = [
             "sessionKey": AnyCodable(resolvedKey),
             "message": AnyCodable(message),
+            "thinking": AnyCodable(thinking),
             "idempotencyKey": AnyCodable(idempotencyKey),
             "timeoutMs": AnyCodable(timeoutMs),
         ]
-        if let thinking = thinking?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !thinking.isEmpty
-        {
-            params["thinking"] = AnyCodable(thinking)
-        }
 
         if !attachments.isEmpty {
             let encoded = attachments.map { att in

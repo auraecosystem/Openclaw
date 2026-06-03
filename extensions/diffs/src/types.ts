@@ -67,7 +67,6 @@ export type DiffRenderOptions = {
     maxPixels: number;
   };
   expandUnchanged: boolean;
-  languagePackAvailable?: boolean;
 };
 
 export type DiffViewerOptions = {
@@ -100,7 +99,6 @@ export type RenderedDiffDocument = {
   title: string;
   fileCount: number;
   inputKind: DiffInput["kind"];
-  viewerRuntime: "base" | "language-pack";
 };
 
 export type DiffArtifactContext = {

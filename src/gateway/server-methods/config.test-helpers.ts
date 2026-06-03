@@ -77,7 +77,5 @@ export function createConfigHandlerHarness(args?: {
 }
 
 export async function flushConfigHandlerMicrotasks() {
-  await new Promise<void>((resolve) => {
-    queueMicrotask(resolve);
-  });
+  await new Promise<void>((resolve) => queueMicrotask(resolve));
 }

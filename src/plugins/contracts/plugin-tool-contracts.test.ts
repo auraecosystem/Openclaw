@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import { expectNoReaddirSyncDuring } from "../../test-utils/fs-scan-assertions.js";
 import {
   listGitTrackedFiles,
@@ -268,20 +268,13 @@ function normalizeManifestTools(value: unknown): string[] {
 }
 
 describe("bundled plugin tool manifest contracts", () => {
-  let toolContractFailures: string[] = [];
-
-  beforeAll(() => {
-    listGitTrackedFiles({ pathspecs: "extensions" });
-    toolContractFailures = collectToolContractFailures(path.join(process.cwd(), "extensions"));
-  });
-
   it("lists plugin tool contract inputs from git without walking extension roots", () => {
     const extensionsDir = path.join(process.cwd(), "extensions");
     expectNoReaddirSyncDuring(() => {
       const manifestPaths = listPluginManifestPaths(extensionsDir);
-      const sourceFiles = manifestPaths[0]
-        ? walkFiles(path.dirname(manifestPaths[0])).filter(isProductionSource)
-        : [];
+      const sourceFiles = manifestPaths.flatMap((manifestPath) =>
+        walkFiles(path.dirname(manifestPath)).filter(isProductionSource),
+      );
 
       expect(manifestPaths.length).toBeGreaterThan(0);
       expect(sourceFiles.length).toBeGreaterThan(0);
@@ -289,44 +282,41 @@ describe("bundled plugin tool manifest contracts", () => {
   });
 
   it("declares every production registerTool owner in contracts.tools", () => {
-    expect(toolContractFailures).toStrictEqual([]);
-  });
-});
+    const extensionsDir = path.join(process.cwd(), "extensions");
+    const failures: string[] = [];
 
-function collectToolContractFailures(extensionsDir: string): string[] {
-  const failures: string[] = [];
+    for (const manifestPath of listPluginManifestPaths(extensionsDir)) {
+      const pluginDir = path.dirname(manifestPath);
+      const manifest = readManifest(manifestPath);
+      const pluginId = typeof manifest.id === "string" ? manifest.id : path.basename(pluginDir);
+      const declaredTools = new Set(normalizeManifestTools(manifest.contracts?.tools));
+      const registeredNames = new Set<string>();
+      let registerCallCount = 0;
 
-  for (const manifestPath of listPluginManifestPaths(extensionsDir)) {
-    const pluginDir = path.dirname(manifestPath);
-    const manifest = readManifest(manifestPath);
-    const pluginId = typeof manifest.id === "string" ? manifest.id : path.basename(pluginDir);
-    const declaredTools = new Set(normalizeManifestTools(manifest.contracts?.tools));
-    const registeredNames = new Set<string>();
-    let registerCallCount = 0;
-
-    for (const filePath of walkFiles(pluginDir).filter(isProductionSource)) {
-      const source = fs.readFileSync(filePath, "utf-8");
-      for (const call of listRegisterToolCalls(source)) {
-        registerCallCount += 1;
-        for (const name of extractStaticRegisteredToolNames(call)) {
-          registeredNames.add(name);
+      for (const filePath of walkFiles(pluginDir).filter(isProductionSource)) {
+        const source = fs.readFileSync(filePath, "utf-8");
+        for (const call of listRegisterToolCalls(source)) {
+          registerCallCount += 1;
+          for (const name of extractStaticRegisteredToolNames(call)) {
+            registeredNames.add(name);
+          }
         }
+      }
+
+      if (registerCallCount === 0) {
+        continue;
+      }
+      if (declaredTools.size === 0) {
+        failures.push(`${pluginId}: registers agent tools but has no contracts.tools`);
+        continue;
+      }
+
+      const missing = [...registeredNames].filter((name) => !declaredTools.has(name)).toSorted();
+      if (missing.length > 0) {
+        failures.push(`${pluginId}: missing contracts.tools for ${missing.join(", ")}`);
       }
     }
 
-    if (registerCallCount === 0) {
-      continue;
-    }
-    if (declaredTools.size === 0) {
-      failures.push(`${pluginId}: registers agent tools but has no contracts.tools`);
-      continue;
-    }
-
-    const missing = [...registeredNames].filter((name) => !declaredTools.has(name)).toSorted();
-    if (missing.length > 0) {
-      failures.push(`${pluginId}: missing contracts.tools for ${missing.join(", ")}`);
-    }
-  }
-
-  return failures;
-}
+    expect(failures).toStrictEqual([]);
+  });
+});

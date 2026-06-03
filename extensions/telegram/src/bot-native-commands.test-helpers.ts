@@ -4,7 +4,6 @@ import type { TelegramAccountConfig } from "openclaw/plugin-sdk/config-contracts
 import type { MockFn } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import { vi } from "vitest";
-import type { TelegramNativeCommandDeps } from "./bot-native-command-deps.runtime.js";
 import type { RegisterTelegramNativeCommandsParams } from "./bot-native-commands.js";
 import { registerTelegramNativeCommands } from "./bot-native-commands.js";
 
@@ -25,8 +24,6 @@ type EnsureConfiguredBindingRouteReadyFn =
   typeof import("./bot-native-commands.runtime.js").ensureConfiguredBindingRouteReady;
 type GetAgentScopedMediaLocalRootsFn =
   typeof import("./bot-native-commands.runtime.js").getAgentScopedMediaLocalRoots;
-type ResolveThreadSessionKeysFn =
-  typeof import("./bot-native-commands.runtime.js").resolveThreadSessionKeys;
 type CreateChannelReplyPipelineFn =
   typeof import("./bot-native-commands.delivery.runtime.js").createChannelMessageReplyPipeline;
 type AnyMock = MockFn<(...args: unknown[]) => unknown>;
@@ -37,7 +34,6 @@ type NativeCommandHarness = {
   setMyCommands: AnyAsyncMock;
   log: AnyMock;
   bot: RegisterTelegramNativeCommandsParams["bot"];
-  readChannelAllowFromStore: AnyAsyncMock;
 };
 
 const pluginCommandMocks = vi.hoisted(() => ({
@@ -71,19 +67,6 @@ const replyPipelineMocks = vi.hoisted(() => {
       ok: true,
     })) as unknown as EnsureConfiguredBindingRouteReadyFn),
     getAgentScopedMediaLocalRoots: vi.fn<GetAgentScopedMediaLocalRootsFn>(() => []),
-    resolveThreadSessionKeys: vi.fn<ResolveThreadSessionKeysFn>(
-      ({ baseSessionKey, threadId, parentSessionKey, useSuffix = true, normalizeThreadId }) => {
-        const normalizedThreadId =
-          typeof threadId === "string" ? (normalizeThreadId?.(threadId) ?? threadId.trim()) : "";
-        return {
-          sessionKey:
-            normalizedThreadId && useSuffix
-              ? `${baseSessionKey}:thread:${normalizedThreadId.toLowerCase()}`
-              : baseSessionKey,
-          parentSessionKey,
-        };
-      },
-    ),
   };
 });
 const deliveryMocks = vi.hoisted(() => ({
@@ -99,7 +82,6 @@ vi.mock("./bot-native-commands.runtime.js", () => ({
   resolveChunkMode: replyPipelineMocks.resolveChunkMode,
   ensureConfiguredBindingRouteReady: replyPipelineMocks.ensureConfiguredBindingRouteReady,
   getAgentScopedMediaLocalRoots: replyPipelineMocks.getAgentScopedMediaLocalRoots,
-  resolveThreadSessionKeys: replyPipelineMocks.resolveThreadSessionKeys,
 }));
 vi.mock("./bot-native-commands.delivery.runtime.js", () => ({
   createChannelMessageReplyPipeline: replyPipelineMocks.createChannelMessageReplyPipeline,
@@ -137,7 +119,6 @@ export function createNativeCommandsHarness(params?: {
   allowFrom?: string[];
   groupAllowFrom?: string[];
   storeAllowFrom?: string[];
-  readChannelAllowFromStore?: AnyAsyncMock;
   useAccessGroups?: boolean;
   nativeEnabled?: boolean;
   groupConfig?: Record<string, unknown>;
@@ -147,12 +128,9 @@ export function createNativeCommandsHarness(params?: {
   const sendMessage: AnyAsyncMock = vi.fn(async () => undefined);
   const setMyCommands: AnyAsyncMock = vi.fn(async () => undefined);
   const log: AnyMock = vi.fn();
-  const readChannelAllowFromStore: AnyAsyncMock =
-    params?.readChannelAllowFromStore ?? vi.fn(async () => params?.storeAllowFrom ?? []);
   const telegramDeps = {
     getRuntimeConfig: vi.fn(() => params?.cfg ?? ({} as OpenClawConfig)),
-    readChannelAllowFromStore:
-      readChannelAllowFromStore as TelegramNativeCommandDeps["readChannelAllowFromStore"],
+    readChannelAllowFromStore: vi.fn(async () => params?.storeAllowFrom ?? []),
     dispatchReplyWithBufferedBlockDispatcher:
       replyPipelineMocks.dispatchReplyWithBufferedBlockDispatcher,
     getPluginCommandSpecs: pluginCommandMocks.getPluginCommandSpecs,
@@ -199,23 +177,7 @@ export function createNativeCommandsHarness(params?: {
     opts: { token: "token" },
   });
 
-  return { handlers, sendMessage, setMyCommands, log, bot, readChannelAllowFromStore };
-}
-
-export function createTelegramDmCommandContext(params?: { senderId?: number; username?: string }) {
-  const senderId = params?.senderId ?? 12345;
-  return {
-    message: {
-      chat: { id: senderId, type: "private" },
-      from: {
-        id: senderId,
-        username: params?.username ?? "testuser",
-      },
-      message_id: 1,
-      date: 1700000000,
-    },
-    match: "",
-  };
+  return { handlers, sendMessage, setMyCommands, log, bot };
 }
 
 export function createTelegramGroupCommandContext(params?: {

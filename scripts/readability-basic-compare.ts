@@ -60,7 +60,7 @@ async function run() {
   }
 }
 
-run().catch((error: unknown) => {
+run().catch((error) => {
   console.error(error);
   process.exit(1);
 });

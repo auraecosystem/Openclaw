@@ -21,7 +21,6 @@ import {
   resolveSlackThreadHistoryFilterPolicy,
   shouldIncludeBotThreadStarterContext,
 } from "./prepare-thread-context-root.js";
-import { resolveSlackTimestampMs } from "./timestamp.js";
 
 type SlackMediaModule = typeof import("../media.js");
 let slackMediaModulePromise: Promise<SlackMediaModule> | undefined;
@@ -122,15 +121,9 @@ export async function resolveSlackThreadContextData(params: {
 
   let threadStarterBody: string | undefined;
   let threadHistoryBody: string | undefined;
+  let threadSessionPreviousTimestamp: number | undefined;
   let threadLabel: string | undefined;
   let threadStarterMedia: SlackMediaResult[] | null = null;
-  const threadSessionPreviousTimestamp =
-    params.isThreadReply && params.threadTs
-      ? readSessionUpdatedAt({
-          storePath: params.storePath,
-          sessionKey: params.sessionKey,
-        })
-      : undefined;
 
   if (!params.isThreadReply || !params.threadTs) {
     return {
@@ -194,6 +187,10 @@ export async function resolveSlackThreadContextData(params: {
     threadLabel = `Slack thread ${params.roomLabel}`;
   }
 
+  threadSessionPreviousTimestamp = readSessionUpdatedAt({
+    storePath: params.storePath,
+    sessionKey: params.sessionKey,
+  });
   const isNewThreadSession = !threadSessionPreviousTimestamp;
   const includeBotStarterAsRootContext = shouldIncludeBotThreadStarterContext({
     starterIsCurrentBot,
@@ -313,7 +310,7 @@ export async function resolveSlackThreadContextData(params: {
           formatInboundEnvelope({
             channel: "Slack",
             from: `${msgSenderName} (${role})`,
-            timestamp: resolveSlackTimestampMs(historyMsg.ts),
+            timestamp: historyMsg.ts ? Math.round(Number(historyMsg.ts) * 1000) : undefined,
             body: msgWithId,
             chatType: "channel",
             envelope: params.envelopeOptions,

@@ -8,10 +8,10 @@ export function createTempDirHarness() {
   const tempDirs: TempWorkspace[] = [];
 
   return {
-    cleanup: async () => {
+    async cleanup() {
       await Promise.all(tempDirs.splice(0).map((dir) => dir.cleanup()));
     },
-    makeTempDir: async (prefix: string) => {
+    async makeTempDir(prefix: string) {
       const dir = await tempWorkspace({
         rootDir: resolvePreferredOpenClawTmpDir(),
         prefix,

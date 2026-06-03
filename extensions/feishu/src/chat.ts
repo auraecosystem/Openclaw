@@ -1,5 +1,4 @@
 import type * as Lark from "@larksuiteoapi/node-sdk";
-import { readPositiveIntegerParam } from "openclaw/plugin-sdk/param-readers";
 import type { OpenClawPluginApi } from "../runtime-api.js";
 import { listEnabledFeishuAccounts } from "./accounts.js";
 import { FeishuChatSchema, type FeishuChatParams } from "./chat-schema.js";
@@ -12,13 +11,6 @@ function json(data: unknown) {
     content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }],
     details: data,
   };
-}
-
-function readChatPageSize(params: Record<string, unknown>): number | undefined {
-  return readPositiveIntegerParam(params, "page_size", {
-    max: 100,
-    message: "page_size must be a positive integer between 1 and 100",
-  });
 }
 
 export async function getChatInfo(client: Lark.Client, chatId: string) {
@@ -154,7 +146,6 @@ export function registerFeishuChatTools(api: OpenClawPluginApi) {
       description: "Feishu chat operations. Actions: members, info, member_info",
       parameters: FeishuChatSchema,
       async execute(_toolCallId, params) {
-        const rawParams = params as Record<string, unknown>;
         const p = params as FeishuChatParams;
         try {
           const client = getClient();
@@ -167,7 +158,7 @@ export function registerFeishuChatTools(api: OpenClawPluginApi) {
                 await getChatMembers(
                   client,
                   p.chat_id,
-                  readChatPageSize(rawParams),
+                  p.page_size,
                   p.page_token,
                   p.member_id_type,
                 ),

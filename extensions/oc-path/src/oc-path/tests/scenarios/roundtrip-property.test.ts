@@ -82,6 +82,7 @@ describe("roundtrip-property", () => {
   });
 });
 
+
 function generateCorpus(count: number): string[] {
   const corpus: string[] = [];
   // Deterministic seed so flaky failures don't surface differently each run.
@@ -122,7 +123,7 @@ function generateCorpus(count: number): string[] {
       parts.push(`## ${choose(headings)}`);
       parts.push("");
       const itemCount = Math.floor(rand() * 4);
-      for (let itLocal = 0; itLocal < itemCount; itLocal++) {
+      for (let it = 0; it < itemCount; it++) {
         parts.push(`- ${choose(itemTexts)}`);
       }
       if (rand() < 0.2) {

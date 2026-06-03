@@ -39,7 +39,7 @@ vi.mock("./provider-hook-runtime.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./provider-hook-runtime.js")>();
   return {
     ...actual,
-    testing: {},
+    __testing: {},
     prepareProviderExtraParams: vi.fn(),
     resolveProviderHookPlugin: vi.fn(),
     resolveProviderPluginsForHooks: vi.fn(() => []),
@@ -52,22 +52,17 @@ vi.mock("./provider-discovery.runtime.js", () => ({
   resolvePluginDiscoveryProvidersRuntime,
 }));
 
-const resolveProviderOwnerIds = vi.hoisted(() =>
-  vi.fn(({ provider }: { provider: string }) =>
+vi.mock("./providers.js", () => ({
+  resolveCatalogHookProviderPluginIds: vi.fn(() => []),
+  resolveExternalAuthProfileCompatFallbackPluginIds: vi.fn(() => []),
+  resolveExternalAuthProfileProviderPluginIds: vi.fn(() => []),
+  resolveOwningPluginIdsForProvider: vi.fn(({ provider }: { provider: string }) =>
     provider === "ollama"
       ? ["ollama"]
       : provider === "anthropic-vertex"
         ? ["anthropic-vertex"]
         : [],
   ),
-);
-
-vi.mock("./providers.js", () => ({
-  resolveCatalogHookProviderPluginIds: vi.fn(() => []),
-  resolveExternalAuthProfileCompatFallbackPluginIds: vi.fn(() => []),
-  resolveExternalAuthProfileProviderPluginIds: vi.fn(() => []),
-  resolveOwningPluginIdsForProvider: resolveProviderOwnerIds,
-  resolveOwningPluginIdsForProviderRef: resolveProviderOwnerIds,
 }));
 
 import { resolveProviderSyntheticAuthWithPlugin } from "./provider-runtime.js";

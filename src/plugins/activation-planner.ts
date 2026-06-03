@@ -1,9 +1,6 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import type { OpenClawConfig } from "../config/types.js";
-import { normalizePluginsConfig } from "./config-state.js";
-import { passesManifestOwnerBasePolicy } from "./manifest-owner-policy.js";
+import { normalizeOptionalLowercaseString } from "../shared/string-coerce.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 import type { PluginDiagnostic } from "./manifest-types.js";
 import type { PluginManifestActivationCapability } from "./manifest.js";
@@ -60,14 +57,12 @@ type ResolveManifestActivationPlanParams = {
   origin?: PluginOrigin;
   onlyPluginIds?: readonly string[];
   manifestRecords?: readonly PluginManifestRecord[];
-  allowRestrictiveAllowlistBypass?: boolean;
 };
 
 export function resolveManifestActivationPlan(
   params: ResolveManifestActivationPlanParams,
 ): PluginActivationPlan {
   const onlyPluginIdSet = createPluginIdScopeSet(normalizePluginIdScope(params.onlyPluginIds));
-  const normalizedConfig = normalizePluginsConfig(params.config?.plugins);
   const registry = params.manifestRecords
     ? { plugins: params.manifestRecords, diagnostics: [] }
     : loadPluginManifestRegistryForPluginRegistry({
@@ -82,15 +77,6 @@ export function resolveManifestActivationPlan(
         return [];
       }
       if (onlyPluginIdSet && !onlyPluginIdSet.has(plugin.id)) {
-        return [];
-      }
-      if (
-        !passesManifestOwnerBasePolicy({
-          plugin,
-          normalizedConfig,
-          allowRestrictiveAllowlistBypass: params.allowRestrictiveAllowlistBypass,
-        })
-      ) {
         return [];
       }
       const reasons = listManifestActivationTriggerReasons(plugin, params.trigger);
@@ -109,7 +95,7 @@ export function resolveManifestActivationPlan(
 
   return {
     trigger: params.trigger,
-    pluginIds: uniqueStrings(entries.map((entry) => entry.pluginId)),
+    pluginIds: [...new Set(entries.map((entry) => entry.pluginId))],
     entries,
     diagnostics: registry.diagnostics,
   };
@@ -271,9 +257,7 @@ function dedupeReasons(
   reasons: readonly (PluginActivationPlannerReason | null)[],
 ): PluginActivationPlannerReason[] {
   return [
-    ...new Set(
-      reasons.filter((reason): reason is PluginActivationPlannerReason => Boolean(reason)),
-    ),
+    ...new Set(reasons.filter((reason): reason is PluginActivationPlannerReason => !!reason)),
   ];
 }
 

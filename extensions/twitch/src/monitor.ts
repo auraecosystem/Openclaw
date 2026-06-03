@@ -50,7 +50,7 @@ async function processTwitchMessage(params: {
   const { message, account, accountId, config, runtime, core, statusSink } = params;
   const cfg = config as OpenClawConfig;
 
-  await core.channel.inbound.run({
+  await core.channel.turn.run({
     channel: "twitch",
     accountId,
     raw: message,
@@ -63,7 +63,7 @@ async function processTwitchMessage(params: {
         textForCommands: incoming.message,
         raw: incoming,
       }),
-      resolveTurn: async (input) => {
+      resolveTurn: (input) => {
         const route = core.channel.routing.resolveAgentRoute({
           cfg,
           channel: "twitch",
@@ -82,7 +82,7 @@ async function processTwitchMessage(params: {
           envelope: core.channel.reply.resolveEnvelopeFormatOptions(cfg),
           body: input.rawText,
         });
-        const ctxPayload = core.channel.inbound.buildContext({
+        const ctxPayload = core.channel.turn.buildContext({
           channel: "twitch",
           accountId,
           messageId: input.id,
@@ -97,6 +97,10 @@ async function processTwitchMessage(params: {
             kind: "group",
             id: message.channel,
             label: message.channel,
+            routePeer: {
+              kind: "group",
+              id: message.channel,
+            },
           },
           route: {
             agentId: route.agentId,
@@ -105,12 +109,14 @@ async function processTwitchMessage(params: {
           },
           reply: {
             to: `twitch:channel:${message.channel}`,
+            originatingTo: `twitch:channel:${message.channel}`,
           },
           message: {
             body,
             rawBody: input.rawText,
             bodyForAgent: input.textForAgent,
             commandBody: input.textForCommands,
+            envelopeFrom: fromLabel,
           },
         });
         const storePath = core.channel.session.resolveStorePath(cfg.session?.store, {
@@ -289,7 +295,7 @@ export async function monitorTwitchProvider(
         core,
         statusSink,
       });
-    })().catch((err: unknown) => {
+    })().catch((err) => {
       runtime.error?.(`Message processing failed: ${String(err)}`);
     });
   });

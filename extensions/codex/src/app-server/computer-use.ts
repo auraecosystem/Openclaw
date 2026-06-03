@@ -487,12 +487,13 @@ async function delay(ms: number, signal?: AbortSignal): Promise<void> {
     throw abortError(signal);
   }
   await new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout>;
     const onAbort = () => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
       reject(abortError(signal));
     };
-    const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+    timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
       resolve();
     }, ms);

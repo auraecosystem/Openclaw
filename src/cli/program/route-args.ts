@@ -6,7 +6,6 @@ import {
   getVerboseFlag,
   hasFlag,
 } from "../argv.js";
-import { parseStrictPositiveIntOrUndefined } from "./helpers.js";
 
 type OptionalFlagParse = {
   ok: boolean;
@@ -353,12 +352,8 @@ export function parseTasksAuditRouteArgs(argv: string[]) {
   if (!code.ok) {
     return null;
   }
-  const rawLimit = getFlagValue(argv, "--limit");
-  if (rawLimit === null) {
-    return null;
-  }
-  const limit = rawLimit === undefined ? undefined : parseStrictPositiveIntOrUndefined(rawLimit);
-  if (rawLimit !== undefined && limit === undefined) {
+  const limit = getPositiveIntFlagValue(argv, "--limit");
+  if (limit === null) {
     return null;
   }
   return {

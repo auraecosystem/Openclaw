@@ -13,7 +13,6 @@ import {
   type OpenClawConfig,
   type SecretInput,
 } from "openclaw/plugin-sdk/setup";
-import { normalizeOptionalString as normalizeString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolveDefaultFeishuAccountId, resolveFeishuAccount } from "./accounts.js";
 import type { AppRegistrationResult } from "./app-registration.js";
 import type { FeishuConfig, FeishuDomain } from "./types.js";
@@ -22,11 +21,18 @@ const t = createSetupTranslator();
 
 const channel = "feishu" as const;
 const SCAN_TO_CREATE_TP = "ob_cli_app";
-const FEISHU_SETUP_FLOW_KEY = "_flow";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function normalizeString(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
 
 function isFeishuConfigured(cfg: OpenClawConfig): boolean {
   const feishuCfg = cfg.channels?.feishu as FeishuConfig | undefined;
@@ -55,8 +61,8 @@ function isFeishuConfigured(cfg: OpenClawConfig): boolean {
     if (!account || typeof account !== "object") {
       return false;
     }
-    const hasOwnAppId = Object.hasOwn(account, "appId");
-    const hasOwnAppSecret = Object.hasOwn(account, "appSecret");
+    const hasOwnAppId = Object.prototype.hasOwnProperty.call(account, "appId");
+    const hasOwnAppSecret = Object.prototype.hasOwnProperty.call(account, "appSecret");
     const accountAppIdConfigured = hasOwnAppId
       ? isAppIdConfigured((account as Record<string, unknown>).appId)
       : isAppIdConfigured(feishuCfg?.appId);
@@ -251,13 +257,6 @@ function applyNewAppSecurityPolicy(
 // Scan-to-create flow
 // ---------------------------------------------------------------------------
 
-let appRegistrationModulePromise: Promise<typeof import("./app-registration.js")> | null = null;
-
-const loadAppRegistrationModule = async () => {
-  appRegistrationModulePromise ??= import("./app-registration.js");
-  return await appRegistrationModulePromise;
-};
-
 async function promptFeishuDomain(params: {
   prompter: WizardPrompter;
   initialValue?: FeishuDomain;
@@ -288,7 +287,7 @@ async function runScanToCreate(
   domain: FeishuDomain,
 ): Promise<AppRegistrationResult | null> {
   const { beginAppRegistration, initAppRegistration, pollAppRegistration, printQrCode } =
-    await loadAppRegistrationModule();
+    await import("./app-registration.js");
   try {
     await initAppRegistration(domain);
   } catch {
@@ -347,7 +346,7 @@ async function runNewAppFlow(params: {
   const targetAccountId = resolveDefaultFeishuAccountId(next);
 
   // ----- QR scan flow -----
-  let appId: string | null;
+  let appId: string | null = null;
   let appSecret: SecretInput | null = null;
   let appSecretProbeValue: string | null = null;
   let scanDomain: FeishuDomain | undefined;
@@ -366,6 +365,7 @@ async function runNewAppFlow(params: {
   if (scanResult) {
     appId = scanResult.appId;
     appSecret = scanResult.appSecret;
+    appSecretProbeValue = scanResult.appSecret;
     scanDomain = scanResult.domain;
     scanOpenId = scanResult.openId;
   } else {
@@ -398,7 +398,7 @@ async function runNewAppFlow(params: {
 
     // Fetch openId via API for manual flow.
     if (appId && appSecretProbeValue) {
-      const { getAppOwnerOpenId } = await loadAppRegistrationModule();
+      const { getAppOwnerOpenId } = await import("./app-registration.js");
       scanOpenId = await getAppOwnerOpenId({
         appId,
         appSecret: appSecretProbeValue,
@@ -420,9 +420,7 @@ async function runNewAppFlow(params: {
 
   // ----- Apply credentials & security policy -----
   const configProgress = prompter.progress(t("wizard.feishu.configuring"));
-  await new Promise((resolve) => {
-    setTimeout(resolve, 50);
-  });
+  await new Promise((resolve) => setTimeout(resolve, 50));
 
   if (appId && appSecret) {
     next = patchFeishuConfig(next, targetAccountId, {
@@ -581,12 +579,12 @@ export const feishuSetupWizard: ChannelSetupWizard = {
 
     if (alreadyConfigured) {
       return {
-        credentialValues: { ...credentialValues, [FEISHU_SETUP_FLOW_KEY]: "edit" },
+        credentialValues: { ...credentialValues, _flow: "edit" },
       };
     }
 
     return {
-      credentialValues: { ...credentialValues, [FEISHU_SETUP_FLOW_KEY]: "new" },
+      credentialValues: { ...credentialValues, _flow: "new" },
     };
   },
 
@@ -596,7 +594,7 @@ export const feishuSetupWizard: ChannelSetupWizard = {
   // finalize: run the appropriate flow
   // -------------------------------------------------------------------------
   finalize: async ({ cfg, prompter, options, credentialValues }) => {
-    const flow = credentialValues[FEISHU_SETUP_FLOW_KEY] ?? "new";
+    const flow = credentialValues._flow ?? "new";
 
     if (flow === "edit") {
       const result = await runEditFlow({ cfg, prompter, options });

@@ -5,8 +5,7 @@ import {
   type MessageReceipt,
   type MessageReceiptPartKind,
   type MessageReceiptSourceResult,
-} from "openclaw/plugin-sdk/channel-outbound";
-import { normalizeStringEntries, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
+} from "openclaw/plugin-sdk/channel-message";
 
 export type WhatsAppSendKind = "media" | "poll" | "reaction" | "text";
 
@@ -86,7 +85,7 @@ export function combineWhatsAppSendResults(
   kind: WhatsAppSendKind,
   results: readonly WhatsAppSendResult[],
 ): WhatsAppSendResult {
-  const messageIds = uniqueStrings(results.flatMap(listWhatsAppSendResultMessageIds));
+  const messageIds = [...new Set(results.flatMap(listWhatsAppSendResultMessageIds))];
   const keys = results.flatMap((result) => result.keys);
   return {
     kind,
@@ -102,9 +101,9 @@ export function listWhatsAppSendResultMessageIds(result: WhatsAppSendResult): st
   if (receiptIds.length > 0) {
     return receiptIds;
   }
-  const keyIds = normalizeStringEntries(result.keys.map((key) => key.id));
+  const keyIds = result.keys.map((key) => key.id.trim()).filter(Boolean);
   if (keyIds.length > 0) {
-    return uniqueStrings(keyIds);
+    return [...new Set(keyIds)];
   }
   return [];
 }

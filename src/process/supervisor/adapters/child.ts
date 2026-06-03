@@ -1,6 +1,6 @@
 import type { ChildProcessWithoutNullStreams, SpawnOptions } from "node:child_process";
 import { createWindowsOutputDecoder } from "../../../infra/windows-encoding.js";
-import { signalProcessTree } from "../../kill-tree.js";
+import { killProcessTree } from "../../kill-tree.js";
 import { prepareOomScoreAdjustedSpawn } from "../../linux-oom-score.js";
 import { spawnWithFallback } from "../../spawn-utils.js";
 import { resolveWindowsCommandShim } from "../../windows-command.js";
@@ -325,7 +325,7 @@ export async function createChildAdapter(params: {
       return waitResult;
     }
     if (waitError !== undefined) {
-      throw toLintErrorObject(waitError, "Non-Error thrown");
+      throw waitError;
     }
     if (!waitPromise) {
       waitPromise = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
@@ -343,7 +343,7 @@ export async function createChildAdapter(params: {
             const error = waitError;
             resolveWait = null;
             rejectWait = null;
-            reject(toLintErrorObject(error, "Non-Error rejection"));
+            reject(error);
           }
         },
       );
@@ -357,17 +357,14 @@ export async function createChildAdapter(params: {
   // gateway's process group regardless of intent, so the kill must avoid
   // group-kill. (#71662 follow-up — caught by Greptile review)
   const childIsDetached = useDetached && !spawned.usedFallback;
-  const signalProcessTreeForChild = (pid: number, signal: "SIGTERM" | "SIGKILL") => {
-    signalProcessTree(pid, signal, { detached: childIsDetached });
-  };
   const kill = (signal?: NodeJS.Signals) => {
     const pid = child.pid ?? undefined;
     if (signal === undefined || signal === "SIGKILL") {
       if (pid) {
         // Pass through whether the child is actually detached. Without this,
-        // `signalProcessTree` group-kills via `-pid` and takes out the gateway's
+        // `killProcessTree` group-kills via `-pid` and takes out the gateway's
         // own process group along with the child. (#71662)
-        signalProcessTreeForChild(pid, "SIGKILL");
+        killProcessTree(pid, { detached: childIsDetached });
       }
       try {
         child.kill("SIGKILL");
@@ -375,10 +372,6 @@ export async function createChildAdapter(params: {
         // ignore kill errors
       }
       scheduleForceKillWaitFallback("SIGKILL");
-      return;
-    }
-    if (signal === "SIGTERM" && pid) {
-      signalProcessTreeForChild(pid, "SIGTERM");
       return;
     }
     try {
@@ -403,18 +396,4 @@ export async function createChildAdapter(params: {
     kill,
     dispose,
   };
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

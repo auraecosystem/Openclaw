@@ -37,7 +37,6 @@ const {
   globalFetchMock,
   HttpsAgent,
   HttpsProxyAgent,
-  fetchWithSsrFGuardMock,
   getLastAgent,
   getLastProxyAgent,
   resolveDebugProxySettingsMock,
@@ -46,28 +45,16 @@ const {
   httpsAgentSpy,
   wsProxyAgentSpy,
 } = vi.hoisted(() => {
-  const wsProxyAgentSpyLocal = vi.fn();
-  const httpsAgentSpyLocal = vi.fn();
-  const globalFetchMockLocal = vi.fn();
-  const baseRegisterClientSpyLocal = vi.fn();
-  const webSocketSpyLocal = vi.fn();
-  const captureHttpExchangeSpyLocal = vi.fn();
-  const captureWsEventSpyLocal = vi.fn();
-  const resolveDebugProxySettingsMockLocal = vi.fn(() => ({ enabled: false }));
-  const fetchWithSsrFGuardMockLocal = vi.fn(async (params: { url: string; init?: RequestInit }) => {
-    const source = (await globalFetchMockLocal(params.url, params.init)) as Response;
-    const body = await source.text();
-    return {
-      response: new Response(body, {
-        status: source.status,
-        statusText: source.statusText,
-        headers: source.headers,
-      }),
-      release: vi.fn(),
-    };
-  });
+  const wsProxyAgentSpy = vi.fn();
+  const httpsAgentSpy = vi.fn();
+  const globalFetchMock = vi.fn();
+  const baseRegisterClientSpy = vi.fn();
+  const webSocketSpy = vi.fn();
+  const captureHttpExchangeSpy = vi.fn();
+  const captureWsEventSpy = vi.fn();
+  const resolveDebugProxySettingsMock = vi.fn(() => ({ enabled: false }));
 
-  const GatewayIntentsLocal = {
+  const GatewayIntents = {
     Guilds: 1 << 0,
     GuildMessages: 1 << 1,
     MessageContent: 1 << 2,
@@ -79,7 +66,7 @@ const {
     GuildVoiceStates: 1 << 8,
   } as const;
 
-  class GatewayPluginLocal {
+  class GatewayPlugin {
     options: unknown;
     gatewayInfo: unknown;
     client: unknown;
@@ -93,53 +80,52 @@ const {
       this.isConnecting = false;
     }
     async registerClient(client: unknown) {
-      baseRegisterClientSpyLocal(client);
+      baseRegisterClientSpy(client);
     }
   }
 
-  class HttpsAgentLocal {
-    static lastCreated: HttpsAgentLocal | undefined;
+  class HttpsAgent {
+    static lastCreated: HttpsAgent | undefined;
     options: unknown;
     constructor(options?: unknown) {
       this.options = options;
-      HttpsAgentLocal.lastCreated = this;
-      httpsAgentSpyLocal(options);
+      HttpsAgent.lastCreated = this;
+      httpsAgentSpy(options);
     }
   }
 
-  class HttpsProxyAgentLocal {
-    static lastCreated: HttpsProxyAgentLocal | undefined;
+  class HttpsProxyAgent {
+    static lastCreated: HttpsProxyAgent | undefined;
     proxyUrl: string;
     constructor(proxyUrl: string) {
       if (proxyUrl === "bad-proxy") {
         throw new Error("bad proxy");
       }
       this.proxyUrl = proxyUrl;
-      HttpsProxyAgentLocal.lastCreated = this;
-      wsProxyAgentSpyLocal(proxyUrl);
+      HttpsProxyAgent.lastCreated = this;
+      wsProxyAgentSpy(proxyUrl);
     }
   }
 
   return {
-    baseRegisterClientSpy: baseRegisterClientSpyLocal,
-    GatewayIntents: GatewayIntentsLocal,
-    GatewayPlugin: GatewayPluginLocal,
-    globalFetchMock: globalFetchMockLocal,
-    HttpsAgent: HttpsAgentLocal,
-    HttpsProxyAgent: HttpsProxyAgentLocal,
-    fetchWithSsrFGuardMock: fetchWithSsrFGuardMockLocal,
-    getLastAgent: () => HttpsAgentLocal.lastCreated,
-    getLastProxyAgent: () => HttpsProxyAgentLocal.lastCreated,
-    captureHttpExchangeSpy: captureHttpExchangeSpyLocal,
-    captureWsEventSpy: captureWsEventSpyLocal,
-    httpsAgentSpy: httpsAgentSpyLocal,
-    resolveDebugProxySettingsMock: resolveDebugProxySettingsMockLocal,
+    baseRegisterClientSpy,
+    GatewayIntents,
+    GatewayPlugin,
+    globalFetchMock,
+    HttpsAgent,
+    HttpsProxyAgent,
+    getLastAgent: () => HttpsAgent.lastCreated,
+    getLastProxyAgent: () => HttpsProxyAgent.lastCreated,
+    captureHttpExchangeSpy,
+    captureWsEventSpy,
+    httpsAgentSpy,
+    resolveDebugProxySettingsMock,
     resetLastAgent: () => {
-      HttpsAgentLocal.lastCreated = undefined;
-      HttpsProxyAgentLocal.lastCreated = undefined;
+      HttpsAgent.lastCreated = undefined;
+      HttpsProxyAgent.lastCreated = undefined;
     },
-    webSocketSpy: webSocketSpyLocal,
-    wsProxyAgentSpy: wsProxyAgentSpyLocal,
+    webSocketSpy,
+    wsProxyAgentSpy,
   };
 });
 
@@ -156,6 +142,10 @@ vi.mock("../internal/gateway.js", () => ({
 
 vi.mock("node:https", () => ({
   Agent: HttpsAgent,
+}));
+
+vi.mock("https-proxy-agent", () => ({
+  HttpsProxyAgent,
 }));
 
 vi.mock("ws", () => ({
@@ -176,7 +166,18 @@ vi.mock("openclaw/plugin-sdk/proxy-capture", () => ({
 }));
 
 vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
-  fetchWithSsrFGuard: fetchWithSsrFGuardMock,
+  fetchWithSsrFGuard: vi.fn(async (params: { url: string; init?: RequestInit }) => {
+    const source = (await globalFetchMock(params.url, params.init)) as Response;
+    const body = await source.text();
+    return {
+      response: new Response(body, {
+        status: source.status,
+        statusText: source.statusText,
+        headers: source.headers,
+      }),
+      release: vi.fn(),
+    };
+  }),
 }));
 
 describe("createDiscordGatewayPlugin", () => {
@@ -212,20 +213,10 @@ describe("createDiscordGatewayPlugin", () => {
     return firstMockCall(mock, label)[index];
   }
 
-  function firstGuardedFetchCall() {
-    return firstMockArg(fetchWithSsrFGuardMock, "fetchWithSsrFGuardMock") as {
-      url: string;
-      init?: RequestInit & { signal?: unknown };
-      mode?: string;
-      dispatcherPolicy?: unknown;
-      policy?: unknown;
-    };
-  }
-
   function createProxyTestingOverrides() {
     return {
-      createProxyAgent: (proxyUrl: string) =>
-        new HttpsProxyAgent(proxyUrl) as unknown as import("node:http").Agent,
+      HttpsProxyAgentCtor:
+        HttpsProxyAgent as unknown as typeof import("https-proxy-agent").HttpsProxyAgent,
       webSocketCtor: function WebSocketCtor(
         url: string,
         options?: { agent?: unknown; handshakeTimeout?: number },
@@ -327,7 +318,6 @@ describe("createDiscordGatewayPlugin", () => {
     vi.useRealTimers();
     baseRegisterClientSpy.mockClear();
     globalFetchMock.mockClear();
-    fetchWithSsrFGuardMock.mockClear();
     httpsAgentSpy.mockClear();
     wsProxyAgentSpy.mockClear();
     webSocketSpy.mockClear();
@@ -440,9 +430,7 @@ describe("createDiscordGatewayPlugin", () => {
     process.on("unhandledRejection", onUnhandledRejection);
     try {
       startIgnoredGatewayRegistration(plugin);
-      await new Promise((resolve) => {
-        setImmediate(resolve);
-      });
+      await new Promise((resolve) => setImmediate(resolve));
 
       expect(unhandledReasons).toHaveLength(0);
       const registration = waitForDiscordGatewayPluginRegistration(plugin);
@@ -487,7 +475,7 @@ describe("createDiscordGatewayPlugin", () => {
     const plugin = createDiscordGatewayPlugin({
       discordConfig: { proxy: "http://127.0.0.1:8080" },
       runtime,
-      testing: createProxyTestingOverrides(),
+      __testing: createProxyTestingOverrides(),
     });
 
     expect(Object.getPrototypeOf(plugin)).not.toBe(GatewayPlugin.prototype);
@@ -516,31 +504,27 @@ describe("createDiscordGatewayPlugin", () => {
     expect(Object.getPrototypeOf(plugin)).not.toBe(GatewayPlugin.prototype);
     expect(runtime.error).toHaveBeenCalled();
     expect(runtime.log).not.toHaveBeenCalled();
-    expect(fetchWithSsrFGuardMock).not.toHaveBeenCalled();
   });
 
-  it("routes gateway metadata lookup through the guarded proxy dispatcher", async () => {
+  it("keeps gateway metadata lookup on the guarded direct fetch when proxy is configured", async () => {
     const runtime = createRuntime();
     const plugin = createDiscordGatewayPlugin({
       discordConfig: { proxy: "http://127.0.0.1:8080" },
       runtime,
-      testing: createProxyTestingOverrides(),
+      __testing: createProxyTestingOverrides(),
     });
 
     await registerGatewayClientWithMetadata({ plugin, fetchMock: globalFetchMock });
 
-    expect(fetchWithSsrFGuardMock).toHaveBeenCalledTimes(1);
-    const guardedFetch = firstGuardedFetchCall();
-    expect(guardedFetch.url).toBe("https://discord.com/api/v10/gateway/bot");
-    expect(guardedFetch.mode).toBe("trusted_explicit_proxy");
-    expect(guardedFetch.dispatcherPolicy).toEqual({
-      mode: "explicit-proxy",
-      proxyUrl: "http://127.0.0.1:8080",
-      allowPrivateProxy: true,
-    });
-    expect(guardedFetch.policy).toEqual({ allowedHostnames: ["discord.com"] });
-    expect(guardedFetch.init?.headers).toEqual({ Authorization: "Bot token-123" });
-    expect(guardedFetch.init?.signal).toBeInstanceOf(AbortSignal);
+    expect(globalFetchMock).toHaveBeenCalledTimes(1);
+    const fetchInit = firstMockArg(globalFetchMock, "globalFetchMock", 1) as
+      | { headers?: Record<string, string>; signal?: unknown }
+      | undefined;
+    expect(firstMockArg(globalFetchMock, "globalFetchMock")).toBe(
+      "https://discord.com/api/v10/gateway/bot",
+    );
+    expect(fetchInit?.headers).toEqual({ Authorization: "Bot token-123" });
+    expect(fetchInit?.signal).toBeInstanceOf(AbortSignal);
     expect(baseRegisterClientSpy).toHaveBeenCalledTimes(1);
   });
 
@@ -562,7 +546,7 @@ describe("createDiscordGatewayPlugin", () => {
     const plugin = createDiscordGatewayPlugin({
       discordConfig: { proxy: "http://[::1]:8080" },
       runtime,
-      testing: createProxyTestingOverrides(),
+      __testing: createProxyTestingOverrides(),
     });
 
     const createWebSocket = (plugin as unknown as { createWebSocket: (url: string) => unknown })

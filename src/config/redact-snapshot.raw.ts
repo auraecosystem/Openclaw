@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "node:util";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import JSON5 from "json5";
 
 export function replaceSensitiveValuesInRaw(params: {
@@ -9,7 +8,7 @@ export function replaceSensitiveValuesInRaw(params: {
 }): string {
   // Empty string is not a valid replacement token here: replaceAll("", x)
   // matches every character boundary and corrupts the whole raw snapshot.
-  const values = uniqueStrings(params.sensitiveValues)
+  const values = [...new Set(params.sensitiveValues)]
     .filter((value) => value !== "")
     .toSorted((a, b) => b.length - a.length);
   let result = params.raw;

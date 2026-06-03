@@ -3,11 +3,6 @@ import { WebSocketServer } from "ws";
 import { rawDataToString } from "../infra/ws.js";
 
 const fetchWithSsrFGuardMock = vi.hoisted(() => vi.fn());
-const { registerManagedProxyBrowserCdpBypassMock } = vi.hoisted(() => ({
-  registerManagedProxyBrowserCdpBypassMock: vi.fn<(url: string) => (() => void) | undefined>(
-    () => undefined,
-  ),
-}));
 
 vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => {
   const actual = await importOriginal<typeof import("openclaw/plugin-sdk/ssrf-runtime")>();
@@ -16,10 +11,6 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", async (importOriginal) => {
     fetchWithSsrFGuard: (...args: unknown[]) => fetchWithSsrFGuardMock(...args),
   };
 });
-
-vi.mock("openclaw/plugin-sdk/ssrf-runtime-internal", () => ({
-  registerManagedProxyBrowserCdpBypass: registerManagedProxyBrowserCdpBypassMock,
-}));
 
 import { SsrFBlockedError } from "../infra/net/ssrf.js";
 import {
@@ -42,9 +33,7 @@ import { BrowserCdpEndpointBlockedError } from "./errors.js";
 
 async function startWsServer() {
   const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
-  await new Promise<void>((resolve) => {
-    wss.once("listening", () => resolve());
-  });
+  await new Promise<void>((resolve) => wss.once("listening", () => resolve()));
   const port = (wss.address() as { port: number }).port;
   return { wss, port, url: `ws://127.0.0.1:${port}/devtools/browser/TEST` };
 }
@@ -54,12 +43,8 @@ describe("cdp.helpers internal", () => {
 
   afterEach(async () => {
     fetchWithSsrFGuardMock.mockReset();
-    registerManagedProxyBrowserCdpBypassMock.mockReset();
-    registerManagedProxyBrowserCdpBypassMock.mockImplementation(() => undefined);
     if (wss) {
-      await new Promise<void>((resolve) => {
-        wss?.close(() => resolve());
-      });
+      await new Promise<void>((resolve) => wss?.close(() => resolve()));
       wss = null;
     }
   });
@@ -129,28 +114,6 @@ describe("cdp.helpers internal", () => {
       await guardedRelease();
       // The underlying release must be invoked exactly once.
       expect(release).toHaveBeenCalledTimes(1);
-    });
-
-    it("registers a managed-proxy bypass for the exact sanitized fetch URL", async () => {
-      const release = vi.fn();
-      registerManagedProxyBrowserCdpBypassMock.mockReturnValueOnce(release);
-      fetchWithSsrFGuardMock.mockResolvedValueOnce({
-        response: { ok: true, status: 200 } as unknown as Response,
-        release: vi.fn(async () => {}),
-      });
-
-      const { release: guardedRelease } = await fetchCdpChecked(
-        "http://openclaw:secret@127.0.0.1:9222/json/version",
-        250,
-        undefined,
-        { dangerouslyAllowPrivateNetwork: false, allowedHostnames: ["127.0.0.1"] },
-      );
-
-      expect(registerManagedProxyBrowserCdpBypassMock).toHaveBeenCalledWith(
-        "http://127.0.0.1:9222/json/version",
-      );
-      expect(release).toHaveBeenCalledOnce();
-      await guardedRelease();
     });
 
     it("converts SSRF-blocked errors from the underlying fetch into a browser-scoped error", async () => {
@@ -311,9 +274,7 @@ describe("cdp.helpers internal", () => {
           cb(true);
         },
       });
-      await new Promise<void>((resolve) => {
-        wss?.once("listening", () => resolve());
-      });
+      await new Promise<void>((resolve) => wss?.once("listening", () => resolve()));
       const port = (wss.address() as { port: number }).port;
       let callbackCount = 0;
       wss.on("connection", (socket) => {
@@ -347,9 +308,7 @@ describe("cdp.helpers internal", () => {
           cb(false, 429, "too many requests");
         },
       });
-      await new Promise<void>((resolve) => {
-        wss?.once("listening", () => resolve());
-      });
+      await new Promise<void>((resolve) => wss?.once("listening", () => resolve()));
       const port = (wss.address() as { port: number }).port;
 
       await expect(
@@ -416,9 +375,8 @@ describe("cdp.helpers internal", () => {
       await expect(
         withCdpSocket(server.url, async (send) => {
           await send("Test.ok");
-          const rejectRawString = () =>
-            Promise.reject(toLintErrorObject("raw-string-from-callback", "Non-Error rejection"));
-          return rejectRawString();
+          // biome-ignore lint/style/useThrowOnlyError: exercising the non-Error guard on purpose.
+          throw "raw-string-from-callback";
         }),
       ).rejects.toThrow(/raw-string-from-callback/);
     });
@@ -522,36 +480,6 @@ describe("openCdpWebSocket option handling", () => {
     ws.close();
   });
 
-  it("registers a managed-proxy bypass for the exact websocket URL during construction", () => {
-    const release = vi.fn();
-    registerManagedProxyBrowserCdpBypassMock.mockReturnValueOnce(release);
-    const url = "ws://127.0.0.1:1/devtools/browser/X";
-    const ws = openCdpWebSocket(url, {
-      handshakeTimeoutMs: 500,
-    });
-
-    expect(ws.url).toBe(url);
-    expect(registerManagedProxyBrowserCdpBypassMock).toHaveBeenCalledWith(url);
-    expect(release).toHaveBeenCalledOnce();
-    ws.once("error", () => {});
-    ws.close();
-  });
-
-  it("registers websocket managed-proxy bypass without URL credentials", () => {
-    const release = vi.fn();
-    registerManagedProxyBrowserCdpBypassMock.mockReturnValueOnce(release);
-    const ws = openCdpWebSocket("ws://user:secret@127.0.0.1:1/devtools/browser/X", {
-      handshakeTimeoutMs: 500,
-    });
-
-    expect(registerManagedProxyBrowserCdpBypassMock).toHaveBeenCalledWith(
-      "ws://127.0.0.1:1/devtools/browser/X",
-    );
-    expect(release).toHaveBeenCalledOnce();
-    ws.once("error", () => {});
-    ws.close();
-  });
-
   it("omits the direct-loopback agent for non-loopback targets", () => {
     // Exercises the falsy side of `agent ? { agent } : {}` — the loopback
     // agent helper returns undefined for non-loopback hosts.
@@ -573,17 +501,3 @@ describe("openCdpWebSocket option handling", () => {
     ws.close();
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

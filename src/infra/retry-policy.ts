@@ -11,8 +11,7 @@ export const CHANNEL_API_RETRY_DEFAULTS = {
   jitter: 0.1,
 };
 
-const CHANNEL_API_RETRY_RE =
-  /429|421|timeout|connect|reset|closed|unavailable|temporarily|misdirected request/i;
+const CHANNEL_API_RETRY_RE = /429|timeout|connect|reset|closed|unavailable|temporarily/i;
 const log = createSubsystemLogger("retry-policy");
 
 function resolveChannelApiShouldRetry(params: {

@@ -1,4 +1,3 @@
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import { listAgentEntries, resolveDefaultAgentId } from "../agents/agent-scope.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import { isRouteBinding, listRouteBindings } from "../config/bindings.js";
@@ -116,7 +115,7 @@ async function resolveParsedBindingsOrExit(params: {
   bindings: AgentRouteBinding[];
   errors: string[];
 } | null> {
-  const specs = normalizeStringEntries(params.bindValues);
+  const specs = (params.bindValues ?? []).map((value) => value.trim()).filter(Boolean);
   if (specs.length === 0) {
     params.runtime.error(params.emptyMessage);
     params.runtime.exit(1);
@@ -333,20 +332,6 @@ export async function agentsUnbindCommand(
     const keptRoutes = existing.filter((binding) => normalizeAgentId(binding.agentId) !== agentId);
     const nonRoutes = (cfg.bindings ?? []).filter((binding) => !isRouteBinding(binding));
     if (removed.length === 0) {
-      if (
-        emitJsonPayload({
-          runtime,
-          json: opts.json,
-          payload: {
-            agentId,
-            removed: [] as string[],
-            missing: [] as string[],
-            conflicts: [] as string[],
-          },
-        })
-      ) {
-        return;
-      }
       runtime.log(`No bindings to remove for agent "${agentId}".`);
       return;
     }

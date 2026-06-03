@@ -1,5 +1,3 @@
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import { sortUniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import {
   loadBundledPluginPublicArtifactModuleSync,
   resolveBundledPluginPublicArtifactPath,
@@ -22,6 +20,10 @@ const WEB_FETCH_ARTIFACT_CANDIDATES = [
   "web-fetch-provider.js",
   "web-fetch.js",
 ] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
 function isStringArray(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
@@ -57,9 +59,8 @@ function collectProviderFactories<TProvider>(params: {
   mod: Record<string, unknown>;
   suffix: string;
   isProvider: (value: unknown) => value is TProvider;
-}): { providers: TProvider[]; errors: unknown[] } {
+}): TProvider[] {
   const providers: TProvider[] = [];
-  const errors: unknown[] = [];
   for (const [name, exported] of Object.entries(params.mod).toSorted(([left], [right]) =>
     left.localeCompare(right),
   )) {
@@ -71,27 +72,12 @@ function collectProviderFactories<TProvider>(params: {
     ) {
       continue;
     }
-    let candidate: unknown;
-    try {
-      candidate = exported();
-    } catch (error) {
-      errors.push(error);
-      continue;
-    }
+    const candidate = exported();
     if (params.isProvider(candidate)) {
       providers.push(candidate);
     }
   }
-  return { providers, errors };
-}
-
-function unableToInitializeProviderError(params: {
-  pluginId: string;
-  errors: readonly unknown[];
-}): Error {
-  return new Error(`Unable to initialize web providers for plugin ${params.pluginId}`, {
-    cause: params.errors.length === 1 ? params.errors[0] : new AggregateError(params.errors),
-  });
+  return providers;
 }
 
 function tryLoadBundledPublicArtifactModule(params: {
@@ -118,7 +104,7 @@ function tryLoadBundledPublicArtifactModule(params: {
 }
 
 function normalizeExplicitBundledPluginIds(pluginIds: readonly string[]): string[] {
-  return sortUniqueStrings(pluginIds);
+  return [...new Set(pluginIds)].toSorted((left, right) => left.localeCompare(right));
 }
 
 function loadBundledProviderEntriesFromDir<TProvider extends object>(params: {
@@ -135,18 +121,12 @@ function loadBundledProviderEntriesFromDir<TProvider extends object>(params: {
   if (!mod) {
     return null;
   }
-  const { providers, errors } = collectProviderFactories({
+  const providers = collectProviderFactories({
     mod,
     suffix: params.suffix,
     isProvider: params.isProvider,
   });
   if (providers.length === 0) {
-    if (errors.length > 0) {
-      throw unableToInitializeProviderError({
-        pluginId: params.pluginId,
-        errors,
-      });
-    }
     return null;
   }
   return providers.map((provider) => Object.assign({}, provider, { pluginId: params.pluginId }));

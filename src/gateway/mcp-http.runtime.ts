@@ -1,4 +1,4 @@
-import type { SourceReplyDeliveryMode } from "../auto-reply/get-reply-options.types.js";
+import { applyOwnerOnlyToolPolicy } from "../agents/tool-policy.js";
 import type { InboundEventKind } from "../channels/inbound-event/kind.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -19,49 +19,22 @@ type CachedScopedTools = {
   time: number;
 };
 
-type McpLoopbackScopeParams = {
-  cfg: OpenClawConfig;
-  sessionKey: string;
-  messageProvider: string | undefined;
-  currentChannelId: string | undefined;
-  currentThreadTs: string | undefined;
-  currentMessageId: string | number | undefined;
-  currentInboundAudio: boolean | undefined;
-  accountId: string | undefined;
-  inboundEventKind: InboundEventKind | undefined;
-  sourceReplyDeliveryMode: SourceReplyDeliveryMode | undefined;
-  senderIsOwner: boolean | undefined;
-};
-
-export function resolveMcpLoopbackScopedTools(params: McpLoopbackScopeParams): {
-  agentId: string | undefined;
-  tools: McpLoopbackTool[];
-} {
-  const scoped = resolveGatewayScopedTools({
-    ...params,
-    surface: "loopback",
-    excludeToolNames: NATIVE_TOOL_EXCLUDE,
-  });
-  return {
-    agentId: scoped.agentId,
-    tools: scoped.tools,
-  };
-}
-
 export class McpLoopbackToolCache {
   #entries = new Map<string, CachedScopedTools>();
 
-  resolve(params: McpLoopbackScopeParams): CachedScopedTools {
+  resolve(params: {
+    cfg: OpenClawConfig;
+    sessionKey: string;
+    messageProvider: string | undefined;
+    accountId: string | undefined;
+    inboundEventKind: InboundEventKind | undefined;
+    senderIsOwner: boolean | undefined;
+  }): CachedScopedTools {
     const cacheKey = [
       params.sessionKey,
       params.messageProvider ?? "",
-      params.currentChannelId ?? "",
-      params.currentThreadTs ?? "",
-      params.currentMessageId != null ? String(params.currentMessageId) : "",
-      params.currentInboundAudio === true ? "audio" : "no-audio",
       params.accountId ?? "",
       params.inboundEventKind ?? "",
-      params.sourceReplyDeliveryMode ?? "",
       params.senderIsOwner === true ? "owner" : "non-owner",
     ].join("\u0000");
     const now = Date.now();
@@ -70,11 +43,21 @@ export class McpLoopbackToolCache {
       return cached;
     }
 
-    const next = resolveMcpLoopbackScopedTools(params);
+    const next = resolveGatewayScopedTools({
+      cfg: params.cfg,
+      sessionKey: params.sessionKey,
+      messageProvider: params.messageProvider,
+      accountId: params.accountId,
+      inboundEventKind: params.inboundEventKind,
+      senderIsOwner: params.senderIsOwner,
+      surface: "loopback",
+      excludeToolNames: NATIVE_TOOL_EXCLUDE,
+    });
+    const tools = applyOwnerOnlyToolPolicy(next.tools, params.senderIsOwner === true);
     const nextEntry: CachedScopedTools = {
       agentId: next.agentId,
-      tools: next.tools,
-      toolSchema: buildMcpToolSchema(next.tools),
+      tools,
+      toolSchema: buildMcpToolSchema(tools),
       configRef: params.cfg,
       time: now,
     };

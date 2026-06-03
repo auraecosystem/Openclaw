@@ -1,4 +1,3 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import type {
   QaBusEvent,
   QaBusMessage,
@@ -96,7 +95,7 @@ export function createQaBusWaiterStore(getSnapshot: () => QaBusStateSnapshot) {
         return immediate;
       }
       return await new Promise<QaBusWaitMatch>((resolve, reject) => {
-        const timeoutMs = resolveTimerTimeoutMs(input.timeoutMs, DEFAULT_WAIT_TIMEOUT_MS, 0);
+        const timeoutMs = input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS;
         const waiter: Waiter = {
           resolve,
           reject,
@@ -119,7 +118,6 @@ export function createQaBusWaiterStore(getSnapshot: () => QaBusStateSnapshot) {
         return;
       }
       return await new Promise<void>((resolve, reject) => {
-        const resolvedTimeoutMs = resolveTimerTimeoutMs(timeoutMs, DEFAULT_WAIT_TIMEOUT_MS, 0);
         const waiter: CursorWaiter = {
           resolve,
           reject,
@@ -127,8 +125,8 @@ export function createQaBusWaiterStore(getSnapshot: () => QaBusStateSnapshot) {
           shouldResolve,
           timer: setTimeout(() => {
             cursorWaiters.delete(waiter);
-            reject(new Error(`qa-bus wait timeout after ${resolvedTimeoutMs}ms`));
-          }, resolvedTimeoutMs),
+            reject(new Error(`qa-bus wait timeout after ${timeoutMs}ms`));
+          }, timeoutMs),
         };
         cursorWaiters.add(waiter);
       });

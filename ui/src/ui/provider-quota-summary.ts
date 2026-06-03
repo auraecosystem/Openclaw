@@ -1,4 +1,3 @@
-import { asDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { ModelAuthStatusProvider, ModelAuthStatusResult } from "./types.ts";
 
 export type QuotaWindowSummary = {
@@ -9,11 +8,10 @@ export type QuotaWindowSummary = {
 };
 
 export function formatQuotaReset(resetAt?: number): string | null {
-  const timestampMs = asDateTimestampMs(resetAt);
-  if (timestampMs === undefined) {
+  if (!resetAt || !Number.isFinite(resetAt)) {
     return null;
   }
-  const diffMs = timestampMs - Date.now();
+  const diffMs = resetAt - Date.now();
   if (diffMs <= 0) {
     return "now";
   }
@@ -31,7 +29,7 @@ export function formatQuotaReset(resetAt?: number): string | null {
     const remainingHours = hours % 24;
     return remainingHours > 0 ? `${days}d ${remainingHours}h` : `${days}d`;
   }
-  return new Date(timestampMs).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return new Date(resetAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 export function collectQuotaWindows(

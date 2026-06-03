@@ -1,4 +1,3 @@
-import { stripAnsi } from "../../../../packages/terminal-core/src/ansi.js";
 import type { GatewayBrowserClient } from "../gateway.ts";
 import { normalizeLowercaseStringOrEmpty } from "../string-coerce.ts";
 import type { LogEntry, LogLevel } from "../types.ts";
@@ -23,10 +22,6 @@ export type LogsState = {
 
 const LOG_BUFFER_LIMIT = 2000;
 const LEVELS = new Set<LogLevel>(["trace", "debug", "info", "warn", "error", "fatal"]);
-
-function stripAnsiSequences(value: string): string {
-  return stripAnsi(value);
-}
 
 function parseMaybeJsonString(value: unknown) {
   if (typeof value !== "string") {
@@ -59,8 +54,8 @@ export function parseLogLine(line: string): LogEntry {
   try {
     const obj = JSON.parse(line) as Record<string, unknown>;
     const meta =
-      obj && typeof obj["_meta"] === "object" && obj["_meta"] !== null
-        ? (obj["_meta"] as Record<string, unknown>)
+      obj && typeof obj._meta === "object" && obj._meta !== null
+        ? (obj._meta as Record<string, unknown>)
         : null;
     const time =
       typeof obj.time === "string" ? obj.time : typeof meta?.date === "string" ? meta?.date : null;
@@ -94,12 +89,12 @@ export function parseLogLine(line: string): LogEntry {
       raw: line,
       time,
       level,
-      subsystem: subsystem ? stripAnsiSequences(subsystem) : subsystem,
-      message: stripAnsiSequences(message),
+      subsystem,
+      message,
       meta: meta ?? undefined,
     };
   } catch {
-    return { raw: line, message: stripAnsiSequences(line) };
+    return { raw: line, message: line };
   }
 }
 

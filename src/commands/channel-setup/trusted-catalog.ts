@@ -1,6 +1,6 @@
 import {
   getChannelPluginCatalogEntry,
-  listRawChannelPluginCatalogEntries,
+  listChannelPluginCatalogEntries,
   type ChannelPluginCatalogEntry,
 } from "../../channels/plugins/catalog.js";
 import { applyPluginAutoEnable } from "../../config/plugin-auto-enable.js";
@@ -61,11 +61,11 @@ function listChannelPluginCatalogEntriesWithTrustedFallback(
   },
   onMissingFallback: (entry: ChannelPluginCatalogEntry) => ChannelPluginCatalogEntry[],
 ): ChannelPluginCatalogEntry[] {
-  const unfiltered = listRawChannelPluginCatalogEntries({
+  const unfiltered = listChannelPluginCatalogEntries({
     workspaceDir: params.workspaceDir,
   });
   const fallbackById = new Map(
-    listRawChannelPluginCatalogEntries({
+    listChannelPluginCatalogEntries({
       workspaceDir: params.workspaceDir,
       excludeWorkspace: true,
     }).map((entry) => [entry.id, entry]),

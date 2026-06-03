@@ -1,5 +1,5 @@
-import fs from "node:fs/promises";
-import { createNoisyPngBuffer, createSolidPngBuffer } from "openclaw/plugin-sdk/test-fixtures";
+import crypto from "node:crypto";
+import sharp from "sharp";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   createMockWebListener,
@@ -120,7 +120,7 @@ describe("web auto-reply", () => {
       body: true,
       arrayBuffer: async () =>
         buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
-      headers: new Headers({ "content-type": mime }),
+      headers: { get: () => mime },
       status: 200,
     } as unknown as Response);
   }
@@ -150,28 +150,52 @@ describe("web auto-reply", () => {
     });
   }
 
-  it("sends common in-limit image formats without re-encoding", async () => {
-    const jpeg = await fs.readFile("docs/assets/showcase/roof-camera-sky.jpg");
-    const webp = await fs.readFile("extensions/whatsapp/src/__fixtures__/large-noisy.webp");
+  it("compresses common formats to jpeg under the cap", async () => {
     const formats = [
       {
         name: "png",
         mime: "image/png",
-        image: createSolidPngBuffer(64, 64, { r: 80, g: 120, b: 200 }),
+        make: (buf: Buffer, opts: { width: number; height: number }) =>
+          sharp(buf, {
+            raw: { width: opts.width, height: opts.height, channels: 3 },
+          })
+            .png({ compressionLevel: 0 })
+            .toBuffer(),
       },
       {
         name: "jpeg",
         mime: "image/jpeg",
-        image: jpeg,
+        make: (buf: Buffer, opts: { width: number; height: number }) =>
+          sharp(buf, {
+            raw: { width: opts.width, height: opts.height, channels: 3 },
+          })
+            // Keep source > cap with fewer pixels so the test runs faster.
+            .jpeg({ quality: 100, chromaSubsampling: "4:4:4" })
+            .toBuffer(),
       },
       {
         name: "webp",
         mime: "image/webp",
-        image: webp,
+        make: (buf: Buffer, opts: { width: number; height: number }) =>
+          sharp(buf, {
+            raw: { width: opts.width, height: opts.height, channels: 3 },
+          })
+            .webp({ quality: 100 })
+            .toBuffer(),
       },
     ] as const;
 
-    await withMediaCap(1, async () => {
+    const width = 320;
+    const height = 320;
+    const sharedRaw = crypto.randomBytes(width * height * 3);
+
+    const renderedFormats = await Promise.all(
+      formats.map(async (fmt) =>
+        Object.assign({}, fmt, { image: await fmt.make(sharedRaw, { width, height }) }),
+      ),
+    );
+
+    await withMediaCap(SMALL_MEDIA_CAP_MB, async () => {
       const sendMedia = vi.fn();
       const { reply, dispatch } = await setupSingleInboundMessage({
         resolverValue: {
@@ -183,7 +207,8 @@ describe("web auto-reply", () => {
       let fetchIndex = 0;
 
       const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-        const matched = formats[Math.min(fetchIndex, formats.length - 1)] ?? formats[0];
+        const matched =
+          renderedFormats[Math.min(fetchIndex, renderedFormats.length - 1)] ?? renderedFormats[0];
         fetchIndex += 1;
         const { image, mime } = matched;
         return {
@@ -191,13 +216,14 @@ describe("web auto-reply", () => {
           body: true,
           arrayBuffer: async () =>
             image.buffer.slice(image.byteOffset, image.byteOffset + image.byteLength),
-          headers: new Headers({ "content-type": mime }),
+          headers: { get: () => mime },
           status: 200,
         } as unknown as Response;
       });
 
       try {
-        for (const [index, fmt] of formats.entries()) {
+        for (const [index, fmt] of renderedFormats.entries()) {
+          expect(fmt.image.length).toBeGreaterThan(SMALL_MEDIA_CAP_BYTES);
           const beforeCalls = sendMedia.mock.calls.length;
           await dispatch(`msg-${fmt.name}-${index}`, {
             from: `+1${index}`,
@@ -206,11 +232,10 @@ describe("web auto-reply", () => {
           });
           expect(sendMedia).toHaveBeenCalledTimes(beforeCalls + 1);
           const payload = imagePayloadAt(sendMedia, beforeCalls);
-          expect(payload.image.length).toBeGreaterThan(0);
-          expect(payload.image.length).toBeLessThanOrEqual(1024 * 1024);
-          expect(payload.mimetype).toBe(fmt.mime);
+          expect(payload.image.length).toBeLessThanOrEqual(SMALL_MEDIA_CAP_BYTES);
+          expect(payload.mimetype).toBe("image/jpeg");
         }
-        expect(sendMedia).toHaveBeenCalledTimes(formats.length);
+        expect(sendMedia).toHaveBeenCalledTimes(renderedFormats.length);
         expect(reply).not.toHaveBeenCalled();
       } finally {
         fetchMock.mockRestore();
@@ -219,7 +244,16 @@ describe("web auto-reply", () => {
   });
 
   it("honors channels.whatsapp.mediaMaxMb for outbound auto-replies", async () => {
-    const bigPng = createNoisyPngBuffer(256, 256);
+    const bigPng = await sharp({
+      create: {
+        width: 256,
+        height: 256,
+        channels: 3,
+        background: { r: 0, g: 0, b: 255 },
+      },
+    })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
     expect(bigPng.length).toBeGreaterThan(SMALL_MEDIA_CAP_BYTES);
     await expectCompressedImageWithinCap({
       mediaUrl: "https://example.com/big.png",
@@ -231,7 +265,16 @@ describe("web auto-reply", () => {
   });
 
   it("prefers per-account WhatsApp media caps for outbound auto-replies", async () => {
-    const bigPng = createNoisyPngBuffer(256, 256);
+    const bigPng = await sharp({
+      create: {
+        width: 256,
+        height: 256,
+        channels: 3,
+        background: { r: 255, g: 0, b: 0 },
+      },
+    })
+      .png({ compressionLevel: 0 })
+      .toBuffer();
     expect(bigPng.length).toBeGreaterThan(SMALL_MEDIA_CAP_BYTES);
 
     setLoadConfigMock(() => ({
@@ -302,13 +345,22 @@ describe("web auto-reply", () => {
       sendMedia,
     });
 
-    const smallPng = createSolidPngBuffer(64, 64, { r: 0, g: 255, b: 0 });
+    const smallPng = await sharp({
+      create: {
+        width: 64,
+        height: 64,
+        channels: 3,
+        background: { r: 0, g: 255, b: 0 },
+      },
+    })
+      .png()
+      .toBuffer();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       body: true,
       arrayBuffer: async () =>
         smallPng.buffer.slice(smallPng.byteOffset, smallPng.byteOffset + smallPng.byteLength),
-      headers: new Headers({ "content-type": "image/png" }),
+      headers: { get: () => "image/png" },
       status: 200,
     } as unknown as Response);
 
@@ -335,7 +387,7 @@ describe("web auto-reply", () => {
       status: 404,
       body: null,
       arrayBuffer: async () => new ArrayBuffer(0),
-      headers: new Headers({ "content-type": "text/plain" }),
+      headers: { get: () => "text/plain" },
     } as unknown as Response);
 
     await dispatch("msg1");
@@ -358,13 +410,22 @@ describe("web auto-reply", () => {
       sendMedia,
     });
 
-    const png = createSolidPngBuffer(64, 64, { r: 0, g: 0, b: 255 });
+    const png = await sharp({
+      create: {
+        width: 64,
+        height: 64,
+        channels: 3,
+        background: { r: 0, g: 0, b: 255 },
+      },
+    })
+      .png()
+      .toBuffer();
 
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue({
       ok: true,
       body: true,
       arrayBuffer: async () => png.buffer.slice(png.byteOffset, png.byteOffset + png.byteLength),
-      headers: new Headers({ "content-type": "image/png" }),
+      headers: { get: () => "image/png" },
       status: 200,
     } as unknown as Response);
 

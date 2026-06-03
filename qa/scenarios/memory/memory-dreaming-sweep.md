@@ -88,7 +88,7 @@ steps:
                 - lambda:
                     async: true
                     expr: "(() => readDoctorMemoryStatus(env).then((payload) => payload.dreaming?.phases?.deep?.managedCronPresent === true ? payload : undefined))()"
-                - expr: liveTurnTimeoutMs(env, 90000)
+                - 30000
                 - 500
             - call: listCronJobs
               saveAs: jobs
@@ -108,12 +108,6 @@ steps:
                 expr: "managed.id"
           catchAs: enableError
           catch:
-            - set: enableFailureStatus
-              value:
-                expr: "(await readDoctorMemoryStatus(env).catch((error) => ({ error: String(error?.message ?? error) })))"
-            - set: enableFailureJobs
-              value:
-                expr: "(await listCronJobs(env).catch((error) => [{ error: String(error?.message ?? error) }]))"
             - call: patchConfig
               args:
                 - env:
@@ -133,7 +127,7 @@ steps:
                 - ref: env
                 - 60000
             - throw:
-                expr: "`managed dreaming cron missing: ${enableError?.message ?? enableError}; status=${JSON.stringify(enableFailureStatus)} jobs=${JSON.stringify(enableFailureJobs)}`"
+                expr: enableError
     detailsExpr: "JSON.stringify({ enabled: status.dreaming?.enabled ?? false, managedCronPresent: status.dreaming?.phases?.deep?.managedCronPresent ?? false, nextRunAtMs: status.dreaming?.phases?.deep?.nextRunAtMs ?? null })"
 
   - name: runs the sweep after repeated recall signals and writes promotion artifacts

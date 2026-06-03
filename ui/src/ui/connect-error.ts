@@ -4,7 +4,7 @@ import {
   formatConnectPairingRequiredMessage,
   readConnectPairingRequiredMessage,
   readPairingConnectErrorDetails,
-} from "../../../packages/gateway-protocol/src/connect-error-details.js";
+} from "../../../src/gateway/protocol/connect-error-details.js";
 import { resolveGatewayErrorDetailCode } from "./gateway.ts";
 import { normalizeLowercaseStringOrEmpty } from "./string-coerce.ts";
 

@@ -1,7 +1,7 @@
 import { withEnv, withEnvAsync } from "openclaw/plugin-sdk/test-env";
 import { describe, expect, it } from "vitest";
 import { createPerplexityWebSearchProvider } from "./perplexity-web-search-provider.js";
-import { testing } from "./perplexity-web-search-provider.runtime.js";
+import { __testing } from "./perplexity-web-search-provider.runtime.js";
 
 const openRouterApiKeyEnv = ["OPENROUTER_API", "KEY"].join("_");
 const perplexityApiKeyEnv = ["PERPLEXITY_API", "KEY"].join("_");
@@ -31,35 +31,38 @@ describe("perplexity web search provider", () => {
   });
 
   it("infers provider routing from api key prefixes", () => {
-    expect(testing.inferPerplexityBaseUrlFromApiKey("pplx-abc")).toBe("direct");
-    expect(testing.inferPerplexityBaseUrlFromApiKey("sk-or-v1-abc")).toBe("openrouter");
-    expect(testing.inferPerplexityBaseUrlFromApiKey("unknown")).toBeUndefined();
+    expect(__testing.inferPerplexityBaseUrlFromApiKey("pplx-abc")).toBe("direct");
+    expect(__testing.inferPerplexityBaseUrlFromApiKey("sk-or-v1-abc")).toBe("openrouter");
+    expect(__testing.inferPerplexityBaseUrlFromApiKey("unknown")).toBeUndefined();
   });
 
   it("resolves base url from auth source and request model by transport", () => {
-    expect(testing.resolvePerplexityBaseUrl(undefined, "perplexity_env")).toBe(
+    expect(__testing.resolvePerplexityBaseUrl(undefined, "perplexity_env")).toBe(
       "https://api.perplexity.ai",
     );
-    expect(testing.resolvePerplexityBaseUrl(undefined, "openrouter_env")).toBe(
+    expect(__testing.resolvePerplexityBaseUrl(undefined, "openrouter_env")).toBe(
       "https://openrouter.ai/api/v1",
     );
     expect(
-      testing.resolvePerplexityRequestModel("https://api.perplexity.ai", "perplexity/sonar-pro"),
+      __testing.resolvePerplexityRequestModel("https://api.perplexity.ai", "perplexity/sonar-pro"),
     ).toBe("sonar-pro");
     expect(
-      testing.resolvePerplexityRequestModel("https://openrouter.ai/api/v1", "perplexity/sonar-pro"),
+      __testing.resolvePerplexityRequestModel(
+        "https://openrouter.ai/api/v1",
+        "perplexity/sonar-pro",
+      ),
     ).toBe("perplexity/sonar-pro");
   });
 
   it("chooses direct search_api transport only for direct base urls without legacy overrides", () => {
     expect(
-      testing.resolvePerplexityTransport({
+      __testing.resolvePerplexityTransport({
         baseUrl: "https://api.perplexity.ai",
       }).transport,
     ).toBe("chat_completions");
 
     expect(
-      testing.resolvePerplexityTransport({
+      __testing.resolvePerplexityTransport({
         apiKey: "pplx-secret",
       }).transport,
     ).toBe("search_api");
@@ -67,7 +70,7 @@ describe("perplexity web search provider", () => {
 
   it("prefers explicit baseUrl over key-based defaults", () => {
     expect(
-      testing.resolvePerplexityBaseUrl({ baseUrl: "https://example.com" }, "config", "pplx-123"),
+      __testing.resolvePerplexityBaseUrl({ baseUrl: "https://example.com" }, "config", "pplx-123"),
     ).toBe("https://example.com");
   });
 
@@ -75,11 +78,11 @@ describe("perplexity web search provider", () => {
     withEnv(
       { [perplexityApiKeyEnv]: undefined, [openRouterApiKeyEnv]: openRouterPerplexityApiKey },
       () => {
-        expect(testing.resolvePerplexityApiKey(undefined)).toEqual({
+        expect(__testing.resolvePerplexityApiKey(undefined)).toEqual({
           apiKey: openRouterPerplexityApiKey,
           source: "openrouter_env",
         });
-        expect(testing.resolvePerplexityTransport(undefined)).toEqual({
+        expect(__testing.resolvePerplexityTransport(undefined)).toEqual({
           apiKey: openRouterPerplexityApiKey,
           source: "openrouter_env",
           baseUrl: "https://openrouter.ai/api/v1",
@@ -94,7 +97,7 @@ describe("perplexity web search provider", () => {
     withEnv(
       { [perplexityApiKeyEnv]: directPerplexityApiKey, [openRouterApiKeyEnv]: undefined },
       () => {
-        expect(testing.resolvePerplexityTransport(undefined)).toEqual({
+        expect(__testing.resolvePerplexityTransport(undefined)).toEqual({
           apiKey: directPerplexityApiKey,
           source: "perplexity_env",
           baseUrl: "https://api.perplexity.ai",
@@ -106,11 +109,11 @@ describe("perplexity web search provider", () => {
   });
 
   it("switches direct Perplexity to chat completions when model override is configured", () => {
-    expect(testing.resolvePerplexityModel({ model: "perplexity/sonar-reasoning-pro" })).toBe(
+    expect(__testing.resolvePerplexityModel({ model: "perplexity/sonar-reasoning-pro" })).toBe(
       "perplexity/sonar-reasoning-pro",
     );
     expect(
-      testing.resolvePerplexityTransport({
+      __testing.resolvePerplexityTransport({
         apiKey: directPerplexityApiKey,
         model: "perplexity/sonar-reasoning-pro",
       }),
@@ -125,7 +128,7 @@ describe("perplexity web search provider", () => {
 
   it("treats unrecognized configured keys as direct Perplexity by default", () => {
     expect(
-      testing.resolvePerplexityTransport({
+      __testing.resolvePerplexityTransport({
         apiKey: enterprisePerplexityApiKey,
       }),
     ).toEqual({
@@ -137,37 +140,15 @@ describe("perplexity web search provider", () => {
     });
   });
 
-  it.each([
-    ["max_tokens", 0, "max_tokens must be a positive integer."],
-    ["max_tokens", 1.5, "max_tokens must be a positive integer."],
-    ["max_tokens", 1_000_001, "max_tokens must be a positive integer."],
-    ["max_tokens_per_page", 1.5, "max_tokens_per_page must be a positive integer."],
-  ])("rejects invalid native token budget %s=%s", async (key, value, message) => {
-    await withEnvAsync(
-      { [perplexityApiKeyEnv]: directPerplexityApiKey, [openRouterApiKeyEnv]: undefined },
-      async () => {
-        const provider = createPerplexityWebSearchProvider();
-        const tool = provider.createTool({ config: {}, searchConfig: {} });
-        if (!tool) {
-          throw new Error("Expected tool definition");
-        }
-
-        await expect(tool.execute({ query: "OpenClaw docs", [key]: value })).rejects.toThrow(
-          message,
-        );
-      },
-    );
-  });
-
   it("reports malformed Search API JSON with a stable provider error", async () => {
     await expect(
-      testing.readPerplexityJsonResponse(new Response("{ nope"), "Perplexity Search"),
+      __testing.readPerplexityJsonResponse(new Response("{ nope"), "Perplexity Search"),
     ).rejects.toThrow("Perplexity Search: malformed JSON response");
   });
 
   it("reports malformed chat completion JSON with a stable provider error", async () => {
     await expect(
-      testing.readPerplexityJsonResponse(new Response("{ nope"), "Perplexity"),
+      __testing.readPerplexityJsonResponse(new Response("{ nope"), "Perplexity"),
     ).rejects.toThrow("Perplexity: malformed JSON response");
   });
 });

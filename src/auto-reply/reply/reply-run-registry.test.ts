@@ -3,9 +3,8 @@ import {
   getDiagnosticSessionActivitySnapshot,
   resetDiagnosticRunActivityForTest,
 } from "../../logging/diagnostic-run-activity.js";
-import { MAX_TIMER_TIMEOUT_MS } from "../../shared/number-coercion.js";
 import {
-  testing,
+  __testing,
   abortActiveReplyRuns,
   createReplyOperation,
   forceClearReplyRunBySessionId,
@@ -18,7 +17,7 @@ import {
 
 describe("reply run registry", () => {
   afterEach(() => {
-    testing.resetReplyRunRegistry();
+    __testing.resetReplyRunRegistry();
     resetDiagnosticRunActivityForTest();
     vi.restoreAllMocks();
   });
@@ -148,30 +147,6 @@ describe("reply run registry", () => {
       expect(forceClearReplyRunBySessionId("session-running", new Error("stuck"))).toBe(true);
 
       expect(isReplyRunActiveForSessionId("session-running")).toBe(false);
-      await expect(waitPromise).resolves.toBe(true);
-    } finally {
-      await vi.runOnlyPendingTimersAsync();
-      vi.useRealTimers();
-    }
-  });
-
-  it("clamps oversized wait timers instead of resolving idle waits immediately", async () => {
-    vi.useFakeTimers();
-    try {
-      const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
-      const operation = createReplyOperation({
-        sessionKey: "agent:main:main",
-        sessionId: "session-running",
-        resetTriggered: false,
-      });
-
-      const waitPromise = waitForReplyRunEndBySessionId(
-        "session-running",
-        MAX_TIMER_TIMEOUT_MS + 1,
-      );
-
-      expect(setTimeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
-      operation.complete();
       await expect(waitPromise).resolves.toBe(true);
     } finally {
       await vi.runOnlyPendingTimersAsync();

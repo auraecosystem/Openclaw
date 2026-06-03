@@ -168,17 +168,12 @@ export function parseOcPath(input: string): OcPath {
     fail(`Empty oc:// path: ${printable(input)}`, input, "OC_PATH_EMPTY");
   }
 
-  const rawSegments = splitRespectingBrackets(pathPart, "/", input);
-  for (const seg of rawSegments) {
+  const segments = splitRespectingBrackets(pathPart, "/", input);
+  for (const seg of segments) {
     if (seg.length === 0) {
       fail(`Empty segment in oc:// path: ${printable(input)}`, input, "OC_PATH_EMPTY_SEGMENT");
     }
   }
-  const fileSeg = rawSegments[0];
-  const file = isQuotedSeg(fileSeg) ? unquoteSeg(fileSeg) : fileSeg;
-  validateFileSlot(file, input);
-
-  const segments = normalizeDeepJsonPathSegments(rawSegments, file, input);
   if (segments.length > 4) {
     fail(`Too many segments in oc:// path (max 4): ${printable(input)}`, input, "OC_PATH_TOO_DEEP");
   }
@@ -198,6 +193,13 @@ export function parseOcPath(input: string): OcPath {
     }
   }
 
+  // Unquote the file slot — splitRespectingBrackets keeps a quoted file
+  // segment intact so its `/` isn't a slot separator; strip the quotes
+  // so consumers see the literal filename.
+  const fileSeg = segments[0];
+  const file = isQuotedSeg(fileSeg) ? unquoteSeg(fileSeg) : fileSeg;
+  validateFileSlot(file, input);
+
   const session = extractSession(queryPart, input);
   return {
     file,
@@ -206,33 +208,6 @@ export function parseOcPath(input: string): OcPath {
     ...(segments[3] !== undefined ? { field: segments[3] } : {}),
     ...(session !== undefined ? { session } : {}),
   };
-}
-
-function isJsonPathFile(file: string): boolean {
-  const lower = file.toLowerCase();
-  return lower.endsWith(".json") || lower.endsWith(".jsonc");
-}
-
-function normalizeDeepJsonPathSegments(
-  segments: readonly string[],
-  file: string,
-  input: string,
-): readonly string[] {
-  if (segments.length <= 4 || !isJsonPathFile(file)) {
-    return segments;
-  }
-  const pathSegments = segments.slice(1);
-  if (pathSegments.length > MAX_TRAVERSAL_DEPTH) {
-    fail(
-      `JSON oc:// path exceeds ${MAX_TRAVERSAL_DEPTH} nested segments: ${printable(input)}`,
-      input,
-      "OC_PATH_TOO_DEEP",
-    );
-  }
-  const section = pathSegments.slice(0, -2).join(".");
-  const item = pathSegments[pathSegments.length - 2];
-  const field = pathSegments[pathSegments.length - 1];
-  return [segments[0], section, item, field];
 }
 
 /** Format an `OcPath` struct into its canonical string form. */
@@ -360,14 +335,6 @@ export function isOrdinalSeg(seg: string): boolean {
 export function parseOrdinalSeg(seg: string): number | null {
   const m = /^#(\d+)$/.exec(seg);
   return m === null || m[1] === undefined ? null : Number(m[1]);
-}
-
-export function parseArrayIndexSegment(seg: string, length: number): number | null {
-  if (!/^(0|[1-9]\d*)$/.test(seg)) {
-    return null;
-  }
-  const index = Number(seg);
-  return Number.isSafeInteger(index) && index >= 0 && index < length ? index : null;
 }
 
 /** Indexable containers provide `size`; keyed containers provide ordered `keys`. */
@@ -652,7 +619,7 @@ function scanBracketAware(s: string, onChar: ScanCallback, onUnbalanced: () => n
 /** First top-level occurrence of `ch` in `s`; -1 when absent. */
 export function indexOfTopLevel(s: string, ch: string): number {
   let result = -1;
-  const failLocal = (): never => {
+  const fail = (): never => {
     throw new OcPathError(`Unbalanced bracket/brace in oc:// path: ${s}`, s, "OC_PATH_UNBALANCED");
   };
   scanBracketAware(
@@ -664,7 +631,7 @@ export function indexOfTopLevel(s: string, ch: string): number {
       }
       return undefined;
     },
-    failLocal,
+    fail,
   );
   return result;
 }

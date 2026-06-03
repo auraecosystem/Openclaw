@@ -3,7 +3,6 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { promisify } from "node:util";
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { danger, shouldLogVerbose } from "../globals.js";
 import { markOpenClawExecEnv } from "../infra/openclaw-exec-env.js";
 import {
@@ -12,6 +11,7 @@ import {
 } from "../infra/windows-encoding.js";
 import { getWindowsInstallRoots } from "../infra/windows-install-roots.js";
 import { logDebug, logError } from "../logger.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import { resolveCommandStdio } from "./spawn-utils.js";
 import { resolveWindowsCommandShim } from "./windows-command.js";
 
@@ -236,8 +236,6 @@ export type SpawnResult = {
   pid?: number;
   stdout: string;
   stderr: string;
-  stdoutTruncatedBytes?: number;
-  stderrTruncatedBytes?: number;
   code: number | null;
   signal: NodeJS.Signals | null;
   killed: boolean;
@@ -249,60 +247,14 @@ export type CommandOptions = {
   timeoutMs: number;
   cwd?: string;
   input?: string;
-  baseEnv?: NodeJS.ProcessEnv;
   env?: NodeJS.ProcessEnv;
   windowsVerbatimArguments?: boolean;
   noOutputTimeoutMs?: number;
   signal?: AbortSignal;
-  maxOutputBytes?: number;
 };
 
 const WINDOWS_CLOSE_STATE_SETTLE_TIMEOUT_MS = 250;
 const WINDOWS_CLOSE_STATE_POLL_MS = 10;
-const DEFAULT_COMMAND_OUTPUT_MAX_BYTES = 16 * 1024 * 1024;
-
-type CapturedOutputBuffers = {
-  chunks: Buffer[];
-  bytes: number;
-  truncatedBytes: number;
-};
-
-function normalizeMaxOutputBytes(value: number | undefined): number {
-  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
-    return DEFAULT_COMMAND_OUTPUT_MAX_BYTES;
-  }
-  return Math.max(1, Math.floor(value));
-}
-
-function appendCapturedOutput(
-  capture: CapturedOutputBuffers,
-  chunk: Buffer | string,
-  maxBytes: number,
-): void {
-  const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
-  if (buffer.byteLength >= maxBytes) {
-    capture.chunks = [Buffer.from(buffer.subarray(buffer.byteLength - maxBytes))];
-    capture.truncatedBytes += capture.bytes + buffer.byteLength - maxBytes;
-    capture.bytes = maxBytes;
-    return;
-  }
-
-  capture.chunks.push(buffer);
-  capture.bytes += buffer.byteLength;
-  while (capture.bytes > maxBytes && capture.chunks.length > 0) {
-    const first = capture.chunks[0];
-    const overflow = capture.bytes - maxBytes;
-    if (first.byteLength <= overflow) {
-      capture.chunks.shift();
-      capture.bytes -= first.byteLength;
-      capture.truncatedBytes += first.byteLength;
-    } else {
-      capture.chunks[0] = Buffer.from(first.subarray(overflow));
-      capture.bytes -= overflow;
-      capture.truncatedBytes += overflow;
-    }
-  }
-}
 
 export function resolveProcessExitCode(params: {
   explicitCode: number | null | undefined;
@@ -367,9 +319,9 @@ export async function runCommandWithTimeout(
 ): Promise<SpawnResult> {
   const options: CommandOptions =
     typeof optionsOrTimeout === "number" ? { timeoutMs: optionsOrTimeout } : optionsOrTimeout;
-  const { timeoutMs, cwd, input, baseEnv, env, noOutputTimeoutMs, signal } = options;
+  const { timeoutMs, cwd, input, env, noOutputTimeoutMs, signal } = options;
   const hasInput = input !== undefined;
-  const resolvedEnv = resolveCommandEnv({ argv, baseEnv, env });
+  const resolvedEnv = resolveCommandEnv({ argv, env });
   const stdio = resolveCommandStdio({ hasInput, preferInherit: true });
   const invocation = resolveChildProcessInvocation({
     argv,
@@ -398,11 +350,10 @@ export async function runCommandWithTimeout(
       ? { shell: true }
       : {}),
   });
-  // Spawn with inherited stdin (TTY) so interactive tools stay usable when needed.
+  // Spawn with inherited stdin (TTY) so tools like `pi` stay interactive when needed.
   return await new Promise((resolve, reject) => {
-    const stdoutCapture: CapturedOutputBuffers = { chunks: [], bytes: 0, truncatedBytes: 0 };
-    const stderrCapture: CapturedOutputBuffers = { chunks: [], bytes: 0, truncatedBytes: 0 };
-    const maxOutputBytes = normalizeMaxOutputBytes(options.maxOutputBytes);
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
     const windowsEncoding = resolveWindowsConsoleEncoding();
     let settled = false;
     let timedOut = false;
@@ -491,11 +442,11 @@ export async function runCommandWithTimeout(
     }
 
     child.stdout?.on("data", (d) => {
-      appendCapturedOutput(stdoutCapture, d, maxOutputBytes);
+      stdoutChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
       armNoOutputTimer();
     });
     child.stderr?.on("data", (d) => {
-      appendCapturedOutput(stderrCapture, d, maxOutputBytes);
+      stderrChunks.push(Buffer.isBuffer(d) ? d : Buffer.from(d));
       armNoOutputTimer();
     });
     child.on("error", (err) => {
@@ -510,8 +461,8 @@ export async function runCommandWithTimeout(
       removeAbortListener = null;
       reject(err);
     });
-    child.on("exit", (code, signalResult) => {
-      childExitState = { code, signal: signalResult };
+    child.on("exit", (code, signal) => {
+      childExitState = { code, signal };
       if (settled || closeFallbackTimer) {
         return;
       }
@@ -523,7 +474,7 @@ export async function runCommandWithTimeout(
         child.stderr?.destroy();
       }, 250);
     });
-    const resolveFromClose = (code: number | null, signalValue: NodeJS.Signals | null) => {
+    const resolveFromClose = (code: number | null, signal: NodeJS.Signals | null) => {
       if (settled) {
         return;
       }
@@ -533,7 +484,7 @@ export async function runCommandWithTimeout(
       clearCloseFallbackTimer();
       removeAbortListener?.();
       removeAbortListener = null;
-      const resolvedSignal = childExitState?.signal ?? signalValue ?? child.signalCode ?? null;
+      const resolvedSignal = childExitState?.signal ?? signal ?? child.signalCode ?? null;
       const resolvedCode = resolveProcessExitCode({
         explicitCode: childExitState?.code ?? code,
         childExitCode: child.exitCode,
@@ -560,15 +511,13 @@ export async function runCommandWithTimeout(
       resolve({
         pid: child.pid ?? undefined,
         stdout: decodeWindowsOutputBuffer({
-          buffer: Buffer.concat(stdoutCapture.chunks, stdoutCapture.bytes),
+          buffer: Buffer.concat(stdoutChunks),
           windowsEncoding,
         }),
         stderr: decodeWindowsOutputBuffer({
-          buffer: Buffer.concat(stderrCapture.chunks, stderrCapture.bytes),
+          buffer: Buffer.concat(stderrChunks),
           windowsEncoding,
         }),
-        stdoutTruncatedBytes: stdoutCapture.truncatedBytes || undefined,
-        stderrTruncatedBytes: stderrCapture.truncatedBytes || undefined,
         code: normalizedCode,
         signal: resolvedSignal,
         killed: child.killed,
@@ -576,16 +525,16 @@ export async function runCommandWithTimeout(
         noOutputTimedOut,
       });
     };
-    child.on("close", (code, signalLocal) => {
+    child.on("close", (code, signal) => {
       if (
         process.platform !== "win32" ||
         childExitState != null ||
         code != null ||
-        signalLocal != null ||
+        signal != null ||
         child.exitCode != null ||
         child.signalCode != null
       ) {
-        resolveFromClose(code, signalLocal);
+        resolveFromClose(code, signal);
         return;
       }
 
@@ -595,11 +544,11 @@ export async function runCommandWithTimeout(
           return;
         }
         if (childExitState != null || child.exitCode != null || child.signalCode != null) {
-          resolveFromClose(code, signalLocal);
+          resolveFromClose(code, signal);
           return;
         }
         if (Date.now() - startedAt >= WINDOWS_CLOSE_STATE_SETTLE_TIMEOUT_MS) {
-          resolveFromClose(code, signalLocal);
+          resolveFromClose(code, signal);
           return;
         }
         setTimeout(waitForExitState, WINDOWS_CLOSE_STATE_POLL_MS);

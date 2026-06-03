@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PluginCandidate } from "../../../plugins/discovery.js";
 import {
   readPersistedInstalledPluginIndex,
-  resolveInstalledPluginIndexStorePath,
   writePersistedInstalledPluginIndex,
 } from "../../../plugins/installed-plugin-index-store.js";
 import type { InstalledPluginIndex } from "../../../plugins/installed-plugin-index.js";
@@ -12,7 +11,6 @@ import {
   cleanupTrackedTempDirs,
   makeTrackedTempDir,
 } from "../../../plugins/test-helpers/fs-fixtures.js";
-import { runOpenClawStateWriteTransaction } from "../../../state/openclaw-state-db.js";
 import {
   DISABLE_PLUGIN_REGISTRY_MIGRATION_ENV,
   FORCE_PLUGIN_REGISTRY_MIGRATION_ENV,
@@ -43,7 +41,7 @@ function createCandidate(
   rootDir: string,
   id = "demo",
   origin: PluginCandidate["origin"] = "global",
-  options: { enabledByDefault?: boolean; manifest?: Record<string, unknown> } = {},
+  options: { enabledByDefault?: boolean } = {},
 ): PluginCandidate {
   fs.writeFileSync(
     path.join(rootDir, "index.ts"),
@@ -58,7 +56,6 @@ function createCandidate(
       ...(options.enabledByDefault ? { enabledByDefault: true } : {}),
       configSchema: { type: "object" },
       providers: [id],
-      ...options.manifest,
     }),
     "utf8",
   );
@@ -94,6 +91,15 @@ function requireRecord(value: unknown, label: string): Record<string, unknown> {
   }
   return value;
 }
+
+function readRecordField(record: Record<string, unknown>, key: string, label: string) {
+  const value = record[key];
+  if (!isRecord(value)) {
+    throw new Error(`Expected ${label} to be an object`);
+  }
+  return value;
+}
+
 function expectRecordFields(record: Record<string, unknown>, fields: Record<string, unknown>) {
   for (const [key, value] of Object.entries(fields)) {
     expect(record[key]).toEqual(value);
@@ -122,31 +128,10 @@ function requirePlugin(index: InstalledPluginIndex | null | undefined, pluginId:
   return plugin;
 }
 
-function insertStalePersistedIndexRow(stateDir: string) {
-  runOpenClawStateWriteTransaction(
-    ({ db }) => {
-      db.prepare(
-        `
-          INSERT OR REPLACE INTO installed_plugin_index (
-            index_key, version, host_contract_version, compat_registry_version,
-            migration_version, policy_hash, generated_at_ms, refresh_reason,
-            install_records_json, plugins_json, diagnostics_json, warning, updated_at_ms
-          ) VALUES (
-            'installed-plugin-index', 1, '2026.4.25', 'compat-v1',
-            0, 'stale-policy', 123, NULL,
-            '{}', '[]', '[]', NULL, 123
-          )
-        `,
-      ).run();
-    },
-    { env: { ...process.env, OPENCLAW_STATE_DIR: stateDir } },
-  );
-}
-
 describe("plugin registry install migration", () => {
   it("short-circuits when a current registry file already exists", async () => {
     const stateDir = makeTempDir();
-    const filePath = resolveInstalledPluginIndexStorePath({ stateDir });
+    const filePath = path.join(stateDir, "plugins", "installs.json");
     await writePersistedInstalledPluginIndex(createCurrentIndex(), { stateDir });
     const readConfig = vi.fn(async () => ({}));
 
@@ -168,9 +153,11 @@ describe("plugin registry install migration", () => {
 
   it("migrates when an existing registry file is not current", async () => {
     const stateDir = makeTempDir();
+    const filePath = path.join(stateDir, "plugins", "installs.json");
     const pluginDir = path.join(stateDir, "plugins", "demo");
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
     fs.mkdirSync(pluginDir, { recursive: true });
-    insertStalePersistedIndexRow(stateDir);
+    fs.writeFileSync(filePath, JSON.stringify({ version: 1, migrationVersion: 0 }), "utf8");
 
     const result = await migratePluginRegistryForInstall({
       stateDir,
@@ -257,77 +244,6 @@ describe("plugin registry install migration", () => {
 
     const persisted = await readPersistedInstalledPluginIndex({ stateDir });
     expect(persisted?.plugins.map((plugin) => plugin.pluginId)).toEqual(["openai"]);
-  });
-
-  it("keeps legacy OpenAI Codex plugin references doctor-only", async () => {
-    const stateDir = makeTempDir();
-    const openaiDir = path.join(stateDir, "plugins", "openai");
-    const unusedBundledDir = path.join(stateDir, "plugins", "unused-bundled");
-    fs.mkdirSync(openaiDir, { recursive: true });
-    fs.mkdirSync(unusedBundledDir, { recursive: true });
-
-    const result = await migratePluginRegistryForInstall({
-      stateDir,
-      candidates: [
-        createCandidate(openaiDir, "openai", "bundled"),
-        createCandidate(unusedBundledDir, "unused-bundled", "bundled"),
-      ],
-      readConfig: async () => ({
-        plugins: {
-          entries: {
-            "openai-codex": {
-              enabled: true,
-            },
-          },
-        },
-      }),
-      env: hermeticEnv(),
-    });
-
-    const current = requireMigratedIndex(result);
-    expect(current.plugins.map((plugin) => plugin.pluginId)).toEqual(["openai"]);
-
-    const persisted = await readPersistedInstalledPluginIndex({ stateDir });
-    expect(persisted?.plugins.map((plugin) => plugin.pluginId)).toEqual(["openai"]);
-  });
-
-  it("keeps bundled memory command plugins discoverable for first-run CLI registration", async () => {
-    const stateDir = makeTempDir();
-    const memoryDir = path.join(stateDir, "plugins", "memory-core");
-    const unusedBundledDir = path.join(stateDir, "plugins", "unused-bundled");
-    fs.mkdirSync(memoryDir, { recursive: true });
-    fs.mkdirSync(unusedBundledDir, { recursive: true });
-
-    const result = await migratePluginRegistryForInstall({
-      stateDir,
-      candidates: [
-        createCandidate(memoryDir, "memory-core", "bundled", {
-          manifest: {
-            kind: "memory",
-            providers: [],
-            contracts: { tools: ["memory_search"] },
-            commandAliases: [
-              {
-                name: "dreaming",
-                kind: "runtime-slash",
-                cliCommand: "memory",
-              },
-            ],
-          },
-        }),
-        createCandidate(unusedBundledDir, "unused-bundled", "bundled"),
-      ],
-      readConfig: async () => ({}),
-      env: hermeticEnv(),
-    });
-    expectRecordFields(requireRecord(result, "migration result"), {
-      status: "migrated",
-    });
-    const current = requireMigratedIndex(result);
-    expect(requirePlugin(current, "memory-core").startup.memory).toBe(true);
-
-    const persisted = await readPersistedInstalledPluginIndex({ stateDir });
-    expect(persisted?.plugins.map((plugin) => plugin.pluginId)).toEqual(["memory-core"]);
   });
 
   it("supports dry-run preflight without reading config or writing the registry", async () => {

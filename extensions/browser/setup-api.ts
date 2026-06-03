@@ -38,10 +38,13 @@ export default definePluginEntry({
       ) {
         return null;
       }
-      if (Object.hasOwn(config, "browser")) {
+      if (Object.prototype.hasOwnProperty.call(config, "browser")) {
         return "browser configured";
       }
-      if (config.plugins?.entries && Object.hasOwn(config.plugins.entries, "browser")) {
+      if (
+        config.plugins?.entries &&
+        Object.prototype.hasOwnProperty.call(config.plugins.entries, "browser")
+      ) {
         return "browser plugin configured";
       }
       if (hasBrowserToolReference(config)) {

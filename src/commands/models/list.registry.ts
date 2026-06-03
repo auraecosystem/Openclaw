@@ -1,11 +1,12 @@
-import { loadAgentModelRegistry } from "../../agents/model-registry-loader.js";
+import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { resolveDefaultAgentDir } from "../../agents/agent-scope.js";
 import {
   shouldSuppressBuiltInModel,
   shouldSuppressBuiltInModelFromManifest,
 } from "../../agents/model-suppression.js";
+import { discoverAuthStorage, discoverModels } from "../../agents/pi-model-discovery.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import type { ModelRegistry } from "../../llm/model-registry.js";
-import type { Model } from "../../llm/types.js";
 import {
   formatErrorWithStack,
   MODEL_AVAILABILITY_UNAVAILABLE_CODE,
@@ -30,7 +31,7 @@ function normalizeAvailabilityError(err: unknown): Error {
   );
 }
 
-function validateAvailableModels(availableModels: unknown): Model[] {
+function validateAvailableModels(availableModels: unknown): Model<Api>[] {
   if (!Array.isArray(availableModels)) {
     throw createAvailabilityUnavailableError(
       "Model availability unavailable: getAvailable() returned a non-array value.",
@@ -50,14 +51,14 @@ function validateAvailableModels(availableModels: unknown): Model[] {
     }
   }
 
-  return availableModels as Model[];
+  return availableModels as Model<Api>[];
 }
 
 function loadAvailableModels(
   registry: ModelRegistry,
   cfg: OpenClawConfig,
   opts?: { runtimeSuppression?: boolean },
-): Model[] {
+): Model<Api>[] {
   let availableModels: unknown;
   try {
     availableModels = registry.getAvailable();
@@ -94,9 +95,14 @@ export async function loadModelRegistry(
   },
 ) {
   const runtimeSuppression = opts?.normalizeModels !== false;
-  const { registry } = loadAgentModelRegistry(cfg, {
+  const agentDir = resolveDefaultAgentDir(cfg);
+  const authStorage = discoverAuthStorage(agentDir, {
+    readOnly: true,
     skipCredentials: opts?.loadAvailability === false,
+    config: cfg,
     workspaceDir: opts?.workspaceDir,
+  });
+  const registry = discoverModels(authStorage, agentDir, {
     providerFilter: opts?.providerFilter,
     normalizeModels: opts?.normalizeModels,
   });

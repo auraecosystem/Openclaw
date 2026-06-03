@@ -110,6 +110,7 @@ export async function monitorNextcloudTalkProvider(
         logger.warn(
           `[nextcloud-talk:${account.accountId}] replayed webhook ignored room=${message.roomToken} messageId=${message.messageId}`,
         );
+        return;
       }
     },
     onMessage: async () => {},

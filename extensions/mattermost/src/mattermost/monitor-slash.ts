@@ -7,7 +7,7 @@ import {
 } from "./client.js";
 import {
   listSkillCommandsForAgents,
-  parseTcpPort,
+  parseStrictPositiveInteger,
   type OpenClawConfig,
   type RuntimeEnv,
 } from "./runtime-api.js";
@@ -149,7 +149,7 @@ export async function registerMattermostMonitorSlashCommands(params: {
 
   try {
     const teams = await fetchMattermostUserTeams(params.client, params.botUserId);
-    const envPort = parseTcpPort(process.env.OPENCLAW_GATEWAY_PORT);
+    const envPort = parseStrictPositiveInteger(process.env.OPENCLAW_GATEWAY_PORT?.trim());
     const slashGatewayPort = envPort ?? params.cfg.gateway?.port ?? 18789;
     const slashCallbackUrl = resolveCallbackUrl({
       config: slashConfig,

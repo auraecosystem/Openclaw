@@ -70,13 +70,9 @@ export function createMatrixMonitorStatusController(params: {
     emit();
   };
 
-  const noteDisconnected = (paramsLocal: {
-    state: MatrixSyncState;
-    at?: number;
-    error?: unknown;
-  }) => {
-    const at = paramsLocal.at ?? Date.now();
-    const error = formatSyncError(paramsLocal.error);
+  const noteDisconnected = (params: { state: MatrixSyncState; at?: number; error?: unknown }) => {
+    const at = params.at ?? Date.now();
+    const error = formatSyncError(params.error);
     status.connected = false;
     status.lastEventAt = at;
     status.lastDisconnect = {
@@ -84,7 +80,7 @@ export function createMatrixMonitorStatusController(params: {
       ...(error ? { error } : {}),
     };
     status.lastError = error;
-    status.healthState = paramsLocal.state.toLowerCase();
+    status.healthState = params.state.toLowerCase();
     emit();
   };
 

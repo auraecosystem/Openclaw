@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import type { VoiceCallConfig } from "./config.js";
 import type { CoreConfig } from "./core-bridge.js";
 import type { VoiceCallRuntime } from "./runtime.js";
@@ -77,11 +76,10 @@ export function createVoiceCallContinueOperationStore(params: {
       params.config.tts?.timeoutMs ??
       params.coreConfig.messages?.tts?.timeoutMs ??
       TELEPHONY_DEFAULT_TTS_TIMEOUT_MS;
-    return resolveTimerTimeoutMs(
+    return (
       (rt.config.transcriptTimeoutMs ?? params.config.transcriptTimeoutMs) +
-        ttsTimeoutMs +
-        VOICE_CALL_CONTINUE_OPERATION_BUFFER_MS,
-      VOICE_CALL_CONTINUE_OPERATION_BUFFER_MS,
+      ttsTimeoutMs +
+      VOICE_CALL_CONTINUE_OPERATION_BUFFER_MS
     );
   };
 
@@ -135,7 +133,7 @@ export function createVoiceCallContinueOperationStore(params: {
           result: { success: true, transcript: result.transcript },
         });
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         const current = operations.get(operationId);
         if (!current || current.status !== "pending") {
           return;

@@ -1,7 +1,7 @@
-import type { AcpRuntime } from "@openclaw/acp-core/runtime/types";
-import { normalizeOptionalLowercaseString } from "@openclaw/normalization-core/string-coerce";
 import { resolveGlobalSingleton } from "../../shared/global-singleton.js";
+import { normalizeOptionalLowercaseString } from "../../shared/string-coerce.js";
 import { AcpRuntimeError } from "./errors.js";
+import type { AcpRuntime } from "./types.js";
 
 export type AcpRuntimeBackend = {
   id: string;
@@ -109,7 +109,7 @@ export function requireAcpRuntimeBackend(id?: string): AcpRuntimeBackend {
   return backend;
 }
 
-export const testing = {
+export const __testing = {
   resetAcpRuntimeBackendsForTests() {
     ACP_BACKENDS_BY_ID.clear();
   },
@@ -117,4 +117,3 @@ export const testing = {
     return resolveAcpRuntimeRegistryGlobalState();
   },
 };
-export { testing as __testing };

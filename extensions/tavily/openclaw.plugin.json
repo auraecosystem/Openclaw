@@ -4,13 +4,8 @@
     "onStartup": false
   },
   "skills": ["./skills"],
-  "setup": {
-    "providers": [
-      {
-        "id": "tavily",
-        "envVars": ["TAVILY_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "tavily": ["TAVILY_API_KEY"]
   },
   "uiHints": {
     "webSearch.apiKey": {

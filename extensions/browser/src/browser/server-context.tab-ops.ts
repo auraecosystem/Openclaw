@@ -350,9 +350,7 @@ export function createProfileTabOps({
           triggerManagedTabLimit(found.targetId);
           return assignTabAlias({ profileState, tab: found, label: opts?.label });
         }
-        await new Promise((r) => {
-          setTimeout(r, OPEN_TAB_DISCOVERY_POLL_MS);
-        });
+        await new Promise((r) => setTimeout(r, OPEN_TAB_DISCOVERY_POLL_MS));
       }
       triggerManagedTabLimit(createdViaCdp);
       return assignTabAlias({
@@ -377,7 +375,7 @@ export function createProfileTabOps({
         method: "PUT",
       },
       getCdpControlPolicy(),
-    ).catch(async (err: unknown) => {
+    ).catch(async (err) => {
       if (String(err).includes("HTTP 405")) {
         return await fetchJson<CdpTarget>(
           endpoint,

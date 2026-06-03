@@ -1,22 +1,10 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
+import { normalizeProviderId } from "../agents/provider-id.js";
+import type { ModelProviderConfig } from "../config/types.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import type { ModelProviderConfig } from "../config/types.js";
-import { copyRecordEntries } from "../shared/safe-record.js";
+} from "../shared/string-coerce.js";
 import type { ProviderCatalogContext, ProviderCatalogResult } from "./types.js";
-
-function addApiKeyToProvider(
-  provider: ModelProviderConfig,
-  apiKey: string,
-): (ModelProviderConfig & { apiKey: string }) | undefined {
-  try {
-    return { ...provider, apiKey };
-  } catch {
-    return undefined;
-  }
-}
 
 export function findCatalogTemplate(params: {
   entries: ReadonlyArray<{ provider: string; id: string }>;
@@ -78,10 +66,7 @@ export async function buildPairedProviderApiKeyCatalog(params: {
   const providers = await params.buildProviders();
   return {
     providers: Object.fromEntries(
-      copyRecordEntries<ModelProviderConfig>(providers).flatMap(([id, provider]) => {
-        const providerWithApiKey = addApiKeyToProvider(provider, apiKey);
-        return providerWithApiKey ? [[id, providerWithApiKey]] : [];
-      }),
+      Object.entries(providers).map(([id, provider]) => [id, { ...provider, apiKey }]),
     ),
   };
 }

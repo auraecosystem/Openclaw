@@ -1,4 +1,3 @@
-import { asDateTimestampMs } from "../../packages/normalization-core/src/number-coercion.js";
 import { buildAuthProfileId } from "../agents/auth-profiles/identity.js";
 import type { AuthProfileCredential } from "../agents/auth-profiles/types.js";
 import { normalizeConfiguredProviderCatalogModelId } from "../agents/model-ref-shared.js";
@@ -141,14 +140,13 @@ export function buildOauthProviderAuthResult(params: {
     profilePrefix: params.profilePrefix,
     profileName: params.profileName ?? email,
   });
-  const expires = asDateTimestampMs(params.expires);
 
   const credential: AuthProfileCredential = {
     type: "oauth",
     provider: params.providerId,
     access: params.access,
     ...(params.refresh ? { refresh: params.refresh } : {}),
-    ...(expires !== undefined ? { expires } : {}),
+    ...(Number.isFinite(params.expires) ? { expires: params.expires as number } : {}),
     ...(email ? { email } : {}),
     ...(displayName ? { displayName } : {}),
     ...params.credentialExtra,

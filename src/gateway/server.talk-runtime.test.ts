@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   invokeTalkSpeakDirect,
   type TalkSpeakTestPayload,
@@ -95,11 +95,6 @@ function expectSingleSynthesizeSpeechCall() {
 }
 
 describe("gateway talk runtime", () => {
-  beforeAll(async () => {
-    await import("./server-methods/talk.js");
-    await import("../config/config.js");
-  });
-
   beforeEach(() => {
     synthesizeSpeechMock.mockReset();
     synthesizeSpeechMock.mockResolvedValue({

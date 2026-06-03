@@ -29,10 +29,10 @@ vi.mock("openclaw/plugin-sdk/ssrf-runtime", () => ({
 // ============ Test doubles ============
 
 /** Build a minimal ApiClient stub whose `request` is fully mockable. */
-function mockApiClient(): ApiClient & { request: ReturnType<typeof vi.fn<ApiClient["request"]>> } {
+function mockApiClient(): ApiClient & { request: ReturnType<typeof vi.fn> } {
   return {
-    request: vi.fn<ApiClient["request"]>(),
-  } as unknown as ApiClient & { request: ReturnType<typeof vi.fn<ApiClient["request"]>> };
+    request: vi.fn(),
+  } as unknown as ApiClient & { request: ReturnType<typeof vi.fn> };
 }
 
 /** Minimal TokenManager stub returning a static token. */
@@ -200,26 +200,25 @@ describe("media-chunked: ChunkedMediaApi.uploadChunked", () => {
     // plus one complete. Because concurrency=2 the order of part_finish is
     // not strictly deterministic, so match on path + payload key.
     client.request.mockImplementation(
-      async (_token: string, _method: string, pathLocal: string, body: unknown) => {
-        const uploadBody = body as Record<string, unknown>;
-        if (pathLocal.endsWith("/upload_prepare")) {
-          expect(uploadBody.file_type).toBe(MediaFileType.FILE);
-          expect(typeof uploadBody.md5).toBe("string");
-          expect(typeof uploadBody.sha1).toBe("string");
-          expect(typeof uploadBody.md5_10m).toBe("string");
-          expect(uploadBody.file_size).toBe(FIXTURE_BUFFER.length);
+      async (_token: string, _method: string, path: string, body: Record<string, unknown>) => {
+        if (path.endsWith("/upload_prepare")) {
+          expect(body.file_type).toBe(MediaFileType.FILE);
+          expect(typeof body.md5).toBe("string");
+          expect(typeof body.sha1).toBe("string");
+          expect(typeof body.md5_10m).toBe("string");
+          expect(body.file_size).toBe(FIXTURE_BUFFER.length);
           return prepareResp;
         }
-        if (pathLocal.endsWith("/upload_part_finish")) {
-          expect(uploadBody.upload_id).toBe("uid-1");
-          expect(typeof uploadBody.part_index).toBe("number");
+        if (path.endsWith("/upload_part_finish")) {
+          expect(body.upload_id).toBe("uid-1");
+          expect(typeof body.part_index).toBe("number");
           return {};
         }
-        if (pathLocal.endsWith("/files")) {
-          expect(uploadBody.upload_id).toBe("uid-1");
+        if (path.endsWith("/files")) {
+          expect(body.upload_id).toBe("uid-1");
           return completeResp;
         }
-        throw new Error(`unexpected path ${pathLocal}`);
+        throw new Error(`unexpected path ${path}`);
       },
     );
 
@@ -251,10 +250,17 @@ describe("media-chunked: ChunkedMediaApi.uploadChunked", () => {
       ]),
     );
 
-    // FILE uploads carry filename metadata in upload_prepare, so the content-only
-    // cache is bypassed to avoid reusing file_info with a stale name.
-    expect(cache.getSpy).not.toHaveBeenCalled();
-    expect(cache.setSpy).not.toHaveBeenCalled();
+    // Cache populated with the complete result.
+    const expectedMd5 = crypto.createHash("md5").update(FIXTURE_BUFFER).digest("hex");
+    expect(cache.setSpy).toHaveBeenCalledWith(
+      expectedMd5,
+      "group",
+      "g1",
+      MediaFileType.FILE,
+      "final-file-info",
+      "uuid-final",
+      3600,
+    );
 
     // Progress callback hit 3 times with monotonically-increasing counts.
     expect(onProgress).toHaveBeenCalledTimes(3);
@@ -324,7 +330,9 @@ describe("media-chunked: ChunkedMediaApi.uploadChunked", () => {
       expect(result.file_info).toBe("fi");
 
       // Verify prepare received the md5 of the on-disk bytes.
-      const prepareCall = client.request.mock.calls.find((c) => c[2].endsWith("/upload_prepare"))!;
+      const prepareCall = client.request.mock.calls.find((c) =>
+        String(c[2]).endsWith("/upload_prepare"),
+      )!;
       const prepareBody = prepareCall[3] as { md5: string; file_name: string };
       expect(prepareBody.md5).toBe(crypto.createHash("md5").update(FIXTURE_BUFFER).digest("hex"));
       expect(prepareBody.file_name).toBe("fixture.bin");
@@ -367,7 +375,9 @@ describe("media-chunked: ChunkedMediaApi.uploadChunked", () => {
         creds: { appId: "a", clientSecret: "s" },
       });
 
-      const prepareCall = client.request.mock.calls.find((c) => c[2].endsWith("/upload_prepare"))!;
+      const prepareCall = client.request.mock.calls.find((c) =>
+        String(c[2]).endsWith("/upload_prepare"),
+      )!;
       const prepareBody = prepareCall[3] as { md5: string };
       expect(prepareBody.md5).toBe(crypto.createHash("md5").update(FIXTURE_BUFFER).digest("hex"));
     } finally {

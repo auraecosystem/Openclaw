@@ -238,10 +238,10 @@ const optionComparisonOmittedFields = new Set([
 ]);
 const nullableLocalizationFields = new Set(["description_localizations", "name_localizations"]);
 
-function stableComparableObject(value: unknown, pathValue: string[] = []): unknown {
+function stableComparableObject(value: unknown, path: string[] = []): unknown {
   if (Array.isArray(value)) {
-    const normalized = value.map((entry) => stableComparableObject(entry, pathValue));
-    const key = pathValue.at(-1);
+    const normalized = value.map((entry) => stableComparableObject(entry, path));
+    const key = path.at(-1);
     if (
       key &&
       unorderedCommandArrayFields.has(key) &&
@@ -266,7 +266,7 @@ function stableComparableObject(value: unknown, pathValue: string[] = []): unkno
         if (entry === null && nullableLocalizationFields.has(key)) {
           return false;
         }
-        if (pathValue.includes("options") && optionComparisonOmittedFields.has(key)) {
+        if (path.includes("options") && optionComparisonOmittedFields.has(key)) {
           return false;
         }
         if ((key === "required" || key === "autocomplete") && entry === false) {
@@ -277,21 +277,21 @@ function stableComparableObject(value: unknown, pathValue: string[] = []): unkno
       .toSorted(([a], [b]) => a.localeCompare(b))
       .map(([key, entry]) => [
         key,
-        shouldNormalizeDescriptionValue(pathValue, key, entry)
+        shouldNormalizeDescriptionValue(path, key, entry)
           ? normalizeDescriptionForComparison(entry)
-          : stableComparableObject(entry, [...pathValue, key]),
+          : stableComparableObject(entry, [...path, key]),
       ]),
   );
 }
 
 function shouldNormalizeDescriptionValue(
-  pathLocal: string[],
+  path: string[],
   key: string,
   entry: unknown,
 ): entry is string {
   return (
     typeof entry === "string" &&
-    (key === "description" || pathLocal.at(-1) === "description_localizations")
+    (key === "description" || path.at(-1) === "description_localizations")
   );
 }
 
@@ -333,7 +333,7 @@ function commandsEqual(a: unknown, b: unknown) {
   return JSON.stringify(comparableCommand(a)) === JSON.stringify(comparableCommand(b));
 }
 
-export const testing = {
+export const __testing = {
   commandsEqual,
   comparableCommand,
   normalizeDescriptionForComparison,
@@ -349,4 +349,3 @@ function stableCommandSetHash(commands: SerializedCommand[]): string {
     );
   return createHash("sha256").update(JSON.stringify(stable)).digest("hex");
 }
-export { testing as __testing };

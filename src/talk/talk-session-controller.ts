@@ -1,4 +1,3 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   createTalkEventSequencer,
   type TalkBrain,
@@ -56,10 +55,6 @@ export type TalkSessionControllerOptions = {
   sequencer?: TalkEventSequencer;
 };
 
-function defaultTalkEventPayload(payload: unknown): unknown {
-  return payload === undefined ? {} : payload;
-}
-
 export function createTalkSessionController(
   params: TalkSessionControllerParams,
   options: TalkSessionControllerOptions = {},
@@ -115,7 +110,7 @@ export function createTalkSessionController(
       event: emit({
         type: "turn.started",
         turnId,
-        payload: defaultTalkEventPayload(startParams.payload),
+        payload: startParams.payload ?? {},
       }),
     };
   };
@@ -136,7 +131,7 @@ export function createTalkSessionController(
       event: emit({
         type,
         turnId,
-        payload: defaultTalkEventPayload(paramsForTurn.payload),
+        payload: paramsForTurn.payload ?? {},
         final: true,
       }),
     };
@@ -178,7 +173,7 @@ export function createTalkSessionController(
       return emit({
         type: "output.audio.done",
         turnId,
-        payload: defaultTalkEventPayload(paramsForOutput.payload),
+        payload: paramsForOutput.payload ?? {},
         final: true,
       });
     },
@@ -193,7 +188,7 @@ export function createTalkSessionController(
         event: emit({
           type: "output.audio.started",
           turnId: turn.turnId,
-          payload: defaultTalkEventPayload(paramsForOutput.payload),
+          payload: paramsForOutput.payload ?? {},
         }),
       };
     },
@@ -215,3 +210,8 @@ export function normalizeTalkTransport(value: string | undefined): string | unde
 }
 
 export type { TalkBrain, TalkEvent, TalkEventContext, TalkEventInput, TalkMode, TalkTransport };
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}

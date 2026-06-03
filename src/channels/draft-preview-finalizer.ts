@@ -5,12 +5,12 @@ import {
 } from "./message/live.js";
 
 /**
- * @deprecated Use `LivePreviewFinalizerDraft` from `openclaw/plugin-sdk/channel-outbound`.
+ * @deprecated Use `LivePreviewFinalizerDraft` from `openclaw/plugin-sdk/channel-message`.
  */
 export type DraftPreviewFinalizerDraft<TId> = LivePreviewFinalizerDraft<TId>;
 
 /**
- * @deprecated Use `LivePreviewFinalizerResult` from `openclaw/plugin-sdk/channel-outbound`.
+ * @deprecated Use `LivePreviewFinalizerResult` from `openclaw/plugin-sdk/channel-message`.
  */
 export type DraftPreviewFinalizerResult = Exclude<
   LivePreviewFinalizerResultKind,
@@ -18,7 +18,7 @@ export type DraftPreviewFinalizerResult = Exclude<
 >;
 
 /**
- * @deprecated Use `deliverFinalizableLivePreview` from `openclaw/plugin-sdk/channel-outbound`.
+ * @deprecated Use `deliverFinalizableLivePreview` from `openclaw/plugin-sdk/channel-message`.
  */
 export async function deliverFinalizableDraftPreview<TPayload, TId, TEdit>(params: {
   kind: "tool" | "block" | "final";

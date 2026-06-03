@@ -17,8 +17,6 @@ describe("nvidia onboard", () => {
     expect(provider.models.map((model) => model.id)).toEqual([
       "nvidia/nemotron-3-super-120b-a12b",
       "moonshotai/kimi-k2.5",
-      "minimaxai/minimax-m2.7",
-      "z-ai/glm-5.1",
       "minimaxai/minimax-m2.5",
       "z-ai/glm5",
     ]);
@@ -44,8 +42,6 @@ describe("nvidia onboard", () => {
       "nvidia/custom-model",
       "nvidia/nemotron-3-super-120b-a12b",
       "moonshotai/kimi-k2.5",
-      "minimaxai/minimax-m2.7",
-      "z-ai/glm-5.1",
       "minimaxai/minimax-m2.5",
       "z-ai/glm5",
     ]);

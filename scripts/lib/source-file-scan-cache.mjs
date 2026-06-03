@@ -1,7 +1,6 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
-const DEFAULT_SOURCE_FILE_READ_CONCURRENCY = 32;
 const scanCache = new Map();
 
 function normalizeRepoPath(repoRoot, filePath) {
@@ -10,7 +9,7 @@ function normalizeRepoPath(repoRoot, filePath) {
 
 async function walkFiles(params, rootDir) {
   const out = [];
-  let entries;
+  let entries = [];
   try {
     entries = await fs.readdir(rootDir, { withFileTypes: true });
   } catch (error) {
@@ -35,35 +34,7 @@ async function walkFiles(params, rootDir) {
   return out;
 }
 
-function normalizeConcurrency(value) {
-  if (!Number.isInteger(value) || value < 1) {
-    return DEFAULT_SOURCE_FILE_READ_CONCURRENCY;
-  }
-  return value;
-}
-
-export async function mapWithConcurrency(items, concurrency, mapper) {
-  const out = Array.from({ length: items.length });
-  const workerCount = Math.min(normalizeConcurrency(concurrency), items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    for (;;) {
-      const index = nextIndex;
-      nextIndex += 1;
-      if (index >= items.length) {
-        return;
-      }
-      out[index] = await mapper(items[index], index);
-    }
-  }
-
-  await Promise.all(Array.from({ length: workerCount }, () => worker()));
-  return out;
-}
-
 export async function collectSourceFileContents(params) {
-  const useCache = !params.readFile;
   const cacheKey = JSON.stringify({
     repoRoot: params.repoRoot,
     scanRoots: params.scanRoots,
@@ -72,11 +43,9 @@ export async function collectSourceFileContents(params) {
       left.localeCompare(right),
     ),
   });
-  if (useCache) {
-    const cached = scanCache.get(cacheKey);
-    if (cached) {
-      return await cached;
-    }
+  const cached = scanCache.get(cacheKey);
+  if (cached) {
+    return await cached;
   }
 
   const promise = (async () => {
@@ -92,23 +61,20 @@ export async function collectSourceFileContents(params) {
         ),
       );
 
-    const readFile = params.readFile ?? fs.readFile;
-    return await mapWithConcurrency(files, params.maxConcurrentReads, async (filePath) => ({
-      filePath,
-      relativeFile: normalizeRepoPath(params.repoRoot, filePath),
-      content: await readFile(filePath, "utf8"),
-    }));
+    return await Promise.all(
+      files.map(async (filePath) => ({
+        filePath,
+        relativeFile: normalizeRepoPath(params.repoRoot, filePath),
+        content: await fs.readFile(filePath, "utf8"),
+      })),
+    );
   })();
 
-  if (useCache) {
-    scanCache.set(cacheKey, promise);
-  }
+  scanCache.set(cacheKey, promise);
   try {
     return await promise;
   } catch (error) {
-    if (useCache) {
-      scanCache.delete(cacheKey);
-    }
+    scanCache.delete(cacheKey);
     throw error;
   }
 }

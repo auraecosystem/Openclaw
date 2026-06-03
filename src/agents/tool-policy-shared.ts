@@ -1,5 +1,4 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   CORE_TOOL_GROUPS,
   resolveCoreToolProfilePolicy,
@@ -23,50 +22,6 @@ export function normalizeToolName(name: string) {
   return TOOL_NAME_ALIASES[normalized] ?? normalized;
 }
 
-export function couldNormalizeToolNamePrefixToAllowedTool(
-  prefix: string,
-  allowedToolNames: Set<string>,
-): boolean {
-  const normalizedPrefix = normalizeLowercaseStringOrEmpty(prefix);
-  if (!normalizedPrefix) {
-    return false;
-  }
-
-  const allowed = new Set<string>();
-  for (const toolName of allowedToolNames) {
-    const normalizedToolName = normalizeToolName(toolName);
-    const foldedToolName = normalizeLowercaseStringOrEmpty(toolName);
-    if (normalizedToolName) {
-      allowed.add(normalizedToolName);
-    }
-    if (foldedToolName) {
-      allowed.add(foldedToolName);
-    }
-    if (
-      normalizedToolName.startsWith(normalizedPrefix) ||
-      foldedToolName.startsWith(normalizedPrefix)
-    ) {
-      return true;
-    }
-  }
-
-  const resolvedPrefix = normalizeToolName(normalizedPrefix);
-  if (resolvedPrefix !== normalizedPrefix) {
-    for (const toolName of allowed) {
-      if (toolName.startsWith(resolvedPrefix)) {
-        return true;
-      }
-    }
-  }
-
-  for (const [alias, toolName] of Object.entries(TOOL_NAME_ALIASES)) {
-    if (alias.startsWith(normalizedPrefix) && allowed.has(toolName)) {
-      return true;
-    }
-  }
-  return false;
-}
-
 export function normalizeToolList(list?: string[]) {
   if (!list) {
     return [];
@@ -85,7 +40,7 @@ export function expandToolGroups(list?: string[]) {
     }
     expanded.push(value);
   }
-  return uniqueStrings(expanded);
+  return Array.from(new Set(expanded));
 }
 
 export function resolveToolProfilePolicy(profile?: string): ToolProfilePolicy | undefined {

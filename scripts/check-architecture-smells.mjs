@@ -15,7 +15,6 @@ import {
   resolveSourceRoots,
   runAsScript,
 } from "./lib/ts-guard-utils.mjs";
-import { mapWithConcurrency } from "./lib/source-file-scan-cache.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const scanRoots = resolveSourceRoots(repoRoot, ["src/plugin-sdk", "src/plugins/runtime"]);
@@ -171,16 +170,14 @@ export async function collectArchitectureSmells() {
       const files = (await collectTypeScriptFilesFromRoots(scanRoots)).toSorted((left, right) =>
         normalizeRepoPath(repoRoot, left).localeCompare(normalizeRepoPath(repoRoot, right)),
       );
-      const entriesByFile = await mapWithConcurrency(
-        files,
-        undefined,
-        async (filePath) => {
+      const entriesByFile = await Promise.all(
+        files.map(async (filePath) => {
           const source = await fs.readFile(filePath, "utf8");
           const entries = scanPluginSdkExtensionFacadeSmells(source, filePath);
           entries.push(...scanRuntimeTypeImplementationSmells(source, filePath));
           entries.push(...scanRuntimeServiceLocatorSmells(source, filePath));
           return entries;
-        },
+        }),
       );
       return entriesByFile.flat().toSorted(compareEntries);
     })();

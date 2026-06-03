@@ -20,18 +20,12 @@ import java.util.TimeZone
 
 private const val DEFAULT_CALENDAR_LIMIT = 50
 
-/**
- * Parsed calendar.events request; times are epoch millis for CalendarContract queries.
- */
 internal data class CalendarEventsRequest(
   val startMs: Long,
   val endMs: Long,
   val limit: Int,
 )
 
-/**
- * Parsed calendar.add request before resolving the target Android calendar.
- */
 internal data class CalendarAddRequest(
   val title: String,
   val startMs: Long,
@@ -43,9 +37,6 @@ internal data class CalendarAddRequest(
   val calendarTitle: String?,
 )
 
-/**
- * Normalized calendar event returned through gateway calendar commands.
- */
 internal data class CalendarEventRecord(
   val identifier: String,
   val title: String,
@@ -56,9 +47,6 @@ internal data class CalendarEventRecord(
   val calendarTitle: String?,
 )
 
-/**
- * Injectable CalendarProvider facade for command tests and Android runtime access.
- */
 internal interface CalendarDataSource {
   fun hasReadPermission(context: Context): Boolean
 
@@ -90,7 +78,6 @@ private object SystemCalendarDataSource : CalendarDataSource {
   ): List<CalendarEventRecord> {
     val resolver = context.contentResolver
     val builder = CalendarContract.Instances.CONTENT_URI.buildUpon()
-    // Instances expands recurring events inside the requested time window.
     ContentUris.appendId(builder, request.startMs)
     ContentUris.appendId(builder, request.endMs)
     val projection =
@@ -168,12 +155,10 @@ private object SystemCalendarDataSource : CalendarDataSource {
     calendarTitle: String?,
   ): Long {
     if (calendarId != null) {
-      // Explicit id wins over title/default selection and must already exist.
       if (calendarExists(resolver, calendarId)) return calendarId
       throw IllegalArgumentException("CALENDAR_NOT_FOUND: no calendar id $calendarId")
     }
     if (!calendarTitle.isNullOrEmpty()) {
-      // Title lookup is exact to avoid adding events to a similarly named calendar.
       findCalendarByTitle(resolver, calendarTitle)?.let { return it }
       throw IllegalArgumentException("CALENDAR_NOT_FOUND: no calendar named $calendarTitle")
     }
@@ -224,7 +209,6 @@ private object SystemCalendarDataSource : CalendarDataSource {
         projection,
         "${CalendarContract.Calendars.VISIBLE}=1",
         null,
-        // Prefer Android's primary visible calendar, then lowest id for deterministic fallback.
         "${CalendarContract.Calendars.IS_PRIMARY} DESC, ${CalendarContract.Calendars._ID} ASC",
       ).use { cursor ->
         if (cursor == null || !cursor.moveToFirst()) return null
@@ -358,7 +342,6 @@ class CalendarHandler private constructor(
     if (paramsJson.isNullOrBlank()) {
       val start = Instant.now()
       val end = start.plus(7, ChronoUnit.DAYS)
-      // Default calendar read is a one-week window, not the full calendar store.
       return CalendarEventsRequest(startMs = start.toEpochMilli(), endMs = end.toEpochMilli(), limit = DEFAULT_CALENDAR_LIMIT)
     }
     val params =
@@ -371,7 +354,6 @@ class CalendarHandler private constructor(
     val end = parseISO((params["endISO"] as? JsonPrimitive)?.content)
     val resolvedStart = start ?: Instant.now()
     val resolvedEnd = end ?: resolvedStart.plus(7, ChronoUnit.DAYS)
-    // Keep model-driven calendar reads bounded.
     val limit = ((params["limit"] as? JsonPrimitive)?.content?.toIntOrNull() ?: DEFAULT_CALENDAR_LIMIT).coerceIn(1, 500)
     return CalendarEventsRequest(
       startMs = resolvedStart.toEpochMilli(),
@@ -408,7 +390,6 @@ class CalendarHandler private constructor(
   private fun parseISO(raw: String?): Instant? {
     val value = raw?.trim().orEmpty()
     if (value.isEmpty()) return null
-    // Gateway calendar payloads use UTC ISO-8601 instants for unambiguous Android storage.
     return try {
       Instant.parse(value)
     } catch (_: Throwable) {

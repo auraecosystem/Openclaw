@@ -5,10 +5,9 @@ import {
   resolveBraveMode,
 } from "./src/brave-web-search-provider.shared.js";
 
-export const testing = {
+export const __testing = {
   normalizeBraveCountry,
   normalizeBraveLanguageParams,
   resolveBraveMode,
   mapBraveLlmContextResults,
 } as const;
-export { testing as __testing };

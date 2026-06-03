@@ -60,14 +60,6 @@ export function createWebSocketTransport(
       callback();
     },
   });
-  const closeSocket = () => {
-    if (socket.readyState === WebSocket.CLOSED || socket.readyState === WebSocket.CLOSING) {
-      return;
-    }
-    socket.close();
-  };
-  stdin.once("finish", closeSocket);
-  stdin.once("close", closeSocket);
 
   return {
     stdin,

@@ -75,7 +75,9 @@ function hasQueuedReactionEventFor(sender: string) {
       typeof options === "object" &&
       options !== null &&
       "sessionKey" in options &&
-      (options as { sessionKey?: string }).sessionKey === route.sessionKey
+      (options as { sessionKey?: string; forceSenderIsOwnerFalse?: boolean }).sessionKey ===
+        route.sessionKey &&
+      (options as { forceSenderIsOwnerFalse?: boolean }).forceSenderIsOwnerFalse === true
     );
   });
 }

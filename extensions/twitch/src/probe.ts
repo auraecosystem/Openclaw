@@ -50,6 +50,9 @@ export async function probeTwitch(
     // Create a promise that resolves when connected
     const connectionPromise = new Promise<void>((resolve, reject) => {
       let settled = false;
+      let connectListener: ReturnType<ChatClient["onConnect"]> | undefined;
+      let disconnectListener: ReturnType<ChatClient["onDisconnect"]> | undefined;
+      let authFailListener: ReturnType<ChatClient["onAuthenticationFailure"]> | undefined;
 
       const cleanup = () => {
         if (settled) {
@@ -62,26 +65,22 @@ export async function probeTwitch(
       };
 
       // Success: connection established
-      const connectListener: ReturnType<ChatClient["onConnect"]> | undefined = client?.onConnect(
-        () => {
-          cleanup();
-          resolve();
-        },
-      );
+      connectListener = client?.onConnect(() => {
+        cleanup();
+        resolve();
+      });
 
       // Failure: disconnected (e.g., auth failed)
-      const disconnectListener: ReturnType<ChatClient["onDisconnect"]> | undefined =
-        client?.onDisconnect((_manually, reason) => {
-          cleanup();
-          reject(reason || new Error("Disconnected"));
-        });
+      disconnectListener = client?.onDisconnect((_manually, reason) => {
+        cleanup();
+        reject(reason || new Error("Disconnected"));
+      });
 
       // Failure: authentication failed
-      const authFailListener: ReturnType<ChatClient["onAuthenticationFailure"]> | undefined =
-        client?.onAuthenticationFailure(() => {
-          cleanup();
-          reject(new Error("Authentication failed"));
-        });
+      authFailListener = client?.onAuthenticationFailure(() => {
+        cleanup();
+        reject(new Error("Authentication failed"));
+      });
     });
 
     let timeoutHandle: ReturnType<typeof setTimeout> | undefined;

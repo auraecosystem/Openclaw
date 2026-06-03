@@ -1,4 +1,3 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.js";
 import { logVerbose } from "../globals.js";
 import type {
@@ -12,6 +11,7 @@ import {
 import { sortWebFetchProvidersForAutoDetect } from "../plugins/web-fetch-providers.shared.js";
 import { getActiveRuntimeWebToolsMetadata } from "../secrets/runtime-web-tools-state.js";
 import type { RuntimeWebFetchMetadata } from "../secrets/runtime-web-tools.types.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import {
   hasWebProviderEntryCredential,
   providerRequiresCredential,
@@ -51,11 +51,7 @@ function resolveFetchConfig(config: OpenClawConfig | undefined): WebFetchConfig 
 function hasEntryCredential(
   provider: Pick<
     PluginWebFetchProviderEntry,
-    | "envVars"
-    | "getConfiguredCredentialFallback"
-    | "getConfiguredCredentialValue"
-    | "getCredentialValue"
-    | "requiresCredential"
+    "envVars" | "getConfiguredCredentialValue" | "getCredentialValue" | "requiresCredential"
   >,
   config: OpenClawConfig | undefined,
   fetch: WebFetchConfig | undefined,
@@ -67,8 +63,6 @@ function hasEntryCredential(
     resolveRawValue: ({ provider: currentProvider, config: currentConfig, toolConfig }) =>
       currentProvider.getConfiguredCredentialValue?.(currentConfig) ??
       currentProvider.getCredentialValue(toolConfig),
-    resolveFallbackRawValue: ({ provider: currentProvider, config: currentConfig }) =>
-      currentProvider.getConfiguredCredentialFallback?.(currentConfig)?.value,
     resolveEnvValue: ({ provider: currentProvider }) =>
       readWebProviderEnvValue(currentProvider.envVars),
   });
@@ -77,11 +71,7 @@ function hasEntryCredential(
 export function isWebFetchProviderConfigured(params: {
   provider: Pick<
     PluginWebFetchProviderEntry,
-    | "envVars"
-    | "getConfiguredCredentialFallback"
-    | "getConfiguredCredentialValue"
-    | "getCredentialValue"
-    | "requiresCredential"
+    "envVars" | "getConfiguredCredentialValue" | "getCredentialValue" | "requiresCredential"
   >;
   config?: OpenClawConfig;
 }): boolean {
@@ -93,6 +83,7 @@ export function listWebFetchProviders(params?: {
 }): PluginWebFetchProviderEntry[] {
   return resolvePluginWebFetchProviders({
     config: params?.config,
+    bundledAllowlistCompat: true,
   });
 }
 
@@ -101,6 +92,7 @@ export function listConfiguredWebFetchProviders(params?: {
 }): PluginWebFetchProviderEntry[] {
   return resolvePluginWebFetchProviders({
     config: params?.config,
+    bundledAllowlistCompat: true,
   });
 }
 
@@ -113,6 +105,7 @@ export function resolveWebFetchProviderId(params: {
     params.providers ??
       resolvePluginWebFetchProviders({
         config: params.config,
+        bundledAllowlistCompat: true,
       }),
   );
   const raw =
@@ -171,14 +164,17 @@ export function resolveWebFetchDefinition(
     options?.sandboxed
       ? resolvePluginWebFetchProviders({
           config: options?.config,
+          bundledAllowlistCompat: true,
           origin: "bundled",
         })
       : options?.preferRuntimeProviders
         ? resolveRuntimeWebFetchProviders({
             config: options?.config,
+            bundledAllowlistCompat: true,
           })
         : resolvePluginWebFetchProviders({
             config: options?.config,
+            bundledAllowlistCompat: true,
           }),
   );
   return resolveWebProviderDefinition({
@@ -198,11 +194,11 @@ export function resolveWebFetchDefinition(
         fetch: toolConfig as WebFetchConfig | undefined,
         sandboxed,
       }),
-    resolveAutoProviderId: ({ config, toolConfig, providers: providersLocal }) =>
+    resolveAutoProviderId: ({ config, toolConfig, providers }) =>
       resolveWebFetchProviderId({
         config,
         fetch: toolConfig as WebFetchConfig | undefined,
-        providers: providersLocal,
+        providers,
       }),
     createTool: ({ provider, config, toolConfig, runtimeMetadata }) =>
       provider.createTool({

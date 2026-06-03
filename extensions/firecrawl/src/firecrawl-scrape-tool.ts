@@ -2,8 +2,7 @@ import { optionalStringEnum } from "openclaw/plugin-sdk/channel-actions";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk/plugin-runtime";
 import {
   jsonResult,
-  readNonNegativeIntegerParam,
-  readPositiveIntegerParam,
+  readNumberParam,
   readStringParam,
 } from "openclaw/plugin-sdk/provider-web-search";
 import { Type } from "typebox";
@@ -16,7 +15,7 @@ const FirecrawlScrapeToolSchema = Type.Object(
       description: 'Extraction mode ("markdown" or "text"). Default: markdown.',
     }),
     maxChars: Type.Optional(
-      Type.Integer({
+      Type.Number({
         description: "Maximum characters to return.",
         minimum: 100,
       }),
@@ -27,7 +26,7 @@ const FirecrawlScrapeToolSchema = Type.Object(
       }),
     ),
     maxAgeMs: Type.Optional(
-      Type.Integer({
+      Type.Number({
         description: "Maximum Firecrawl cache age in milliseconds.",
         minimum: 0,
       }),
@@ -41,7 +40,7 @@ const FirecrawlScrapeToolSchema = Type.Object(
       }),
     ),
     timeoutSeconds: Type.Optional(
-      Type.Integer({
+      Type.Number({
         description: "Timeout in seconds for the Firecrawl scrape request.",
         minimum: 1,
       }),
@@ -61,9 +60,11 @@ export function createFirecrawlScrapeTool(api: OpenClawPluginApi) {
       const url = readStringParam(rawParams, "url", { required: true });
       const extractMode =
         readStringParam(rawParams, "extractMode") === "text" ? "text" : "markdown";
-      const maxChars = readPositiveIntegerParam(rawParams, "maxChars");
-      const maxAgeMs = readNonNegativeIntegerParam(rawParams, "maxAgeMs");
-      const timeoutSeconds = readPositiveIntegerParam(rawParams, "timeoutSeconds");
+      const maxChars = readNumberParam(rawParams, "maxChars", { integer: true });
+      const maxAgeMs = readNumberParam(rawParams, "maxAgeMs", { integer: true });
+      const timeoutSeconds = readNumberParam(rawParams, "timeoutSeconds", {
+        integer: true,
+      });
       const proxyRaw = readStringParam(rawParams, "proxy");
       const proxy =
         proxyRaw === "basic" || proxyRaw === "stealth" || proxyRaw === "auto"

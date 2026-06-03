@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 export function sha256HexPrefix(value: string, len = 12): string {
   const safeLen = Number.isFinite(len) ? Math.max(1, Math.floor(len)) : 12;

@@ -5,8 +5,6 @@ import {
 } from "../plugins/provider-auth-choices.js";
 import type { AuthChoice } from "./onboard-types.js";
 
-const LEGACY_REPLACEMENT_AUTH_CHOICES = new Set(["claude-cli"]);
-
 function resolveLegacyCliBackendChoice(
   choice: string,
   params?: {
@@ -15,7 +13,7 @@ function resolveLegacyCliBackendChoice(
     env?: NodeJS.ProcessEnv;
   },
 ) {
-  if (!LEGACY_REPLACEMENT_AUTH_CHOICES.has(choice)) {
+  if (!choice.endsWith("-cli")) {
     return undefined;
   }
   return resolveManifestDeprecatedProviderAuthChoice(choice, params);
@@ -32,9 +30,9 @@ export function resolveLegacyAuthChoiceAliasesForCli(params?: {
 }): ReadonlyArray<AuthChoice> {
   const manifestCliAliases = resolveManifestProviderAuthChoices(params)
     .flatMap((choice) => choice.deprecatedChoiceIds ?? [])
-    .filter((choice): choice is AuthChoice => LEGACY_REPLACEMENT_AUTH_CHOICES.has(choice))
+    .filter((choice): choice is AuthChoice => choice.endsWith("-cli"))
     .toSorted((left, right) => left.localeCompare(right));
-  return Array.from(new Set(manifestCliAliases));
+  return manifestCliAliases;
 }
 
 export function normalizeLegacyOnboardAuthChoice(

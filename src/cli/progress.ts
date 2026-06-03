@@ -1,15 +1,11 @@
 import { spinner } from "@clack/prompts";
-import {
-  createOscProgressController,
-  supportsOscProgress,
-} from "../../packages/terminal-core/src/osc-progress.js";
+import { createOscProgressController, supportsOscProgress } from "../terminal/osc-progress.js";
 import {
   clearActiveProgressLine,
   registerActiveProgressLine,
   unregisterActiveProgressLine,
-} from "../../packages/terminal-core/src/progress-line.js";
-import { theme } from "../../packages/terminal-core/src/theme.js";
-import { resolveTimerTimeoutMs } from "../shared/number-coercion.js";
+} from "../terminal/progress-line.js";
+import { theme } from "../terminal/theme.js";
 
 const DEFAULT_DELAY_MS = 0;
 let activeProgress = 0;
@@ -68,7 +64,7 @@ export function createCliProgress(options: ProgressOptions): ProgressReporter {
     return noopReporter;
   }
 
-  const delayMs = resolveTimerTimeoutMs(options.delayMs, DEFAULT_DELAY_MS, 0);
+  const delayMs = typeof options.delayMs === "number" ? options.delayMs : DEFAULT_DELAY_MS;
   const canOsc = isTty && supportsOscProgress(process.env, isTty);
   const stdinIsRaw = process.stdin.isRaw;
   const allowSpinner = shouldUseInteractiveProgressSpinner({
@@ -102,7 +98,7 @@ export function createCliProgress(options: ProgressOptions): ProgressReporter {
       })
     : null;
 
-  const spin = allowSpinner ? spinner({ output: stream }) : null;
+  const spin = allowSpinner ? spinner() : null;
   const renderLine = allowLine
     ? () => {
         if (!started) {
@@ -201,9 +197,6 @@ export function createCliProgress(options: ProgressOptions): ProgressReporter {
       timer = null;
     }
     if (!started) {
-      if (isTty) {
-        unregisterActiveProgressLine(stream);
-      }
       activeProgress = Math.max(0, activeProgress - 1);
       return;
     }

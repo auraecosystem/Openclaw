@@ -1,8 +1,5 @@
 import crypto from "node:crypto";
-import { resolveAgentDir, resolveSessionAgentIds } from "openclaw/plugin-sdk/agent-runtime";
-import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import type { PluginCommandContext, PluginCommandResult } from "openclaw/plugin-sdk/plugin-entry";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { CODEX_CONTROL_METHODS, type CodexControlMethod } from "./app-server/capabilities.js";
 import {
   installCodexComputerUse,
@@ -13,10 +10,6 @@ import { isCodexFastServiceTier, type CodexComputerUseConfig } from "./app-serve
 import { listAllCodexAppServerModels } from "./app-server/models.js";
 import { isJsonObject, type JsonValue } from "./app-server/protocol.js";
 import { rememberCodexRateLimits } from "./app-server/rate-limit-cache.js";
-import {
-  resolveCodexNativeExecutionBlock,
-  resolveCodexNativeSandboxBlock,
-} from "./app-server/sandbox-guard.js";
 import {
   clearCodexAppServerBinding,
   readCodexAppServerBinding,
@@ -31,18 +24,9 @@ import {
   formatCodexStatus,
   formatList,
   formatModels,
-  formatSkills,
   formatThreads,
   readString,
 } from "./command-formatters.js";
-import {
-  handleCodexPluginsSubcommand,
-  type CodexPluginsManagementIO,
-} from "./command-plugins-management.js";
-import {
-  buildCodexCommandPickerPresentation,
-  type CodexCommandPickerButton,
-} from "./command-presentation.js";
 import {
   codexControlRequest,
   readCodexStatusProbes,
@@ -95,7 +79,6 @@ export type CodexCommandDeps = {
   stopCodexConversationTurn: typeof stopCodexConversationTurn;
   listCodexCliSessionsOnNode: ListCodexCliSessionsOnNodeFn;
   resolveCodexCliSessionForBindingOnNode: ResolveCodexCliSessionForBindingOnNodeFn;
-  codexPluginsManagementIo?: CodexPluginsManagementIO;
 };
 
 type CodexControlRequestFn = (
@@ -221,16 +204,6 @@ const CODEX_DIAGNOSTICS_CONFIRMATION_MAX_REQUESTS_PER_SCOPE = 100;
 const CODEX_DIAGNOSTICS_CONFIRMATION_MAX_SCOPES = 100;
 const CODEX_DIAGNOSTICS_SCOPE_FIELD_MAX_CHARS = 128;
 const CODEX_RESUME_SAFE_THREAD_ID_PATTERN = /^[A-Za-z0-9._:-]+$/;
-const CODEX_NATIVE_EXECUTION_SUBCOMMANDS = new Set([
-  "bind",
-  "resume",
-  "steer",
-  "model",
-  "fast",
-  "permissions",
-  "compact",
-  "review",
-]);
 
 const lastCodexDiagnosticsUploadByThread = new Map<string, number>();
 const lastCodexDiagnosticsUploadByScope = new Map<string, number>();
@@ -244,151 +217,15 @@ export function resetCodexDiagnosticsFeedbackStateForTests(): void {
   pendingCodexDiagnosticsConfirmationTokensByScope.clear();
 }
 
-/**
- * No-arg `/codex` picker. Codex owns the command tree; channels render the
- * portable command actions as inline controls when their transport can.
- */
-function buildCodexSubcommandPickerReply(): PluginCommandResult {
-  const verbs: CodexCommandPickerButton[] = [
-    { label: "plugins", command: "/codex plugins menu" },
-    { label: "permissions", command: "/codex permissions menu" },
-    { label: "fast", command: "/codex fast menu" },
-    { label: "computer-use", command: "/codex computer-use menu" },
-    { label: "account", command: "/codex account" },
-    { label: "help", command: "/codex help" },
-  ];
-
-  const fallbackTextLines = [
-    "Codex commands. Pick a category or type:",
-    "",
-    ...verbs.map((v, i) => `  ${i + 1}. ${v.command}`),
-    "",
-    "Tap 'help' (or type /codex help) for the full list of typeable verbs",
-    "including threads, mcp, binding, detach, skills, resume, bind, steer,",
-    "model, diagnostics, compact, review, computer-use.",
-    "",
-    "Top-level shortcuts cover everyday operations: /status, /fast, /help, /stop, /models.",
-  ];
-
-  return {
-    text: fallbackTextLines.join("\n"),
-    presentation: buildCodexCommandPickerPresentation(
-      "Codex commands",
-      "Pick a Codex subcommand:",
-      verbs,
-    ),
-  };
-}
-
-/** Sub-picker for `/codex fast menu` (on / off / status). */
-function buildCodexFastMenuReply(): PluginCommandResult {
-  const modes = ["on", "off", "status"] as const;
-  const buttons: CodexCommandPickerButton[] = [
-    ...modes.map((mode) => ({ label: mode, command: `/codex fast ${mode}` })),
-    { label: "back", command: "/codex" },
-  ];
-  const fallbackTextLines = [
-    "Codex fast mode. Pick one or type /codex fast <mode>:",
-    "",
-    ...modes.map((m, i) => `  ${i + 1}. /codex fast ${m}`),
-    "",
-    "Type '/codex' to go back to the main menu.",
-  ];
-  return {
-    text: fallbackTextLines.join("\n"),
-    presentation: buildCodexCommandPickerPresentation(
-      "Codex fast mode",
-      "Pick a Codex fast mode:",
-      buttons,
-    ),
-  };
-}
-
-/** Sub-picker for `/codex permissions menu` (default / yolo / status). */
-function buildCodexPermissionsMenuReply(): PluginCommandResult {
-  const modes = ["default", "yolo", "status"] as const;
-  const buttons: CodexCommandPickerButton[] = [
-    ...modes.map((mode) => ({ label: mode, command: `/codex permissions ${mode}` })),
-    { label: "back", command: "/codex" },
-  ];
-  const fallbackTextLines = [
-    "Codex permissions. Pick one or type /codex permissions <mode>:",
-    "",
-    ...modes.map((m, i) => `  ${i + 1}. /codex permissions ${m}`),
-    "",
-    "Type '/codex' to go back to the main menu.",
-  ];
-  return {
-    text: fallbackTextLines.join("\n"),
-    presentation: buildCodexCommandPickerPresentation(
-      "Codex permissions",
-      "Pick a Codex permissions mode:",
-      buttons,
-    ),
-  };
-}
-
-/** Sub-picker for `/codex computer-use menu` (status / install). */
-function buildCodexComputerUseMenuReply(): PluginCommandResult {
-  const actions = ["status", "install"] as const;
-  const buttons: CodexCommandPickerButton[] = [
-    ...actions.map((action) => ({
-      label: action,
-      command: `/codex computer-use ${action}`,
-    })),
-    { label: "back", command: "/codex" },
-  ];
-  const fallbackTextLines = [
-    "Codex computer-use. Pick one or type /codex computer-use <action>:",
-    "",
-    ...actions.map((a, i) => `  ${i + 1}. /codex computer-use ${a}`),
-    "",
-    "Flag-driven invocations (--source, --marketplace-path, --marketplace) are not in the picker. Type '/codex computer-use' or read '/codex help' for the full surface.",
-    "",
-    "Type '/codex' to go back to the main menu.",
-  ];
-  return {
-    text: fallbackTextLines.join("\n"),
-    presentation: buildCodexCommandPickerPresentation(
-      "Codex computer-use",
-      "Pick a Codex computer-use action:",
-      buttons,
-    ),
-  };
-}
-
-/** Returns true when the rest-args are exactly `["menu"]` (case-insensitive). */
-function isMenuVerb(rest: readonly string[]): boolean {
-  return rest.length === 1 && (rest[0] ?? "").trim().toLowerCase() === "menu";
-}
-
 export async function handleCodexSubcommand(
   ctx: PluginCommandContext,
   options: { pluginConfig?: unknown; deps?: Partial<CodexCommandDeps> },
 ): Promise<PluginCommandResult> {
   const deps: CodexCommandDeps = { ...defaultCodexCommandDeps, ...options.deps };
-  const args = splitArgs(ctx.args);
-  if (args.length === 0) {
-    return buildCodexSubcommandPickerReply();
-  }
-  const [subcommand = "status", ...rest] = args;
+  const [subcommand = "status", ...rest] = splitArgs(ctx.args);
   const normalized = subcommand.toLowerCase();
   if (normalized === "help") {
     return { text: buildHelp() };
-  }
-  const sandboxBlock = resolveCodexNativeCommandSandboxBlock(ctx, normalized, rest);
-  if (sandboxBlock) {
-    return { text: sandboxBlock };
-  }
-  if (normalized === "plugins") {
-    if (!deps.codexPluginsManagementIo) {
-      return {
-        text:
-          "Codex sub-plugin management is not wired up (codexPluginsManagementIo dep is undefined). " +
-          "Edit ~/.openclaw/openclaw.json or use `openclaw config patch` until the runtime exposes the IO.",
-      };
-    }
-    return await handleCodexPluginsSubcommand(ctx, rest, deps.codexPluginsManagementIo);
   }
   if (normalized === "status") {
     if (rest.length > 0) {
@@ -447,15 +284,9 @@ export async function handleCodexSubcommand(
     return { text: await setConversationModel(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "fast") {
-    if (isMenuVerb(rest)) {
-      return buildCodexFastMenuReply();
-    }
     return { text: await setConversationFastMode(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "permissions") {
-    if (isMenuVerb(rest)) {
-      return buildCodexPermissionsMenuReply();
-    }
     return { text: await setConversationPermissions(deps, ctx, options.pluginConfig, rest) };
   }
   if (normalized === "compact") {
@@ -492,9 +323,6 @@ export async function handleCodexSubcommand(
     );
   }
   if (normalized === "computer-use" || normalized === "computeruse") {
-    if (isMenuVerb(rest)) {
-      return buildCodexComputerUseMenuReply();
-    }
     return {
       text: await handleComputerUseCommand(deps, options.pluginConfig, rest),
     };
@@ -517,8 +345,9 @@ export async function handleCodexSubcommand(
       return { text: "Usage: /codex skills" };
     }
     return {
-      text: formatSkills(
+      text: formatList(
         await deps.codexControlRequest(options.pluginConfig, CODEX_CONTROL_METHODS.listSkills, {}),
+        "Codex skills",
       ),
     };
   }
@@ -554,78 +383,6 @@ export async function handleCodexSubcommand(
     };
   }
   return { text: `Unknown Codex command: ${formatCodexDisplayText(subcommand)}\n\n${buildHelp()}` };
-}
-
-function resolveCodexNativeCommandSandboxBlock(
-  ctx: PluginCommandContext,
-  subcommand: string,
-  args: readonly string[],
-): string | undefined {
-  if (!CODEX_NATIVE_EXECUTION_SUBCOMMANDS.has(subcommand)) {
-    return undefined;
-  }
-  if (returnsBeforeNativeCodexExecution(subcommand, args)) {
-    return undefined;
-  }
-  if (isCodexCliNodeResumeBind(subcommand, args)) {
-    return resolveCodexNativeSandboxBlock({
-      config: ctx.config,
-      sessionKey: ctx.sessionKey,
-      sessionId: ctx.sessionId,
-      surface: `/${["codex", subcommand].join(" ")}`,
-    });
-  }
-  return resolveCodexNativeExecutionBlock({
-    config: ctx.config,
-    sessionKey: ctx.sessionKey,
-    sessionId: ctx.sessionId,
-    surface: `/${["codex", subcommand].join(" ")}`,
-  });
-}
-
-function returnsBeforeNativeCodexExecution(subcommand: string, args: readonly string[]): boolean {
-  switch (subcommand) {
-    case "bind":
-      return parseBindArgs([...args]).help === true;
-    case "resume":
-      return returnsBeforeNativeCodexResume(args);
-    case "steer":
-      return args.join(" ").trim() === "";
-    case "model":
-      return args.length === 0 || args.length > 1;
-    case "fast":
-      return args.length === 0 || args.length > 1 || parseCodexFastModeArg(args[0]) === undefined;
-    case "permissions":
-      return (
-        args.length === 0 || args.length > 1 || parseCodexPermissionsModeArg(args[0]) === undefined
-      );
-    case "compact":
-    case "review":
-    case "stop":
-      return args.length > 0;
-    default:
-      return false;
-  }
-}
-
-function isCodexCliNodeResumeBind(subcommand: string, args: readonly string[]): boolean {
-  if (subcommand !== "resume") {
-    return false;
-  }
-  const parsed = parseResumeArgs([...args]);
-  return Boolean(parsed.host && parsed.threadId && parsed.bindHere === true && !parsed.help);
-}
-
-function returnsBeforeNativeCodexResume(args: readonly string[]): boolean {
-  const parsed = parseResumeArgs([...args]);
-  const normalizedThreadId = parsed.threadId?.trim();
-  if (parsed.help) {
-    return true;
-  }
-  if (parsed.host) {
-    return !normalizedThreadId || parsed.bindHere !== true;
-  }
-  return !normalizedThreadId || args.length !== 1;
 }
 
 async function handleComputerUseCommand(
@@ -668,20 +425,14 @@ async function bindConversation(
       text: "Cannot bind Codex because this command did not include an OpenClaw session file.",
     };
   }
-  const scope = resolveCodexConversationControlScope(ctx);
   const workspaceDir = parsed.cwd ?? deps.resolveCodexDefaultWorkspaceDir(pluginConfig);
-  const existingBinding = await deps.readCodexAppServerBinding(ctx.sessionFile, {
-    agentDir: scope.agentDir,
-    config: ctx.config,
-  });
+  const existingBinding = await deps.readCodexAppServerBinding(ctx.sessionFile);
   const authProfileId = existingBinding?.authProfileId;
   const startParams: Parameters<CodexCommandDeps["startCodexConversationThread"]>[0] = {
     pluginConfig,
     config: ctx.config,
     sessionFile: ctx.sessionFile,
     workspaceDir,
-    agentDir: scope.agentDir,
-    sessionKey: ctx.sessionKey,
     threadId: parsed.threadId,
     model: parsed.model,
     modelProvider: parsed.provider,
@@ -690,10 +441,7 @@ async function bindConversation(
     startParams.authProfileId = authProfileId;
   }
   const data = await deps.startCodexConversationThread(startParams);
-  const binding = await deps.readCodexAppServerBinding(ctx.sessionFile, {
-    agentDir: scope.agentDir,
-    config: ctx.config,
-  });
+  const binding = await deps.readCodexAppServerBinding(ctx.sessionFile);
   const threadId = binding?.threadId ?? parsed.threadId ?? "new thread";
   const summary = `Codex app-server thread ${formatCodexDisplayText(threadId)} in ${formatCodexDisplayText(workspaceDir)}`;
   let request: Awaited<ReturnType<PluginCommandContext["requestConversationBinding"]>>;
@@ -757,10 +505,7 @@ async function describeConversationBinding(
       "- Active run: not tracked",
     ].join("\n");
   }
-  const threadBinding = await deps.readCodexAppServerBinding(data.sessionFile, {
-    agentDir: data.agentDir,
-    config: ctx.config,
-  });
+  const threadBinding = await deps.readCodexAppServerBinding(data.sessionFile);
   const active = deps.readCodexConversationActiveTurn(data.sessionFile);
   return [
     "Codex conversation binding:",
@@ -889,18 +634,11 @@ async function stopConversationTurn(
   ctx: PluginCommandContext,
   pluginConfig: unknown,
 ): Promise<string> {
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return "Cannot stop Codex because this command did not include an OpenClaw session file.";
   }
-  return (
-    await deps.stopCodexConversationTurn({
-      sessionFile: target.sessionFile,
-      pluginConfig,
-      agentDir: target.agentDir,
-      config: ctx.config,
-    })
-  ).message;
+  return (await deps.stopCodexConversationTurn({ sessionFile, pluginConfig })).message;
 }
 
 async function steerConversationTurn(
@@ -909,17 +647,15 @@ async function steerConversationTurn(
   pluginConfig: unknown,
   message: string,
 ): Promise<string> {
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return "Cannot steer Codex because this command did not include an OpenClaw session file.";
   }
   return (
     await deps.steerCodexConversationTurn({
-      sessionFile: target.sessionFile,
+      sessionFile,
       pluginConfig,
       message,
-      agentDir: target.agentDir,
-      config: ctx.config,
     })
   ).message;
 }
@@ -933,27 +669,22 @@ async function setConversationModel(
   if (args.length > 1) {
     return "Usage: /codex model <model>";
   }
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return "Cannot set Codex model because this command did not include an OpenClaw session file.";
   }
   const [model = ""] = args;
   const normalized = model.trim();
   if (!normalized) {
-    const binding = await deps.readCodexAppServerBinding(target.sessionFile, {
-      agentDir: target.agentDir,
-      config: ctx.config,
-    });
+    const binding = await deps.readCodexAppServerBinding(sessionFile);
     return binding?.model
       ? `Codex model: ${formatCodexDisplayText(binding.model)}`
       : "Usage: /codex model <model>";
   }
   return await deps.setCodexConversationModel({
-    sessionFile: target.sessionFile,
+    sessionFile,
     pluginConfig,
     model: normalized,
-    agentDir: target.agentDir,
-    config: ctx.config,
   });
 }
 
@@ -966,8 +697,8 @@ async function setConversationFastMode(
   if (args.length > 1) {
     return "Usage: /codex fast [on|off|status]";
   }
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return "Cannot set Codex fast mode because this command did not include an OpenClaw session file.";
   }
   const value = args[0];
@@ -976,11 +707,9 @@ async function setConversationFastMode(
     return "Usage: /codex fast [on|off|status]";
   }
   return await deps.setCodexConversationFastMode({
-    sessionFile: target.sessionFile,
+    sessionFile,
     pluginConfig,
     enabled: parsed,
-    agentDir: target.agentDir,
-    config: ctx.config,
   });
 }
 
@@ -993,8 +722,8 @@ async function setConversationPermissions(
   if (args.length > 1) {
     return "Usage: /codex permissions [default|yolo|status]";
   }
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return "Cannot set Codex permissions because this command did not include an OpenClaw session file.";
   }
   const value = args[0];
@@ -1003,46 +732,16 @@ async function setConversationPermissions(
     return "Usage: /codex permissions [default|yolo|status]";
   }
   return await deps.setCodexConversationPermissions({
-    sessionFile: target.sessionFile,
+    sessionFile,
     pluginConfig,
     mode: parsed,
-    agentDir: target.agentDir,
-    config: ctx.config,
   });
-}
-
-type CodexConversationControlTarget = {
-  sessionFile: string;
-  agentDir: string;
-};
-
-async function resolveControlTarget(
-  ctx: PluginCommandContext,
-): Promise<CodexConversationControlTarget | undefined> {
-  const binding = await ctx.getCurrentConversationBinding();
-  const data = readCodexConversationBindingData(binding);
-  const scope = resolveCodexConversationControlScope(ctx);
-  if (data?.kind === "codex-app-server-session") {
-    return {
-      sessionFile: data.sessionFile,
-      agentDir: data.agentDir ?? scope.agentDir,
-    };
-  }
-  return ctx.sessionFile ? { sessionFile: ctx.sessionFile, agentDir: scope.agentDir } : undefined;
 }
 
 async function resolveControlSessionFile(ctx: PluginCommandContext): Promise<string | undefined> {
-  return (await resolveControlTarget(ctx))?.sessionFile;
-}
-
-function resolveCodexConversationControlScope(ctx: PluginCommandContext): { agentDir: string } {
-  const { sessionAgentId } = resolveSessionAgentIds({
-    sessionKey: ctx.sessionKey,
-    config: ctx.config,
-  });
-  return {
-    agentDir: resolveAgentDir(ctx.config, sessionAgentId),
-  };
+  const binding = await ctx.getCurrentConversationBinding();
+  const data = readCodexConversationBindingData(binding);
+  return data?.kind === "codex-app-server-session" ? data.sessionFile : ctx.sessionFile;
 }
 
 async function handleCodexDiagnosticsFeedback(
@@ -1142,18 +841,8 @@ async function requestCodexDiagnosticsFeedbackApproval(
         {
           type: "buttons",
           buttons: [
-            {
-              label: "Send diagnostics",
-              action: { type: "command", command: confirmCommand },
-              value: confirmCommand,
-              style: "danger",
-            },
-            {
-              label: "Cancel",
-              action: { type: "command", command: cancelCommand },
-              value: cancelCommand,
-              style: "secondary",
-            },
+            { label: "Send diagnostics", value: confirmCommand, style: "danger" },
+            { label: "Cancel", value: cancelCommand, style: "secondary" },
           ],
         },
       ],
@@ -1914,42 +1603,21 @@ async function startThreadAction(
   if (args.length > 0) {
     return `Usage: /codex ${label === "compaction" ? "compact" : label}`;
   }
-  const target = await resolveControlTarget(ctx);
-  if (!target) {
+  const sessionFile = await resolveControlSessionFile(ctx);
+  if (!sessionFile) {
     return `Cannot start Codex ${label} because this command did not include an OpenClaw session file.`;
   }
-  const binding = await deps.readCodexAppServerBinding(target.sessionFile, {
-    agentDir: target.agentDir,
-    config: ctx.config,
-  });
+  const binding = await deps.readCodexAppServerBinding(sessionFile);
   if (!binding?.threadId) {
     return `No Codex thread is attached to this OpenClaw session yet.`;
   }
   if (method === CODEX_CONTROL_METHODS.review) {
-    await deps.codexControlRequest(
-      pluginConfig,
-      method,
-      {
-        threadId: binding.threadId,
-        target: { type: "uncommittedChanges" },
-      },
-      {
-        agentDir: target.agentDir,
-        authProfileId: binding.authProfileId,
-        config: ctx.config,
-      },
-    );
+    await deps.codexControlRequest(pluginConfig, method, {
+      threadId: binding.threadId,
+      target: { type: "uncommittedChanges" },
+    });
   } else {
-    await deps.codexControlRequest(
-      pluginConfig,
-      method,
-      { threadId: binding.threadId },
-      {
-        agentDir: target.agentDir,
-        authProfileId: binding.authProfileId,
-        config: ctx.config,
-      },
-    );
+    await deps.codexControlRequest(pluginConfig, method, { threadId: binding.threadId });
   }
   return `Started Codex ${label} for thread ${formatCodexDisplayText(binding.threadId)}.`;
 }
@@ -2079,8 +1747,8 @@ function parseCodexCliSessionsArgs(args: string[]): ParsedCodexCliSessionsArgs {
     }
     if (arg === "--limit") {
       const value = readRequiredOptionValue(args, index);
-      const parsedLimit = parseStrictPositiveInteger(value);
-      if (parsedLimit === undefined) {
+      const parsedLimit = value ? Number.parseInt(value, 10) : Number.NaN;
+      if (!Number.isFinite(parsedLimit) || parsedLimit <= 0) {
         parsed.help = true;
         continue;
       }
@@ -2251,4 +1919,9 @@ function normalizeComputerUseStringOverrides(
     normalized.mcpServerName = mcpServerName;
   }
   return normalized;
+}
+
+function normalizeOptionalString(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
 }

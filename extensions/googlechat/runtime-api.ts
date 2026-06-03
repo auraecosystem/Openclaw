@@ -19,9 +19,9 @@ export { missingTargetError } from "openclaw/plugin-sdk/channel-feedback";
 export {
   createAccountStatusSink,
   runPassiveAccountLifecycle,
-} from "openclaw/plugin-sdk/channel-outbound";
+} from "openclaw/plugin-sdk/channel-lifecycle";
 export { createChannelPairingController } from "openclaw/plugin-sdk/channel-pairing";
-export { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-outbound";
+export { createChannelMessageReplyPipeline } from "openclaw/plugin-sdk/channel-message";
 export { PAIRING_APPROVED_MESSAGE } from "openclaw/plugin-sdk/channel-status";
 export { chunkTextForOutbound } from "openclaw/plugin-sdk/text-chunking";
 export type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";

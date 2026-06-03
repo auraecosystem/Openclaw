@@ -1,19 +1,20 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CronService } from "./service.js";
 import {
   createStartedCronServiceWithFinishedBarrier,
   setupCronServiceSuite,
 } from "./service.test-harness.js";
-import { saveCronStore } from "./store.js";
-import type { CronJob } from "./types.js";
 
 const { logger: noopLogger, makeStorePath } = setupCronServiceSuite({
   prefix: "openclaw-cron-16156-",
   baseTimeIso: "2025-12-13T00:00:00.000Z",
 });
 
-async function writeJobsStore(storePath: string, jobs: CronJob[]) {
-  await saveCronStore(storePath, { version: 1, jobs });
+async function writeJobsStore(storePath: string, jobs: unknown[]) {
+  await fs.mkdir(path.dirname(storePath), { recursive: true });
+  await fs.writeFile(storePath, JSON.stringify({ version: 1, jobs }, null, 2), "utf-8");
 }
 
 function createCronFromStorePath(storePath: string) {
@@ -74,9 +75,9 @@ describe("#16156: cron.list() must not silently advance past-due recurring jobs"
     expect(jobBeforeTimer?.state.nextRunAtMs).toBe(firstDueAt);
 
     // Now let the timer fire. The job should be found as due and execute.
-    const finishedRun = finished.waitForOk(job.id);
     await vi.runOnlyPendingTimersAsync();
-    await finishedRun;
+
+    await finished.waitForOk(job.id);
 
     const jobs = await cron.list({ includeDisabled: true });
     const updated = jobs.find((j) => j.id === job.id);
@@ -119,9 +120,9 @@ describe("#16156: cron.list() must not silently advance past-due recurring jobs"
     await cron.status();
 
     // Timer fires.
-    const finishedRun = finished.waitForOk(job.id);
     await vi.runOnlyPendingTimersAsync();
-    await finishedRun;
+
+    await finished.waitForOk(job.id);
 
     const jobs = await cron.list({ includeDisabled: true });
     const updated = jobs.find((j) => j.id === job.id);

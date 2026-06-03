@@ -138,9 +138,6 @@ export function createOpenAiCompatibleImageGenerationProvider(
     id: options.id,
     label: options.label,
     defaultModel: options.defaultModel,
-    ...(options.defaultTimeoutMs !== undefined
-      ? { defaultTimeoutMs: options.defaultTimeoutMs }
-      : {}),
     models: [...options.models],
     isConfigured: ({ agentDir }) =>
       isProviderApiKeyConfigured({

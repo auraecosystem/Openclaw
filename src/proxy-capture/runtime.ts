@@ -171,10 +171,9 @@ function installDebugProxyGlobalFetchPatch(
   if (fetchTarget[DEBUG_PROXY_FETCH_PATCH_KEY]) {
     return;
   }
-  const fetchImpl = fetchTarget.fetch;
-  const originalFetch = fetchImpl.bind(fetchTarget);
+  const originalFetch = fetchTarget.fetch.bind(fetchTarget);
   fetchTarget[DEBUG_PROXY_FETCH_PATCH_KEY] = { originalFetch };
-  const patchedFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+  fetchTarget.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = resolveUrlString(input);
     const normalizedInit = normalizeRequestInitHeadersForFetch(init);
     try {
@@ -239,12 +238,7 @@ function installDebugProxyGlobalFetchPatch(
       }
       throw error;
     }
-  };
-  const mockState = (fetchImpl as typeof globalThis.fetch & { mock?: unknown }).mock;
-  if (typeof mockState === "object" && mockState !== null) {
-    (patchedFetch as typeof globalThis.fetch & { mock?: unknown }).mock = mockState;
-  }
-  fetchTarget.fetch = patchedFetch as typeof globalThis.fetch;
+  }) as typeof globalThis.fetch;
 }
 
 function uninstallDebugProxyGlobalFetchPatch(deps: DebugProxyCaptureRuntimeDeps = {}): void {
@@ -404,7 +398,7 @@ export function captureHttpExchange(
         ...responsePayload,
       });
     })
-    .catch((error: unknown) => {
+    .catch((error) => {
       store.recordEvent({
         ...createHttpCaptureEventBase({
           settings,

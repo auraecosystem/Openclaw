@@ -20,15 +20,15 @@ export function registerSlackChannelEvents(params: {
 }) {
   const { ctx, trackEvent } = params;
 
-  const enqueueChannelSystemEvent = (paramsLocal: {
+  const enqueueChannelSystemEvent = (params: {
     kind: "created" | "renamed";
     channelId: string | undefined;
     channelName: string | undefined;
   }) => {
     if (
       !ctx.isChannelAllowed({
-        channelId: paramsLocal.channelId,
-        channelName: paramsLocal.channelName,
+        channelId: params.channelId,
+        channelName: params.channelName,
         channelType: "channel",
       })
     ) {
@@ -36,16 +36,18 @@ export function registerSlackChannelEvents(params: {
     }
 
     const label = resolveSlackChannelLabel({
-      channelId: paramsLocal.channelId,
-      channelName: paramsLocal.channelName,
+      channelId: params.channelId,
+      channelName: params.channelName,
     });
     const sessionKey = ctx.resolveSlackSystemEventSessionKey({
-      channelId: paramsLocal.channelId,
+      channelId: params.channelId,
       channelType: "channel",
     });
-    enqueueSystemEvent(`Slack channel ${paramsLocal.kind}: ${label}.`, {
+    enqueueSystemEvent(`Slack channel ${params.kind}: ${label}.`, {
       sessionKey,
-      contextKey: `slack:channel:${paramsLocal.kind}:${paramsLocal.channelId ?? paramsLocal.channelName ?? "unknown"}`,
+      contextKey: `slack:channel:${params.kind}:${params.channelId ?? params.channelName ?? "unknown"}`,
+      forceSenderIsOwnerFalse: true,
+      trusted: false,
     });
   };
 

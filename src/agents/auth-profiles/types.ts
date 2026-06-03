@@ -1,6 +1,5 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { SecretRef } from "../../config/types.secrets.js";
-import type { LegacyOAuthRef } from "./legacy-oauth-ref.js";
 
 export type OAuthProvider = string;
 
@@ -50,7 +49,6 @@ export type TokenCredential = {
 export type OAuthCredential = OAuthCredentials & {
   type: "oauth";
   provider: string;
-  oauthRef?: LegacyOAuthRef;
   clientId?: string;
   /**
    * OAuth refresh tokens are not portable by default. Provider-owned flows may
@@ -119,13 +117,7 @@ export type AuthProfileStateStore = {
   version: number;
 } & AuthProfileState;
 
-export type AuthProfileStore = AuthProfileSecretsStore &
-  AuthProfileState & {
-    /** Runtime-only provenance for external OAuth profiles overlaid onto this store. */
-    runtimeExternalProfileIds?: string[];
-    /** True when the runtime external profile set was freshly resolved, even if empty. */
-    runtimeExternalProfileIdsAuthoritative?: boolean;
-  };
+export type AuthProfileStore = AuthProfileSecretsStore & AuthProfileState;
 
 export type AuthProfileIdRepairResult = {
   config: OpenClawConfig;

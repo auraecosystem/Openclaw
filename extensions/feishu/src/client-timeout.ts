@@ -1,4 +1,3 @@
-import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import type { FeishuConfig } from "./types.js";
 
 /** Default HTTP timeout for Feishu API requests (30 seconds). */
@@ -28,8 +27,8 @@ export function resolveConfiguredHttpTimeoutMs(creds: FeishuClientTimeoutConfig)
 
   const envRaw = process.env[FEISHU_HTTP_TIMEOUT_ENV_VAR];
   if (envRaw) {
-    const envValue = parseStrictPositiveInteger(envRaw);
-    if (envValue !== undefined) {
+    const envValue = Number(envRaw);
+    if (Number.isFinite(envValue) && envValue > 0) {
       return clampTimeout(envValue);
     }
   }

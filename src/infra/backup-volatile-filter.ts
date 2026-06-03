@@ -73,7 +73,7 @@ export type VolatileFilterPlan = {
  *   - `{stateDir}/agents/<agentId>/sessions/**`/`*.{jsonl,log}`
  *   - `{stateDir}/cron/runs/**`/`*.{jsonl,log}`
  *   - `{stateDir}/logs/**`/`*.{jsonl,log}`
- *   - `{stateDir}/{delivery-queue,session-delivery-queue}/**`/`*.{json,delivered,tmp}`
+ *   - `{stateDir}/{delivery-queue,session-delivery-queue}/**`/`*.{json,tmp}`
  *   - `{stateDir}/**`/`*.{sock,pid,tmp}`
  */
 export function isVolatileBackupPath(absolutePath: string, plan: VolatileFilterPlan): boolean {
@@ -113,10 +113,7 @@ export function isVolatileBackupPath(absolutePath: string, plan: VolatileFilterP
 
       for (const queueDir of ["delivery-queue", "session-delivery-queue"]) {
         const queueRoot = path.posix.join(stateDirPosix, queueDir);
-        if (
-          isUnder(filePosix, queueRoot) &&
-          hasExtension(filePosix, [".json", ".delivered", ".tmp"])
-        ) {
+        if (isUnder(filePosix, queueRoot) && hasExtension(filePosix, [".json", ".tmp"])) {
           return true;
         }
       }

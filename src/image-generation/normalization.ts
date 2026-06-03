@@ -39,7 +39,6 @@ function finalizeImageNormalization(
 
 export function resolveImageGenerationOverrides(params: {
   provider: ImageGenerationProvider;
-  model?: string;
   size?: string;
   aspectRatio?: string;
   resolution?: ImageGenerationResolution;
@@ -53,17 +52,6 @@ export function resolveImageGenerationOverrides(params: {
     ? params.provider.capabilities.edit
     : params.provider.capabilities.generate;
   const geometry = params.provider.capabilities.geometry;
-  const modelGeometry = {
-    sizes: params.model
-      ? (geometry?.sizesByModel?.[params.model] ?? geometry?.sizes)
-      : geometry?.sizes,
-    aspectRatios: params.model
-      ? (geometry?.aspectRatiosByModel?.[params.model] ?? geometry?.aspectRatios)
-      : geometry?.aspectRatios,
-    resolutions: params.model
-      ? (geometry?.resolutionsByModel?.[params.model] ?? geometry?.resolutions)
-      : geometry?.resolutions,
-  };
   const ignoredOverrides: ImageGenerationIgnoredOverride[] = [];
   const normalization: ImageGenerationNormalization = {};
   let size = params.size;
@@ -73,10 +61,10 @@ export function resolveImageGenerationOverrides(params: {
   let outputFormat = params.outputFormat;
   let background = params.background;
 
-  if (size && (modelGeometry.sizes?.length ?? 0) > 0 && modeCaps.supportsSize) {
+  if (size && (geometry?.sizes?.length ?? 0) > 0 && modeCaps.supportsSize) {
     const normalizedSize = resolveClosestSize({
       requestedSize: size,
-      supportedSizes: modelGeometry.sizes,
+      supportedSizes: geometry?.sizes,
     });
     if (normalizedSize && normalizedSize !== size) {
       normalization.size = {
@@ -93,7 +81,7 @@ export function resolveImageGenerationOverrides(params: {
       const normalizedAspectRatio = resolveClosestAspectRatio({
         requestedAspectRatio: aspectRatio,
         requestedSize: size,
-        supportedAspectRatios: modelGeometry.aspectRatios,
+        supportedAspectRatios: geometry?.aspectRatios,
       });
       if (normalizedAspectRatio) {
         aspectRatio = normalizedAspectRatio;
@@ -110,15 +98,11 @@ export function resolveImageGenerationOverrides(params: {
     size = undefined;
   }
 
-  if (
-    aspectRatio &&
-    (modelGeometry.aspectRatios?.length ?? 0) > 0 &&
-    modeCaps.supportsAspectRatio
-  ) {
+  if (aspectRatio && (geometry?.aspectRatios?.length ?? 0) > 0 && modeCaps.supportsAspectRatio) {
     const normalizedAspectRatio = resolveClosestAspectRatio({
       requestedAspectRatio: aspectRatio,
       requestedSize: size,
-      supportedAspectRatios: modelGeometry.aspectRatios,
+      supportedAspectRatios: geometry?.aspectRatios,
     });
     if (normalizedAspectRatio && normalizedAspectRatio !== aspectRatio) {
       normalization.aspectRatio = {
@@ -133,7 +117,7 @@ export function resolveImageGenerationOverrides(params: {
         ? resolveClosestSize({
             requestedSize: params.size,
             requestedAspectRatio: aspectRatio,
-            supportedSizes: modelGeometry.sizes,
+            supportedSizes: geometry?.sizes,
           })
         : undefined;
     let translated = false;
@@ -151,10 +135,10 @@ export function resolveImageGenerationOverrides(params: {
     aspectRatio = undefined;
   }
 
-  if (resolution && (modelGeometry.resolutions?.length ?? 0) > 0 && modeCaps.supportsResolution) {
+  if (resolution && (geometry?.resolutions?.length ?? 0) > 0 && modeCaps.supportsResolution) {
     const normalizedResolution = resolveClosestResolution({
       requestedResolution: resolution,
-      supportedResolutions: modelGeometry.resolutions,
+      supportedResolutions: geometry?.resolutions,
     });
     if (normalizedResolution && normalizedResolution !== resolution) {
       normalization.resolution = {

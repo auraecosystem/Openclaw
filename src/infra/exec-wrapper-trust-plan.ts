@@ -65,18 +65,13 @@ function finalizeExecWrapperTrustPlan(
 export function resolveExecWrapperTrustPlan(
   argv: string[],
   maxDepth = MAX_DISPATCH_WRAPPER_DEPTH,
-  platform: NodeJS.Platform = process.platform,
 ): ExecWrapperTrustPlan {
   let current = argv;
   let policyArgv = argv;
   let sawShellMultiplexer = false;
   const wrapperChain: string[] = [];
   for (let depth = 0; depth < maxDepth; depth += 1) {
-    const dispatchPlan = resolveDispatchWrapperTrustPlan(
-      current,
-      maxDepth - wrapperChain.length,
-      platform,
-    );
+    const dispatchPlan = resolveDispatchWrapperTrustPlan(current, maxDepth - wrapperChain.length);
     if (dispatchPlan.policyBlocked) {
       return blockedExecWrapperTrustPlan({
         argv: dispatchPlan.argv,
@@ -124,7 +119,7 @@ export function resolveExecWrapperTrustPlan(
   }
 
   if (wrapperChain.length >= maxDepth) {
-    const dispatchOverflow = unwrapKnownDispatchWrapperInvocation(current, platform);
+    const dispatchOverflow = unwrapKnownDispatchWrapperInvocation(current);
     if (dispatchOverflow.kind === "blocked" || dispatchOverflow.kind === "unwrapped") {
       return blockedExecWrapperTrustPlan({
         argv: current,

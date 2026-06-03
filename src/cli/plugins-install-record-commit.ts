@@ -28,46 +28,6 @@ function mergeUnsetPaths(
   return merged.length > 0 ? merged : undefined;
 }
 
-export function hasPendingPluginInstallRecords(config: OpenClawConfig): boolean {
-  return Object.keys(config.plugins?.installs ?? {}).length > 0;
-}
-
-export function unchangedPendingPluginInstallRecordIds(
-  config: OpenClawConfig,
-  baseConfig: OpenClawConfig,
-): string[] {
-  const pendingInstalls = config.plugins?.installs ?? {};
-  return Object.entries(baseConfig.plugins?.installs ?? {})
-    .filter(([pluginId, baseInstall]) => isDeepStrictEqual(pendingInstalls[pluginId], baseInstall))
-    .map(([pluginId]) => pluginId);
-}
-
-export function stripPendingPluginInstallRecords(
-  config: OpenClawConfig,
-  pluginIds?: Iterable<string>,
-): OpenClawConfig {
-  if (!pluginIds) {
-    return withoutPluginInstallRecords(config);
-  }
-  const removeIds = new Set(pluginIds);
-  if (removeIds.size === 0 || !config.plugins?.installs) {
-    return config;
-  }
-  const remainingInstalls = Object.fromEntries(
-    Object.entries(config.plugins.installs).filter(([pluginId]) => !removeIds.has(pluginId)),
-  );
-  if (Object.keys(remainingInstalls).length === 0) {
-    return withoutPluginInstallRecords(config);
-  }
-  return {
-    ...config,
-    plugins: {
-      ...config.plugins,
-      installs: remainingInstalls,
-    },
-  };
-}
-
 type ConfigCommit = (
   config: OpenClawConfig,
   writeOptions?: ConfigWriteOptions,
@@ -153,7 +113,8 @@ export async function commitConfigWriteWithPendingPluginInstalls(params: {
   movedInstallRecords: boolean;
   persistedHash: string | null;
 }> {
-  if (!hasPendingPluginInstallRecords(params.nextConfig)) {
+  const pendingInstallRecords = params.nextConfig.plugins?.installs ?? {};
+  if (Object.keys(pendingInstallRecords).length === 0) {
     const committed = params.writeOptions
       ? await params.commit(params.nextConfig, params.writeOptions)
       : await params.commit(params.nextConfig);
@@ -165,7 +126,6 @@ export async function commitConfigWriteWithPendingPluginInstalls(params: {
     };
   }
 
-  const pendingInstallRecords = params.nextConfig.plugins?.installs ?? {};
   const previousInstallRecords = await loadInstalledPluginIndexInstallRecords();
   const nextInstallRecords = {
     ...previousInstallRecords,

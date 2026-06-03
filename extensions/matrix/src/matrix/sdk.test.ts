@@ -39,6 +39,16 @@ async function expectAbortError(promise: Promise<unknown>) {
     name: "AbortError",
   });
 }
+
+function expectMockCallOptions(
+  mock: ReturnType<typeof vi.fn>,
+  callIndex: number,
+  fields: Record<string, unknown>,
+) {
+  const call = (mock.mock.calls as unknown[][])[callIndex]?.[0];
+  expectRecordFields(requireRecord(call, `mock call ${callIndex + 1} options`), fields);
+}
+
 function expectSomeMockCallOptions(
   mock: ReturnType<typeof vi.fn>,
   fields: Record<string, unknown>,
@@ -613,7 +623,7 @@ describe("MatrixClient request hardening", () => {
   it("aborts requests after timeout", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn((_: URL | string, init?: RequestInit) => {
-      return new Promise<Response>((_Value, reject) => {
+      return new Promise<Response>((_, reject) => {
         init?.signal?.addEventListener("abort", () => {
           reject(new Error("aborted"));
         });
@@ -629,29 +639,6 @@ describe("MatrixClient request hardening", () => {
     const pending = client.doRequest("GET", "/_matrix/client/v3/account/whoami");
     const assertion = expect(pending).rejects.toThrow("aborted");
     await vi.advanceTimersByTimeAsync(30);
-
-    await assertion;
-  });
-
-  it("falls back to the default timeout for non-finite localTimeoutMs", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn((_: URL | string, init?: RequestInit) => {
-      return new Promise<Response>((_Local, reject) => {
-        init?.signal?.addEventListener("abort", () => {
-          reject(new Error("aborted"));
-        });
-      });
-    });
-    stubRuntimeFetch(fetchMock as unknown as typeof fetch);
-
-    const client = new MatrixClient("http://127.0.0.1:8008", "token", {
-      localTimeoutMs: Number.NaN,
-      ssrfPolicy: { allowPrivateNetwork: true },
-    });
-
-    const pending = client.doRequest("GET", "/_matrix/client/v3/account/whoami");
-    const assertion = expect(pending).rejects.toThrow("aborted");
-    await vi.advanceTimersByTimeAsync(60_001);
 
     await assertion;
   });
@@ -741,7 +728,7 @@ describe("MatrixClient event bridge", () => {
     const failed: string[] = [];
     const delivered: string[] = [];
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
     client.on("room.message", (_roomId, event) => {
@@ -783,7 +770,7 @@ describe("MatrixClient event bridge", () => {
     const failed: string[] = [];
     const delivered: string[] = [];
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
     client.on("room.message", (_roomId, event) => {
@@ -893,7 +880,7 @@ describe("MatrixClient event bridge", () => {
       requestOwnUserVerification: vi.fn(async () => null),
     }));
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
     client.on("room.message", (_roomId, event) => {
@@ -945,7 +932,7 @@ describe("MatrixClient event bridge", () => {
     const client = new MatrixClient("https://matrix.example.org", "token");
     const failed: string[] = [];
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
 
@@ -1023,7 +1010,7 @@ describe("MatrixClient event bridge", () => {
     const failed: string[] = [];
     const delivered: string[] = [];
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
     client.on("room.message", (_roomId, event) => {
@@ -1067,7 +1054,7 @@ describe("MatrixClient event bridge", () => {
     const client = new MatrixClient("https://matrix.example.org", "token");
     const failed: string[] = [];
 
-    client.on("room.failed_decryption", (_roomId, eventValue, error) => {
+    client.on("room.failed_decryption", (_roomId, _event, error) => {
       failed.push(error.message);
     });
 
@@ -1848,13 +1835,13 @@ describe("MatrixClient crypto bootstrapping", () => {
       localTimeoutMs: 1,
     });
     vi.spyOn(client, "getRoomKeyBackupStatus").mockImplementation(
-      async () => await new Promise<never>(() => {}),
+      async () => await new Promise<never>(() => undefined),
     );
     vi.spyOn(client, "getDeviceVerificationStatus").mockImplementation(
-      async () => await new Promise<never>(() => {}),
+      async () => await new Promise<never>(() => undefined),
     );
     vi.spyOn(client, "listOwnDevices").mockImplementation(
-      async () => await new Promise<never>(() => {}),
+      async () => await new Promise<never>(() => undefined),
     );
 
     const status = await client.getOwnDeviceVerificationStatus();

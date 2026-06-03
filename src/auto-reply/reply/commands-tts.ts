@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
+import { readLatestAssistantTextFromSessionTranscript } from "../../config/sessions.js";
+import { logVerbose } from "../../globals.js";
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { readLatestAssistantTextFromSessionTranscript } from "../../config/sessions.js";
-import { logVerbose } from "../../globals.js";
+} from "../../shared/string-coerce.js";
 import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
@@ -428,9 +428,8 @@ export const handleTtsCommands: CommandHandler = async (params, allowTextCommand
         },
       };
     }
-    const trimmedLimit = args.trim();
-    const next = /^\d+$/.test(trimmedLimit) ? Number(trimmedLimit) : Number.NaN;
-    if (!Number.isSafeInteger(next) || next < 100 || next > 4096) {
+    const next = Number.parseInt(args.trim(), 10);
+    if (!Number.isFinite(next) || next < 100 || next > 4096) {
       return {
         shouldContinue: false,
         reply: { text: "❌ Limit must be between 100 and 4096 characters." },

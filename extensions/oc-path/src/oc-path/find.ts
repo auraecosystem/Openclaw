@@ -23,7 +23,6 @@ import {
   isPredicateSeg,
   isQuotedSeg,
   isUnionSeg,
-  parseArrayIndexSegment,
   parseOrdinalSeg,
   parsePredicateSeg,
   parseUnionSeg,
@@ -290,8 +289,8 @@ const jsoncOps: WalkOps<JsoncValue> = {
       return e === undefined ? null : { keySub: key, child: e.value };
     }
     if (node.kind === "array") {
-      const idx = parseArrayIndexSegment(key, node.items.length);
-      if (idx === null) {
+      const idx = Number(key);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= node.items.length) {
         return null;
       }
       return { keySub: key, child: node.items[idx] };
@@ -518,12 +517,9 @@ const yamlOps: WalkOps<Node> = {
         : { keySub: key, child: pair.value as Node };
     }
     if (isSeq(node)) {
-      const idx = parseArrayIndexSegment(key, node.items.length);
-      if (idx === null) {
-        return null;
-      }
+      const idx = Number(key);
       const child = node.items[idx];
-      if (child === null) {
+      if (!Number.isInteger(idx) || idx < 0 || idx >= node.items.length || child === null) {
         return null;
       }
       return { keySub: key, child: child as Node };

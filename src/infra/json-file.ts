@@ -1,9 +1,10 @@
 import "./fs-safe-defaults.js";
 import fs from "node:fs";
 import path from "node:path";
-import { tryReadJsonSync, writeJsonSync } from "@openclaw/fs-safe/json";
+import { tryReadJsonSync, tryReadJson, writeJsonSync } from "@openclaw/fs-safe/json";
 
-export { tryReadJsonSync, writeJsonSync };
+export { tryReadJson, tryReadJsonSync, writeJsonSync };
+export const readJsonFile = tryReadJson;
 
 function resolveJsonSymlinkTarget(pathname: string): string | undefined {
   let stat: fs.Stats;
@@ -33,31 +34,6 @@ function resolveJsonSaveTarget(pathname: string): string {
 
 export function saveJsonFile(pathname: string, data: unknown): void {
   writeJsonSync(resolveJsonSaveTarget(pathname), data);
-}
-
-export function repairJsonFilePermissions(pathname: string): void {
-  const target = resolveJsonSaveTarget(pathname);
-  let fd: number | undefined;
-  try {
-    fd = fs.openSync(
-      target,
-      fs.constants.O_RDONLY |
-        (process.platform !== "win32" && "O_NOFOLLOW" in fs.constants
-          ? fs.constants.O_NOFOLLOW
-          : 0),
-    );
-    fs.fchmodSync(fd, 0o600);
-  } catch {
-    // Matches fs-safe JSON writes: permission repair is best-effort.
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        // best-effort cleanup
-      }
-    }
-  }
 }
 
 // oxlint-disable-next-line typescript-eslint/no-unnecessary-type-parameters -- legacy typed JSON loader alias.

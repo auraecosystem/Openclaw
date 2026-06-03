@@ -276,8 +276,8 @@ export function resolveDiffsPluginDefaults(config: unknown): DiffToolDefaults {
 
   return {
     fontFamily: normalizeFontFamily(defaults.fontFamily),
-    fontSize: normalizeDiffFontSize(defaults.fontSize),
-    lineSpacing: normalizeDiffLineSpacing(defaults.lineSpacing),
+    fontSize: normalizeFontSize(defaults.fontSize),
+    lineSpacing: normalizeLineSpacing(defaults.lineSpacing),
     layout: normalizeLayout(defaults.layout),
     showLineNumbers: defaults.showLineNumbers !== false,
     diffIndicators: normalizeDiffIndicators(defaults.diffIndicators),
@@ -327,7 +327,7 @@ function normalizeFontFamily(fontFamily?: string): string {
   return normalized || DEFAULT_DIFFS_TOOL_DEFAULTS.fontFamily;
 }
 
-export function normalizeDiffFontSize(fontSize?: number): number {
+function normalizeFontSize(fontSize?: number): number {
   if (fontSize === undefined || !Number.isFinite(fontSize)) {
     return DEFAULT_DIFFS_TOOL_DEFAULTS.fontSize;
   }
@@ -335,7 +335,7 @@ export function normalizeDiffFontSize(fontSize?: number): number {
   return Math.min(Math.max(rounded, 10), 24);
 }
 
-export function normalizeDiffLineSpacing(lineSpacing?: number): number {
+function normalizeLineSpacing(lineSpacing?: number): number {
   if (lineSpacing === undefined || !Number.isFinite(lineSpacing)) {
     return DEFAULT_DIFFS_TOOL_DEFAULTS.lineSpacing;
   }

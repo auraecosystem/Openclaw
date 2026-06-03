@@ -5,13 +5,8 @@
   },
   "enabledByDefault": true,
   "providers": ["comfy"],
-  "setup": {
-    "providers": [
-      {
-        "id": "comfy",
-        "envVars": ["COMFY_API_KEY", "COMFY_CLOUD_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "comfy": ["COMFY_API_KEY", "COMFY_CLOUD_API_KEY"]
   },
   "providerAuthChoices": [
     {

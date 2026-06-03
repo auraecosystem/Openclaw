@@ -252,9 +252,9 @@ describe("slack socket reconnect helpers", () => {
     const err = new Error("missing_scope");
     const app = {
       receiver: { client },
-      start: vi.fn().mockImplementation(() => {
+      start: vi.fn().mockImplementation(async () => {
         client.emit("unable_to_socket_mode_start", err);
-        throw new Error();
+        throw undefined;
       }),
     };
 

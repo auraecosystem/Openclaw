@@ -1,7 +1,4 @@
-import {
-  markImplicitSameChatApprovalAuthorization,
-  resolveApprovalApprovers,
-} from "openclaw/plugin-sdk/approval-auth-runtime";
+import { resolveApprovalApprovers } from "openclaw/plugin-sdk/approval-auth-runtime";
 import {
   createChannelExecApprovalProfile,
   isChannelExecApprovalClientEnabledFromConfig,
@@ -227,7 +224,7 @@ export function authorizeQQBotApprovalAction(params: {
   approvalKind: "exec" | "plugin";
 }): { authorized: boolean; reason?: string } {
   if (resolveQQBotExecApprovalConfig(params) === undefined) {
-    return markImplicitSameChatApprovalAuthorization({ authorized: true });
+    return { authorized: true };
   }
 
   const authorized =

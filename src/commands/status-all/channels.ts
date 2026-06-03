@@ -1,7 +1,4 @@
 import fs from "node:fs";
-import { asRecord } from "@openclaw/normalization-core/record-coerce";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { sanitizeForLog } from "../../../packages/terminal-core/src/ansi.js";
 import { resolveInspectedChannelAccount } from "../../channels/account-inspection.js";
 import { hasConfiguredUnavailableCredentialStatus } from "../../channels/account-snapshot-fields.js";
 import {
@@ -24,6 +21,8 @@ import {
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { listExplicitConfiguredChannelIdsForConfig } from "../../plugins/channel-plugin-ids.js";
 import { resolveMissingOfficialExternalChannelPluginRepairHint } from "../../plugins/official-external-plugin-repair-hints.js";
+import { asRecord } from "../../shared/record-coerce.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
   summarizeTokenConfig,
   type ChannelAccountTokenSummaryRow,
@@ -96,7 +95,6 @@ const buildAccountNotes = (params: {
   cfg: OpenClawConfig;
   entry: ChannelAccountRow;
   liveCredentialAvailable?: boolean;
-  credentialResolutionSkipped?: boolean;
 }) => {
   const { plugin, cfg, entry } = params;
   const notes: string[] = [];
@@ -124,11 +122,6 @@ const buildAccountNotes = (params: {
   }
   if (params.liveCredentialAvailable) {
     notes.push("credential available in gateway runtime");
-  } else if (
-    params.credentialResolutionSkipped &&
-    hasConfiguredUnavailableCredentialStatus(entry.account)
-  ) {
-    notes.push("credential not checked");
   } else if (hasConfiguredUnavailableCredentialStatus(entry.account)) {
     notes.push("secret unavailable in this command path");
   }
@@ -223,7 +216,6 @@ export async function buildChannelsTable(
     sourceConfig?: OpenClawConfig;
     includeSetupFallbackPlugins?: boolean;
     liveChannelStatus?: unknown;
-    credentialResolutionSkipped?: boolean;
   },
 ): Promise<{
   rows: ChannelRow[];
@@ -243,7 +235,6 @@ export async function buildChannelsTable(
 
   const sourceConfig = opts?.sourceConfig ?? cfg;
   const includeSetupFallbackPlugins = opts?.includeSetupFallbackPlugins ?? true;
-  const credentialResolutionSkipped = opts?.credentialResolutionSkipped === true;
   const readOnlyPlugins = resolveReadOnlyChannelPluginsForConfig(cfg, {
     activationSourceConfig: sourceConfig,
     includeSetupFallbackPlugins,
@@ -279,13 +270,11 @@ export async function buildChannelsTable(
     const unavailableConfiguredAccounts = enabledAccounts.filter(
       (a) =>
         hasConfiguredUnavailableCredentialStatus(a.account) &&
-        !credentialResolutionSkipped &&
         !hasRuntimeCredentialAvailable({ liveAccounts, accountId: a.accountId }),
     );
     const accountsForTokenSummary = accounts.map((entry) =>
       hasConfiguredUnavailableCredentialStatus(entry.account) &&
-      (credentialResolutionSkipped ||
-        hasRuntimeCredentialAvailable({ liveAccounts, accountId: entry.accountId }))
+      hasRuntimeCredentialAvailable({ liveAccounts, accountId: entry.accountId })
         ? {
             ...entry,
             account: markConfiguredUnavailableCredentialStatusesAvailable(entry.account),
@@ -438,15 +427,7 @@ export async function buildChannelsTable(
             liveAccounts,
             accountId: entry.accountId,
           });
-          const credentialUnknown =
-            credentialResolutionSkipped && hasConfiguredUnavailableCredentialStatus(entry.account);
-          const notes = buildAccountNotes({
-            plugin,
-            cfg,
-            entry,
-            liveCredentialAvailable,
-            credentialResolutionSkipped,
-          });
+          const notes = buildAccountNotes({ plugin, cfg, entry, liveCredentialAvailable });
           return {
             Account: formatAccountLabel({
               accountId: entry.accountId,
@@ -456,9 +437,7 @@ export async function buildChannelsTable(
               entry.enabled &&
               (!hasConfiguredUnavailableCredentialStatus(entry.account) || liveCredentialAvailable)
                 ? "OK"
-                : credentialUnknown
-                  ? "UNKNOWN"
-                  : "WARN",
+                : "WARN",
             Notes: notes.join(" · "),
           };
         }),
@@ -497,10 +476,6 @@ export async function buildChannelsTable(
       ...listExplicitConfiguredChannelIdsForConfig(cfg),
     ]),
   ].toSorted((left, right) => left.localeCompare(right));
-  const explicitConfiguredChannelIds = new Set([
-    ...listExplicitConfiguredChannelIdsForConfig(sourceConfig),
-    ...listExplicitConfiguredChannelIdsForConfig(cfg),
-  ]);
   for (const channelId of missingCandidateChannelIds) {
     if (visibleChannelIds.has(channelId)) {
       continue;
@@ -511,16 +486,6 @@ export async function buildChannelsTable(
       channelId,
     });
     if (!hint || hint.channelId !== channelId) {
-      if (!includeSetupFallbackPlugins && explicitConfiguredChannelIds.has(channelId)) {
-        rows.push({
-          id: channelId,
-          label: sanitizeForLog(channelId).trim() || "configured-channel",
-          enabled: true,
-          state: "setup",
-          detail: "configured; status unavailable in fast mode",
-        });
-        visibleChannelIds.add(channelId);
-      }
       continue;
     }
     rows.push({
@@ -531,24 +496,6 @@ export async function buildChannelsTable(
       detail: `plugin not installed - run ${hint.installCommand} or ${hint.doctorFixCommand}`,
     });
     visibleChannelIds.add(channelId);
-  }
-
-  if (!includeSetupFallbackPlugins) {
-    for (const channelId of readOnlyPlugins.missingConfiguredChannelIds.toSorted((left, right) =>
-      left.localeCompare(right),
-    )) {
-      if (visibleChannelIds.has(channelId)) {
-        continue;
-      }
-      rows.push({
-        id: channelId,
-        label: sanitizeForLog(channelId).trim() || "configured-channel",
-        enabled: true,
-        state: "setup",
-        detail: "configured; status unavailable in fast mode",
-      });
-      visibleChannelIds.add(channelId);
-    }
   }
 
   return {

@@ -5,13 +5,8 @@
   },
   "enabledByDefault": true,
   "providers": ["fal"],
-  "setup": {
-    "providers": [
-      {
-        "id": "fal",
-        "envVars": ["FAL_KEY", "FAL_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "fal": ["FAL_KEY", "FAL_API_KEY"]
   },
   "providerAuthChoices": [
     {
@@ -33,11 +28,6 @@
     "imageGenerationProviders": ["fal"],
     "musicGenerationProviders": ["fal"],
     "videoGenerationProviders": ["fal"]
-  },
-  "videoGenerationProviderMetadata": {
-    "fal": {
-      "referenceAudioInputs": true
-    }
   },
   "configSchema": {
     "type": "object",

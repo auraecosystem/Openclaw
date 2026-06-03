@@ -6,7 +6,6 @@ import {
   buildVideoGenerationTaskStatusDetails,
   buildVideoGenerationTaskStatusText,
   findActiveVideoGenerationTaskForSession,
-  findDuplicateGuardVideoGenerationTaskForSession,
 } from "../video-generation-task-status.js";
 import {
   createMediaGenerateProviderListActionResult,
@@ -81,7 +80,7 @@ function summarizeVideoGenerationCapabilities(
 
 export function createVideoGenerateListActionResult(
   config?: OpenClawConfig,
-  options?: { workspaceDir?: string; agentDir?: string; authStore?: AuthProfileStore },
+  options?: { agentDir?: string; authStore?: AuthProfileStore },
 ): VideoGenerateActionResult {
   const providers = listRuntimeVideoGenerationProviders({ config });
   return createMediaGenerateProviderListActionResult({
@@ -89,7 +88,6 @@ export function createVideoGenerateListActionResult(
     providers,
     emptyText: "No video-generation providers are registered.",
     cfg: config,
-    workspaceDir: options?.workspaceDir,
     agentDir: options?.agentDir,
     authStore: options?.authStore,
     listModes: listSupportedVideoGenerationModes,
@@ -112,26 +110,6 @@ export function createVideoGenerateStatusActionResult(
 
 export function createVideoGenerateDuplicateGuardResult(
   sessionKey?: string,
-  params?: { prompt?: string; requestKey?: string },
 ): VideoGenerateActionResult | undefined {
-  const blockingTask = findDuplicateGuardVideoGenerationTaskForSession(sessionKey, {
-    prompt: params?.prompt,
-    requestKey: params?.requestKey,
-  });
-  if (!blockingTask) {
-    return undefined;
-  }
-  return {
-    content: [
-      {
-        type: "text",
-        text: buildVideoGenerationTaskStatusText(blockingTask, { duplicateGuard: true }),
-      },
-    ],
-    details: {
-      action: "status",
-      duplicateGuard: true,
-      ...buildVideoGenerationTaskStatusDetails(blockingTask),
-    },
-  };
+  return videoGenerateTaskStatusActions.createDuplicateGuardResult(sessionKey);
 }

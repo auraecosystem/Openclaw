@@ -1,4 +1,3 @@
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { CHANNEL_IDS } from "../channels/ids.js";
 import { listRegisteredChannelPluginIds } from "../channels/registry.js";
 import {
@@ -22,7 +21,7 @@ const listPluginChannelIds = (): string[] => {
 };
 
 export const listDeliverableMessageChannels = (): ChannelId[] =>
-  uniqueStrings([...CHANNEL_IDS, ...listPluginChannelIds()]) as ChannelId[];
+  Array.from(new Set([...CHANNEL_IDS, ...listPluginChannelIds()]));
 
 const listGatewayMessageChannels = (): GatewayMessageChannel[] => [
   ...listDeliverableMessageChannels(),

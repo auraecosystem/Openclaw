@@ -27,8 +27,8 @@ export function resolveTelegramSendThreadSpec(params: {
   if (messageThreadId == null) {
     return undefined;
   }
-  // Telegram supports DM topics; keep direct chat thread IDs and let invalid
-  // topics fail closed instead of sending to the base chat.
+  // Telegram supports DM topics; keep direct chat thread IDs and rely on
+  // thread-not-found retry fallback when a plain DM rejects them.
   return {
     id: messageThreadId,
     scope: params.chatType === "direct" ? "dm" : "forum",

@@ -12,7 +12,6 @@ import {
 } from "./doctor.e2e-harness.js";
 
 const providerRuntimeMocks = vi.hoisted(() => ({
-  useMockProviders: false,
   resolvePluginProviders: vi.fn((_params?: unknown): ProviderPlugin[] => []),
 }));
 
@@ -22,12 +21,7 @@ vi.mock("../plugins/providers.runtime.js", async () => {
   );
   return {
     ...actual,
-    resolvePluginProviders: (
-      params: Parameters<typeof actual.resolvePluginProviders>[0],
-    ): ProviderPlugin[] =>
-      providerRuntimeMocks.useMockProviders
-        ? providerRuntimeMocks.resolvePluginProviders(params)
-        : actual.resolvePluginProviders(params),
+    resolvePluginProviders: providerRuntimeMocks.resolvePluginProviders,
   };
 });
 
@@ -41,35 +35,30 @@ describe("doctor command", () => {
     ({ doctorCommand } = await import("./doctor.js"));
     ({ healthCommand } = await import("./health.js"));
     vi.clearAllMocks();
-    providerRuntimeMocks.useMockProviders = false;
     providerRuntimeMocks.resolvePluginProviders.mockReturnValue([]);
   });
 
   it("runs legacy state migrations in yes mode without prompting", async () => {
-    const {
-      doctorCommand: doctorCommandValue,
-      runtime,
-      runLegacyStateMigrations,
-    } = await arrangeLegacyStateMigrationTest();
+    const { doctorCommand, runtime, runLegacyStateMigrations } =
+      await arrangeLegacyStateMigrationTest();
 
-    await (
-      doctorCommandValue as (runtime: unknown, opts: Record<string, unknown>) => Promise<void>
-    )(runtime, { yes: true });
+    await (doctorCommand as (runtime: unknown, opts: Record<string, unknown>) => Promise<void>)(
+      runtime,
+      { yes: true },
+    );
 
     expect(runLegacyStateMigrations).toHaveBeenCalledTimes(1);
     expect(confirm).not.toHaveBeenCalled();
   }, 30_000);
 
   it("runs legacy state migrations in non-interactive mode without prompting", async () => {
-    const {
-      doctorCommand: doctorCommandLocal,
-      runtime,
-      runLegacyStateMigrations,
-    } = await arrangeLegacyStateMigrationTest();
+    const { doctorCommand, runtime, runLegacyStateMigrations } =
+      await arrangeLegacyStateMigrationTest();
 
-    await (
-      doctorCommandLocal as (runtime: unknown, opts: Record<string, unknown>) => Promise<void>
-    )(runtime, { nonInteractive: true });
+    await (doctorCommand as (runtime: unknown, opts: Record<string, unknown>) => Promise<void>)(
+      runtime,
+      { nonInteractive: true },
+    );
 
     expect(runLegacyStateMigrations).toHaveBeenCalledTimes(1);
     expect(confirm).not.toHaveBeenCalled();
@@ -139,7 +128,7 @@ describe("doctor command", () => {
       },
     });
 
-    ensureAuthProfileStore.mockReturnValue({
+    ensureAuthProfileStore.mockReturnValueOnce({
       version: 1,
       profiles: {
         "anthropic:me@example.com": {
@@ -152,7 +141,6 @@ describe("doctor command", () => {
         },
       },
     });
-    providerRuntimeMocks.useMockProviders = true;
     providerRuntimeMocks.resolvePluginProviders.mockReturnValue([
       {
         id: "anthropic",
@@ -176,12 +164,12 @@ describe("doctor command", () => {
       }
     }
 
-    const writtenCall = writeConfigFile.mock.calls.findLast((call) => {
-      const candidate = call[0] as Record<string, unknown>;
-      const auth = candidate.auth as { profiles?: unknown } | undefined;
-      return Boolean(auth?.profiles);
-    });
-    const written = writtenCall?.[0] as Record<string, unknown> | undefined;
+    const written = writeConfigFile.mock.calls
+      .map((call) => call[0] as Record<string, unknown>)
+      .find((candidate) => {
+        const auth = candidate.auth as { profiles?: unknown } | undefined;
+        return Boolean(auth?.profiles);
+      });
     if (!written) {
       throw new Error("Expected doctor to write migrated auth profiles");
     }

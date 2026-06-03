@@ -1,5 +1,5 @@
 ---
-summary: "OpenClaw Matrix channel plugin for rooms and direct messages."
+summary: "Adds the Matrix channel surface for sending and receiving OpenClaw messages."
 read_when:
   - You are installing, configuring, or auditing the matrix plugin
 title: "Matrix plugin"
@@ -7,7 +7,7 @@ title: "Matrix plugin"
 
 # Matrix plugin
 
-OpenClaw Matrix channel plugin for rooms and direct messages.
+Adds the Matrix channel surface for sending and receiving OpenClaw messages.
 
 ## Distribution
 

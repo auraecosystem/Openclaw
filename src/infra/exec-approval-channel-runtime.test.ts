@@ -450,7 +450,7 @@ describe("createExecApprovalChannelRuntime", () => {
     });
 
     let caught: unknown;
-    await runtime.start().catch((error: unknown) => {
+    await runtime.start().catch((error) => {
       caught = error;
     });
 

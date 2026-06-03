@@ -596,9 +596,7 @@ async function main() {
   printSummary(buckets, manifest, opts.outDir);
 }
 
-main().catch(
-  /** @param {unknown} err */ (err) => {
-    console.error(`compile-rules: error: ${err.message ?? err}`);
-    process.exit(1);
-  },
-);
+main().catch((err) => {
+  console.error(`compile-rules: error: ${err.message ?? err}`);
+  process.exit(1);
+});

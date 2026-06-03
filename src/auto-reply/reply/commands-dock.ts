@@ -1,9 +1,8 @@
+import { getActivePluginChannelRegistry } from "../../plugins/runtime.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
-import { getActivePluginChannelRegistry } from "../../plugins/runtime.js";
+} from "../../shared/string-coerce.js";
 import { resolveTextCommand } from "../commands-registry.js";
 import { resolveCommandSurfaceChannel } from "./channel-context.js";
 import { persistSessionEntry } from "./commands-session-store.js";
@@ -92,7 +91,7 @@ function resolveLinkedDockTarget(params: {
     if (!Array.isArray(ids)) {
       continue;
     }
-    const normalizedIds = normalizeTrimmedStringList(ids).map((id) => id.toLowerCase());
+    const normalizedIds = ids.map((id) => normalizeLowercaseStringOrEmpty(id)).filter(Boolean);
     if (!normalizedIds.some((id) => params.sourceCandidates.has(id))) {
       continue;
     }

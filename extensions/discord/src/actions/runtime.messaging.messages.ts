@@ -1,6 +1,6 @@
 import {
   jsonResult,
-  readPositiveIntegerParam,
+  readNumberParam,
   readStringArrayParam,
   readStringParam,
 } from "../runtime-api.js";
@@ -54,7 +54,6 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
         throw new Error("Discord permissions are disabled.");
       }
       const channelId = ctx.resolveChannelId();
-      await ctx.assertReadTargetAllowed({ channelId });
       const permissions = await discordMessagingActionRuntime.fetchChannelPermissionsDiscord(
         channelId,
         ctx.withOpts(),
@@ -80,7 +79,6 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
           "Discord message fetch requires guildId, channelId, and messageId (or a valid messageLink).",
         );
       }
-      await ctx.assertReadTargetAllowed({ guildId, channelId });
       const message = await discordMessagingActionRuntime.fetchMessageDiscord(
         channelId,
         messageId,
@@ -99,9 +97,8 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
         throw new Error("Discord message reads are disabled.");
       }
       const channelId = ctx.resolveChannelId();
-      await ctx.assertReadTargetAllowed({ channelId });
       const query = {
-        limit: readPositiveIntegerParam(ctx.params, "limit"),
+        limit: readNumberParam(ctx.params, "limit"),
         before: readStringParam(ctx.params, "before"),
         after: readStringParam(ctx.params, "after"),
         around: readStringParam(ctx.params, "around"),
@@ -175,7 +172,6 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
         throw new Error("Discord pins are disabled.");
       }
       const channelId = ctx.resolveChannelId();
-      await ctx.assertReadTargetAllowed({ channelId });
       const pins = await discordMessagingActionRuntime.listPinsDiscord(channelId, ctx.withOpts());
       return jsonResult({ ok: true, pins: pins.map((pin) => ctx.normalizeMessage(pin)) });
     }
@@ -193,15 +189,8 @@ export async function handleDiscordMessageManagementAction(ctx: DiscordMessaging
       const channelIds = readStringArrayParam(ctx.params, "channelIds");
       const authorId = readStringParam(ctx.params, "authorId");
       const authorIds = readStringArrayParam(ctx.params, "authorIds");
-      const limit = readPositiveIntegerParam(ctx.params, "limit");
+      const limit = readNumberParam(ctx.params, "limit");
       const channelIdList = [...(channelIds ?? []), ...(channelId ? [channelId] : [])];
-      if (channelIdList.length > 0) {
-        for (const targetChannelId of channelIdList) {
-          await ctx.assertReadTargetAllowed({ guildId, channelId: targetChannelId });
-        }
-      } else {
-        await ctx.assertGuildReadTargetAllowed({ guildId });
-      }
       const authorIdList = [...(authorIds ?? []), ...(authorId ? [authorId] : [])];
       const results = await discordMessagingActionRuntime.searchMessagesDiscord(
         {

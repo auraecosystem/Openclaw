@@ -1,5 +1,4 @@
 import { resolveChannelConfigWrites } from "openclaw/plugin-sdk/channel-config-writes";
-import { parseStrictNonNegativeInteger } from "openclaw/plugin-sdk/number-runtime";
 import type { ResolvedAgentRoute } from "openclaw/plugin-sdk/routing";
 import { resolveFeishuRuntimeAccount } from "./accounts.js";
 import { createFeishuClient } from "./client.js";
@@ -47,7 +46,8 @@ function buildCommentSessionKey(params: {
 }
 
 function parseTimestampMs(value: string | undefined): number {
-  return parseStrictNonNegativeInteger(value) ?? Date.now();
+  const parsed = value ? Number.parseInt(value, 10) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : Date.now();
 }
 
 export async function handleFeishuCommentEvent(
@@ -235,7 +235,7 @@ export async function handleFeishuCommentEvent(
       `feishu[${account.accountId}]: dispatching drive comment to agent ` +
         `(session=${commentSessionKey} comment=${turn.commentId} type=${turn.noticeType})`,
     );
-    const turnResult = await core.channel.inbound.run({
+    const turnResult = await core.channel.turn.run({
       channel: "feishu",
       accountId: route.accountId,
       raw: turn,

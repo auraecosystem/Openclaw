@@ -1,10 +1,5 @@
 import { randomBytes } from "node:crypto";
 import { inspect } from "node:util";
-import {
-  clampTimerTimeoutMs,
-  parseFiniteNumber,
-  resolveTimerTimeoutMs,
-} from "openclaw/plugin-sdk/number-runtime";
 import { serializeRequestBody } from "./rest-body.js";
 import {
   DiscordError,
@@ -44,12 +39,6 @@ export type RequestClientOptions = {
   runtimeProfile?: RuntimeProfile;
   scheduler?: RequestSchedulerOptions;
   fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-};
-
-type NormalizedRequestClientOptions = RequestClientOptions & {
-  apiVersion: number;
-  maxQueueSize: number;
-  timeout: number;
 };
 
 export type RequestData = {
@@ -145,7 +134,7 @@ async function normalizeFetchBody(
 }
 
 export class RequestClient {
-  readonly options: NormalizedRequestClientOptions;
+  readonly options: RequestClientOptions;
   protected token: string;
   protected customFetch: RequestClientOptions["fetch"];
   protected requestControllers = new Set<AbortController>();
@@ -154,23 +143,16 @@ export class RequestClient {
   constructor(token: string, options?: RequestClientOptions) {
     this.token = token.replace(/^Bot\s+/i, "");
     this.customFetch = options?.fetch;
-    this.options = normalizeRequestClientOptions(options);
+    this.options = { ...defaultOptions, ...options };
     this.scheduler = new RestScheduler<RequestData>(
       {
-        lanes: normalizeSchedulerLanes(this.options.maxQueueSize, this.options.scheduler?.lanes),
-        maxConcurrency: normalizeIntegerOption(
-          this.options.scheduler?.maxConcurrency,
-          DEFAULT_MAX_CONCURRENT_WORKERS,
-          { min: 1 },
+        lanes: normalizeSchedulerLanes(
+          this.options.maxQueueSize ?? defaultOptions.maxQueueSize,
+          this.options.scheduler?.lanes,
         ),
-        maxQueueSize: this.options.maxQueueSize,
-        maxRateLimitRetries: normalizeIntegerOption(
-          this.options.scheduler?.maxRateLimitRetries,
-          3,
-          {
-            min: 0,
-          },
-        ),
+        maxConcurrency: this.options.scheduler?.maxConcurrency ?? DEFAULT_MAX_CONCURRENT_WORKERS,
+        maxQueueSize: this.options.maxQueueSize ?? defaultOptions.maxQueueSize,
+        maxRateLimitRetries: this.options.scheduler?.maxRateLimitRetries ?? 3,
       },
       async (request) =>
         await this.executeRequest(
@@ -298,37 +280,11 @@ export class RequestClient {
   }
 }
 
-function normalizeIntegerOption(
-  value: number | undefined,
-  fallback: number,
-  params: { min: number },
-): number {
-  const candidate = parseFiniteNumber(value) ?? fallback;
-  return Math.max(params.min, Math.floor(candidate));
-}
-
-function normalizeRequestClientOptions(
-  options?: RequestClientOptions,
-): NormalizedRequestClientOptions {
-  const merged = { ...defaultOptions, ...options };
-  return {
-    ...merged,
-    apiVersion: normalizeIntegerOption(merged.apiVersion, defaultOptions.apiVersion, { min: 1 }),
-    timeout:
-      clampTimerTimeoutMs(merged.timeout, 1) ?? resolveTimerTimeoutMs(defaultOptions.timeout, 1),
-    maxQueueSize: normalizeIntegerOption(merged.maxQueueSize, defaultOptions.maxQueueSize, {
-      min: 1,
-    }),
-  };
-}
-
 function normalizeSchedulerLanes(
   maxQueueSize: number,
   lanes?: RequestSchedulerOptions["lanes"],
 ): Record<RestRequestPriority, { maxQueueSize: number; staleAfterMs?: number; weight: number }> {
-  const fallbackMaxQueueSize = normalizeIntegerOption(maxQueueSize, defaultOptions.maxQueueSize, {
-    min: 1,
-  });
+  const fallbackMaxQueueSize = Math.max(1, Math.floor(maxQueueSize));
   return {
     critical: normalizeSchedulerLane("critical", fallbackMaxQueueSize, lanes?.critical),
     standard: normalizeSchedulerLane("standard", fallbackMaxQueueSize, lanes?.standard),
@@ -342,20 +298,17 @@ function normalizeSchedulerLane(
   options?: { maxQueueSize?: number; staleAfterMs?: number; weight?: number },
 ): { maxQueueSize: number; staleAfterMs?: number; weight: number } {
   const defaults = defaultLaneOptions[lane];
-  const staleAfterMs =
-    options?.staleAfterMs !== undefined
-      ? normalizeIntegerOption(options.staleAfterMs, defaults.staleAfterMs ?? 0, { min: 0 })
-      : defaults.staleAfterMs;
   return {
     maxQueueSize:
       options?.maxQueueSize !== undefined
-        ? normalizeIntegerOption(options.maxQueueSize, maxQueueSize, { min: 1 })
+        ? Math.max(1, Math.floor(options.maxQueueSize))
         : maxQueueSize,
-    ...(staleAfterMs !== undefined ? { staleAfterMs } : {}),
+    staleAfterMs:
+      options?.staleAfterMs !== undefined
+        ? Math.max(0, Math.floor(options.staleAfterMs))
+        : defaults.staleAfterMs,
     weight:
-      options?.weight !== undefined
-        ? normalizeIntegerOption(options.weight, defaults.weight, { min: 1 })
-        : defaults.weight,
+      options?.weight !== undefined ? Math.max(1, Math.floor(options.weight)) : defaults.weight,
   };
 }
 

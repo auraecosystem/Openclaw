@@ -14,17 +14,8 @@ describe("cron session target helpers", () => {
     );
   });
 
-  it("preserves opaque persistent session targets with native separators", () => {
-    expect(
-      resolveCronSessionTargetSessionKey(
-        "session: agent:main:dingtalk:group:cid3tmd4xb19xjfk/wogxwy2a== ",
-      ),
-    ).toBe("agent:main:dingtalk:group:cid3tmd4xb19xjfk/wogxwy2a==");
-    expect(resolveCronSessionTargetSessionKey("session:..\\outside")).toBe("..\\outside");
-  });
-
-  it("rejects null bytes in persistent session targets", () => {
-    expect(() => resolveCronSessionTargetSessionKey("session:bad\0id")).toThrow(
+  it("rejects unsafe persistent session targets", () => {
+    expect(() => resolveCronSessionTargetSessionKey("session:../../outside")).toThrow(
       "invalid cron sessionTarget session id",
     );
   });
@@ -33,9 +24,9 @@ describe("cron session target helpers", () => {
     expect(
       resolveCronCurrentSessionTarget({
         sessionTarget: "current",
-        sessionKey: " agent:main:dingtalk:group:cid3tmd4xb19xjfk/wogxwy2a== ",
+        sessionKey: " agent:main:telegram:direct:123 ",
       }),
-    ).toBe("session:agent:main:dingtalk:group:cid3tmd4xb19xjfk/wogxwy2a==");
+    ).toBe("session:agent:main:telegram:direct:123");
   });
 
   it("falls back current targets to isolated without a creator session key", () => {

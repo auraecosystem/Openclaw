@@ -1,6 +1,5 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { replaceFileAtomic } from "openclaw/plugin-sdk/security-runtime";
-import { assertWebCredsPathRegularFileOrMissing, resolveWebCredsPath } from "./creds-files.js";
+import { resolveWebCredsPath } from "./creds-files.js";
 
 const CREDS_FILE_MODE = 0o600;
 const CREDS_SAVE_FLUSH_TIMEOUT_MS = 15_000;
@@ -14,31 +13,17 @@ async function stringifyCreds(creds: unknown): Promise<string> {
   return JSON.stringify(creds, BufferJSON.replacer);
 }
 
-export async function writeWebCredsRawAtomically(params: {
-  filePath: string;
-  content: string;
-  tempPrefix: string;
-}): Promise<void> {
-  await assertWebCredsPathRegularFileOrMissing(params.filePath);
+export async function writeCredsJsonAtomically(authDir: string, creds: unknown): Promise<void> {
+  const credsPath = resolveWebCredsPath(authDir);
+  const json = await stringifyCreds(creds);
   await replaceFileAtomic({
-    filePath: params.filePath,
-    content: params.content,
+    filePath: credsPath,
+    content: json,
     dirMode: 0o700,
     mode: CREDS_FILE_MODE,
-    tempPrefix: params.tempPrefix,
+    tempPrefix: ".creds",
     syncTempFile: true,
     syncParentDir: true,
-    beforeRename: async ({ filePath }) => {
-      await assertWebCredsPathRegularFileOrMissing(filePath);
-    },
-  });
-}
-
-export async function writeCredsJsonAtomically(authDir: string, creds: unknown): Promise<void> {
-  await writeWebCredsRawAtomically({
-    filePath: resolveWebCredsPath(authDir),
-    content: await stringifyCreds(creds),
-    tempPrefix: ".creds",
   });
 }
 
@@ -50,7 +35,7 @@ export function enqueueCredsSave(
   const previous = credsSaveQueues.get(authDir) ?? Promise.resolve();
   const next = previous
     .then(() => saveCreds())
-    .catch((error: unknown) => {
+    .catch((error) => {
       onError(error);
     })
     .finally(() => {
@@ -72,12 +57,11 @@ export async function waitForCredsSaveQueueWithTimeout(
   authDir: string,
   timeoutMs = CREDS_SAVE_FLUSH_TIMEOUT_MS,
 ): Promise<CredsQueueWaitResult> {
-  const boundedTimeoutMs = resolveTimerTimeoutMs(timeoutMs, CREDS_SAVE_FLUSH_TIMEOUT_MS, 0);
   let flushTimeout: ReturnType<typeof setTimeout> | undefined;
   return await Promise.race([
     waitForCredsSaveQueue(authDir).then(() => "drained" as const),
     new Promise<CredsQueueWaitResult>((resolve) => {
-      flushTimeout = setTimeout(() => resolve("timed_out"), boundedTimeoutMs);
+      flushTimeout = setTimeout(() => resolve("timed_out"), timeoutMs);
     }),
   ]).finally(() => {
     if (flushTimeout) {

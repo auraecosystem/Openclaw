@@ -1,8 +1,16 @@
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
 import { readCliStartupMetadata } from "./startup-metadata.js";
 
 function dedupe(values: string[]): string[] {
-  return uniqueStrings(values.filter(Boolean));
+  const seen = new Set<string>();
+  const resolved: string[] = [];
+  for (const value of values) {
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    resolved.push(value);
+  }
+  return resolved;
 }
 
 let precomputedChannelOptions: string[] | null | undefined;
@@ -36,9 +44,8 @@ export function formatCliChannelOptions(extra: string[] = []): string {
   return options.length > 0 ? options.join("|") : "channel";
 }
 
-export const testing = {
+export const __testing = {
   resetPrecomputedChannelOptionsForTests(): void {
     precomputedChannelOptions = undefined;
   },
 };
-export { testing as __testing };

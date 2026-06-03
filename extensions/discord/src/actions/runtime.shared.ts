@@ -1,9 +1,4 @@
-import {
-  parseAvailableTags,
-  readNonNegativeIntegerParam,
-  readPositiveIntegerParam,
-  readStringParam,
-} from "../runtime-api.js";
+import { parseAvailableTags, readNumberParam, readStringParam } from "../runtime-api.js";
 import type { OpenClawConfig } from "../runtime-api.js";
 import type {
   DiscordChannelCreate,
@@ -52,12 +47,12 @@ export function readDiscordChannelCreateParams(
     guildId: readStringParam(params, "guildId", { required: true }),
     name: readStringParam(params, "name", { required: true }),
     type:
-      readNonNegativeIntegerParam(params, "channelType") ??
-      readNonNegativeIntegerParam(params, "type") ??
+      readNumberParam(params, "channelType", { integer: true }) ??
+      readNumberParam(params, "type", { integer: true }) ??
       undefined,
     parentId: parentId ?? undefined,
     topic: readStringParam(params, "topic") ?? undefined,
-    position: readNonNegativeIntegerParam(params, "position") ?? undefined,
+    position: readNumberParam(params, "position", { integer: true }) ?? undefined,
     nsfw: readDiscordBooleanParam(params, "nsfw"),
   };
 }
@@ -68,13 +63,14 @@ export function readDiscordChannelEditParams(params: Record<string, unknown>): D
     channelId: readStringParam(params, "channelId", { required: true }),
     name: readStringParam(params, "name") ?? undefined,
     topic: readStringParam(params, "topic") ?? undefined,
-    position: readNonNegativeIntegerParam(params, "position") ?? undefined,
+    position: readNumberParam(params, "position", { integer: true }) ?? undefined,
     parentId: parentId === undefined ? undefined : parentId,
     nsfw: readDiscordBooleanParam(params, "nsfw"),
-    rateLimitPerUser: readNonNegativeIntegerParam(params, "rateLimitPerUser") ?? undefined,
+    rateLimitPerUser: readNumberParam(params, "rateLimitPerUser", { integer: true }) ?? undefined,
     archived: readDiscordBooleanParam(params, "archived"),
     locked: readDiscordBooleanParam(params, "locked"),
-    autoArchiveDuration: readPositiveIntegerParam(params, "autoArchiveDuration") ?? undefined,
+    autoArchiveDuration:
+      readNumberParam(params, "autoArchiveDuration", { integer: true }) ?? undefined,
     availableTags: parseAvailableTags(params.availableTags),
   };
 }
@@ -85,6 +81,6 @@ export function readDiscordChannelMoveParams(params: Record<string, unknown>): D
     guildId: readStringParam(params, "guildId", { required: true }),
     channelId: readStringParam(params, "channelId", { required: true }),
     parentId: parentId === undefined ? undefined : parentId,
-    position: readNonNegativeIntegerParam(params, "position") ?? undefined,
+    position: readNumberParam(params, "position", { integer: true }) ?? undefined,
   };
 }

@@ -13,7 +13,7 @@ vi.mock("./external-cli-sync.js", () => ({
 function makeCredential(overrides: Partial<OAuthCredential> = {}): OAuthCredential {
   return {
     type: "oauth",
-    provider: "openai",
+    provider: "openai-codex",
     access: "local-access-token",
     refresh: "local-refresh-token",
     expires: Date.now() - 60_000,
@@ -36,7 +36,7 @@ describe("resolveEffectiveOAuthCredential", () => {
 
     expect(
       resolveEffectiveOAuthCredential({
-        profileId: "openai:default",
+        profileId: "openai-codex:default",
         credential: makeCredential(),
       }),
     ).toBe(imported);
@@ -57,7 +57,7 @@ describe("resolveEffectiveOAuthCredential", () => {
 
     expect(
       resolveEffectiveOAuthCredential({
-        profileId: "openai:default",
+        profileId: "openai-codex:default",
         credential: local,
       }),
     ).toBe(local);
@@ -74,7 +74,7 @@ describe("resolveEffectiveOAuthCredential", () => {
 
     expect(
       resolveEffectiveOAuthCredential({
-        profileId: "openai:default",
+        profileId: "openai-codex:default",
         credential: local,
       }),
     ).toBe(local);

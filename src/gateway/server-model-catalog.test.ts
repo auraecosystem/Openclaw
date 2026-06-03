@@ -2,15 +2,32 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { GatewayModelChoice } from "./server-model-catalog.js";
 import {
-  resetModelCatalogCacheForTest,
+  __resetModelCatalogCacheForTest,
   loadGatewayModelCatalog,
   markGatewayModelCatalogStaleForReload,
 } from "./server-model-catalog.js";
-import { createDeferred } from "./test-helpers.deferred.js";
 
+type Deferred<T> = {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: unknown) => void;
+};
 type LoadModelCatalogForTest = NonNullable<
   NonNullable<Parameters<typeof loadGatewayModelCatalog>[0]>["loadModelCatalog"]
 >;
+
+function createDeferred<T>(): Deferred<T> {
+  let resolve: ((value: T) => void) | undefined;
+  let reject: ((error: unknown) => void) | undefined;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  if (!resolve || !reject) {
+    throw new Error("Expected deferred callbacks to be initialized");
+  }
+  return { promise, resolve, reject };
+}
 
 function model(id: string): GatewayModelChoice {
   return { id, name: id, provider: "openai" } as GatewayModelChoice;
@@ -18,42 +35,9 @@ function model(id: string): GatewayModelChoice {
 
 const getConfig = () => ({}) as OpenClawConfig;
 
-function createRefreshingCatalogLoader(
-  firstCatalog: GatewayModelChoice[],
-  secondCatalog: GatewayModelChoice[],
-) {
-  return vi
-    .fn<LoadModelCatalogForTest>()
-    .mockResolvedValueOnce(firstCatalog)
-    .mockResolvedValueOnce(secondCatalog);
-}
-
-async function expectCatalog(
-  loadModelCatalog: LoadModelCatalogForTest,
-  catalog: GatewayModelChoice[],
-  readOnly = true,
-) {
-  await expect(
-    loadGatewayModelCatalog({
-      getConfig,
-      loadModelCatalog,
-      ...(readOnly ? {} : { readOnly: false }),
-    }),
-  ).resolves.toBe(catalog);
-}
-
-async function markStaleAndExpectPreviousCatalog(
-  loadModelCatalog: LoadModelCatalogForTest,
-  catalog: GatewayModelChoice[],
-) {
-  markGatewayModelCatalogStaleForReload();
-  await expectCatalog(loadModelCatalog, catalog);
-  await vi.waitFor(() => expect(loadModelCatalog).toHaveBeenCalledTimes(2));
-}
-
 describe("loadGatewayModelCatalog", () => {
   beforeEach(async () => {
-    await resetModelCatalogCacheForTest();
+    await __resetModelCatalogCacheForTest();
   });
 
   it("caches the first successful catalog until reload marks it stale", async () => {
@@ -98,26 +82,46 @@ describe("loadGatewayModelCatalog", () => {
   it("caches an empty read-only catalog until reload marks it stale", async () => {
     const emptyCatalog: GatewayModelChoice[] = [];
     const freshCatalog = [model("gpt-5.5")];
-    const loadModelCatalog = createRefreshingCatalogLoader(emptyCatalog, freshCatalog);
+    const loadModelCatalog = vi
+      .fn<LoadModelCatalogForTest>()
+      .mockResolvedValueOnce(emptyCatalog)
+      .mockResolvedValueOnce(freshCatalog);
 
-    await expectCatalog(loadModelCatalog, emptyCatalog);
-    await expectCatalog(loadModelCatalog, emptyCatalog);
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      emptyCatalog,
+    );
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      emptyCatalog,
+    );
 
     expect(loadModelCatalog).toHaveBeenCalledTimes(1);
 
-    await markStaleAndExpectPreviousCatalog(loadModelCatalog, emptyCatalog);
+    markGatewayModelCatalogStaleForReload();
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      emptyCatalog,
+    );
+    await vi.waitFor(() => expect(loadModelCatalog).toHaveBeenCalledTimes(2));
     await vi.waitFor(async () => {
-      await expectCatalog(loadModelCatalog, freshCatalog);
+      await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+        freshCatalog,
+      );
     });
   });
 
   it("does not cache an empty full catalog so the next all-model request retries", async () => {
     const emptyCatalog: GatewayModelChoice[] = [];
     const freshCatalog = [model("gpt-5.5")];
-    const loadModelCatalog = createRefreshingCatalogLoader(emptyCatalog, freshCatalog);
+    const loadModelCatalog = vi
+      .fn<LoadModelCatalogForTest>()
+      .mockResolvedValueOnce(emptyCatalog)
+      .mockResolvedValueOnce(freshCatalog);
 
-    await expectCatalog(loadModelCatalog, emptyCatalog, false);
-    await expectCatalog(loadModelCatalog, freshCatalog, false);
+    await expect(
+      loadGatewayModelCatalog({ getConfig, loadModelCatalog, readOnly: false }),
+    ).resolves.toBe(emptyCatalog);
+    await expect(
+      loadGatewayModelCatalog({ getConfig, loadModelCatalog, readOnly: false }),
+    ).resolves.toBe(freshCatalog);
 
     expect(loadModelCatalog).toHaveBeenCalledTimes(2);
   });
@@ -131,13 +135,21 @@ describe("loadGatewayModelCatalog", () => {
       .mockResolvedValueOnce(staleCatalog)
       .mockReturnValueOnce(refresh.promise);
 
-    await expectCatalog(loadModelCatalog, staleCatalog);
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      staleCatalog,
+    );
 
-    await markStaleAndExpectPreviousCatalog(loadModelCatalog, staleCatalog);
+    markGatewayModelCatalogStaleForReload();
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      staleCatalog,
+    );
+    await vi.waitFor(() => expect(loadModelCatalog).toHaveBeenCalledTimes(2));
 
     refresh.resolve(freshCatalog);
     await vi.waitFor(async () => {
-      await expectCatalog(loadModelCatalog, freshCatalog);
+      await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+        freshCatalog,
+      );
     });
   });
 
@@ -150,15 +162,25 @@ describe("loadGatewayModelCatalog", () => {
       .mockRejectedValueOnce(new Error("provider offline"))
       .mockResolvedValueOnce(freshCatalog);
 
-    await expectCatalog(loadModelCatalog, staleCatalog);
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      staleCatalog,
+    );
 
-    await markStaleAndExpectPreviousCatalog(loadModelCatalog, staleCatalog);
+    markGatewayModelCatalogStaleForReload();
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      staleCatalog,
+    );
+    await vi.waitFor(() => expect(loadModelCatalog).toHaveBeenCalledTimes(2));
 
-    await expectCatalog(loadModelCatalog, staleCatalog);
+    await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+      staleCatalog,
+    );
     await vi.waitFor(() => expect(loadModelCatalog).toHaveBeenCalledTimes(3));
 
     await vi.waitFor(async () => {
-      await expectCatalog(loadModelCatalog, freshCatalog);
+      await expect(loadGatewayModelCatalog({ getConfig, loadModelCatalog })).resolves.toBe(
+        freshCatalog,
+      );
     });
   });
 });

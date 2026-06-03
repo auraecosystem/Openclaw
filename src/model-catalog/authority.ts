@@ -1,7 +1,4 @@
-import type {
-  ModelCatalogSource,
-  NormalizedModelCatalogRow,
-} from "@openclaw/model-catalog-core/model-catalog-types";
+import type { ModelCatalogSource, NormalizedModelCatalogRow } from "./types.js";
 
 const MODEL_CATALOG_SOURCE_AUTHORITY: Readonly<Record<ModelCatalogSource, number>> = {
   config: 0,

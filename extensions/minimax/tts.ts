@@ -1,4 +1,3 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 import { assertOkOrThrowProviderError } from "openclaw/plugin-sdk/provider-http";
 import {
   fetchWithSsrFGuard,
@@ -58,17 +57,16 @@ export async function minimaxTTS(params: {
     baseUrl,
     model,
     voiceId,
-    speed = 1,
-    vol = 1,
+    speed = 1.0,
+    vol = 1.0,
     pitch = 0,
     format = "mp3",
     sampleRate = 32000,
     timeoutMs,
   } = params;
-  const safeTimeoutMs = resolveTimerTimeoutMs(timeoutMs, 1);
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), safeTimeoutMs);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const { response, release } = await fetchWithSsrFGuard({
@@ -95,7 +93,7 @@ export async function minimaxTTS(params: {
         }),
         signal: controller.signal,
       },
-      timeoutMs: safeTimeoutMs,
+      timeoutMs,
       policy: ssrfPolicyFromHttpBaseUrlAllowedHostname(baseUrl),
       auditContext: "minimax.tts",
     });

@@ -1,21 +1,10 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
-import {
-  appendQaChildOutput,
-  appendQaChildOutputTail,
-  createQaChildOutputCapture,
-  createQaChildOutputTail,
-  formatQaChildOutputTail,
-  QA_CHILD_STDOUT_MAX_BYTES,
-  readQaChildOutput,
-} from "./child-output.js";
 import { resolveQaNodeExecPath } from "./node-exec.js";
 import { liveTurnTimeoutMs } from "./suite-runtime-agent-common.js";
 import { waitForGatewayHealthy, waitForTransportReady } from "./suite-runtime-gateway.js";
 import type { QaDreamingStatus, QaSuiteRuntimeEnv } from "./suite-runtime-types.js";
-import { resolveQaGatewayTimeoutWithGraceMs } from "./timer-timeouts.js";
 
 type QaMemorySearchResult = {
   results?: Array<{ snippet?: string; text?: string; path?: string }>;
@@ -86,8 +75,8 @@ async function runQaCli(
   args: string[],
   opts?: { timeoutMs?: number; json?: boolean; env?: NodeJS.ProcessEnv },
 ) {
-  const stdout = createQaChildOutputCapture();
-  const stderr = createQaChildOutputTail();
+  const stdout: Buffer[] = [];
+  const stderr: Buffer[] = [];
   const distEntryPath = path.join(env.repoRoot, "dist", "index.js");
   const nodeExecPath = await resolveQaNodeExecPath();
   await new Promise<void>((resolve, reject) => {
@@ -99,13 +88,12 @@ async function runQaCli(
       },
       stdio: ["ignore", "pipe", "pipe"],
     });
-    const timeoutMs = resolveTimerTimeoutMs(opts?.timeoutMs, 60_000);
     const timeout = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error(`qa cli timed out: openclaw ${args.join(" ")}`));
-    }, timeoutMs);
-    child.stdout.on("data", (chunk) => appendQaChildOutput(stdout, chunk));
-    child.stderr.on("data", (chunk) => appendQaChildOutputTail(stderr, chunk));
+    }, opts?.timeoutMs ?? 60_000);
+    child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
+    child.stderr.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
     child.once("error", (error) => {
       clearTimeout(timeout);
       reject(error);
@@ -113,22 +101,17 @@ async function runQaCli(
     child.once("exit", (code) => {
       clearTimeout(timeout);
       if (code === 0) {
-        if (stdout.exceeded) {
-          reject(
-            new Error(
-              `qa cli stdout exceeded ${QA_CHILD_STDOUT_MAX_BYTES} bytes; refusing to parse truncated output`,
-            ),
-          );
-          return;
-        }
         resolve();
         return;
       }
-      const stderrText = formatQaChildOutputTail(stderr, "qa cli stderr");
-      reject(new Error(`qa cli failed (${code ?? "unknown"}): ${stderrText}`));
+      reject(
+        new Error(
+          `qa cli failed (${code ?? "unknown"}): ${Buffer.concat(stderr).toString("utf8").trim()}`,
+        ),
+      );
     });
   });
-  const text = readQaChildOutput(stdout).trim();
+  const text = Buffer.concat(stdout).toString("utf8").trim();
   if (!opts?.json) {
     return text;
   }
@@ -193,7 +176,7 @@ async function waitForAgentRun(
       timeoutMs,
     },
     {
-      timeoutMs: resolveQaGatewayTimeoutWithGraceMs(timeoutMs),
+      timeoutMs: timeoutMs + 5_000,
     },
   )) as { status?: string; error?: string };
 }
@@ -255,9 +238,7 @@ async function waitForMemorySearchMatch(params: {
     if (haystack.includes(params.expectedNeedle)) {
       return result;
     }
-    await new Promise((resolve) => {
-      setTimeout(resolve, 500);
-    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`memory index missing expected fact after reindex: ${params.expectedNeedle}`);
 }
@@ -275,7 +256,7 @@ async function forceMemoryIndex(params: {
   await runQaCli(params.env, ["memory", "index", "--agent", "qa", "--force"], {
     timeoutMs: liveTurnTimeoutMs(params.env, 60_000),
   });
-  const result = await waitForMemorySearchMatch({
+  return await waitForMemorySearchMatch({
     expectedNeedle: params.expectedNeedle,
     timeoutMs: liveTurnTimeoutMs(params.env, 20_000),
     search: async () =>
@@ -288,8 +269,6 @@ async function forceMemoryIndex(params: {
         },
       )) as QaMemorySearchResult,
   });
-  await params.env.gateway.restartAfterStateMutation?.(async () => {});
-  return result;
 }
 
 async function runAgentPrompt(

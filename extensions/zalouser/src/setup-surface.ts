@@ -13,7 +13,6 @@ import {
   type DmPolicy,
   type OpenClawConfig,
 } from "openclaw/plugin-sdk/setup";
-import { normalizeStringEntries } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   checkZcaAuthenticated,
   listZalouserAccountIds,
@@ -39,7 +38,10 @@ const ZALOUSER_ALLOWLIST_TITLE = t("wizard.zalouser.allowlistTitle");
 const ZALOUSER_GROUPS_TITLE = t("wizard.zalouser.groupsTitle");
 
 function parseZalouserEntries(raw: string): string[] {
-  return normalizeStringEntries(raw.split(/[\n,;]+/g));
+  return raw
+    .split(/[\n,;]+/g)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
 }
 
 function setZalouserAccountScopedConfig(
@@ -236,7 +238,7 @@ const zalouserDmPolicy: ChannelSetupDmPolicy = {
         ? (normalizeAccountId(accountId) ?? DEFAULT_ACCOUNT_ID)
         : resolveDefaultZalouserAccountId(cfg);
     return await promptZalouserAllowFrom({
-      cfg,
+      cfg: cfg,
       prompter,
       accountId: id,
     });
@@ -438,7 +440,7 @@ export const zalouserSetupWizard: ChannelSetupWizard = {
         );
         return [];
       }
-      const updatedAccount = resolveZalouserAccountSync({ cfg, accountId });
+      const updatedAccount = resolveZalouserAccountSync({ cfg: cfg, accountId });
       try {
         const resolved = await resolveZaloGroupsByEntries({
           profile: updatedAccount.profile,
@@ -448,7 +450,7 @@ export const zalouserSetupWizard: ChannelSetupWizard = {
           .filter((entry) => entry.resolved && entry.id)
           .map((entry) => entry.id as string);
         const unresolved = resolved.filter((entry) => !entry.resolved).map((entry) => entry.input);
-        const keys = [...resolvedIds, ...normalizeStringEntries(unresolved)];
+        const keys = [...resolvedIds, ...unresolved.map((entry) => entry.trim()).filter(Boolean)];
         const resolution = formatResolvedUnresolvedNote({
           resolved: resolvedIds,
           unresolved,
@@ -462,7 +464,7 @@ export const zalouserSetupWizard: ChannelSetupWizard = {
           t("wizard.zalouser.groupLookupFailed", { error: String(err) }),
           ZALOUSER_GROUPS_TITLE,
         );
-        return normalizeStringEntries(entries);
+        return entries.map((entry) => entry.trim()).filter(Boolean);
       }
     },
     applyAllowlist: ({ cfg, accountId, resolved }) =>

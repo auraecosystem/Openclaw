@@ -37,7 +37,7 @@ export function createIMessageConversationBindingManager(params: {
   });
 }
 
-export const testing = {
+export const __testing = {
   resetIMessageConversationBindingsForTests() {
     resetAccountScopedConversationBindingsForTests({
       stateKey: IMESSAGE_CONVERSATION_BINDINGS_STATE_KEY,

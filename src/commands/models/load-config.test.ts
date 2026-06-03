@@ -69,9 +69,8 @@ describe("models load-config", () => {
       targetIds,
     });
     expect(mocks.setRuntimeConfigSnapshot).toHaveBeenCalledWith(resolvedConfig, sourceConfig);
-    expect(runtime.error).toHaveBeenNthCalledWith(1, "[secrets] diag-one");
-    expect(runtime.error).toHaveBeenNthCalledWith(2, "[secrets] diag-two");
-    expect(runtime.log).not.toHaveBeenCalled();
+    expect(runtime.log).toHaveBeenNthCalledWith(1, "[secrets] diag-one");
+    expect(runtime.log).toHaveBeenNthCalledWith(2, "[secrets] diag-two");
     expect(result).toEqual({
       sourceConfig,
       resolvedConfig,
@@ -99,6 +98,6 @@ describe("models load-config", () => {
     const result = await loadModelsConfigWithSource({ commandName: "models list" });
 
     expect(result.sourceConfig).toBe(runtimeConfig);
-    expect(mocks.setRuntimeConfigSnapshot).toHaveBeenCalledWith(resolvedConfig, runtimeConfig);
+    expect(mocks.setRuntimeConfigSnapshot).toHaveBeenCalledWith(resolvedConfig);
   });
 });

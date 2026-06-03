@@ -207,9 +207,7 @@ describe("openclaw channel mcp server", () => {
         const messages = await bridge.readMessages(sessionKey, 5);
         expect(messages[0]?.role).toBe("assistant");
         expect(messages[0]?.content).toEqual([{ type: "text", text: "hello from transcript" }]);
-        expect((messages[1]?.["__openclaw"] as { id?: string } | undefined)?.id).toBe(
-          "msg-attachment",
-        );
+        expect((messages[1]?.__openclaw as { id?: string } | undefined)?.id).toBe("msg-attachment");
         expect(
           extractAttachmentsFromMessage(messages[1]).some(
             (entry) => (entry as { type?: unknown }).type === "image",
@@ -268,7 +266,7 @@ describe("openclaw channel mcp server", () => {
 
       test("emits Claude channel and permission notifications", async () => {
         const sessionKey = "agent:main:main";
-        let mcp: Awaited<ReturnType<typeof connectMcpWithoutGateway>> | null | undefined;
+        let mcp: Awaited<ReturnType<typeof connectMcpWithoutGateway>> | null = null;
         try {
           const channelNotifications: Array<{ content: string; meta: Record<string, string> }> = [];
           const permissionNotifications: Array<{
@@ -489,10 +487,14 @@ describe("openclaw channel mcp server", () => {
 
       (
         bridge as unknown as {
-          pendingClaudePermissions: Map<string, number>;
+          pendingClaudePermissions: Map<string, Record<string, unknown>>;
           server: { server: { notification: ReturnType<typeof vi.fn> } };
         }
-      ).pendingClaudePermissions.set("abcde", Date.now());
+      ).pendingClaudePermissions.set("abcde", {
+        toolName: "Bash",
+        description: "run npm test",
+        inputPreview: '{"cmd":"npm test"}',
+      });
       (
         bridge as unknown as {
           server: { server: { notification: ReturnType<typeof vi.fn> } };

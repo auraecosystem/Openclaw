@@ -141,7 +141,6 @@ describe("buildSlackThreadingToolContext", () => {
 
     expect(result.currentThreadTs).toBe("1771999998.834199");
     expect(result.replyToMode).toBe("all");
-    expect(result.sameChannelThreadRequired).toBe(true);
   });
 
   it("uses TransportThreadId when ReplyToId matches the current message", () => {
@@ -165,7 +164,6 @@ describe("buildSlackThreadingToolContext", () => {
 
     expect(result.currentThreadTs).toBe("1771999998.834199");
     expect(result.replyToMode).toBe("all");
-    expect(result.sameChannelThreadRequired).toBe(true);
   });
 
   it("keeps top-level ReplyToId as an anchor without forcing configured off mode", () => {
@@ -188,7 +186,6 @@ describe("buildSlackThreadingToolContext", () => {
 
     expect(result.currentThreadTs).toBe("1771999998.834199");
     expect(result.replyToMode).toBe("off");
-    expect(result.sameChannelThreadRequired).toBe(false);
   });
 
   it("keeps top-level ReplyToId as the first-reply anchor for single-use modes", () => {

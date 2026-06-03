@@ -1,6 +1,5 @@
 import type { Command } from "commander";
 import { normalizeAccountId } from "openclaw/plugin-sdk/account-id";
-import { parseStrictInteger, timestampMsToIsoString } from "openclaw/plugin-sdk/number-runtime";
 import type { ChannelSetupInput } from "openclaw/plugin-sdk/setup";
 import { resolveMatrixAccount, resolveMatrixAccountConfig } from "./matrix/accounts.js";
 import { listMatrixOwnDevices, pruneMatrixStaleGatewayDevices } from "./matrix/actions/devices.js";
@@ -216,9 +215,8 @@ function printMatrixOwnDevices(
     console.log(
       `- ${formatMatrixCliText(device.deviceId)}${labels.length ? ` (${labels.join(", ")})` : ""}`,
     );
-    const lastSeenAt = timestampMsToIsoString(device.lastSeenTs);
-    if (lastSeenAt) {
-      printTimestamp("  Last seen", lastSeenAt);
+    if (device.lastSeenTs) {
+      printTimestamp("  Last seen", new Date(device.lastSeenTs).toISOString());
     }
     if (device.lastSeenIp) {
       console.log(`  Last IP: ${formatMatrixCliText(device.lastSeenIp)}`);
@@ -236,11 +234,8 @@ function parseOptionalInt(value: string | undefined, fieldName: string): number 
   if (!trimmed) {
     return undefined;
   }
-  if (!/^-?\d+$/.test(trimmed)) {
-    throw new Error(`${fieldName} must be an integer`);
-  }
-  const parsed = parseStrictInteger(trimmed);
-  if (parsed === undefined) {
+  const parsed = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(parsed)) {
     throw new Error(`${fieldName} must be an integer`);
   }
   return parsed;
@@ -399,7 +394,10 @@ async function addMatrixAccount(params: {
     }
   }
 
-  let deviceHealth: MatrixCliAccountAddResult["deviceHealth"];
+  let deviceHealth: MatrixCliAccountAddResult["deviceHealth"] = {
+    currentDeviceId: null,
+    staleOpenClawDeviceIds: [],
+  };
   try {
     const addedDevices = await listMatrixOwnDevices({ accountId, cfg: updated });
     deviceHealth = {

@@ -22,7 +22,6 @@ export type GatewayBonjourAdvertiseOpts = {
   sshPort?: number;
   gatewayTlsEnabled?: boolean;
   gatewayTlsFingerprintSha256?: string;
-  gatewayDirectReachable?: boolean;
   canvasPort?: number;
   tailnetDns?: string;
   cliPath?: string;
@@ -452,9 +451,6 @@ export async function startGatewayBonjourAdvertiser(
         txtBase.gatewayTlsSha256 = opts.gatewayTlsFingerprintSha256;
       }
     }
-    if (opts.gatewayDirectReachable) {
-      txtBase.gatewayDirectReachable = "1";
-    }
     if (typeof opts.canvasPort === "number" && opts.canvasPort > 0) {
       txtBase.canvasPort = String(opts.canvasPort);
     }
@@ -495,10 +491,7 @@ export async function startGatewayBonjourAdvertiser(
       return { responder, services };
     }
 
-    async function stopCycle(
-      cycle: BonjourCycle | null,
-      optsValue?: { shutdownResponder?: boolean },
-    ) {
+    async function stopCycle(cycle: BonjourCycle | null, opts?: { shutdownResponder?: boolean }) {
       if (!cycle) {
         return;
       }
@@ -510,7 +503,7 @@ export async function startGatewayBonjourAdvertiser(
         }
       }
       try {
-        if (optsValue?.shutdownResponder) {
+        if (opts?.shutdownResponder) {
           await cycle.responder.shutdown();
         }
       } catch {
@@ -571,7 +564,7 @@ export async function startGatewayBonjourAdvertiser(
             .then(() => {
               logger.info(`bonjour: advertised ${serviceSummary(label, svc)}`);
             })
-            .catch((err: unknown) => {
+            .catch((err) => {
               handleAdvertiseFailure(label, svc, err, "failed");
             });
         } catch (err) {
@@ -618,7 +611,7 @@ export async function startGatewayBonjourAdvertiser(
       }
     };
 
-    const recreateAdvertiser = async (reason: string, optsLocal?: { stuckState?: boolean }) => {
+    const recreateAdvertiser = async (reason: string, opts?: { stuckState?: boolean }) => {
       if (stopped || disabled) {
         return;
       }
@@ -627,9 +620,7 @@ export async function startGatewayBonjourAdvertiser(
       }
       recreatePromise = (async () => {
         consecutiveRestarts += 1;
-        consecutiveStuckStateRestarts = optsLocal?.stuckState
-          ? consecutiveStuckStateRestarts + 1
-          : 0;
+        consecutiveStuckStateRestarts = opts?.stuckState ? consecutiveStuckStateRestarts + 1 : 0;
         const now = Date.now();
         while (
           restartTimestamps.length > 0 &&
@@ -747,7 +738,7 @@ export async function startGatewayBonjourAdvertiser(
           )})`,
         );
         try {
-          void svc.advertise().catch((err: unknown) => {
+          void svc.advertise().catch((err) => {
             logger.warn(
               `bonjour: watchdog re-advertise failed (${serviceSummary(label, svc)}): ${formatBonjourError(err)}`,
             );

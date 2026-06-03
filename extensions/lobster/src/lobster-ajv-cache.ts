@@ -1,30 +1,33 @@
 import { createHash } from "node:crypto";
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import AjvPkg, { type AnySchema, type ValidateFunction } from "ajv";
 
 const installedSymbol = Symbol.for("openclaw.lobster.ajv-compile-cache.installed");
 const cacheSymbol = Symbol.for("openclaw.lobster.ajv-compile-cache.entries");
 const maxEntries = 512;
 
-type ValidateFunction = (value: unknown) => boolean;
-type AjvInstance = {
-  compile: (schema: unknown) => ValidateFunction;
-  removeSchema: (schemaKeyRef?: unknown) => AjvInstance;
+type AjvInstance = import("ajv").default;
+
+type CompileCacheEntry = {
+  schema: AnySchema;
+  validate: ValidateFunction;
 };
-type AjvConstructor = {
+
+const AjvCtor = AjvPkg as unknown as {
   new (opts?: object): AjvInstance;
   prototype: AjvInstance;
 };
+
 type AjvWithCompileCache = AjvInstance & {
   [cacheSymbol]?: Map<string, CompileCacheEntry>;
 };
-type AjvPrototypePatch = AjvInstance & {
+
+type AjvPrototypePatch = {
   [installedSymbol]?: boolean;
+  compile: (schema: AnySchema) => ValidateFunction;
+  removeSchema: (schemaKeyRef?: Parameters<AjvInstance["removeSchema"]>[0]) => AjvInstance;
 };
-type CompileCacheEntry = {
-  schema: unknown;
-  validate: ValidateFunction;
-};
+
+type JsonLike = null | boolean | number | string | JsonLike[] | { [key: string]: JsonLike };
 
 function stableJsonStringify(value: unknown, seen = new WeakSet<object>()): string {
   if (value === null || typeof value !== "object") {
@@ -72,8 +75,8 @@ function rememberCompiledValidator(params: {
   cache: Map<string, CompileCacheEntry>;
   instance: AjvWithCompileCache;
   key: string;
-  removeSchema: AjvInstance["removeSchema"];
-  schema: unknown;
+  removeSchema: AjvPrototypePatch["removeSchema"];
+  schema: AnySchema;
   validate: ValidateFunction;
 }) {
   const { cache, instance, key, removeSchema, schema, validate } = params;
@@ -90,21 +93,8 @@ function rememberCompiledValidator(params: {
   cache.set(key, { schema, validate });
 }
 
-async function resolveLobsterAjvConstructor(packageEntryPath: string): Promise<AjvConstructor> {
-  const lobsterRequire = createRequire(packageEntryPath);
-  const ajvPath = lobsterRequire.resolve("ajv");
-  const ajvModule = (await import(pathToFileURL(ajvPath).href)) as { default?: unknown };
-  return (ajvModule.default ?? ajvModule) as AjvConstructor;
-}
-
-export async function installLobsterAjvCompileCache(packageEntryPath: string) {
-  let AjvCtor: AjvConstructor;
-  try {
-    AjvCtor = await resolveLobsterAjvConstructor(packageEntryPath);
-  } catch {
-    return;
-  }
-  const proto = AjvCtor.prototype as AjvPrototypePatch;
+export function installLobsterAjvCompileCache() {
+  const proto = AjvCtor.prototype as unknown as AjvPrototypePatch;
   if (proto[installedSymbol]) {
     return;
   }
@@ -119,18 +109,18 @@ export async function installLobsterAjvCompileCache(packageEntryPath: string) {
 
   proto.compile = function compileWithContentCache(
     this: AjvWithCompileCache,
-    schema: unknown,
-  ): ValidateFunction {
+    schema: AnySchema,
+  ): ValidateFunction<JsonLike> {
     const key = compileCacheKey(schema);
     if (!key) {
-      return originalCompile.call(this, schema);
+      return originalCompile.call(this, schema) as ValidateFunction<JsonLike>;
     }
     const cache = readCompileCache(this);
     const cached = cache.get(key);
     if (cached) {
-      return cached.validate;
+      return cached.validate as ValidateFunction<JsonLike>;
     }
-    const validate = originalCompile.call(this, schema);
+    const validate = originalCompile.call(this, schema) as ValidateFunction<JsonLike>;
     rememberCompiledValidator({
       cache,
       instance: this,
@@ -144,7 +134,7 @@ export async function installLobsterAjvCompileCache(packageEntryPath: string) {
 
   proto.removeSchema = function removeSchemaAndClearContentCache(
     this: AjvWithCompileCache,
-    schemaKeyRef?: unknown,
+    schemaKeyRef?: Parameters<AjvInstance["removeSchema"]>[0],
   ) {
     this[cacheSymbol]?.clear();
     return originalRemoveSchema.call(this, schemaKeyRef);

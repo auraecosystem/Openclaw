@@ -82,9 +82,7 @@ async function listen(
       sockets.delete(socket);
     });
   });
-  await new Promise<void>((resolve) => {
-    server.listen(0, host, resolve);
-  });
+  await new Promise<void>((resolve) => server.listen(0, host, resolve));
   const addr = server.address();
   const port = typeof addr === "object" && addr ? addr.port : 0;
   return {
@@ -95,9 +93,9 @@ async function listen(
         socket.destroy();
       }
       await withTimeout(
-        new Promise<void>((resolve, reject) => {
-          server.close((err) => (err ? reject(err) : resolve()));
-        }),
+        new Promise<void>((resolve, reject) =>
+          server.close((err) => (err ? reject(err) : resolve())),
+        ),
         SERVER_CLOSE_TIMEOUT_MS,
         "gateway test server close",
       );
@@ -204,7 +202,7 @@ async function sendRawHttpRequest(params: {
       });
     });
     socket.on("data", (chunk) => {
-      response += chunk.toString();
+      response += chunk;
     });
     socket.once("end", () => {
       finish(() => resolve(response));
@@ -216,49 +214,6 @@ async function sendRawHttpRequest(params: {
       finish(() => reject(err));
     });
   });
-}
-
-type CanvasGatewayListener = Awaited<ReturnType<typeof listen>>;
-
-function canvasUrl(listener: CanvasGatewayListener, path = CANVAS_HOST_PATH): string {
-  return `http://127.0.0.1:${listener.port}${path}`;
-}
-
-async function fetchCanvasHost(
-  listener: CanvasGatewayListener,
-  init?: RequestInit,
-): Promise<Response> {
-  return await fetchCanvas(canvasUrl(listener), init);
-}
-
-async function expectMalformedRequestTargetsRejected(params: {
-  listener: CanvasGatewayListener;
-  headers?: readonly string[];
-}): Promise<void> {
-  for (const requestTarget of ["//", "///", "//${jndi:ldap://example}.action"]) {
-    const response = await sendRawHttpRequest({
-      host: "127.0.0.1",
-      port: params.listener.port,
-      requestTarget,
-      ...(params.headers ? { headers: params.headers } : {}),
-    });
-    expect(response).toMatch(/^HTTP\/1\.1 401 /);
-  }
-
-  const res = await fetchCanvasHost(params.listener);
-  expect(res.status).toBe(401);
-}
-
-async function expectRepeatedCanvasAuthAttemptsRateLimited(
-  listener: CanvasGatewayListener,
-  headers: Record<string, string>,
-): Promise<Response> {
-  const first = await fetchCanvasHost(listener, { headers });
-  expect(first.status).toBe(401);
-
-  const second = await fetchCanvasHost(listener, { headers });
-  expect(second.status).toBe(429);
-  return second;
 }
 
 function makeWsClient(params: {
@@ -380,12 +335,8 @@ async function withCanvasGatewayHarness(params: {
     for (const ws of wss.clients) {
       ws.terminate();
     }
-    await new Promise<void>((resolve) => {
-      canvasWss.close(() => resolve());
-    });
-    await new Promise<void>((resolve) => {
-      wss.close(() => resolve());
-    });
+    await new Promise<void>((resolve) => canvasWss.close(() => resolve()));
+    await new Promise<void>((resolve) => wss.close(() => resolve()));
     await listener.close();
     params.rateLimiter?.dispose();
   }
@@ -506,7 +457,17 @@ describe("gateway plugin node capability auth", () => {
       resolvedAuth: tokenResolvedAuth,
       handleHttpRequest: allowCanvasHostHttp,
       run: async ({ listener }) => {
-        await expectMalformedRequestTargetsRejected({ listener });
+        for (const requestTarget of ["//", "///", "//${jndi:ldap://example}.action"]) {
+          const response = await sendRawHttpRequest({
+            host: "127.0.0.1",
+            port: listener.port,
+            requestTarget,
+          });
+          expect(response).toMatch(/^HTTP\/1\.1 401 /);
+        }
+
+        const res = await fetchCanvas(`http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`);
+        expect(res.status).toBe(401);
       },
     });
   }, 60_000);
@@ -516,16 +477,24 @@ describe("gateway plugin node capability auth", () => {
       resolvedAuth: tokenResolvedAuth,
       handleHttpRequest: allowCanvasHostHttp,
       run: async ({ listener }) => {
-        await expectMalformedRequestTargetsRejected({
-          listener,
-          headers: [
-            "Host: localhost",
-            "Upgrade: websocket",
-            "Connection: Upgrade",
-            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-            "Sec-WebSocket-Version: 13",
-          ],
-        });
+        for (const requestTarget of ["//", "///", "//${jndi:ldap://example}.action"]) {
+          const response = await sendRawHttpRequest({
+            host: "127.0.0.1",
+            port: listener.port,
+            requestTarget,
+            headers: [
+              "Host: localhost",
+              "Upgrade: websocket",
+              "Connection: Upgrade",
+              "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+              "Sec-WebSocket-Version: 13",
+            ],
+          });
+          expect(response).toMatch(/^HTTP\/1\.1 401 /);
+        }
+
+        const res = await fetchCanvas(`http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`);
+        expect(res.status).toBe(401);
       },
     });
   }, 60_000);
@@ -663,7 +632,18 @@ describe("gateway plugin node capability auth", () => {
             authorization: "Bearer wrong",
             "x-forwarded-for": "203.0.113.99",
           };
-          const second = await expectRepeatedCanvasAuthAttemptsRateLimited(listener, headers);
+          const first = await fetchCanvas(`http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`, {
+            headers,
+          });
+          expect(first.status).toBe(401);
+
+          const second = await fetchCanvas(
+            `http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`,
+            {
+              headers,
+            },
+          );
+          expect(second.status).toBe(429);
           expect(second.headers.get("retry-after")).toMatch(/^\d+$/);
 
           await expectWsRejected(`ws://127.0.0.1:${listener.port}${CANVAS_WS_PATH}`, headers, 429);
@@ -697,7 +677,21 @@ describe("gateway plugin node capability auth", () => {
               host: "localhost",
               "x-forwarded-for": "127.0.0.1, 203.0.113.24",
             };
-            await expectRepeatedCanvasAuthAttemptsRateLimited(listener, headers);
+            const first = await fetchCanvas(
+              `http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`,
+              {
+                headers,
+              },
+            );
+            expect(first.status).toBe(401);
+
+            const second = await fetchCanvas(
+              `http://127.0.0.1:${listener.port}${CANVAS_HOST_PATH}/`,
+              {
+                headers,
+              },
+            );
+            expect(second.status).toBe(429);
           },
         });
       },

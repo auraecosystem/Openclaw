@@ -112,14 +112,16 @@ describe("resolveProviderDiscoveryFilterForTest", () => {
     ).toEqual(["anthropic"]);
   });
 
-  it("does not resolve provider aliases through plugin metadata owners", () => {
+  it("normalizes provider aliases through plugin metadata owners", () => {
     const snapshot = {
       owners: metadataOwners({
         providers: new Map([["volcengine", ["volcengine"]]]),
       }),
     };
 
-    expect(resolvePluginMetadataProviderOwnersForTest(snapshot, "bytedance")).toBeUndefined();
+    expect(resolvePluginMetadataProviderOwnersForTest(snapshot, "bytedance")).toEqual([
+      "volcengine",
+    ]);
     expect(
       resolveProviderDiscoveryFilterForTest({
         env: liveFilterEnv({
@@ -128,7 +130,7 @@ describe("resolveProviderDiscoveryFilterForTest", () => {
         }),
         resolveOwners: (provider) => resolvePluginMetadataProviderOwnersForTest(snapshot, provider),
       }),
-    ).toEqual(["bytedance"]);
+    ).toEqual(["volcengine"]);
   });
 
   it("scopes normal startup discovery to requested provider owners", () => {
@@ -150,17 +152,17 @@ describe("resolveProviderDiscoveryFilterForTest", () => {
     ).toEqual(["openai"]);
   });
 
-  it("maps scoped startup provider ids through model catalog owners", () => {
+  it("maps scoped startup provider aliases through model catalog owners", () => {
     const snapshot = {
       owners: metadataOwners({
-        modelCatalogProviders: new Map([["openai", ["codex"]]]),
+        modelCatalogProviders: new Map([["openai-codex", ["codex"]]]),
       }),
     };
 
     expect(
       resolveProviderDiscoveryFilterForTest({
         env: liveFilterEnv({}),
-        providerIds: ["OpenAI"],
+        providerIds: ["OpenAI-Codex"],
         resolveOwners: (provider) => resolvePluginMetadataProviderOwnersForTest(snapshot, provider),
       }),
     ).toEqual(["codex"]);

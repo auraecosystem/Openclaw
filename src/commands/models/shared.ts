@@ -18,7 +18,6 @@ import { normalizeAgentModelRefForConfig, toAgentModelListLike } from "../../con
 import type { AgentModelEntryConfig } from "../../config/types.agent-defaults.js";
 import type { AgentModelConfig } from "../../config/types.agents-shared.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
-import { canonicalizeModelCatalogProviderRef } from "./provider-aliases.js";
 export { normalizeAlias } from "./alias-name.js";
 export { isLocalBaseUrl } from "./list.local-url.js";
 
@@ -60,21 +59,15 @@ export async function loadValidConfigOrThrow(): Promise<OpenClawConfig> {
   return snapshot.runtimeConfig ?? snapshot.config;
 }
 
-export type UpdateConfigContext = {
-  runtimeConfig: OpenClawConfig;
-};
-
 export async function updateConfig(
-  mutator: (cfg: OpenClawConfig, context: UpdateConfigContext) => OpenClawConfig,
+  mutator: (cfg: OpenClawConfig) => OpenClawConfig,
 ): Promise<OpenClawConfig> {
   const snapshot = await readConfigFileSnapshot();
   if (!snapshot.valid) {
     const issues = formatConfigIssueLines(snapshot.issues, "-").join("\n");
     throw new Error(`Invalid config at ${snapshot.path}\n${issues}`);
   }
-  const sourceConfig = structuredClone(snapshot.sourceConfig ?? snapshot.config);
-  const runtimeConfig = structuredClone(snapshot.runtimeConfig ?? snapshot.config);
-  const next = mutator(sourceConfig, { runtimeConfig });
+  const next = mutator(structuredClone(snapshot.sourceConfig ?? snapshot.config));
   await replaceConfigFile({
     nextConfig: next,
     baseHash: snapshot.hash,
@@ -98,23 +91,7 @@ export function resolveModelTarget(params: { raw: string; cfg: OpenClawConfig })
   if (!resolved) {
     throw new Error(`Invalid model reference: ${params.raw}`);
   }
-  return canonicalizeModelCatalogProviderRef(resolved.ref, { cfg: params.cfg });
-}
-
-function resolveAuthoredModelAliasTarget(params: {
-  raw: string;
-  cfg: OpenClawConfig;
-}): { provider: string; model: string } | undefined {
-  const aliasIndex = buildModelAliasIndex({
-    cfg: params.cfg,
-    defaultProvider: DEFAULT_PROVIDER,
-  });
-  const resolved = resolveModelRefFromString({
-    raw: params.raw,
-    defaultProvider: DEFAULT_PROVIDER,
-    aliasIndex,
-  });
-  return resolved?.alias ? resolved.ref : undefined;
+  return resolved.ref;
 }
 
 export function resolveModelKeysFromEntries(params: {
@@ -232,24 +209,10 @@ export function mergePrimaryFallbackConfig(
 
 export function applyDefaultModelPrimaryUpdate(params: {
   cfg: OpenClawConfig;
-  resolveCfg?: OpenClawConfig;
   modelRaw: string;
   field: "model" | "imageModel";
 }): OpenClawConfig {
-  const resolved =
-    params.resolveCfg && params.resolveCfg !== params.cfg
-      ? (resolveAuthoredModelAliasTarget({
-          raw: params.modelRaw,
-          cfg: params.cfg,
-        }) ??
-        resolveModelTarget({
-          raw: params.modelRaw,
-          cfg: params.resolveCfg,
-        }))
-      : resolveModelTarget({
-          raw: params.modelRaw,
-          cfg: params.cfg,
-        });
+  const resolved = resolveModelTarget({ raw: params.modelRaw, cfg: params.cfg });
   const nextModels = {
     ...params.cfg.agents?.defaults?.models,
   } as Record<string, AgentModelEntryConfig>;

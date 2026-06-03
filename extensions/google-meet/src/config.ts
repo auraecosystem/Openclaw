@@ -1,17 +1,11 @@
 import {
-  addTimerTimeoutGraceMs,
-  resolvePositiveTimerTimeoutMs,
-} from "openclaw/plugin-sdk/number-runtime";
-import {
   REALTIME_VOICE_AGENT_CONSULT_TOOL_NAME,
   resolveRealtimeVoiceAgentConsultToolPolicy,
   type RealtimeVoiceAgentConsultToolPolicy,
 } from "openclaw/plugin-sdk/realtime-voice";
 import {
-  asRecord,
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-  normalizeOptionalTrimmedStringList,
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export type GoogleMeetTransport = "chrome" | "chrome-node" | "twilio";
@@ -95,18 +89,9 @@ export type GoogleMeetConfig = {
   };
 };
 
-export function resolveGoogleMeetGatewayOperationTimeoutMs(config: GoogleMeetConfig): number {
-  return Math.max(
-    60_000,
-    addTimerTimeoutGraceMs(config.chrome.joinTimeoutMs, 30_000) ?? 1,
-    addTimerTimeoutGraceMs(config.voiceCall.requestTimeoutMs, 10_000) ?? 1,
-  );
-}
-
 const SOX_DEFAULT_BUFFER_BYTES = 8192;
 const SOX_MIN_BUFFER_BYTES = 17;
 export const DEFAULT_GOOGLE_MEET_AUDIO_BUFFER_BYTES = SOX_DEFAULT_BUFFER_BYTES / 2;
-const PLAIN_DECIMAL_NUMBER_RE = /^\d+(?:\.\d+)?$/;
 
 function withSoxBuffer(command: readonly string[], bufferBytes: number): string[] {
   return [command[0] ?? "sox", "-q", "--buffer", String(bufferBytes), ...command.slice(2)];
@@ -275,6 +260,12 @@ const GOOGLE_MEET_PREVIEW_ACK_KEYS = [
   "GOOGLE_MEET_PREVIEW_ACK",
 ] as const;
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
 function resolveBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
@@ -283,17 +274,12 @@ function resolveNumber(value: unknown, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-function resolveTimerConfigMs(value: unknown, fallback: number): number {
-  return resolvePositiveTimerTimeoutMs(resolveNumber(value, fallback), fallback);
-}
-
 function resolveOptionalNumber(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isFinite(value)) {
     return value;
   }
   if (typeof value === "string" && value.trim()) {
-    const trimmed = value.trim();
-    const parsed = PLAIN_DECIMAL_NUMBER_RE.test(trimmed) ? Number(trimmed) : Number.NaN;
+    const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : undefined;
   }
   return undefined;
@@ -332,7 +318,13 @@ function readEnvNumber(env: NodeJS.ProcessEnv, keys: readonly string[]): number 
 }
 
 function resolveStringArray(value: unknown): string[] | undefined {
-  return normalizeOptionalTrimmedStringList(value);
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const normalized = value
+    .map((entry) => normalizeOptionalString(entry))
+    .filter((entry): entry is string => Boolean(entry));
+  return normalized.length > 0 ? normalized : undefined;
 }
 
 function resolveProvidersConfig(value: unknown): Record<string, Record<string, unknown>> {
@@ -488,11 +480,11 @@ export function resolveGoogleMeetConfigWithEnv(
         DEFAULT_GOOGLE_MEET_CONFIG.chrome.reuseExistingTab,
       ),
       autoJoin: resolveBoolean(chrome.autoJoin, DEFAULT_GOOGLE_MEET_CONFIG.chrome.autoJoin),
-      joinTimeoutMs: resolveTimerConfigMs(
+      joinTimeoutMs: resolveNumber(
         chrome.joinTimeoutMs,
         DEFAULT_GOOGLE_MEET_CONFIG.chrome.joinTimeoutMs,
       ),
-      waitForInCallMs: resolveTimerConfigMs(
+      waitForInCallMs: resolveNumber(
         chrome.waitForInCallMs,
         DEFAULT_GOOGLE_MEET_CONFIG.chrome.waitForInCallMs,
       ),
@@ -509,7 +501,7 @@ export function resolveGoogleMeetConfigWithEnv(
         chrome.bargeInPeakThreshold,
         DEFAULT_GOOGLE_MEET_CONFIG.chrome.bargeInPeakThreshold,
       ),
-      bargeInCooldownMs: resolveTimerConfigMs(
+      bargeInCooldownMs: resolveNumber(
         chrome.bargeInCooldownMs,
         DEFAULT_GOOGLE_MEET_CONFIG.chrome.bargeInCooldownMs,
       ),
@@ -528,15 +520,15 @@ export function resolveGoogleMeetConfigWithEnv(
       enabled: resolveBoolean(voiceCall.enabled, DEFAULT_GOOGLE_MEET_CONFIG.voiceCall.enabled),
       gatewayUrl: normalizeOptionalString(voiceCall.gatewayUrl),
       token: normalizeOptionalString(voiceCall.token),
-      requestTimeoutMs: resolveTimerConfigMs(
+      requestTimeoutMs: resolveNumber(
         voiceCall.requestTimeoutMs,
         DEFAULT_GOOGLE_MEET_CONFIG.voiceCall.requestTimeoutMs,
       ),
-      dtmfDelayMs: resolveTimerConfigMs(
+      dtmfDelayMs: resolveNumber(
         voiceCall.dtmfDelayMs,
         DEFAULT_GOOGLE_MEET_CONFIG.voiceCall.dtmfDelayMs,
       ),
-      postDtmfSpeechDelayMs: resolveTimerConfigMs(
+      postDtmfSpeechDelayMs: resolveNumber(
         voiceCall.postDtmfSpeechDelayMs,
         DEFAULT_GOOGLE_MEET_CONFIG.voiceCall.postDtmfSpeechDelayMs,
       ),

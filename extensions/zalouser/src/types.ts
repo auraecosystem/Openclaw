@@ -1,4 +1,4 @@
-import type { MessageReceipt } from "openclaw/plugin-sdk/channel-outbound";
+import type { MessageReceipt } from "openclaw/plugin-sdk/channel-message";
 import type { Style } from "./zca-constants.js";
 
 export type ZcaFriend = {
@@ -46,9 +46,6 @@ export type ZaloInboundMessage = {
   wasExplicitlyMentioned?: boolean;
   canResolveExplicitMention?: boolean;
   implicitMention?: boolean;
-  quotedGlobalMsgId?: string;
-  quotedOwnerId?: string;
-  quotedBody?: string;
   eventMessage?: ZaloEventMessage;
   raw: unknown;
 };

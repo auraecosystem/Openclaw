@@ -1,5 +1,5 @@
 import type { webhook } from "@line/bot-sdk";
-import { hasFinalInboundReplyDispatch } from "openclaw/plugin-sdk/channel-inbound";
+import { hasFinalChannelTurnDispatch } from "openclaw/plugin-sdk/channel-message";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { chunkMarkdownText } from "openclaw/plugin-sdk/reply-runtime";
 import {
@@ -224,7 +224,7 @@ export async function monitorLineProvider(
         const textLimit = 5000;
         let replyTokenUsed = false;
         const core = getLineRuntime();
-        const turnResult = await core.channel.inbound.run({
+        const turnResult = await core.channel.turn.run({
           channel: "line",
           accountId: route.accountId,
           raw: ctx,
@@ -313,7 +313,7 @@ export async function monitorLineProvider(
           },
         });
         const dispatchResult = turnResult.dispatched ? turnResult.dispatchResult : undefined;
-        if (!hasFinalInboundReplyDispatch(dispatchResult)) {
+        if (!hasFinalChannelTurnDispatch(dispatchResult)) {
           logVerbose(`line: no response generated for message from ${ctxPayload.From}`);
         }
       } catch (err) {
@@ -437,7 +437,7 @@ export async function monitorLineProvider(
             logVerbose(`line: received ${body.events.length} webhook events`);
             void Promise.resolve()
               .then(() => match.target.bot.handleWebhook(body))
-              .catch((err: unknown) => {
+              .catch((err) => {
                 match.target.runtime.error?.(
                   danger(`line webhook dispatch failed: ${String(err)}`),
                 );

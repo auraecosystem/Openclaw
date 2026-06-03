@@ -8,7 +8,6 @@ import {
   applyLocalTsgoPolicy,
   shouldAcquireLocalHeavyCheckLockForTsgo,
 } from "./lib/local-heavy-check-runtime.mjs";
-import { createManagedCommandInvocation } from "./lib/managed-child-process.mjs";
 
 const repoRoot = path.resolve(import.meta.dirname, "..");
 const artifactRoot = path.resolve(repoRoot, ".artifacts/tsgo-profile");
@@ -140,18 +139,12 @@ function runTsgo(label, args, params = {}) {
 
   const startedAt = Date.now();
   try {
-    const tsgo = createManagedCommandInvocation({
-      args: finalArgs,
-      bin: tsgoPath,
-      env,
-    });
-    const result = spawnSync(tsgo.command, tsgo.args, {
+    const result = spawnSync(tsgoPath, finalArgs, {
       cwd: repoRoot,
       env,
       encoding: "utf8",
       maxBuffer: params.maxBuffer ?? 128 * 1024 * 1024,
-      shell: tsgo.shell,
-      windowsVerbatimArguments: tsgo.windowsVerbatimArguments,
+      shell: process.platform === "win32",
     });
     const elapsedMs = Date.now() - startedAt;
     const stdout = result.stdout ?? "";

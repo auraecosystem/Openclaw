@@ -1,4 +1,4 @@
-import type { ChannelRouteRef, ChannelRouteTargetInput } from "../plugin-sdk/channel-route.js";
+import type { ChannelRouteTargetInput } from "../plugin-sdk/channel-route.js";
 
 export type DeliveryIntentRef = {
   id: string;
@@ -18,7 +18,6 @@ export type DeliveryContext = Pick<
 };
 
 export type DeliveryContextSessionSource = {
-  route?: ChannelRouteRef;
   channel?: string;
   lastChannel?: string;
   lastTo?: string;

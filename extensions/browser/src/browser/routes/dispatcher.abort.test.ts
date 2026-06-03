@@ -20,21 +20,10 @@ describe("browser route dispatcher (abort)", () => {
                 const signal = req.signal;
                 await new Promise<void>((resolve, reject) => {
                   if (signal?.aborted) {
-                    reject(
-                      toLintErrorObject(
-                        signal.reason ?? new Error("aborted"),
-                        "Non-Error rejection",
-                      ),
-                    );
+                    reject(signal.reason ?? new Error("aborted"));
                     return;
                   }
-                  const onAbort = () =>
-                    reject(
-                      toLintErrorObject(
-                        signal?.reason ?? new Error("aborted"),
-                        "Non-Error rejection",
-                      ),
-                    );
+                  const onAbort = () => reject(signal?.reason ?? new Error("aborted"));
                   signal?.addEventListener("abort", onAbort, { once: true });
                   queueMicrotask(() => {
                     signal?.removeEventListener("abort", onAbort);
@@ -92,17 +81,3 @@ describe("browser route dispatcher (abort)", () => {
     expect(body.error).toBe("invalid path parameter encoding: id");
   });
 });
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
-}

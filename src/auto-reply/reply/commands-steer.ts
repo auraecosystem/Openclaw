@@ -1,16 +1,16 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import {
   resolveInternalSessionKey,
   resolveMainSessionAlias,
 } from "../../agents/tools/sessions-helpers.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import { logVerbose } from "../../globals.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import { isNativeCommandTurn, resolveCommandTurnContext } from "../command-turn-context.js";
 import { rejectUnauthorizedCommand } from "./command-gates.js";
 import {
-  formatEmbeddedAgentQueueFailureSummary,
-  isEmbeddedAgentRunActive,
-  queueEmbeddedAgentMessageWithOutcomeAsync,
+  formatEmbeddedPiQueueFailureSummary,
+  isEmbeddedPiRunActive,
+  queueEmbeddedPiMessageWithOutcomeAsync,
   resolveActiveEmbeddedRunSessionId,
 } from "./commands-steer.runtime.js";
 import type {
@@ -67,7 +67,7 @@ function resolveSteerSessionId(params: {
 
   const entry = resolveStoredSessionEntry(params.commandParams, params.targetSessionKey);
   const sessionId = normalizeOptionalString(entry?.sessionId);
-  if (!sessionId || !isEmbeddedAgentRunActive(sessionId)) {
+  if (!sessionId || !isEmbeddedPiRunActive(sessionId)) {
     return undefined;
   }
   return sessionId;
@@ -139,7 +139,7 @@ export const handleSteerCommand: CommandHandler = async (params, allowTextComman
     );
   }
 
-  const queueOutcome = await queueEmbeddedAgentMessageWithOutcomeAsync(sessionId, message, {
+  const queueOutcome = await queueEmbeddedPiMessageWithOutcomeAsync(sessionId, message, {
     steeringMode: "all",
     debounceMs: 0,
   }).catch((err: unknown): CommandHandlerResult => {
@@ -153,7 +153,7 @@ export const handleSteerCommand: CommandHandler = async (params, allowTextComman
     return queueOutcome;
   }
   if (!queueOutcome.queued) {
-    const summary = formatEmbeddedAgentQueueFailureSummary(queueOutcome);
+    const summary = formatEmbeddedPiQueueFailureSummary(queueOutcome);
     return continueWithSteerFallback(
       params,
       message,

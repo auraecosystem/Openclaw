@@ -87,7 +87,7 @@ export function parseArgs(argv: string[]): CliOptions {
 
 export function pinIosVersion(params: CliOptions): PinIosVersionResult {
   const rootDir = path.resolve(params.rootDir);
-  let previousVersion: string | null;
+  let previousVersion: string | null = null;
   try {
     previousVersion = resolveIosVersion(rootDir).canonicalVersion;
   } catch {

@@ -1,5 +1,6 @@
 import type { ChannelPlugin } from "openclaw/plugin-sdk/core";
-import type { ResolvedWhatsAppAccount } from "./accounts.js";
+import { type ResolvedWhatsAppAccount } from "./accounts.js";
+import { readWebAuthState } from "./auth-store.js";
 import { resolveWhatsAppGroupIntroHint } from "./group-intro.js";
 import {
   resolveWhatsAppGroupRequireMention,
@@ -8,11 +9,6 @@ import {
 import { whatsappSetupAdapter } from "./setup-core.js";
 import { createWhatsAppPluginBase, whatsappSetupWizardProxy } from "./shared.js";
 import { detectWhatsAppLegacyStateMigrations } from "./state-migrations.js";
-
-async function isWhatsAppAuthConfigured(account: ResolvedWhatsAppAccount): Promise<boolean> {
-  const { readWebAuthState } = await import("./auth-store.js");
-  return (await readWebAuthState(account.authDir)) === "linked";
-}
 
 export const whatsappSetupPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
   ...createWhatsAppPluginBase({
@@ -23,7 +19,7 @@ export const whatsappSetupPlugin: ChannelPlugin<ResolvedWhatsAppAccount> = {
     },
     setupWizard: whatsappSetupWizardProxy,
     setup: whatsappSetupAdapter,
-    isConfigured: isWhatsAppAuthConfigured,
+    isConfigured: async (account) => (await readWebAuthState(account.authDir)) === "linked",
   }),
   lifecycle: {
     detectLegacyStateMigrations: ({ oauthDir }) =>

@@ -14,7 +14,6 @@ internal data class TalkModeGatewayConfigState(
 )
 
 internal object TalkModeGatewayConfigParser {
-  /** Reads gateway talk/session config into the runtime state TalkMode needs. */
   fun parse(config: JsonObject?): TalkModeGatewayConfigState {
     val talk = config?.get("talk").asObjectOrNull()
     val sessionCfg = config?.get("session").asObjectOrNull()
@@ -25,7 +24,6 @@ internal object TalkModeGatewayConfigParser {
     )
   }
 
-  /** Accepts only numeric whole-millisecond silence timeouts; malformed config uses defaults. */
   fun resolvedSilenceTimeoutMs(talk: JsonObject?): Long {
     val fallback = TalkDefaults.defaultSilenceTimeoutMs
     val primitive = talk?.get("silenceTimeoutMs") as? JsonPrimitive ?: return fallback

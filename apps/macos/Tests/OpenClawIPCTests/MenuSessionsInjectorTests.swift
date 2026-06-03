@@ -97,7 +97,7 @@ struct MenuSessionsInjectorTests {
                     plan: "Pro",
                     error: nil),
                 GatewayUsageProvider(
-                    provider: "openai",
+                    provider: "openai-codex",
                     displayName: "Codex",
                     windows: [GatewayUsageWindow(label: "day", usedPercent: 3, resetAt: nil)],
                     plan: nil,

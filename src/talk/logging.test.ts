@@ -13,9 +13,7 @@ import { recordTalkObservabilityEvent } from "./observability.js";
 import { createTalkEventSequencer } from "./talk-events.js";
 
 function flushDiagnosticEvents() {
-  return new Promise<void>((resolve) => {
-    setImmediate(resolve);
-  });
+  return new Promise<void>((resolve) => setImmediate(resolve));
 }
 
 type ObservedDiagnostic = { event: DiagnosticEventPayload; trusted: boolean };
@@ -33,7 +31,7 @@ function stableDiagnosticPayload<TEvent extends DiagnosticEventPayload>(
 function stableLogRecordPayload(event: Extract<DiagnosticEventPayload, { type: "log.record" }>) {
   const { code, loggerParents, ...stable } = stableDiagnosticPayload(event);
   expect(loggerParents).toStrictEqual(["openclaw"]);
-  expect(code?.functionName).toMatch(/^[A-Za-z0-9_.:-]+$/u);
+  expect(code?.functionName).toBe("recordTalkLogEvent");
   expect(code?.line).toBeGreaterThan(0);
   return stable;
 }

@@ -226,7 +226,8 @@ describe("Security: Bot Mention Detection", () => {
     it("handles empty/null inputs safely", () => {
       expect(isBotMentioned("", botShip)).toBe(false);
       expect(isBotMentioned("test", "")).toBe(false);
-      expect(isBotMentioned(null as unknown as string, botShip)).toBe(false);
+      // @ts-expect-error testing null input
+      expect(isBotMentioned(null, botShip)).toBe(false);
     });
 
     it("requires word boundary for nickname", () => {
@@ -318,6 +319,9 @@ describe("Security: Channel Authorization Logic", () => {
   });
 
   it("empty allowedShips with restricted mode should block all", () => {
+    // If a channel is restricted but has no allowed ships,
+    // no one should be able to send messages
+    const _mode = "restricted";
     const allowedShips: string[] = [];
     const sender = "~random-ship";
 

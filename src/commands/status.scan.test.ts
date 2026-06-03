@@ -14,7 +14,6 @@ const mocks = {
   ...createStatusScanSharedMocks("status-scan"),
   buildChannelsTable: vi.fn(),
   callGateway: vi.fn(),
-  getStatusCommandSecretTargetIds: vi.fn(() => new Set<string>()),
 };
 
 let originalForceStderr: boolean;
@@ -70,7 +69,6 @@ function configureScanStatus(
     details: [],
   });
   mocks.callGateway.mockResolvedValue(null);
-  mocks.getStatusCommandSecretTargetIds.mockReturnValue(new Set<string>());
 }
 
 function firstCallArg(mock: { mock: { calls: unknown[][] } }, label: string): unknown {
@@ -112,15 +110,14 @@ describe("scanStatus", () => {
       resolvedConfig,
       {
         showSecrets: true,
-        includeSetupFallbackPlugins: false,
+        includeSetupFallbackPlugins: true,
         sourceConfig,
         liveChannelStatus: null,
-        credentialResolutionSkipped: true,
       },
     ]);
   });
 
-  it("keeps default text status off live channel status and channel setup fallback for fast path", async () => {
+  it("keeps default text status off live channel status while keeping configured channel setup fallback", async () => {
     const cfg = createStatusScanConfig();
     configureScanStatus({
       hasConfiguredChannels: true,
@@ -146,24 +143,14 @@ describe("scanStatus", () => {
         return (call as { method?: unknown } | undefined)?.method === "channels.status";
       }),
     ).toBe(false);
-    expect(mocks.getUpdateCheckResult).toHaveBeenCalledWith({
-      timeoutMs: 2500,
-      fetchGit: false,
-      includeRegistry: false,
-      updateConfigChannel: null,
-    });
-    expect(mocks.getStatusCommandSecretTargetIds).toHaveBeenCalledWith(cfg, process.env, {
-      includeChannelTargets: false,
-    });
     expect(mocks.buildChannelsTable).toHaveBeenCalledOnce();
     expect(firstBuildChannelsTableCall()).toStrictEqual([
       cfg,
       {
         showSecrets: true,
-        includeSetupFallbackPlugins: false,
+        includeSetupFallbackPlugins: true,
         sourceConfig: cfg,
         liveChannelStatus: null,
-        credentialResolutionSkipped: true,
       },
     ]);
   });

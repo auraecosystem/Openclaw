@@ -3,7 +3,6 @@ import type { OcPath } from "../oc-path.js";
 import {
   isPositionalSeg,
   isQuotedSeg,
-  parseArrayIndexSegment,
   resolvePositionalSeg,
   splitRespectingBrackets,
   unquoteSeg,
@@ -100,8 +99,8 @@ function resolveEditSegments(root: JsoncValue, segments: readonly string[]): Jso
       continue;
     }
     if (current.kind === "array") {
-      const index = parseArrayIndexSegment(segment, current.items.length);
-      if (index === null) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.items.length) {
         return null;
       }
       out.push(index);

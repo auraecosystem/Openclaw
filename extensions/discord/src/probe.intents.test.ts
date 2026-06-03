@@ -1,5 +1,5 @@
 import { withFetchPreconnect } from "openclaw/plugin-sdk/test-env";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   fetchDiscordApplicationId,
   fetchDiscordApplicationSummary,
@@ -8,14 +8,6 @@ import {
 import { jsonResponse } from "./test-http-helpers.js";
 
 describe("resolveDiscordPrivilegedIntentsFromFlags", () => {
-  beforeEach(() => {
-    vi.useRealTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
   it("reports disabled when no bits set", () => {
     expect(resolveDiscordPrivilegedIntentsFromFlags(0)).toEqual({
       presence: "disabled",
@@ -64,11 +56,9 @@ describe("resolveDiscordPrivilegedIntentsFromFlags", () => {
       return jsonResponse({ id: "app-1" });
     });
 
-    vi.useFakeTimers();
-    const lookup = fetchDiscordApplicationId("unparseable.token", 1_000, fetcher);
-    await vi.runAllTimersAsync();
-
-    await expect(lookup).resolves.toBe("app-1");
+    await expect(fetchDiscordApplicationId("unparseable.token", 1_000, fetcher)).resolves.toBe(
+      "app-1",
+    );
     expect(calls).toBe(2);
   });
 

@@ -119,7 +119,7 @@ async function syncMoonshotDocs() {
   await writeFile(conceptsDoc, conceptsText);
 }
 
-syncMoonshotDocs().catch((error: unknown) => {
+syncMoonshotDocs().catch((error) => {
   console.error(error);
   process.exitCode = 1;
 });

@@ -89,18 +89,6 @@ function expectSnapshotFields(snapshot: unknown, expected: Record<string, unknow
   return actual;
 }
 
-function expectSaturatedLoadSnapshot(snapshot: unknown) {
-  return expectSnapshotFields(snapshot, {
-    degraded: true,
-    reasons: ["event_loop_utilization", "cpu"],
-    intervalMs: 1_000,
-    delayP99Ms: 30,
-    delayMaxMs: 0,
-    utilization: 1,
-    cpuCoreRatio: 1,
-  });
-}
-
 describe("classifyGatewayEventLoopHealthReasons", () => {
   it("does not degrade on utilization or CPU from a sub-second sample", () => {
     expect(
@@ -211,7 +199,15 @@ describe("createGatewayEventLoopHealthMonitor", () => {
     harness.setDelay({ p99Ms: 30 });
     harness.setNow(1_000);
 
-    expectSaturatedLoadSnapshot(harness.monitor.snapshot());
+    expectSnapshotFields(harness.monitor.snapshot(), {
+      degraded: true,
+      reasons: ["event_loop_utilization", "cpu"],
+      intervalMs: 1_000,
+      delayP99Ms: 30,
+      delayMaxMs: 0,
+      utilization: 1,
+      cpuCoreRatio: 1,
+    });
   });
 
   it("does not wait for the sustained sample window before reporting event-loop delay", () => {
@@ -272,7 +268,15 @@ describe("createGatewayEventLoopHealthMonitor", () => {
     expect(harness.monitor.snapshot()).toBe(first);
 
     harness.setNow(2_000);
-    expectSaturatedLoadSnapshot(harness.monitor.snapshot());
+    expectSnapshotFields(harness.monitor.snapshot(), {
+      degraded: true,
+      reasons: ["event_loop_utilization", "cpu"],
+      intervalMs: 1_000,
+      delayP99Ms: 30,
+      delayMaxMs: 0,
+      utilization: 1,
+      cpuCoreRatio: 1,
+    });
   });
 
   it("clears the cached snapshot when stopped", () => {
@@ -284,7 +288,7 @@ describe("createGatewayEventLoopHealthMonitor", () => {
     harness.setNow(1_250);
     harness.monitor.stop();
 
-    expect(harness.delayMonitor["disable"]).toHaveBeenCalledTimes(1);
+    expect(harness.delayMonitor.disable).toHaveBeenCalledTimes(1);
     expect(harness.monitor.snapshot()).toBeUndefined();
   });
 });

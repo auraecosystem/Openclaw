@@ -26,7 +26,6 @@ function setRequired(
   }
 }
 
-/** Derives the adapter capabilities core needs before it can require durable final delivery. */
 export function deriveDurableFinalDeliveryRequirements(
   params: DeriveDurableFinalDeliveryRequirementsParams,
 ): DurableFinalDeliveryRequirementMap {

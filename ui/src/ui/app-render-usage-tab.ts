@@ -2,11 +2,7 @@ import { nothing } from "lit";
 import type { AppViewState } from "./app-view-state.ts";
 import type { UsageState } from "./controllers/usage.ts";
 import { loadUsage, loadSessionTimeSeries, loadSessionLogs } from "./controllers/usage.ts";
-import type { LazyView } from "./lazy-view.ts";
-import { renderLazyView } from "./lazy-view.ts";
-import type { UsageColumnId } from "./views/usageTypes.ts";
-
-type UsageViewModule = typeof import("./views/usage.ts");
+import { renderUsage } from "./views/usage.ts";
 
 type UsageCacheStatus = NonNullable<NonNullable<UsageState["usageResult"]>["cacheStatus"]>;
 
@@ -44,17 +40,16 @@ const debouncedLoadUsage = (state: UsageState) => {
   usageDateDebounceTimeout = window.setTimeout(() => void loadUsage(state), 400);
 };
 
-export function renderUsageTab(state: AppViewState, usageView: LazyView<UsageViewModule>) {
+export function renderUsageTab(state: AppViewState) {
   if (state.tab !== "usage") {
     return nothing;
   }
 
-  return renderLazyView(usageView, ({ renderUsage }) => renderUsage({
+  return renderUsage({
     data: {
       loading: state.usageLoading,
       error: state.usageError,
       sessions: state.usageResult?.sessions ?? [],
-      agents: state.agentsList?.agents.map((entry) => entry.id).filter(Boolean) ?? [],
       sessionsLimitReached: (state.usageResult?.sessions?.length ?? 0) >= 1000,
       totals: state.usageResult?.totals ?? null,
       aggregates: state.usageResult?.aggregates ?? null,
@@ -71,7 +66,6 @@ export function renderUsageTab(state: AppViewState, usageView: LazyView<UsageVie
       selectedSessions: state.usageSelectedSessions,
       selectedDays: state.usageSelectedDays,
       selectedHours: state.usageSelectedHours,
-      agentId: state.usageAgentId,
       query: state.usageQuery,
       queryDraft: state.usageQueryDraft,
       timeZone: state.usageTimeZone,
@@ -83,7 +77,7 @@ export function renderUsageTab(state: AppViewState, usageView: LazyView<UsageVie
       sessionSortDir: state.usageSessionSortDir,
       recentSessions: state.usageRecentSessions,
       sessionsTab: state.usageSessionsTab,
-      visibleColumns: state.usageVisibleColumns as UsageColumnId[],
+      visibleColumns: state.usageVisibleColumns as import("./views/usage.ts").UsageColumnId[],
       contextExpanded: state.usageContextExpanded,
       headerPinned: state.usageHeaderPinned,
     },
@@ -129,16 +123,7 @@ export function renderUsageTab(state: AppViewState, usageView: LazyView<UsageVie
           state.usageSessionLogs = null;
           void loadUsage(state);
         },
-        onAgentChange: (agentId) => {
-          state.usageAgentId = agentId;
-          state.usageSelectedDays = [];
-          state.usageSelectedHours = [];
-          state.usageSelectedSessions = [];
-          state.usageTimeSeries = null;
-          state.usageSessionLogs = null;
-          void loadUsage(state);
-        },
-        onRefresh: () => void loadUsage(state),
+        onRefresh: () => loadUsage(state),
         onTimeZoneChange: (zone) => {
           state.usageTimeZone = zone;
           state.usageSelectedDays = [];
@@ -337,5 +322,5 @@ export function renderUsageTab(state: AppViewState, usageView: LazyView<UsageVie
         },
       },
     },
-  }));
+  });
 }

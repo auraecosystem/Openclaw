@@ -1,4 +1,3 @@
-import { uniqueValues } from "@openclaw/normalization-core/string-normalization";
 import { resolveVideoGenerationModeCapabilities } from "./capabilities.js";
 import type { VideoGenerationProvider } from "./types.js";
 
@@ -8,7 +7,7 @@ function normalizeSupportedDurationValues(
   if (!Array.isArray(values) || values.length === 0) {
     return undefined;
   }
-  const normalized = uniqueValues(values)
+  const normalized = [...new Set(values)]
     .filter((value) => Number.isFinite(value) && value > 0)
     .map((value) => Math.round(value))
     .filter((value) => value > 0)

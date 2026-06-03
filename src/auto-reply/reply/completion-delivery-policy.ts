@@ -1,6 +1,6 @@
 import { normalizeChatType, type ChatType } from "../../channels/chat-type.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { deriveSessionChatTypeFromKey } from "../../sessions/session-chat-type-shared.js";
+import { deriveSessionChatType } from "../../sessions/session-chat-type.js";
 import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import { resolveSourceReplyDeliveryMode } from "./source-reply-delivery-mode.js";
 
@@ -26,7 +26,7 @@ export function resolveCompletionChatType(params: {
   }
 
   for (const key of [params.targetRequesterSessionKey, params.requesterSessionKey]) {
-    const derived = deriveSessionChatTypeFromKey(key);
+    const derived = deriveSessionChatType(key);
     if (derived !== "unknown") {
       return derived;
     }
@@ -60,7 +60,7 @@ export function completionRequiresMessageToolDelivery(params: {
 export function shouldRouteCompletionThroughRequesterSession(
   sessionKey: string | undefined | null,
 ): boolean {
-  const chatType = deriveSessionChatTypeFromKey(sessionKey);
+  const chatType = deriveSessionChatType(sessionKey);
   return chatType === "group" || chatType === "channel";
 }
 

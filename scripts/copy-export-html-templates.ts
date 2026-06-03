@@ -9,51 +9,44 @@ import { ensureDirectory, logVerboseCopy, resolveBuildCopyContext } from "./lib/
 
 const context = resolveBuildCopyContext(import.meta.url);
 
-const exportHtmlSrcDir = path.join(
-  context.projectRoot,
-  "src",
-  "auto-reply",
-  "reply",
-  "export-html",
-);
-const exportHtmlDistDir = path.join(
-  context.projectRoot,
-  "dist",
-  "auto-reply",
-  "reply",
-  "export-html",
-);
+const srcDir = path.join(context.projectRoot, "src", "auto-reply", "reply", "export-html");
+const distDir = path.join(context.projectRoot, "dist", "export-html");
 
 function copyExportHtmlTemplates() {
-  if (!fs.existsSync(exportHtmlSrcDir)) {
-    console.warn(`${context.prefix} Source directory not found:`, exportHtmlSrcDir);
+  if (!fs.existsSync(srcDir)) {
+    console.warn(`${context.prefix} Source directory not found:`, srcDir);
     return;
   }
 
-  fs.rmSync(exportHtmlDistDir, { recursive: true, force: true });
-  ensureDirectory(exportHtmlDistDir);
-  let copiedCount = 0;
+  ensureDirectory(distDir);
 
-  const copyDir = (srcDir: string, distDir: string, relativePrefix = "") => {
-    ensureDirectory(distDir);
-    for (const file of fs.readdirSync(srcDir)) {
-      const srcFile = path.join(srcDir, file);
-      const distFile = path.join(distDir, file);
-      const relativeName = path.join(relativePrefix, file);
-      if (file.endsWith(".test.ts")) {
-        continue;
-      }
-      if (fs.statSync(srcFile).isDirectory()) {
-        copyDir(srcFile, distFile, relativeName);
-        continue;
-      }
+  const templateFiles = ["template.html", "template.css", "template.js"];
+  let copiedCount = 0;
+  for (const file of templateFiles) {
+    const srcFile = path.join(srcDir, file);
+    const distFile = path.join(distDir, file);
+    if (fs.existsSync(srcFile)) {
       fs.copyFileSync(srcFile, distFile);
       copiedCount += 1;
-      logVerboseCopy(context, `Copied ${relativeName}`);
+      logVerboseCopy(context, `Copied ${file}`);
     }
-  };
+  }
 
-  copyDir(exportHtmlSrcDir, exportHtmlDistDir);
+  const srcVendor = path.join(srcDir, "vendor");
+  const distVendor = path.join(distDir, "vendor");
+  if (fs.existsSync(srcVendor)) {
+    ensureDirectory(distVendor);
+    const vendorFiles = fs.readdirSync(srcVendor);
+    for (const file of vendorFiles) {
+      const srcFile = path.join(srcVendor, file);
+      const distFile = path.join(distVendor, file);
+      if (fs.statSync(srcFile).isFile()) {
+        fs.copyFileSync(srcFile, distFile);
+        copiedCount += 1;
+        logVerboseCopy(context, `Copied vendor/${file}`);
+      }
+    }
+  }
 
   console.log(`${context.prefix} Copied ${copiedCount} export-html assets.`);
 }

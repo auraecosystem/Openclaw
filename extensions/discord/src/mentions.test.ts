@@ -1,14 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  resetDiscordDirectoryCacheForTest,
+  __resetDiscordDirectoryCacheForTest,
   rememberDiscordDirectoryUser,
 } from "./directory-cache.js";
-import {
-  discordTextHasBroadcastMention,
-  discordTextHasTargetedMention,
-  formatMention,
-  rewriteDiscordKnownMentions,
-} from "./mentions.js";
+import { formatMention, rewriteDiscordKnownMentions } from "./mentions.js";
 
 describe("formatMention", () => {
   it("formats user mentions from ids", () => {
@@ -34,7 +29,7 @@ describe("formatMention", () => {
 
 describe("rewriteDiscordKnownMentions", () => {
   beforeEach(() => {
-    resetDiscordDirectoryCacheForTest();
+    __resetDiscordDirectoryCacheForTest();
   });
 
   it("rewrites @name mentions when a cached user id exists", () => {
@@ -112,31 +107,5 @@ describe("rewriteDiscordKnownMentions", () => {
     const opsRewrite = rewriteDiscordKnownMentions("@alice", { accountId: "ops" });
     expect(defaultRewrite).toBe("@alice");
     expect(opsRewrite).toBe("<@999888777>");
-  });
-});
-
-describe("discordTextHasTargetedMention", () => {
-  it("detects user and role mentions", () => {
-    expect(discordTextHasTargetedMention("ping <@123>")).toBe(true);
-    expect(discordTextHasTargetedMention("ping <@!123>")).toBe(true);
-    expect(discordTextHasTargetedMention("ping <@&456>")).toBe(true);
-  });
-
-  it("ignores plain text, channels, and broadcasts", () => {
-    expect(discordTextHasTargetedMention("ping @alice")).toBe(false);
-    expect(discordTextHasTargetedMention("see <#789>")).toBe(false);
-    expect(discordTextHasTargetedMention("heads up @everyone @here")).toBe(false);
-  });
-});
-
-describe("discordTextHasBroadcastMention", () => {
-  it("detects @everyone and @here", () => {
-    expect(discordTextHasBroadcastMention("heads up @everyone")).toBe(true);
-    expect(discordTextHasBroadcastMention("@here please")).toBe(true);
-  });
-
-  it("ignores targeted mentions and lookalikes", () => {
-    expect(discordTextHasBroadcastMention("ping <@123>")).toBe(false);
-    expect(discordTextHasBroadcastMention("mail me at a@everyones")).toBe(false);
   });
 });

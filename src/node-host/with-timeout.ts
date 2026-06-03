@@ -1,11 +1,12 @@
-import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
-
 export async function withTimeout<T>(
   work: (signal: AbortSignal | undefined) => Promise<T>,
   timeoutMs?: number,
   label?: string,
 ): Promise<T> {
-  const resolved = timeoutMs === undefined ? undefined : resolveTimerTimeoutMs(timeoutMs, 1);
+  const resolved =
+    typeof timeoutMs === "number" && Number.isFinite(timeoutMs)
+      ? Math.max(1, Math.floor(timeoutMs))
+      : undefined;
   if (!resolved) {
     return await work(undefined);
   }
@@ -17,12 +18,9 @@ export async function withTimeout<T>(
 
   let abortListener: (() => void) | undefined;
   const abortPromise: Promise<never> = abortCtrl.signal.aborted
-    ? Promise.reject(
-        toLintErrorObject(abortCtrl.signal.reason ?? timeoutError, "Non-Error rejection"),
-      )
+    ? Promise.reject(abortCtrl.signal.reason ?? timeoutError)
     : new Promise((_, reject) => {
-        abortListener = () =>
-          reject(toLintErrorObject(abortCtrl.signal.reason ?? timeoutError, "Non-Error rejection"));
+        abortListener = () => reject(abortCtrl.signal.reason ?? timeoutError);
         abortCtrl.signal.addEventListener("abort", abortListener, { once: true });
       });
 
@@ -34,18 +32,4 @@ export async function withTimeout<T>(
       abortCtrl.signal.removeEventListener("abort", abortListener);
     }
   }
-}
-
-function toLintErrorObject(value: unknown, fallbackMessage: string): Error {
-  if (value instanceof Error) {
-    return value;
-  }
-  if (typeof value === "string") {
-    return new Error(value);
-  }
-  const error = new Error(fallbackMessage, { cause: value });
-  if ((typeof value === "object" && value !== null) || typeof value === "function") {
-    Object.assign(error, value);
-  }
-  return error;
 }

@@ -1,5 +1,3 @@
-import { uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
-
 const QA_AGENTIC_PARITY_PACK = "agentic";
 
 const QA_AGENTIC_PARITY_SCENARIOS = [
@@ -78,7 +76,7 @@ export function resolveQaParityPackScenarioIds(params: {
   scenarioIds?: string[];
 }): string[] {
   const normalizedPack = params.parityPack?.trim().toLowerCase();
-  const explicitScenarioIds = uniqueStrings(params.scenarioIds ?? []);
+  const explicitScenarioIds = [...new Set(params.scenarioIds ?? [])];
   if (!normalizedPack) {
     return explicitScenarioIds;
   }
@@ -88,5 +86,5 @@ export function resolveQaParityPackScenarioIds(params: {
     );
   }
 
-  return uniqueStrings([...explicitScenarioIds, ...QA_AGENTIC_PARITY_SCENARIO_IDS]);
+  return [...new Set([...explicitScenarioIds, ...QA_AGENTIC_PARITY_SCENARIO_IDS])];
 }

@@ -20,5 +20,5 @@ export function ensureRecord(target: JsonRecord, key: string): JsonRecord {
 }
 
 export function hasOwnKey(target: JsonRecord, key: string): boolean {
-  return Object.hasOwn(target, key);
+  return Object.prototype.hasOwnProperty.call(target, key);
 }

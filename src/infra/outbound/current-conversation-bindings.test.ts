@@ -1,11 +1,11 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import {
-  testing,
+  __testing,
   bindGenericCurrentConversation,
   getGenericCurrentConversationBindingCapabilities,
   listGenericCurrentConversationBindingsBySession,
@@ -70,14 +70,13 @@ describe("generic current-conversation bindings", () => {
     testStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-current-bindings-"));
     process.env.OPENCLAW_STATE_DIR = testStateDir;
     setMinimalCurrentConversationRegistry();
-    testing.resetCurrentConversationBindingsForTests({
+    __testing.resetCurrentConversationBindingsForTests({
       deletePersistedFile: true,
     });
   });
 
   afterEach(async () => {
-    vi.useRealTimers();
-    testing.resetCurrentConversationBindingsForTests({
+    __testing.resetCurrentConversationBindingsForTests({
       deletePersistedFile: true,
     });
     if (previousStateDir == null) {
@@ -138,7 +137,7 @@ describe("generic current-conversation bindings", () => {
       targetSessionKey: "agent:codex:acp:workspace-dm",
     });
 
-    testing.resetCurrentConversationBindingsForTests();
+    __testing.resetCurrentConversationBindingsForTests();
 
     const resolved = resolveGenericCurrentConversationBinding({
       channel: "workspace",
@@ -153,7 +152,7 @@ describe("generic current-conversation bindings", () => {
   });
 
   it("normalizes persisted target session keys on reload", async () => {
-    const filePath = testing.resolveBindingsFilePath();
+    const filePath = __testing.resolveBindingsFilePath();
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(
       filePath,
@@ -235,7 +234,7 @@ describe("generic current-conversation bindings", () => {
   });
 
   it("migrates persisted legacy self-parent binding ids on load", async () => {
-    const filePath = testing.resolveBindingsFilePath();
+    const filePath = __testing.resolveBindingsFilePath();
     await fs.mkdir(path.dirname(filePath), { recursive: true });
     await fs.writeFile(
       filePath,
@@ -288,7 +287,7 @@ describe("generic current-conversation bindings", () => {
       bindingId: "generic:forum\u241fdefault\u241f\u241f6098642967",
     });
 
-    testing.resetCurrentConversationBindingsForTests();
+    __testing.resetCurrentConversationBindingsForTests();
     expect(
       resolveGenericCurrentConversationBinding({
         channel: "forum",
@@ -314,71 +313,13 @@ describe("generic current-conversation bindings", () => {
       reason: "test cleanup",
     });
 
-    testing.resetCurrentConversationBindingsForTests();
+    __testing.resetCurrentConversationBindingsForTests();
 
     expect(
       resolveGenericCurrentConversationBinding({
         channel: "googlechat",
         accountId: "default",
         conversationId: "spaces/AAAAAAA",
-      }),
-    ).toBeNull();
-  });
-
-  it("drops persisted bindings with invalid expiration timestamps", async () => {
-    const filePath = testing.resolveBindingsFilePath();
-    await fs.mkdir(path.dirname(filePath), { recursive: true });
-    await fs.writeFile(
-      filePath,
-      JSON.stringify({
-        version: 1,
-        bindings: [
-          {
-            bindingId: "generic:workspace\u241fdefault\u241f\u241fuser:U123",
-            targetSessionKey: "agent:codex:acp:workspace-dm",
-            targetKind: "session",
-            conversation: {
-              channel: "workspace",
-              accountId: "default",
-              conversationId: "user:U123",
-            },
-            status: "active",
-            boundAt: 1234,
-            expiresAt: 8_640_000_000_000_001,
-          },
-        ],
-      }),
-    );
-
-    expect(
-      resolveGenericCurrentConversationBinding({
-        channel: "workspace",
-        accountId: "default",
-        conversationId: "user:U123",
-      }),
-    ).toBeNull();
-  });
-
-  it("does not bind generic current conversations when ttl expiry overflows", async () => {
-    vi.setSystemTime(new Date(8_640_000_000_000_000));
-
-    await expect(
-      bindGenericCurrentConversation({
-        targetSessionKey: "agent:codex:acp:workspace-dm",
-        targetKind: "session",
-        conversation: {
-          channel: "workspace",
-          accountId: "default",
-          conversationId: "user:U123",
-        },
-        ttlMs: 1,
-      }),
-    ).resolves.toBeNull();
-    expect(
-      resolveGenericCurrentConversationBinding({
-        channel: "workspace",
-        accountId: "default",
-        conversationId: "user:U123",
       }),
     ).toBeNull();
   });
@@ -404,7 +345,7 @@ describe("generic current-conversation bindings", () => {
       1_234_567_890,
     );
 
-    testing.resetCurrentConversationBindingsForTests();
+    __testing.resetCurrentConversationBindingsForTests();
 
     expectBindingMetadata(
       resolveGenericCurrentConversationBinding({

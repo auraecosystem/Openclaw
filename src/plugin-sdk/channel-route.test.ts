@@ -180,7 +180,7 @@ describe("plugin-sdk channel-route", () => {
     ).toBe(false);
   });
 
-  it("keeps deprecated parser wrapper wired for public SDK compatibility", () => {
+  it("resolves parsed route targets through an injected channel grammar", () => {
     expect(
       resolveChannelRouteTargetWithParser({
         channel: "Mock",

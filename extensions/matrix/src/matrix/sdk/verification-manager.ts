@@ -4,10 +4,6 @@ import {
   VerifierEvent,
 } from "matrix-js-sdk/lib/crypto-api/verification.js";
 import { VerificationMethod } from "matrix-js-sdk/lib/types.js";
-import {
-  resolveDateTimestampMs,
-  resolveTimestampMsToIsoString,
-} from "openclaw/plugin-sdk/number-runtime";
 import { formatMatrixErrorMessage } from "../errors.js";
 
 export type MatrixVerificationMethod = "sas" | "show-qr" | "scan-qr";
@@ -270,7 +266,7 @@ export class MatrixVerificationManager {
   }
 
   private touchVerificationSession(session: MatrixVerificationSession): void {
-    session.updatedAtMs = resolveDateTimestampMs(Date.now());
+    session.updatedAtMs = Date.now();
     this.emitVerificationSummary(session);
   }
 
@@ -321,8 +317,8 @@ export class MatrixVerificationManager {
       hasReciprocateQr: Boolean(session.reciprocateQrCallbacks),
       completed: phase === VerificationPhase.Done,
       error: session.error,
-      createdAt: resolveTimestampMsToIsoString(session.createdAtMs),
-      updatedAt: resolveTimestampMsToIsoString(session.updatedAtMs),
+      createdAt: new Date(session.createdAtMs).toISOString(),
+      updatedAt: new Date(session.updatedAtMs).toISOString(),
     };
   }
 
@@ -394,7 +390,7 @@ export class MatrixVerificationManager {
       .then(() => {
         this.touchVerificationSession(session);
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         session.acceptRequested = false;
         session.error = formatMatrixErrorMessage(err);
         this.touchVerificationSession(session);
@@ -516,7 +512,7 @@ export class MatrixVerificationManager {
         .then(() => {
           this.touchVerificationSession(session);
         })
-        .catch((err: unknown) => {
+        .catch((err) => {
           session.error = formatMatrixErrorMessage(err);
           this.touchVerificationSession(session);
         });
@@ -545,7 +541,7 @@ export class MatrixVerificationManager {
       .then(() => {
         this.touchVerificationSession(session);
       })
-      .catch((err: unknown) => {
+      .catch((err) => {
         session.error = formatMatrixErrorMessage(err);
         this.touchVerificationSession(session);
       });
@@ -598,7 +594,7 @@ export class MatrixVerificationManager {
       }
     }
 
-    const now = resolveDateTimestampMs(Date.now());
+    const now = Date.now();
     const id = `verification-${++this.verificationSessionCounter}`;
     const session: MatrixVerificationSession = {
       id,
@@ -655,7 +651,7 @@ export class MatrixVerificationManager {
     if (!crypto) {
       throw new Error("Matrix crypto is not available");
     }
-    let request: MatrixVerificationRequestLike | null;
+    let request: MatrixVerificationRequestLike | null = null;
     if (params.ownUser) {
       request = await crypto.requestOwnUserVerification();
     } else if (params.userId && params.deviceId && crypto.requestDeviceVerification) {

@@ -1,5 +1,4 @@
 import path from "node:path";
-import { normalizeNullableString as normalizeString } from "@openclaw/normalization-core/string-coerce";
 import { tryReadJson } from "./json-files.js";
 
 type PackageJson = {
@@ -7,6 +6,10 @@ type PackageJson = {
   packageManager?: unknown;
   version?: unknown;
 };
+
+function normalizeString(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 export async function readPackageJson(root: string): Promise<PackageJson | null> {
   const parsed = await tryReadJson<unknown>(path.join(root, "package.json"));

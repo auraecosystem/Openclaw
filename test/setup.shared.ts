@@ -1,20 +1,17 @@
 import { vi } from "vitest";
 
-const openAiCodexTokenRefreshTestHook = "__OPENCLAW_TEST_REFRESH_OPENAI_CODEX_TOKEN__";
-type GlobalWithOpenAiCodexTokenRefreshTestHook = typeof globalThis & {
-  [openAiCodexTokenRefreshTestHook]?: ((...args: unknown[]) => unknown) | undefined;
-};
+declare global {
+  // Optional per-test delegate for the shared OAuth mock.
+  var __OPENCLAW_TEST_REFRESH_OPENAI_CODEX_TOKEN__: ((...args: unknown[]) => unknown) | undefined;
+}
 
-vi.mock("../src/llm/oauth.js", () => ({
+vi.mock("@earendil-works/pi-ai/oauth", () => ({
   getOAuthApiKey: () => undefined,
   getOAuthProviders: () => [],
   loginOpenAICodex: vi.fn(),
   refreshOpenAICodexToken: vi.fn((...args: unknown[]) =>
-    (globalThis as GlobalWithOpenAiCodexTokenRefreshTestHook)[openAiCodexTokenRefreshTestHook]?.(
-      ...args,
-    ),
+    globalThis.__OPENCLAW_TEST_REFRESH_OPENAI_CODEX_TOKEN__?.(...args),
   ),
-  resetOAuthProviders: vi.fn(),
 }));
 
 vi.mock("@mariozechner/clipboard", () => ({

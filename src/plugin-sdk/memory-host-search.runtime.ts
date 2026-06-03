@@ -1,5 +1,4 @@
 export {
-  closeActiveMemorySearchManager,
   closeActiveMemorySearchManagers,
   getActiveMemorySearchManager,
   resolveActiveMemoryBackendConfig,

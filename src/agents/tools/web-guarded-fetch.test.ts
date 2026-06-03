@@ -1,4 +1,3 @@
-import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchWithSsrFGuard, GUARDED_FETCH_MODE } from "../../infra/net/fetch-guard.js";
 import {
@@ -8,20 +7,20 @@ import {
 } from "./web-guarded-fetch.js";
 
 vi.mock("../../infra/net/fetch-guard.js", () => {
-  const GUARDED_FETCH_MODELocal = {
+  const GUARDED_FETCH_MODE = {
     STRICT: "strict",
     TRUSTED_ENV_PROXY: "trusted_env_proxy",
   } as const;
   return {
-    GUARDED_FETCH_MODE: GUARDED_FETCH_MODELocal,
+    GUARDED_FETCH_MODE,
     fetchWithSsrFGuard: vi.fn(),
     withStrictGuardedFetchMode: (params: Record<string, unknown>) => ({
       ...params,
-      mode: GUARDED_FETCH_MODELocal.STRICT,
+      mode: GUARDED_FETCH_MODE.STRICT,
     }),
     withTrustedEnvProxyGuardedFetchMode: (params: Record<string, unknown>) => ({
       ...params,
-      mode: GUARDED_FETCH_MODELocal.TRUSTED_ENV_PROXY,
+      mode: GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY,
     }),
   };
 });
@@ -89,67 +88,5 @@ describe("web-guarded-fetch", () => {
     expect(call?.url).toBe("https://example.com");
     expect(call?.policy).toBeUndefined();
     expect(call?.mode).toBe(GUARDED_FETCH_MODE.STRICT);
-  });
-
-  it("normalizes string timeouts before guarded fetch dispatch", async () => {
-    vi.mocked(fetchWithSsrFGuard).mockResolvedValue({
-      response: new Response("ok", { status: 200 }),
-      finalUrl: "https://example.com",
-      release: async () => {},
-    });
-
-    await withStrictWebToolsEndpoint(
-      { url: "https://example.com", timeoutSeconds: "7" as never },
-      async () => undefined,
-    );
-    expect(firstFetchCall().timeoutMs).toBe(7000);
-
-    vi.clearAllMocks();
-    vi.mocked(fetchWithSsrFGuard).mockResolvedValue({
-      response: new Response("ok", { status: 200 }),
-      finalUrl: "https://example.com",
-      release: async () => {},
-    });
-
-    await withStrictWebToolsEndpoint(
-      {
-        url: "https://example.com",
-        timeoutMs: "2500" as never,
-        timeoutSeconds: "7" as never,
-      },
-      async () => undefined,
-    );
-    expect(firstFetchCall().timeoutMs).toBe(2500);
-  });
-
-  it("caps oversized timeoutSeconds before guarded fetch dispatch", async () => {
-    vi.mocked(fetchWithSsrFGuard).mockResolvedValue({
-      response: new Response("ok", { status: 200 }),
-      finalUrl: "https://example.com",
-      release: async () => {},
-    });
-
-    await withStrictWebToolsEndpoint(
-      { url: "https://example.com", timeoutSeconds: Number.MAX_SAFE_INTEGER },
-      async () => undefined,
-    );
-
-    expect(firstFetchCall().timeoutMs).toBe(MAX_TIMER_TIMEOUT_MS);
-  });
-
-  it("rejects malformed timeouts before guarded fetch dispatch", async () => {
-    await expect(
-      withStrictWebToolsEndpoint(
-        { url: "https://example.com", timeoutMs: "2.5" as never },
-        async () => undefined,
-      ),
-    ).rejects.toThrow("timeoutMs must be a positive integer");
-    await expect(
-      withStrictWebToolsEndpoint(
-        { url: "https://example.com", timeoutSeconds: -1 },
-        async () => undefined,
-      ),
-    ).rejects.toThrow("timeoutSeconds must be a positive integer");
-    expect(fetchWithSsrFGuard).not.toHaveBeenCalled();
   });
 });

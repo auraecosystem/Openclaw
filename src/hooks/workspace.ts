@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { normalizeTrimmedStringList } from "@openclaw/normalization-core/string-normalization";
 import { MANIFEST_KEY } from "../compat/legacy-names.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { openRootFileSync } from "../infra/boundary-file-read.js";
@@ -45,7 +44,11 @@ function readHookPackageManifest(dir: string): HookPackageManifest | null {
 }
 
 function resolvePackageHooks(manifest: HookPackageManifest): string[] {
-  return normalizeTrimmedStringList(manifest[MANIFEST_KEY]?.hooks);
+  const raw = manifest[MANIFEST_KEY]?.hooks;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw.map((entry) => (typeof entry === "string" ? entry.trim() : "")).filter(Boolean);
 }
 
 function resolveContainedDir(baseDir: string, targetDir: string): string | null {
@@ -232,7 +235,9 @@ function discoverWorkspaceHookEntries(
   const workspaceHooksDir = path.join(workspaceDir, "hooks");
   const bundledHooksDir = opts?.bundledHooksDir ?? resolveBundledHooksDir();
   const extraDirsRaw = opts?.config?.hooks?.internal?.load?.extraDirs ?? [];
-  const extraDirs = normalizeTrimmedStringList(extraDirsRaw);
+  const extraDirs = extraDirsRaw
+    .map((d) => (typeof d === "string" ? d.trim() : ""))
+    .filter(Boolean);
   const pluginHookDirs = resolvePluginHookDirs({
     workspaceDir,
     config: opts?.config,

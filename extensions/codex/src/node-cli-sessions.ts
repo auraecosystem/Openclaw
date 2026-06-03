@@ -3,13 +3,11 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { timestampMsToIsoString } from "openclaw/plugin-sdk/number-runtime";
 import type {
   OpenClawPluginNodeHostCommand,
   OpenClawPluginNodeInvokePolicy,
 } from "openclaw/plugin-sdk/plugin-entry";
 import type { PluginRuntime } from "openclaw/plugin-sdk/plugin-runtime";
-import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import {
   materializeWindowsSpawnProgram,
@@ -372,8 +370,8 @@ async function readHistorySessions(
     if (typeof parsed.text === "string" && parsed.text.trim()) {
       entry.lastMessage = truncateText(parsed.text.trim(), 140);
     }
-    if (typeof parsed.ts === "number") {
-      entry.updatedAt = timestampMsToIsoString(parsed.ts * 1000) ?? entry.updatedAt;
+    if (typeof parsed.ts === "number" && Number.isFinite(parsed.ts)) {
+      entry.updatedAt = new Date(parsed.ts * 1000).toISOString();
     }
     summaries.set(sessionId, entry);
   }
@@ -706,4 +704,8 @@ function readNodeId(node: CodexCliSessionNodeInfo): string {
 
 function formatNodeLabel(node: CodexCliSessionNodeInfo): string {
   return [node.displayName, node.nodeId, node.remoteIp].filter(Boolean).join(" / ") || "node";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }

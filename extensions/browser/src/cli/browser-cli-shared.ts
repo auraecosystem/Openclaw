@@ -1,22 +1,14 @@
-import {
-  parseStrictNonNegativeInteger,
-  parseStrictPositiveInteger,
-} from "openclaw/plugin-sdk/number-runtime";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   BROWSER_REQUEST_GATEWAY_METHOD,
   BROWSER_REQUEST_GATEWAY_SCOPES,
 } from "../browser-gateway-contract.js";
-import { normalizeBrowserTimerDelayMs } from "../browser/timer-delay.js";
 import { callGatewayFromCli, type GatewayRpcOpts } from "./core-api.js";
 
 export type BrowserParentOpts = GatewayRpcOpts & {
   json?: boolean;
   browserProfile?: string;
 };
-
-export const BROWSER_TAB_REFERENCE_HELP =
-  "Tab reference: suggested target id, tab id, label, raw target id, or unique raw prefix";
 
 type BrowserRequestParams = {
   method: "GET" | "POST" | "DELETE";
@@ -39,30 +31,6 @@ function normalizeQuery(query: BrowserRequestParams["query"]): Record<string, st
   return Object.keys(out).length ? out : undefined;
 }
 
-export function parseBrowserPositiveIntegerValue(value: unknown): number | undefined {
-  return parseStrictPositiveInteger(value);
-}
-
-export function parseBrowserNonNegativeIntegerValue(value: unknown): number | undefined {
-  return parseStrictNonNegativeInteger(value);
-}
-
-export function parseBrowserPositiveIntegerOption(raw: string, flag: string): number {
-  const parsed = parseBrowserPositiveIntegerValue(raw);
-  if (parsed === undefined) {
-    throw new Error(`${flag} must be a positive integer.`);
-  }
-  return parsed;
-}
-
-export function parseBrowserNonNegativeIntegerOption(raw: string, flag: string): number {
-  const parsed = parseBrowserNonNegativeIntegerValue(raw);
-  if (parsed === undefined) {
-    throw new Error(`${flag} must be a non-negative integer.`);
-  }
-  return parsed;
-}
-
 export async function callBrowserRequest<T>(
   opts: BrowserParentOpts,
   params: BrowserRequestParams,
@@ -70,9 +38,9 @@ export async function callBrowserRequest<T>(
 ): Promise<T> {
   const resolvedTimeoutMs =
     typeof extra?.timeoutMs === "number" && Number.isFinite(extra.timeoutMs)
-      ? normalizeBrowserTimerDelayMs(extra.timeoutMs)
+      ? Math.max(1, Math.floor(extra.timeoutMs))
       : typeof opts.timeout === "string"
-        ? normalizeBrowserTimerDelayMs(parseBrowserPositiveIntegerOption(opts.timeout, "--timeout"))
+        ? Number.parseInt(opts.timeout, 10)
         : undefined;
   const resolvedTimeout =
     typeof resolvedTimeoutMs === "number" && Number.isFinite(resolvedTimeoutMs)

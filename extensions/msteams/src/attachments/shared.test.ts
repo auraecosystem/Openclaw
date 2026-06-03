@@ -57,7 +57,6 @@ async function expectSafeFetchStatus(params: {
     resolveFn: params.resolveFn ?? publicResolve,
   });
   expect(res.status).toBe(params.expectedStatus);
-  await res.body?.cancel();
   return res;
 }
 
@@ -77,22 +76,6 @@ describe("msteams attachment allowlists", () => {
       allowHosts: ["sharepoint.com"],
       authAllowHosts: ["graph.microsoft.com"],
     });
-  });
-
-  it("allows Azure China Bot Framework attachment URLs with auth by default", () => {
-    const policy = resolveAttachmentFetchPolicy();
-    const url = "https://msteams.botframework.azure.cn/teams/v3/attachments/att-1/views/original";
-    const headers = new Headers();
-
-    expect(isUrlAllowed(url, policy.allowHosts)).toBe(true);
-    applyAuthorizationHeaderForUrl({
-      headers,
-      url,
-      authAllowHosts: policy.authAllowHosts,
-      bearerToken: "token-1",
-    });
-
-    expect(headers.get("Authorization")).toBe("Bearer token-1");
   });
 
   it("requires https and host suffix match", () => {
@@ -178,21 +161,6 @@ describe("safeFetch", () => {
     expect(fetchInitAt(fetchMock, 0)).toHaveProperty("redirect", "manual");
   });
 
-  it("pins the validated DNS result into the request dispatcher", async () => {
-    const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) => {
-      return new Response("ok", { status: 200 });
-    });
-
-    await expectSafeFetchStatus({
-      fetchMock,
-      url: "https://teams.sharepoint.com/file.pdf",
-      allowHosts: ["sharepoint.com"],
-      expectedStatus: 200,
-    });
-
-    expect(fetchInitAt(fetchMock, 0)).toHaveProperty("dispatcher");
-  });
-
   it("follows a redirect to an allowlisted host with public IP", async () => {
     const fetchMock = mockFetchWithRedirect({
       "https://teams.sharepoint.com/file.pdf": "https://cdn.sharepoint.com/storage/file.pdf",
@@ -204,24 +172,6 @@ describe("safeFetch", () => {
       expectedStatus: 200,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
-  it("fails explicitly for custom fetch functions that cannot receive the pinned dispatcher", async () => {
-    let called = false;
-    const customFetch = async () => {
-      called = true;
-      return new Response("ok", { status: 200 });
-    };
-
-    await expect(
-      safeFetch({
-        url: "https://teams.sharepoint.com/file.pdf",
-        allowHosts: ["sharepoint.com"],
-        fetchFn: customFetch as typeof fetch,
-        resolveFn: publicResolve,
-      }),
-    ).rejects.toThrow("fetchFnSupportsDispatcher");
-    expect(called).toBe(false);
   });
 
   it("returns the redirect response when dispatcher is provided by an outer guard", async () => {
@@ -268,7 +218,7 @@ describe("safeFetch", () => {
         fetchFn: fetchMock as unknown as typeof fetch,
         resolveFn: publicResolve,
       }),
-    ).rejects.toThrow("allowlist");
+    ).rejects.toThrow("blocked by allowlist");
     // Should not have fetched the evil URL
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -295,7 +245,7 @@ describe("safeFetch", () => {
         fetchFn: fetchMock as unknown as typeof fetch,
         resolveFn: rebindingResolve,
       }),
-    ).rejects.toThrow("private/internal");
+    ).rejects.toThrow("private/reserved IP");
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -308,7 +258,7 @@ describe("safeFetch", () => {
         fetchFn: fetchMock as unknown as typeof fetch,
         resolveFn: privateResolve("10.0.0.1"),
       }),
-    ).rejects.toThrow("private/internal");
+    ).rejects.toThrow("Initial download URL blocked");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -320,7 +270,7 @@ describe("safeFetch", () => {
         allowHosts: ["localhost"],
         fetchFn: fetchMock as unknown as typeof fetch,
       }),
-    ).rejects.toThrow("private/internal");
+    ).rejects.toThrow("Initial download URL blocked");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -333,7 +283,7 @@ describe("safeFetch", () => {
         fetchFn: fetchMock as unknown as typeof fetch,
         resolveFn: failingResolve,
       }),
-    ).rejects.toThrow("DNS failure");
+    ).rejects.toThrow("Initial download URL blocked");
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -361,7 +311,6 @@ describe("safeFetch", () => {
       resolveFn: publicResolve,
     });
     expect(res.status).toBe(200);
-    await res.body?.cancel();
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
@@ -399,7 +348,7 @@ describe("safeFetch", () => {
         fetchFn: fetchMock as unknown as typeof fetch,
         resolveFn: publicResolve,
       }),
-    ).rejects.toThrow("https");
+    ).rejects.toThrow("blocked by allowlist");
   });
 
   it("strips authorization across redirects outside auth allowlist", async () => {
@@ -407,7 +356,7 @@ describe("safeFetch", () => {
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get("authorization") ?? "";
       seenAuth.push(`${url}|${auth}`);
-      if (url === "https://graph.microsoft.com/v1.0/me/photo") {
+      if (url === "https://teams.sharepoint.com/file.pdf") {
         return new Response(null, {
           status: 302,
           headers: { location: "https://cdn.sharepoint.com/storage/file.pdf" },
@@ -418,96 +367,16 @@ describe("safeFetch", () => {
 
     const headers = new Headers({ Authorization: "Bearer secret" });
     const res = await safeFetch({
-      url: "https://graph.microsoft.com/v1.0/me/photo",
-      allowHosts: ["graph.microsoft.com", "sharepoint.com"],
+      url: "https://teams.sharepoint.com/file.pdf",
+      allowHosts: ["sharepoint.com"],
       authorizationAllowHosts: ["graph.microsoft.com"],
       fetchFn: fetchMock as unknown as typeof fetch,
       requestInit: { headers },
       resolveFn: publicResolve,
     });
     expect(res.status).toBe(200);
-    await res.body?.cancel();
     expect(seenAuth[0]).toContain("Bearer secret");
     expect(seenAuth[1]).toMatch(/\|$/);
-  });
-
-  it("keeps authorization across redirects inside auth allowlist", async () => {
-    const seenAuth: string[] = [];
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      const auth = new Headers(init?.headers).get("authorization") ?? "";
-      seenAuth.push(`${url}|${auth}`);
-      if (url === "https://graph.microsoft.com/file.pdf") {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://cdn.sharepoint.com/storage/file.pdf" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-
-    const headers = new Headers({ Authorization: "Bearer secret" });
-    const res = await safeFetch({
-      url: "https://graph.microsoft.com/file.pdf",
-      allowHosts: ["graph.microsoft.com", "sharepoint.com"],
-      authorizationAllowHosts: ["graph.microsoft.com", "sharepoint.com"],
-      fetchFn: fetchMock as unknown as typeof fetch,
-      requestInit: { headers },
-      resolveFn: publicResolve,
-    });
-    expect(res.status).toBe(200);
-    await res.body?.cancel();
-    expect(seenAuth[0]).toContain("Bearer secret");
-    expect(seenAuth[1]).toContain("Bearer secret");
-  });
-
-  it("keeps authorization across HTTPS redirects when auth allowlist is wildcard", async () => {
-    const seenAuth: string[] = [];
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      const auth = new Headers(init?.headers).get("authorization") ?? "";
-      seenAuth.push(`${url}|${auth}`);
-      if (url === "https://graph.microsoft.com/file.pdf") {
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://cdn.example.com/storage/file.pdf" },
-        });
-      }
-      return new Response("ok", { status: 200 });
-    });
-
-    const headers = new Headers({ Authorization: "Bearer secret" });
-    const res = await safeFetch({
-      url: "https://graph.microsoft.com/file.pdf",
-      allowHosts: ["*"],
-      authorizationAllowHosts: ["*"],
-      fetchFn: fetchMock as unknown as typeof fetch,
-      requestInit: { headers },
-      resolveFn: publicResolve,
-    });
-    expect(res.status).toBe(200);
-    await res.body?.cancel();
-    expect(seenAuth[0]).toContain("Bearer secret");
-    expect(seenAuth[1]).toContain("Bearer secret");
-  });
-
-  it("strips authorization from the initial fetch outside auth allowlist", async () => {
-    const seenAuth: string[] = [];
-    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
-      seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
-      expect(url).toBe("https://attacker.trafficmanager.net/v3/attachments/att-1");
-      return new Response("ok", { status: 200 });
-    });
-
-    const res = await safeFetch({
-      url: "https://attacker.trafficmanager.net/v3/attachments/att-1",
-      allowHosts: ["trafficmanager.net"],
-      authorizationAllowHosts: ["smba.trafficmanager.net"],
-      fetchFn: fetchMock as unknown as typeof fetch,
-      requestInit: { headers: { Authorization: "Bearer secret" } },
-      resolveFn: publicResolve,
-    });
-
-    expect(res.status).toBe(200);
-    expect(seenAuth).toEqual([""]);
   });
 });
 
@@ -545,7 +414,6 @@ describe("attachment fetch auth helpers", () => {
       resolveFn: publicResolve,
     });
     expect(res.status).toBe(200);
-    await res.body?.cancel();
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

@@ -1,5 +1,4 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { ErrorCodes, errorShape } from "../../../packages/gateway-protocol/src/index.js";
+import { normalizeOptionalString } from "../../shared/string-coerce.js";
 import {
   canonicalizeSpeechProviderId,
   getSpeechProvider,
@@ -22,6 +21,7 @@ import {
   setTtsProvider,
   textToSpeech,
 } from "../../tts/tts.js";
+import { ErrorCodes, errorShape } from "../protocol/index.js";
 import { formatForLog } from "../ws-log.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
@@ -37,8 +37,6 @@ export const ttsHandlers: GatewayRequestHandlers = {
       const fallbackProviders = resolveTtsProviderOrder(provider, cfg)
         .slice(1)
         .filter((candidate) => isTtsProviderConfigured(config, candidate, cfg));
-      // Report configured state per provider so the UI can explain why fallback
-      // order differs from the complete provider registry.
       const providerStates = listSpeechProviders(cfg).map((candidate) => ({
         id: candidate.id,
         label: candidate.label,
@@ -108,8 +106,6 @@ export const ttsHandlers: GatewayRequestHandlers = {
       const voiceId = normalizeOptionalString(params.voiceId);
       let overrides;
       try {
-        // Explicit provider/model/voice requests are validated before synthesis
-        // and disable fallback so preview calls fail against the requested target.
         overrides = resolveExplicitTtsOverrides({
           cfg,
           provider: providerRaw,
@@ -217,8 +213,6 @@ export const ttsHandlers: GatewayRequestHandlers = {
         );
         return;
       }
-      // Persist only the canonical configured id; labels/aliases stay in config
-      // so preference files remain stable across copy changes.
       setTtsPersona(prefsPath, persona.id);
       respond(true, { persona: persona.id });
     } catch (err) {

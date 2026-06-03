@@ -7,7 +7,6 @@ const mocks = vi.hoisted(() => ({
   healthCommand: vi.fn(),
   sessionsCommand: vi.fn(),
   sessionsCleanupCommand: vi.fn(),
-  sessionsTailCommand: vi.fn(),
   exportTrajectoryCommand: vi.fn(),
   commitmentsListCommand: vi.fn(),
   commitmentsDismissCommand: vi.fn(),
@@ -32,7 +31,6 @@ const statusCommand = mocks.statusCommand;
 const healthCommand = mocks.healthCommand;
 const sessionsCommand = mocks.sessionsCommand;
 const sessionsCleanupCommand = mocks.sessionsCleanupCommand;
-const sessionsTailCommand = mocks.sessionsTailCommand;
 const exportTrajectoryCommand = mocks.exportTrajectoryCommand;
 const commitmentsListCommand = mocks.commitmentsListCommand;
 const commitmentsDismissCommand = mocks.commitmentsDismissCommand;
@@ -90,10 +88,6 @@ vi.mock("../../commands/sessions-cleanup.js", () => ({
   sessionsCleanupCommand: mocks.sessionsCleanupCommand,
 }));
 
-vi.mock("../../commands/sessions-tail.js", () => ({
-  sessionsTailCommand: mocks.sessionsTailCommand,
-}));
-
 vi.mock("../../commands/export-trajectory.js", () => ({
   exportTrajectoryCommand: mocks.exportTrajectoryCommand,
 }));
@@ -140,7 +134,6 @@ describe("registerStatusHealthSessionsCommands", () => {
     healthCommand.mockResolvedValue(undefined);
     sessionsCommand.mockResolvedValue(undefined);
     sessionsCleanupCommand.mockResolvedValue(undefined);
-    sessionsTailCommand.mockResolvedValue(undefined);
     exportTrajectoryCommand.mockResolvedValue(undefined);
     commitmentsListCommand.mockResolvedValue(undefined);
     commitmentsDismissCommand.mockResolvedValue(undefined);
@@ -248,74 +241,6 @@ describe("registerStatusHealthSessionsCommands", () => {
     });
   });
 
-  it("dispatches sessions list as an alias for bare sessions (regression for #81139)", async () => {
-    await runCli(["sessions", "list"]);
-
-    expect(sessionsCommand).toHaveBeenCalledTimes(1);
-    expectCommandOptions(sessionsCommand, {
-      json: false,
-      allAgents: false,
-      agent: undefined,
-      store: undefined,
-    });
-  });
-
-  it("forwards sessions parent options through the list alias", async () => {
-    await runCli([
-      "sessions",
-      "--json",
-      "--verbose",
-      "--store",
-      "/tmp/sessions.json",
-      "--agent",
-      "work",
-      "--all-agents",
-      "--active",
-      "120",
-      "--limit",
-      "25",
-      "list",
-    ]);
-
-    expect(setVerbose).toHaveBeenCalledWith(true);
-    expectCommandOptions(sessionsCommand, {
-      json: true,
-      store: "/tmp/sessions.json",
-      agent: "work",
-      allAgents: true,
-      active: "120",
-      limit: "25",
-    });
-  });
-
-  it("forwards sessions list-side options", async () => {
-    await runCli([
-      "sessions",
-      "list",
-      "--json",
-      "--verbose",
-      "--store",
-      "/tmp/sessions.json",
-      "--agent",
-      "work",
-      "--all-agents",
-      "--active",
-      "120",
-      "--limit",
-      "25",
-    ]);
-
-    expect(setVerbose).toHaveBeenCalledWith(true);
-    expectCommandOptions(sessionsCommand, {
-      json: true,
-      store: "/tmp/sessions.json",
-      agent: "work",
-      allAgents: true,
-      active: "120",
-      limit: "25",
-    });
-  });
-
   it("runs sessions cleanup subcommand with forwarded options", async () => {
     await runCli([
       "sessions",
@@ -349,31 +274,6 @@ describe("registerStatusHealthSessionsCommands", () => {
 
     expectCommandOptions(sessionsCleanupCommand, {
       allAgents: true,
-    });
-  });
-
-  it("runs sessions tail with forwarded progress options", async () => {
-    await runCli([
-      "sessions",
-      "--store",
-      "/tmp/sessions.json",
-      "--agent",
-      "work",
-      "tail",
-      "--session-key",
-      "agent:main:telegram:direct:owner",
-      "--tail",
-      "5",
-      "--follow",
-    ]);
-
-    expectCommandOptions(sessionsTailCommand, {
-      sessionKey: "agent:main:telegram:direct:owner",
-      store: "/tmp/sessions.json",
-      agent: "work",
-      allAgents: false,
-      follow: true,
-      tail: "5",
     });
   });
 
@@ -463,16 +363,6 @@ describe("registerStatusHealthSessionsCommands", () => {
       code: "stale_running",
       limit: 5,
     });
-  });
-
-  it("rejects partially numeric tasks audit limits", async () => {
-    await runCli(["tasks", "--json", "audit", "--limit", "5abc"]);
-
-    expect(runtime.error).toHaveBeenCalledWith(
-      "--limit must be a positive integer, for example --limit 25.",
-    );
-    expect(runtime.exit).toHaveBeenCalledWith(1);
-    expect(tasksAuditCommand).not.toHaveBeenCalled();
   });
 
   it("routes tasks flow commands through the TaskFlow handlers", async () => {

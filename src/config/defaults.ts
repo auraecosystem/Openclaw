@@ -1,17 +1,12 @@
-import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
-import {
-  collectManifestModelIdNormalizationPolicies,
-  normalizeConfiguredProviderCatalogModelId,
-} from "@openclaw/model-catalog-core/provider-model-id-normalization";
-import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { DEFAULT_CONTEXT_TOKENS } from "../agents/defaults.js";
+import { normalizeConfiguredProviderCatalogModelId } from "../agents/model-ref-shared.js";
+import { normalizeProviderId } from "../agents/provider-id.js";
 import type { PluginManifestRegistry } from "../plugins/manifest-registry.js";
 import {
   DEFAULT_AGENT_MAX_CONCURRENT,
   DEFAULT_SUBAGENT_ARCHIVE_AFTER_MINUTES,
   DEFAULT_SUBAGENT_MAX_CONCURRENT,
 } from "./agent-limits.js";
-import { DEFAULT_CRON_MAX_CONCURRENT_RUNS } from "./cron-limits.js";
 import { normalizeAgentModelMapForConfig, normalizeAgentModelRefForConfig } from "./model-input.js";
 import {
   applyProviderConfigDefaultsForConfig,
@@ -24,14 +19,13 @@ import type { OpenClawConfig } from "./types.openclaw.js";
 type WarnState = { warned: boolean };
 type ProviderPolicyDefaultsOptions = {
   manifestRegistry?: Pick<PluginManifestRegistry, "plugins">;
-  loadManifestRegistry?: () => Pick<PluginManifestRegistry, "plugins"> | undefined;
 };
 
-const defaultWarnState: WarnState = { warned: false };
+let defaultWarnState: WarnState = { warned: false };
 
 const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
-  // Anthropic (shared model runtime catalog uses "latest" ids without date suffix)
-  opus: "anthropic/claude-opus-4-8",
+  // Anthropic (pi-ai catalog uses "latest" ids without date suffix)
+  opus: "anthropic/claude-opus-4-7",
   sonnet: "anthropic/claude-sonnet-4-6",
 
   // OpenAI
@@ -39,10 +33,10 @@ const DEFAULT_MODEL_ALIASES: Readonly<Record<string, string>> = {
   "gpt-mini": "openai/gpt-5.4-mini",
   "gpt-nano": "openai/gpt-5.4-nano",
 
-  // Google Gemini (3.x — flash-lite is GA; pro and flash are still preview)
+  // Google Gemini (3.x are preview ids in the catalog)
   gemini: "google/gemini-3.1-pro-preview",
   "gemini-flash": "google/gemini-3-flash-preview",
-  "gemini-flash-lite": "google/gemini-3.1-flash-lite",
+  "gemini-flash-lite": "google/gemini-3.1-flash-lite-preview",
 };
 
 const DEFAULT_MODEL_COST: ModelDefinitionConfig["cost"] = {
@@ -64,6 +58,10 @@ const MISTRAL_SAFE_MAX_TOKENS_BY_MODEL = {
 
 type ModelDefinitionLike = Partial<ModelDefinitionConfig> &
   Pick<ModelDefinitionConfig, "id" | "name">;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
 
 function isPositiveNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -159,10 +157,6 @@ export function applyModelDefaults(
 
   const providerConfig = nextCfg.models?.providers;
   if (providerConfig) {
-    const manifestRegistry = options.manifestRegistry ?? options.loadManifestRegistry?.();
-    const modelIdNormalizationPolicies = manifestRegistry
-      ? collectManifestModelIdNormalizationPolicies(manifestRegistry.plugins)
-      : undefined;
     const nextProviders = { ...providerConfig };
     for (const [providerId, provider] of Object.entries(providerConfig)) {
       const normalizedProvider = normalizeProviderConfigForConfigDefaults({
@@ -179,7 +173,7 @@ export function applyModelDefaults(
         continue;
       }
       const providerApi = normalizedProvider.api;
-      const nextProvider = normalizedProvider;
+      let nextProvider = normalizedProvider;
       if (nextProvider !== provider) {
         mutated = true;
       }
@@ -187,11 +181,7 @@ export function applyModelDefaults(
       const nextModels = models.map((model) => {
         const raw = model as ModelDefinitionLike;
         let modelMutated = false;
-        const id = normalizeConfiguredProviderCatalogModelId(
-          providerId,
-          raw.id,
-          modelIdNormalizationPolicies,
-        );
+        const id = normalizeConfiguredProviderCatalogModelId(providerId, raw.id);
         if (id !== raw.id) {
           modelMutated = true;
         }
@@ -285,7 +275,7 @@ export function applyModelDefaults(
         return agent;
       }
       let nextAgent = agent;
-      if (Object.hasOwn(agent, "model")) {
+      if (Object.prototype.hasOwnProperty.call(agent, "model")) {
         const normalizedModel = normalizeAgentModelConfigForDefaults(agent.model);
         if (normalizedModel !== agent.model) {
           nextAgent = { ...nextAgent, model: normalizedModel as typeof agent.model };
@@ -444,20 +434,6 @@ export function applyAgentDefaults(cfg: OpenClawConfig): OpenClawConfig {
         ...nextDefaults,
         subagents: nextSubagents,
       },
-    },
-  };
-}
-
-export function applyCronDefaults(cfg: OpenClawConfig): OpenClawConfig {
-  const raw = cfg.cron?.maxConcurrentRuns;
-  if (typeof raw === "number" && Number.isFinite(raw)) {
-    return cfg;
-  }
-  return {
-    ...cfg,
-    cron: {
-      ...cfg.cron,
-      maxConcurrentRuns: DEFAULT_CRON_MAX_CONCURRENT_RUNS,
     },
   };
 }

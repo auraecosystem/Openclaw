@@ -31,6 +31,8 @@ const {
   touchBindingMock,
   withReplyDispatcherMock,
 } = getFeishuLifecycleTestMocks();
+
+let _handlers: Record<string, (data: unknown) => Promise<void>> = {};
 let lastRuntime = createRuntimeEnv();
 const originalStateDir = process.env.OPENCLAW_STATE_DIR;
 const lifecycleConfig = createFeishuLifecycleConfig({
@@ -75,7 +77,9 @@ async function setupLifecycleMonitor() {
   lastRuntime = createRuntimeEnv();
   return setupFeishuLifecycleHandler({
     createEventDispatcherMock,
-    onRegister: () => {},
+    onRegister: (registered) => {
+      _handlers = registered;
+    },
     runtime: lastRuntime,
     cfg: lifecycleConfig,
     account: lifecycleAccount,
@@ -88,6 +92,7 @@ describe("Feishu bot-menu lifecycle", () => {
   beforeEach(() => {
     vi.useRealTimers();
     resetFeishuLifecycleTestMocks();
+    _handlers = {};
     lastRuntime = createRuntimeEnv();
     setFeishuLifecycleStateDir("openclaw-feishu-bot-menu");
 
@@ -186,7 +191,6 @@ describe("Feishu bot-menu lifecycle", () => {
         SessionKey: "agent:bound-agent:feishu:direct:ou_user1",
         MessageSid: "bot-menu:quick-actions:1700000000001",
       }),
-      undefined,
     );
     expect(touchBindingMock).toHaveBeenCalledWith("binding-menu");
 

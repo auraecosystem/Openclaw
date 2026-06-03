@@ -7,7 +7,7 @@ import {
 import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 export function resolveMSTeamsOutboundSessionRoute(params: ChannelOutboundSessionRouteParams) {
-  const trimmed = stripChannelTargetPrefix(params.target, "msteams", "teams");
+  let trimmed = stripChannelTargetPrefix(params.target, "msteams", "teams");
   if (!trimmed) {
     return null;
   }

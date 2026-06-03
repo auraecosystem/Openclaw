@@ -6,7 +6,6 @@ import type { ApiContributor, Entry, MapConfig, User } from "./update-clawtribut
 const REPO = "openclaw/openclaw";
 const PER_LINE = 10;
 const AVATAR_PROBE_SIZE = 40;
-const AVATAR_PROBE_MAX_BYTES = 256 * 1024;
 const AVATAR_SIZE = 48;
 const CLAWTRIBUTORS_START = "<!-- clawtributors:start -->";
 const CLAWTRIBUTORS_END = "<!-- clawtributors:end -->";
@@ -109,7 +108,7 @@ for (const line of log.split("\n")) {
     continue;
   }
 
-  const login = resolveLogin(currentName, currentEmail, apiByLogin, nameToLogin, emailToLogin);
+  let login = resolveLogin(currentName, currentEmail, apiByLogin, nameToLogin, emailToLogin);
   if (!login) {
     continue;
   }
@@ -156,7 +155,7 @@ function computeScore(loc: number, commits: number, prs: number, firstDate: stri
     ? Math.max(0, (now - new Date(firstDate.slice(0, 10)).getTime()) / 86_400_000)
     : 0;
   const tenureRatio = Math.min(1, daysIn / repoAgeDays);
-  const tenure = 1 + tenureRatio * tenureRatio * 0.5;
+  const tenure = 1.0 + tenureRatio * tenureRatio * 0.5;
   return base * tenure;
 }
 
@@ -330,7 +329,7 @@ for (const [index, entry] of visibleEntries.slice(0, 25).entries()) {
   const daysIn =
     fd !== "?" ? Math.max(0, (now - new Date(fd.slice(0, 10)).getTime()) / 86_400_000) : 0;
   const tr = Math.min(1, daysIn / repoAgeDays);
-  const tenure = 1 + tr * tr * 0.5;
+  const tenure = 1.0 + tr * tr * 0.5;
   console.log(
     `${index + 1}`.padStart(3) +
       `  ${login.padEnd(24)} ${entry.score.toFixed(0).padStart(8)} ${tenure.toFixed(2).padStart(6)}x ${String(entry.commits).padStart(8)} ${String(entry.prs).padStart(6)} ${String(entry.lines).padStart(10)}  ${fd}`,
@@ -345,9 +344,9 @@ function run(cmd: string): string {
   }).trim();
 }
 
-function parsePaginatedJson(rawLocal: string): unknown[] {
+function parsePaginatedJson(raw: string): unknown[] {
   const items: unknown[] = [];
-  for (const line of rawLocal.split("\n")) {
+  for (const line of raw.split("\n")) {
     if (!line.trim()) {
       continue;
     }
@@ -460,7 +459,7 @@ async function probeDefaultGitHubAvatar(login: string): Promise<boolean> {
     if (!response.ok) {
       return false;
     }
-    const buffer = await readAvatarProbeBuffer(response);
+    const buffer = Buffer.from(await response.arrayBuffer());
     const dimensions = readImageDimensions(buffer);
     return Boolean(
       dimensions && (dimensions.width > AVATAR_PROBE_SIZE || dimensions.height > AVATAR_PROBE_SIZE),
@@ -470,48 +469,11 @@ async function probeDefaultGitHubAvatar(login: string): Promise<boolean> {
   }
 }
 
-async function readAvatarProbeBuffer(response: Response): Promise<Buffer> {
-  const contentLength = Number(response.headers.get("content-length") ?? 0);
-  if (Number.isFinite(contentLength) && contentLength > AVATAR_PROBE_MAX_BYTES) {
-    throw new Error(`avatar probe exceeded ${AVATAR_PROBE_MAX_BYTES} bytes`);
-  }
-
-  const reader = response.body?.getReader?.();
-  if (!reader) {
-    const buffer = Buffer.from(await response.arrayBuffer());
-    if (buffer.byteLength > AVATAR_PROBE_MAX_BYTES) {
-      throw new Error(`avatar probe exceeded ${AVATAR_PROBE_MAX_BYTES} bytes`);
-    }
-    return buffer;
-  }
-
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) {
-      break;
-    }
-    if (!value?.byteLength) {
-      continue;
-    }
-    const chunk = Buffer.from(value);
-    const nextTotal = total + chunk.byteLength;
-    if (nextTotal > AVATAR_PROBE_MAX_BYTES) {
-      await reader.cancel().catch(() => undefined);
-      throw new Error(`avatar probe exceeded ${AVATAR_PROBE_MAX_BYTES} bytes`);
-    }
-    chunks.push(chunk);
-    total = nextTotal;
-  }
-  return Buffer.concat(chunks, total);
-}
-
 async function filterVisibleEntries(
-  entriesResult: Entry[],
+  entries: Entry[],
   hiddenLogins: ReadonlySet<string>,
 ): Promise<Entry[]> {
-  const results = await mapConcurrent(entriesResult, 8, async (entry) => {
+  const results = await mapConcurrent(entries, 8, async (entry) => {
     const login = entry.login ?? entry.key;
     if (!login) {
       return entry;
@@ -630,16 +592,16 @@ function readJpegDimensions(buffer: Buffer): { width: number; height: number } |
 function resolveLogin(
   name: string,
   email: string | null,
-  apiByLoginValue: Map<string, User>,
-  nameToLoginLocal: Record<string, string>,
-  emailToLoginLocal: Record<string, string>,
+  apiByLogin: Map<string, User>,
+  nameToLogin: Record<string, string>,
+  emailToLogin: Record<string, string>,
 ): string | null {
-  if (email && emailToLoginLocal[email]) {
-    return normalizeLogin(emailToLoginLocal[email]);
+  if (email && emailToLogin[email]) {
+    return normalizeLogin(emailToLogin[email]);
   }
 
   if (email && name) {
-    const guessed = guessLoginFromEmailName(name, email, apiByLoginValue);
+    const guessed = guessLoginFromEmailName(name, email, apiByLogin);
     if (guessed) {
       return normalizeLogin(guessed);
     }
@@ -653,26 +615,26 @@ function resolveLogin(
 
   if (email && email.endsWith("@github.com")) {
     const login = email.split("@", 1)[0];
-    if (apiByLoginValue.has(login.toLowerCase())) {
+    if (apiByLogin.has(login.toLowerCase())) {
       return normalizeLogin(login);
     }
   }
 
   const normalized = normalizeName(name);
-  if (nameToLoginLocal[normalized]) {
-    return normalizeLogin(nameToLoginLocal[normalized]);
+  if (nameToLogin[normalized]) {
+    return normalizeLogin(nameToLogin[normalized]);
   }
 
   const compact = normalized.replace(/\s+/g, "");
-  if (nameToLoginLocal[compact]) {
-    return normalizeLogin(nameToLoginLocal[compact]);
+  if (nameToLogin[compact]) {
+    return normalizeLogin(nameToLogin[compact]);
   }
 
-  if (apiByLoginValue.has(normalized)) {
+  if (apiByLogin.has(normalized)) {
     return normalizeLogin(normalized);
   }
 
-  if (apiByLoginValue.has(compact)) {
+  if (apiByLogin.has(compact)) {
     return normalizeLogin(compact);
   }
 
@@ -682,7 +644,7 @@ function resolveLogin(
 function guessLoginFromEmailName(
   name: string,
   email: string,
-  apiByLoginLocal: Map<string, User>,
+  apiByLogin: Map<string, User>,
 ): string | null {
   const local = email.split("@", 1)[0]?.trim();
   if (!local) {
@@ -701,7 +663,7 @@ function guessLoginFromEmailName(
       continue;
     }
     const key = candidate.toLowerCase();
-    if (apiByLoginLocal.has(key)) {
+    if (apiByLogin.has(key)) {
       return key;
     }
   }
@@ -719,65 +681,61 @@ function escapeMarkdownLabel(value: string): string {
 function parseReadmeEntries(
   content: string,
 ): Array<{ display: string; html_url: string; avatar_url: string }> {
-  const rangeValue = findClawtributorsRange(content);
-  if (!rangeValue) {
+  const range = findClawtributorsRange(content);
+  if (!range) {
     return [];
   }
-  const blockValue = content.slice(rangeValue.start, rangeValue.end);
-  const entriesValue: Array<{ display: string; html_url: string; avatar_url: string }> = [];
+  const block = content.slice(range.start, range.end);
+  const entries: Array<{ display: string; html_url: string; avatar_url: string }> = [];
   const markdown = /\[!\[([^\]]+)\]\(([^)]+)\)\]\(([^)]+)\)/g;
-  for (const match of blockValue.matchAll(markdown)) {
+  for (const match of block.matchAll(markdown)) {
     const [, alt, src, href] = match;
     if (!href || !src || !alt) {
       continue;
     }
-    entriesValue.push({
-      html_url: href,
-      avatar_url: src,
-      display: alt.replace(/\\([\\[\]])/g, "$1"),
-    });
+    entries.push({ html_url: href, avatar_url: src, display: alt.replace(/\\([\\[\]])/g, "$1") });
   }
   const linked = /<a href="([^"]+)"><img src="([^"]+)"[^>]*alt="([^"]+)"[^>]*>/g;
-  for (const match of blockValue.matchAll(linked)) {
+  for (const match of block.matchAll(linked)) {
     const [, href, src, alt] = match;
     if (!href || !src || !alt) {
       continue;
     }
-    entriesValue.push({ html_url: href, avatar_url: src, display: alt });
+    entries.push({ html_url: href, avatar_url: src, display: alt });
   }
   const standalone = /<img src="([^"]+)"[^>]*alt="([^"]+)"[^>]*>/g;
-  for (const match of blockValue.matchAll(standalone)) {
+  for (const match of block.matchAll(standalone)) {
     const [, src, alt] = match;
     if (!src || !alt) {
       continue;
     }
-    if (entriesValue.some((entry) => entry.display === alt && entry.avatar_url === src)) {
+    if (entries.some((entry) => entry.display === alt && entry.avatar_url === src)) {
       continue;
     }
-    entriesValue.push({ html_url: fallbackHref(alt), avatar_url: src, display: alt });
+    entries.push({ html_url: fallbackHref(alt), avatar_url: src, display: alt });
   }
-  return entriesValue;
+  return entries;
 }
 
 function parseHiddenReadmeLogins(content: string): string[] {
-  const rangeLocal = findHiddenReadmeRange(content);
-  if (!rangeLocal) {
+  const range = findHiddenReadmeRange(content);
+  if (!range) {
     return [];
   }
-  const blockLocal = content.slice(rangeLocal.start, rangeLocal.end);
-  return blockLocal
+  const block = content.slice(range.start, range.end);
+  return block
     .split("\n")
     .map((line) => normalizeLogin(line.trim())?.toLowerCase() ?? null)
     .filter((login): login is string => Boolean(login));
 }
 
-function buildHiddenReadmeBlock(entriesLocal: Entry[], visibleEntriesLocal: Entry[]): string {
+function buildHiddenReadmeBlock(entries: Entry[], visibleEntries: Entry[]): string {
   const visibleLogins = new Set(
-    visibleEntriesLocal
+    visibleEntries
       .map((entry) => normalizeLogin(entry.login ?? entry.key)?.toLowerCase() ?? null)
       .filter((login): login is string => Boolean(login)),
   );
-  const hiddenLogins = entriesLocal
+  const hiddenLogins = entries
     .map((entry) => normalizeLogin(entry.login ?? entry.key)?.toLowerCase() ?? null)
     .filter((login): login is string => Boolean(login))
     .filter((login) => !visibleLogins.has(login))

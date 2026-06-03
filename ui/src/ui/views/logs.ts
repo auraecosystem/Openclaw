@@ -55,7 +55,7 @@ export function renderLogs(props: LogsProps) {
   const exportLabel = needle || levelFiltered ? "filtered" : "visible";
 
   return html`
-    <section class="card card--fill-height">
+    <section class="card">
       <div class="row" style="justify-content: space-between;">
         <div>
           <div class="card-title">Logs</div>

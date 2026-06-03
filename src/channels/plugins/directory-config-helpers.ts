@@ -1,9 +1,8 @@
+import type { OpenClawConfig } from "../../config/types.js";
 import {
   normalizeLowercaseStringOrEmpty,
   normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
-import type { OpenClawConfig } from "../../config/types.js";
+} from "../../shared/string-coerce.js";
 import type { DirectoryConfigParams } from "./directory-types.js";
 import type { ChannelDirectoryEntry } from "./types.public.js";
 
@@ -46,27 +45,32 @@ function collectDirectoryIdsFromEntries(params: {
   entries?: readonly unknown[];
   normalizeId?: (entry: string) => string | null | undefined;
 }): string[] {
-  return collectDirectoryIds(params.entries ?? [], params.normalizeId);
+  const ids: string[] = [];
+  for (const value of params.entries ?? []) {
+    const entry = normalizeOptionalString(String(value)) ?? "";
+    if (!entry || entry === "*") {
+      continue;
+    }
+    const normalized = params.normalizeId ? params.normalizeId(entry) : entry;
+    const id = normalizeOptionalString(normalized) ?? "";
+    if (id) {
+      ids.push(id);
+    }
+  }
+  return ids;
 }
 
 function collectDirectoryIdsFromMapKeys(params: {
   groups?: Record<string, unknown>;
   normalizeId?: (entry: string) => string | null | undefined;
 }): string[] {
-  return collectDirectoryIds(Object.keys(params.groups ?? {}), params.normalizeId);
-}
-
-function collectDirectoryIds(
-  values: Iterable<unknown>,
-  normalizeId?: (entry: string) => string | null | undefined,
-): string[] {
   const ids: string[] = [];
-  for (const value of values) {
-    const entry = normalizeOptionalString(String(value)) ?? "";
+  for (const key of Object.keys(params.groups ?? {})) {
+    const entry = normalizeOptionalString(key) ?? "";
     if (!entry || entry === "*") {
       continue;
     }
-    const normalized = normalizeId ? normalizeId(entry) : entry;
+    const normalized = params.normalizeId ? params.normalizeId(entry) : entry;
     const id = normalizeOptionalString(normalized) ?? "";
     if (id) {
       ids.push(id);
@@ -76,7 +80,16 @@ function collectDirectoryIds(
 }
 
 function dedupeDirectoryIds(ids: string[]): string[] {
-  return uniqueStrings(ids);
+  const deduped: string[] = [];
+  const seen = new Set<string>();
+  for (const id of ids) {
+    if (seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    deduped.push(id);
+  }
+  return deduped;
 }
 
 export function collectNormalizedDirectoryIds(params: {

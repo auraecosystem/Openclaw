@@ -1,9 +1,3 @@
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "@openclaw/normalization-core/string-coerce";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
-import { resolveExplicitConfigWriteTarget } from "../../channels/plugins/config-writes.js";
 import { getChannelPlugin } from "../../channels/plugins/index.js";
 import type { ChannelId } from "../../channels/plugins/types.public.js";
 import { normalizeChannelId } from "../../channels/registry.js";
@@ -15,7 +9,11 @@ import {
   removeChannelAllowFromStoreEntry,
 } from "../../pairing/pairing-store.js";
 import { DEFAULT_ACCOUNT_ID, normalizeOptionalAccountId } from "../../routing/session-key.js";
-import { resolveChannelAccountId, resolveCommandSurfaceChannel } from "./channel-context.js";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "../../shared/string-coerce.js";
+import { normalizeStringEntries } from "../../shared/string-normalization.js";
 import {
   rejectNonOwnerCommand,
   rejectUnauthorizedCommand,
@@ -309,13 +307,6 @@ export const handleAllowlistCommand: CommandHandler = async (params, allowTextCo
     parsedAccount: parsed.account,
     ctxAccountId: params.ctx.AccountId,
   });
-  const originChannelId =
-    params.command.channelId ?? normalizeChannelId(resolveCommandSurfaceChannel(params));
-  const originAccountId = resolveChannelAccountId({
-    cfg: params.cfg,
-    ctx: params.ctx,
-    command: params.command,
-  });
   const plugin = getChannelPlugin(channelId);
 
   if (parsed.action === "list") {
@@ -499,11 +490,10 @@ export const handleAllowlistCommand: CommandHandler = async (params, allowTextCo
     const deniedText = resolveConfigWriteDeniedText({
       cfg: params.cfg,
       channel: params.command.channel,
-      originChannelId,
-      originAccountId,
+      channelId,
+      accountId,
       gatewayClientScopes: params.ctx.GatewayClientScopes,
       target: editResult.writeTarget,
-      fallbackChannelId: channelId,
     });
     if (deniedText) {
       return {
@@ -569,22 +559,6 @@ export const handleAllowlistCommand: CommandHandler = async (params, allowTextCo
     return {
       shouldContinue: false,
       reply: { text: "⚠️ This channel does not support allowlist storage." },
-    };
-  }
-
-  const storeDeniedText = resolveConfigWriteDeniedText({
-    cfg: params.cfg,
-    channel: params.command.channel,
-    originChannelId,
-    originAccountId,
-    gatewayClientScopes: params.ctx.GatewayClientScopes,
-    target: resolveExplicitConfigWriteTarget({ channelId, accountId }),
-    fallbackChannelId: channelId,
-  });
-  if (storeDeniedText) {
-    return {
-      shouldContinue: false,
-      reply: { text: storeDeniedText },
     };
   }
 

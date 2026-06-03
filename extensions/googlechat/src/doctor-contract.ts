@@ -16,7 +16,9 @@ function hasLegacyGoogleChatGroupAllowAlias(value: unknown): boolean {
   if (!groups) {
     return false;
   }
-  return Object.values(groups).some((group) => Object.hasOwn(asObjectRecord(group) ?? {}, "allow"));
+  return Object.values(groups).some((group) =>
+    Object.prototype.hasOwnProperty.call(asObjectRecord(group) ?? {}, "allow"),
+  );
 }
 
 function hasLegacyAccountAliases(value: unknown, match: (entry: unknown) => boolean): boolean {
@@ -36,7 +38,7 @@ function normalizeGoogleChatGroups(params: {
   const nextGroups = { ...params.groups };
   for (const [groupId, groupValue] of Object.entries(params.groups)) {
     const group = asObjectRecord(groupValue);
-    if (!group || !Object.hasOwn(group, "allow")) {
+    if (!group || !Object.prototype.hasOwnProperty.call(group, "allow")) {
       continue;
     }
     const nextGroup = { ...group };
@@ -128,7 +130,7 @@ export function normalizeCompatibilityConfig({
 
   const changes: string[] = [];
   let updated = rawEntry;
-  let changed;
+  let changed = false;
 
   const root = normalizeGoogleChatEntry({
     entry: updated,

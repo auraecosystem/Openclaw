@@ -1,6 +1,5 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
-import { normalizeUniqueStringEntriesLower } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 const DIAGNOSTICS_ENV = "OPENCLAW_DIAGNOSTICS";
 
@@ -34,7 +33,17 @@ function parseEnvFlags(raw?: string): ParsedEnvFlags {
 }
 
 function uniqueFlags(flags: string[]): string[] {
-  return normalizeUniqueStringEntriesLower(flags);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const flag of flags) {
+    const normalized = normalizeLowercaseStringOrEmpty(flag);
+    if (!normalized || seen.has(normalized)) {
+      continue;
+    }
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
 }
 
 export function resolveDiagnosticFlags(

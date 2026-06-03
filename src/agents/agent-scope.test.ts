@@ -6,7 +6,6 @@ import type { OpenClawConfig } from "../config/config.js";
 import type { SessionEntry } from "../config/sessions.js";
 import {
   clearAutoFallbackPrimaryProbeSelection,
-  hasLegacyAutoFallbackWithoutOrigin,
   markAutoFallbackPrimaryProbe,
   hasConfiguredModelFallbacks,
   resolveAgentConfig,
@@ -124,30 +123,6 @@ describe("resolveAgentConfig", () => {
       memoryGetMaxChars: 24_000,
       memoryGetDefaultLines: 180,
       toolResultMaxChars: 18_000,
-    });
-  });
-
-  it("merges experimental flags from defaults with per-agent overrides", () => {
-    const cfg: OpenClawConfig = {
-      agents: {
-        defaults: {
-          experimental: {
-            localModelLean: true,
-          },
-        },
-        list: [
-          {
-            id: "main",
-            experimental: {
-              localModelLean: false,
-            },
-          },
-        ],
-      },
-    };
-
-    expect(resolveAgentConfig(cfg, "main")?.experimental).toEqual({
-      localModelLean: false,
     });
   });
 
@@ -680,36 +655,6 @@ describe("resolveAgentConfig", () => {
     ).toBeUndefined();
   });
 
-  it("identifies legacy auto fallback overrides without origin metadata", () => {
-    expect(
-      hasLegacyAutoFallbackWithoutOrigin({
-        modelOverrideSource: "auto",
-        modelOverrideFallbackOriginProvider: "anthropic",
-        modelOverrideFallbackOriginModel: "claude-sonnet-4-6",
-      }),
-    ).toBe(false);
-    expect(
-      hasLegacyAutoFallbackWithoutOrigin({
-        modelOverrideSource: "auto",
-        modelOverrideFallbackOriginProvider: " ",
-        modelOverrideFallbackOriginModel: "claude-sonnet-4-6",
-      }),
-    ).toBe(true);
-    expect(
-      hasLegacyAutoFallbackWithoutOrigin({
-        modelOverrideSource: "auto",
-        modelOverrideFallbackOriginProvider: "anthropic",
-      }),
-    ).toBe(true);
-    expect(
-      hasLegacyAutoFallbackWithoutOrigin({
-        modelOverrideSource: "user",
-      }),
-    ).toBe(false);
-    expect(hasLegacyAutoFallbackWithoutOrigin({})).toBe(false);
-    expect(hasLegacyAutoFallbackWithoutOrigin(undefined)).toBe(false);
-  });
-
   it("recognizes recovered auto fallback provenance without a source marker", () => {
     expect(
       resolveAutoFallbackPrimaryProbe({
@@ -873,7 +818,7 @@ describe("resolveAgentConfig", () => {
           subagents: {
             model: {
               primary: "kimi/kimi-code",
-              fallbacks: ["openai/gpt-5.4", "zai/glm-5"],
+              fallbacks: ["openai-codex/gpt-5.4", "zai/glm-5"],
             },
           },
         },
@@ -883,7 +828,7 @@ describe("resolveAgentConfig", () => {
             subagents: {
               model: {
                 primary: "kimi/kimi-code",
-                fallbacks: ["openai/gpt-5.4", "zai/glm-5"],
+                fallbacks: ["openai-codex/gpt-5.4", "zai/glm-5"],
               },
             },
           },
@@ -892,6 +837,16 @@ describe("resolveAgentConfig", () => {
             model: {
               primary: "anthropic/claude-sonnet-4-6",
               fallbacks: ["google/gemini-3-pro"],
+            },
+          },
+          {
+            id: "metadata-only-subagent",
+            model: {
+              primary: "anthropic/claude-sonnet-4-6",
+              fallbacks: ["google/gemini-3-pro"],
+            },
+            subagents: {
+              model: { timeoutMs: 1_000 },
             },
           },
           {
@@ -922,89 +877,27 @@ describe("resolveAgentConfig", () => {
     };
 
     expect(resolveSubagentModelFallbacksOverride(cfg, "research")).toEqual([
-      "openai/gpt-5.4",
+      "openai-codex/gpt-5.4",
       "zai/glm-5",
     ]);
     expect(resolveSubagentModelFallbacksOverride(cfg, "agent-model")).toEqual([
       "google/gemini-3-pro",
     ]);
+    expect(resolveSubagentModelFallbacksOverride(cfg, "metadata-only-subagent")).toEqual([
+      "google/gemini-3-pro",
+    ]);
     expect(resolveSubagentModelFallbacksOverride(cfg, "fallback-only-agent-model")).toEqual([
-      "openai/gpt-5.4",
+      "openai-codex/gpt-5.4",
       "zai/glm-5",
     ]);
     expect(
       resolveSubagentModelFallbacksOverride(cfg, "fallback-only-subagent-model"),
     ).toStrictEqual([]);
     expect(resolveSubagentModelFallbacksOverride(cfg, "default-subagent")).toEqual([
-      "openai/gpt-5.4",
+      "openai-codex/gpt-5.4",
       "zai/glm-5",
     ]);
     expect(resolveSubagentModelFallbacksOverride(cfg, "strict")).toStrictEqual([]);
-  });
-
-  it("uses subagent model fallbacks for auto-selected spawned subagent models", () => {
-    const cfg: OpenClawConfig = {
-      agents: {
-        defaults: {
-          model: {
-            fallbacks: ["openai/gpt-5.4"],
-          },
-          subagents: {
-            model: {
-              primary: "kimi/kimi-code",
-              fallbacks: ["openai/gpt-5.4", "zai/glm-5"],
-            },
-          },
-        },
-        list: [
-          {
-            id: "research",
-            model: {
-              primary: "anthropic/claude-sonnet-4-6",
-              fallbacks: ["google/gemini-3-pro"],
-            },
-          },
-          {
-            id: "fallback-only-subagent",
-            model: {
-              primary: "anthropic/claude-sonnet-4-6",
-              fallbacks: ["google/gemini-3-pro"],
-            },
-            subagents: {
-              model: { fallbacks: ["zai/glm-5"] },
-            },
-          },
-        ],
-      },
-    };
-
-    expect(
-      resolveEffectiveModelFallbacks({
-        cfg,
-        agentId: "research",
-        sessionKey: "agent:research:subagent:child",
-        hasSessionModelOverride: true,
-        modelOverrideSource: "auto",
-      }),
-    ).toEqual(["openai/gpt-5.4", "zai/glm-5"]);
-    expect(
-      resolveEffectiveModelFallbacks({
-        cfg,
-        agentId: "research",
-        sessionKey: "agent:research:subagent:child",
-        hasSessionModelOverride: true,
-        modelOverrideSource: "user",
-      }),
-    ).toStrictEqual([]);
-    expect(
-      resolveEffectiveModelFallbacks({
-        cfg,
-        agentId: "fallback-only-subagent",
-        sessionKey: "agent:fallback-only-subagent:subagent:child",
-        hasSessionModelOverride: true,
-        modelOverrideSource: "auto",
-      }),
-    ).toEqual(["zai/glm-5"]);
   });
 
   it("resolves the subagent model config selected for isolated runs", () => {
@@ -1027,15 +920,15 @@ describe("resolveAgentConfig", () => {
             subagents: {
               model: {
                 primary: "kimi/kimi-code",
-                fallbacks: ["openai/gpt-5.4"],
+                fallbacks: ["openai-codex/gpt-5.4"],
               },
             },
           },
           {
-            id: "fallback-only-subagent",
+            id: "metadata-only-subagent",
             model: "anthropic/claude-sonnet-4-6",
             subagents: {
-              model: { fallbacks: [] },
+              model: { timeoutMs: 1_000 },
             },
           },
         ],
@@ -1048,9 +941,9 @@ describe("resolveAgentConfig", () => {
     });
     expect(resolveSubagentModelConfigSelection({ cfg, agentId: "subagent-model" })).toEqual({
       primary: "kimi/kimi-code",
-      fallbacks: ["openai/gpt-5.4"],
+      fallbacks: ["openai-codex/gpt-5.4"],
     });
-    expect(resolveSubagentModelConfigSelection({ cfg, agentId: "fallback-only-subagent" })).toBe(
+    expect(resolveSubagentModelConfigSelection({ cfg, agentId: "metadata-only-subagent" })).toBe(
       "anthropic/claude-sonnet-4-6",
     );
     expect(resolveSubagentModelConfigSelection({ cfg, agentId: "default-subagent" })).toBe(

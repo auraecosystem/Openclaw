@@ -27,11 +27,10 @@ execution:
   kind: flow
   summary: Verify a restart-triggering config change flips capability inventory and the same session successfully uses the newly restored tool after wake-up.
   config:
+    setupPrompt: "Capability flip setup: acknowledge this setup so restart wake-up has a route."
     imagePrompt: "Capability flip image check: generate a QA lighthouse image in this turn right now. Do not acknowledge first, do not promise future work, and do not stop before using image_generate. Final reply must include the MEDIA path."
     imagePromptSnippet: "Capability flip image check"
     deniedTool: image_generate
-    imageTurnTimeoutMs: 120000
-    mediaPathTimeoutMs: 30000
 ```
 
 ```yaml qa-flow
@@ -84,6 +83,15 @@ steps:
               args:
                 - ref: env
                 - 60000
+            - call: runAgentPrompt
+              args:
+                - ref: env
+                - sessionKey:
+                    ref: sessionKey
+                  message:
+                    expr: config.setupPrompt
+                  timeoutMs:
+                    expr: liveTurnTimeoutMs(env, 30000)
             - call: readEffectiveTools
               saveAs: beforeTools
               args:
@@ -127,7 +135,7 @@ steps:
                 - lambda:
                     async: true
                     expr: "(() => readEffectiveTools(env, sessionKey).then((tools) => (tools.has('image_generate') ? tools : undefined)))()"
-                - expr: liveTurnTimeoutMs(env, config.imageTurnTimeoutMs)
+                - expr: liveTurnTimeoutMs(env, 45000)
                 - 500
             - set: imageStartedAtMs
               value:
@@ -144,7 +152,7 @@ steps:
                   message:
                     expr: config.imagePrompt
                   timeoutMs:
-                    expr: liveTurnTimeoutMs(env, config.imageTurnTimeoutMs)
+                    expr: liveTurnTimeoutMs(env, 45000)
             - try:
                 actions:
                   - call: resolveGeneratedImagePath
@@ -157,7 +165,7 @@ steps:
                         startedAtMs:
                           ref: imageStartedAtMs
                         timeoutMs:
-                          expr: liveTurnTimeoutMs(env, config.mediaPathTimeoutMs)
+                          expr: liveTurnTimeoutMs(env, 15000)
                 catch:
                   - set: mediaPath
                     value: ""
@@ -171,7 +179,7 @@ steps:
                       - lambda:
                           params: [candidate]
                           expr: "candidate.conversation.id === 'qa-operator' && (String(candidate.text ?? '').includes('MEDIA:') || /media failed|image generation failed/i.test(String(candidate.text ?? '')))"
-                      - expr: liveTurnTimeoutMs(env, config.imageTurnTimeoutMs)
+                      - expr: liveTurnTimeoutMs(env, 45000)
                   - set: imageReplyText
                     value:
                       expr: "String(imageReply.text ?? '')"

@@ -83,9 +83,7 @@ describe("Zalo reply-once lifecycle", () => {
 
     try {
       await withServer(
-        (req, res) => {
-          void monitor.route.handler(req, res);
-        },
+        (req, res) => monitor.route.handler(req, res),
         async (baseUrl) => {
           const { first, replay } = await postWebhookReplay({
             baseUrl,
@@ -147,9 +145,7 @@ describe("Zalo reply-once lifecycle", () => {
 
     try {
       await withServer(
-        (req, res) => {
-          void monitor.route.handler(req, res);
-        },
+        (req, res) => monitor.route.handler(req, res),
         async (baseUrl) => {
           const { first, replay } = await postWebhookReplay({
             baseUrl,

@@ -5,7 +5,6 @@ const pluginRegistryMocks = vi.hoisted(() => ({
   loadPluginManifestRegistryForPluginRegistry: vi.fn(),
   loadPluginRegistrySnapshot: vi.fn(() => ({ plugins: [] })),
   loadPluginMetadataSnapshot: vi.fn(),
-  resolvePluginMetadataSnapshot: vi.fn(),
 }));
 
 vi.mock("./manifest-registry-installed.js", () => ({
@@ -27,12 +26,10 @@ vi.mock("../plugins/plugin-registry.js", () => ({
 
 vi.mock("./plugin-metadata-snapshot.js", () => ({
   loadPluginMetadataSnapshot: pluginRegistryMocks.loadPluginMetadataSnapshot,
-  resolvePluginMetadataSnapshot: pluginRegistryMocks.resolvePluginMetadataSnapshot,
 }));
 
 vi.mock("../plugins/plugin-metadata-snapshot.js", () => ({
   loadPluginMetadataSnapshot: pluginRegistryMocks.loadPluginMetadataSnapshot,
-  resolvePluginMetadataSnapshot: pluginRegistryMocks.resolvePluginMetadataSnapshot,
 }));
 
 vi.resetModules();
@@ -69,10 +66,6 @@ function setManifestPlugins(plugins: Array<Record<string, unknown>>) {
     plugins,
     manifestRegistry: { plugins },
   });
-  pluginRegistryMocks.resolvePluginMetadataSnapshot.mockImplementation(
-    (params?: { pluginMetadataSnapshot?: unknown }) =>
-      params?.pluginMetadataSnapshot ?? pluginRegistryMocks.loadPluginMetadataSnapshot(params),
-  );
 }
 
 function expectResolvedProviderAuthChoices(params: {
@@ -113,11 +106,6 @@ describe("provider auth choice manifest helpers", () => {
       plugins: [],
       manifestRegistry: { plugins: [] },
     });
-    pluginRegistryMocks.resolvePluginMetadataSnapshot.mockReset();
-    pluginRegistryMocks.resolvePluginMetadataSnapshot.mockImplementation(
-      (params?: { pluginMetadataSnapshot?: unknown }) =>
-        params?.pluginMetadataSnapshot ?? pluginRegistryMocks.loadPluginMetadataSnapshot(params),
-    );
     resetProviderAuthAliasMapCacheForTest();
   });
 

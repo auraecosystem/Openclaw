@@ -32,7 +32,7 @@ function buildDeps(cfg: OpenClawConfig, _runtime?: PluginRuntime): MSTeamsMessag
     cfg,
     runtime: { error: vi.fn() } as unknown as MSTeamsMessageHandlerDeps["runtime"],
     appId: "test-app",
-    app: {} as MSTeamsMessageHandlerDeps["app"],
+    adapter: {} as MSTeamsMessageHandlerDeps["adapter"],
     tokenProvider: { getAccessToken: vi.fn(async () => "token") },
     textLimit: 4000,
     mediaMaxBytes: 1024 * 1024,

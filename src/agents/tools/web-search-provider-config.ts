@@ -1,6 +1,5 @@
 import { resolvePluginWebSearchConfig } from "../../config/plugin-web-search-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { isLegacyWebSearchProviderConfigKey } from "../../config/web-search-legacy-provider-keys.js";
 
 export function getTopLevelCredentialValue(searchConfig?: Record<string, unknown>): unknown {
   return searchConfig?.apiKey;
@@ -53,22 +52,13 @@ export function mergeScopedSearchConfig(
     !Array.isArray(searchConfig[key])
       ? (searchConfig[key] as Record<string, unknown>)
       : {};
-  const next: Record<string, unknown> = { ...searchConfig };
-  const existingDescriptor = searchConfig
-    ? Object.getOwnPropertyDescriptor(searchConfig, key)
-    : undefined;
-  const shouldHideRuntimeInjectedLegacyShape =
-    isLegacyWebSearchProviderConfigKey(key) && existingDescriptor === undefined;
-
-  Object.defineProperty(next, key, {
-    value: {
+  const next: Record<string, unknown> = {
+    ...searchConfig,
+    [key]: {
       ...currentScoped,
       ...pluginConfig,
     },
-    enumerable: !shouldHideRuntimeInjectedLegacyShape,
-    configurable: true,
-    writable: true,
-  });
+  };
 
   if (options?.mirrorApiKeyToTopLevel && pluginConfig.apiKey !== undefined) {
     next.apiKey = pluginConfig.apiKey;

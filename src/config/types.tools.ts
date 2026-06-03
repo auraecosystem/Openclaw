@@ -1,7 +1,6 @@
-import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { ChatType } from "../channels/chat-type.js";
 import type { SafeBinProfileFixture } from "../infra/exec-safe-bin-policy.js";
-import type { AgentModelConfig } from "./types.agents-shared.js";
+import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type { AgentElevatedAllowFromConfig, SessionSendPolicyAction } from "./types.base.js";
 import type { MemoryQmdIndexPath } from "./types.memory.js";
 import type { ConfiguredProviderRequest } from "./types.provider-request.js";
@@ -299,11 +298,9 @@ export type GroupToolPolicyBySenderConfig = Record<string, GroupToolPolicyConfig
 export type ExecToolConfig = {
   /** Exec host routing (default: auto). */
   host?: "auto" | "sandbox" | "gateway" | "node";
-  /** Normalized exec policy mode. Prefer this over raw security/ask knobs. */
-  mode?: "deny" | "allowlist" | "ask" | "auto" | "full";
-  /** Exec security mode (default: full; sandbox host defaults to deny). */
+  /** Exec security mode (default: deny). */
   security?: "deny" | "allowlist" | "full";
-  /** Exec ask mode (default: off). */
+  /** Exec ask mode (default: on-miss). */
   ask?: "off" | "on-miss" | "always";
   /** Default node binding for exec.host=node (node id/name). */
   node?: string;
@@ -322,13 +319,6 @@ export type ExecToolConfig = {
   safeBinTrustedDirs?: string[];
   /** Optional custom safe-bin profiles for entries in tools.exec.safeBins. */
   safeBinProfiles?: Record<string, SafeBinProfileFixture>;
-  /** Model-backed reviewer used by tools.exec.mode=auto before falling back to human approval. */
-  reviewer?: {
-    /** Optional reviewer model override (provider/model or agent model config). */
-    model?: AgentModelConfig;
-    /** Reviewer timeout in milliseconds (default: 30000). */
-    timeoutMs?: number;
-  };
   /** Default time (ms) before an exec command auto-backgrounds. */
   backgroundMs?: number;
   /** Default timeout (seconds) before auto-killing exec commands. */
@@ -369,17 +359,6 @@ export type FsToolsConfig = {
   workspaceOnly?: boolean;
 };
 
-export type SessionsSpawnToolsConfig = {
-  attachments?: {
-    /** Enable inline attachments for sessions_spawn. */
-    enabled?: boolean;
-    maxTotalBytes?: number;
-    maxFiles?: number;
-    maxFileBytes?: number;
-    retainOnSessionKeep?: boolean;
-  };
-};
-
 export type AgentToolsConfig = {
   /** Base tool profile applied before allow/deny lists. */
   profile?: ToolProfileId;
@@ -391,8 +370,6 @@ export type AgentToolsConfig = {
   byProvider?: Record<string, ToolPolicyConfig>;
   /** Per-sender tool policy overrides keyed by sender identity. */
   toolsBySender?: GroupToolPolicyBySenderConfig;
-  /** Per-agent code mode override; merges over the top-level tools.codeMode config. */
-  codeMode?: CodeModeConfig;
   /** Per-agent elevated exec gate (can only further restrict global tools.elevated). */
   elevated?: {
     /** Enable or disable elevated mode for this agent (default: true). */
@@ -711,10 +688,10 @@ export type ToolsConfig = {
   toolSearch?: ToolSearchConfig;
   /** Generic code mode: expose exec/wait and hide normal tools behind a QuickJS catalog bridge. */
   codeMode?: CodeModeConfig;
-  /** sessions_spawn tool configuration. */
-  sessions_spawn?: SessionsSpawnToolsConfig;
   /** Sub-agent tool policy defaults (deny wins). */
   subagents?: {
+    /** Default model selection for spawned sub-agents (string or {primary,fallbacks}). */
+    model?: string | { primary?: string; fallbacks?: string[] };
     tools?: {
       allow?: string[];
       /** Additional allowlist entries merged into allow and/or default sub-agent denylist. */

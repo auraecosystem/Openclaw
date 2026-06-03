@@ -205,19 +205,17 @@ describe("nextcloud talk core", () => {
     });
 
     try {
-      const {
-        generateNextcloudTalkSignature: generateNextcloudTalkSignatureLocal,
-        verifyNextcloudTalkSignature: verifyNextcloudTalkSignatureLocal,
-      } = await import("./signature.js");
+      const { generateNextcloudTalkSignature, verifyNextcloudTalkSignature } =
+        await import("./signature.js");
       const body = JSON.stringify({ hello: "world" });
-      const generated = generateNextcloudTalkSignatureLocal({
+      const generated = generateNextcloudTalkSignature({
         body,
         secret: "secret-123",
       });
       const shortSignature = generated.signature.slice(0, 12);
 
       expect(
-        verifyNextcloudTalkSignatureLocal({
+        verifyNextcloudTalkSignature({
           signature: shortSignature,
           random: generated.random,
           body,

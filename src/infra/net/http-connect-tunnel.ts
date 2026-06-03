@@ -1,9 +1,7 @@
 import * as net from "node:net";
 import * as tls from "node:tls";
-import { resolveTimerTimeoutMs } from "@openclaw/normalization-core/number-coercion";
 import type { ManagedProxyTlsOptions } from "./proxy/proxy-tls.js";
 
-/** Parameters for opening an APNs HTTP/2 tunnel through an HTTP(S) forward proxy. */
 export type HttpConnectTunnelParams = {
   proxyUrl: URL;
   proxyTls?: ManagedProxyTlsOptions;
@@ -13,7 +11,6 @@ export type HttpConnectTunnelParams = {
 };
 
 const MAX_CONNECT_RESPONSE_HEADER_BYTES = 16 * 1024;
-const MIN_CONNECT_TIMEOUT_MS = 1;
 
 type ProxySocket = net.Socket | tls.TLSSocket;
 type ConnectResponseBuffer = Buffer;
@@ -98,8 +95,6 @@ function readProxyConnectResponse(
 
   const responseHeader = nextBuffer.subarray(0, bodyOffset).toString("latin1");
   const statusLine = responseHeader.split("\r\n", 1)[0] ?? "";
-  // CONNECT can coalesce response headers and first tunneled bytes. Preserve
-  // those bytes so the target TLS handshake sees the stream from byte zero.
   const tunneledBytes =
     nextBuffer.length > bodyOffset ? nextBuffer.subarray(bodyOffset) : undefined;
   return {
@@ -116,7 +111,6 @@ function isSuccessfulConnectStatusLine(statusLine: string): boolean {
 
 function connectToProxy(proxy: URL, proxyTls: ManagedProxyTlsOptions | undefined): ProxySocket {
   const proxyHost = resolveProxyHost(proxy);
-  // TLS SNI cannot be an IP literal; omit it for IP-addressed HTTPS proxies.
   const proxyServername = net.isIP(proxyHost) === 0 ? proxyHost : undefined;
   const connectOptions = {
     host: proxyHost,
@@ -165,14 +159,11 @@ class HttpConnectTunnelAttempt {
   }
 
   private startTimeout(): void {
-    const timeoutMs =
-      this.params.timeoutMs === undefined || this.params.timeoutMs <= 0
-        ? undefined
-        : resolveTimerTimeoutMs(this.params.timeoutMs, MIN_CONNECT_TIMEOUT_MS);
-    if (timeoutMs !== undefined) {
+    const timeoutMs = this.params.timeoutMs;
+    if (timeoutMs && Number.isFinite(timeoutMs) && timeoutMs > 0) {
       this.timeout = setTimeout(() => {
-        this.fail(new Error(`Proxy CONNECT timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+        this.fail(new Error(`Proxy CONNECT timed out after ${Math.trunc(timeoutMs)}ms`));
+      }, Math.trunc(timeoutMs));
     }
   }
 
@@ -214,8 +205,6 @@ class HttpConnectTunnelAttempt {
     this.clearTimer();
     this.cleanupProxyListeners();
     this.cleanupTargetTlsListeners();
-    // Failure may happen during either CONNECT or target TLS setup. Destroy both
-    // sockets so half-open proxy tunnels do not leak into the process.
     this.targetTlsSocket?.destroy();
     this.proxySocket?.destroy();
     this.reject(formatTunnelFailure(this.params.proxyUrl, err));
@@ -316,7 +305,6 @@ class HttpConnectTunnelAttempt {
   };
 }
 
-/** Opens a TLS-over-CONNECT tunnel and verifies the target negotiated HTTP/2. */
 export async function openHttpConnectTunnel(
   params: HttpConnectTunnelParams,
 ): Promise<tls.TLSSocket> {

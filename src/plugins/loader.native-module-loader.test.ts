@@ -125,7 +125,6 @@ describe("createPluginModuleLoader", () => {
 
     loadOpenClawPlugins({
       cache: false,
-      installRecords: {},
       workspaceDir: pluginRoot,
       onlyPluginIds: ["demo"],
       config: {
@@ -155,8 +154,6 @@ describe("createPluginModuleLoader", () => {
 
     const registry = loadOpenClawPlugins({
       cache: false,
-      installRecords: {},
-      onlyPluginIds: ["npm-demo"],
       config: {
         plugins: {
           enabled: true,

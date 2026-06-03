@@ -209,7 +209,7 @@ export class GatewayConnection {
       });
 
       // ---- WebSocket: message ----
-      ws.on("message", (data) => {
+      ws.on("message", async (data) => {
         try {
           const rawData = decodeGatewayMessageData(data);
           const payload = JSON.parse(rawData) as WSPayload;

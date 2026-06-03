@@ -7,13 +7,8 @@
   "contracts": {
     "memoryEmbeddingProviders": ["voyage"]
   },
-  "setup": {
-    "providers": [
-      {
-        "id": "voyage",
-        "envVars": ["VOYAGE_API_KEY"]
-      }
-    ]
+  "providerAuthEnvVars": {
+    "voyage": ["VOYAGE_API_KEY"]
   },
   "configSchema": {
     "type": "object",

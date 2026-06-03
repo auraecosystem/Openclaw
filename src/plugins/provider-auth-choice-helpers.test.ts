@@ -1,23 +1,8 @@
-import { beforeAll, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { applyDefaultModel, applyProviderAuthConfigPatch } from "./provider-auth-choice-helpers.js";
 
 describe("applyProviderAuthConfigPatch", () => {
-  beforeAll(() => {
-    applyProviderAuthConfigPatch(
-      {},
-      {
-        models: {
-          providers: {
-            google: {
-              models: [],
-            },
-          },
-        },
-      },
-    );
-  });
-
   const base = {
     agents: {
       defaults: {
@@ -77,13 +62,13 @@ describe("applyProviderAuthConfigPatch", () => {
         params: { maxTokens: 12000 },
       },
     });
-    expect(Object.hasOwn(models ?? {}, "__proto__")).toBe(false);
+    expect(Object.prototype.hasOwnProperty.call(models, "__proto__")).toBe(false);
     expect(Object.getPrototypeOf(Object.assign({}, models)).polluted).toBeUndefined();
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
   });
 
   it("keeps normal recursive merges for unrelated provider auth patch fields", () => {
-    const baseLocal = {
+    const base = {
       agents: {
         defaults: {
           contextPruning: {
@@ -103,7 +88,7 @@ describe("applyProviderAuthConfigPatch", () => {
       },
     };
 
-    const next = applyProviderAuthConfigPatch(baseLocal, patch);
+    const next = applyProviderAuthConfigPatch(base, patch);
 
     expect(next).toEqual({
       agents: {

@@ -1,4 +1,3 @@
-import { MAX_TIMER_TIMEOUT_MS } from "openclaw/plugin-sdk/number-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { probeZalouser } from "./probe.js";
 import { getZaloUserInfo } from "./zalo-js.js";
@@ -48,7 +47,7 @@ describe("probeZalouser", () => {
 
   it("times out when lookup takes too long", async () => {
     vi.useFakeTimers();
-    mockGetUserInfo.mockReturnValueOnce(new Promise(() => {}));
+    mockGetUserInfo.mockReturnValueOnce(new Promise(() => undefined));
 
     const pending = probeZalouser("default", 10);
     await vi.advanceTimersByTimeAsync(1000);
@@ -57,15 +56,5 @@ describe("probeZalouser", () => {
       ok: false,
       error: "Not authenticated",
     });
-  });
-
-  it("caps oversized lookup timeout before scheduling", async () => {
-    vi.useFakeTimers();
-    mockGetUserInfo.mockReturnValueOnce(new Promise(() => {}));
-    const timeoutSpy = vi.spyOn(globalThis, "setTimeout");
-
-    void probeZalouser("default", Number.MAX_SAFE_INTEGER);
-
-    expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), MAX_TIMER_TIMEOUT_MS);
   });
 });

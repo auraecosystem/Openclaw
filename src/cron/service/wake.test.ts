@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { wake } from "./wake.js";
+import { wake } from "./timer.js";
 
 function createState() {
   const enqueueSystemEvent = vi.fn();

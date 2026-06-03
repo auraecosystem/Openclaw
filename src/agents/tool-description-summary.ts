@@ -1,5 +1,4 @@
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
 
 function normalizeSummaryWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
@@ -54,9 +53,15 @@ export function summarizeToolDescriptionText(params: {
     return "Tool";
   }
 
-  const paragraphs = normalizeStringEntries(raw.split(/\n\s*\n/g));
+  const paragraphs = raw
+    .split(/\n\s*\n/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
   for (const paragraph of paragraphs) {
-    const lines = normalizeStringEntries(paragraph.split("\n"));
+    const lines = paragraph
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
     if (lines.length === 0) {
       continue;
     }

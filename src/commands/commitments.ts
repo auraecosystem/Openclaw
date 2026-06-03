@@ -1,8 +1,3 @@
-import { timestampMsToIsoString } from "@openclaw/normalization-core/number-coercion";
-import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
-import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
-import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
-import { isRich, theme } from "../../packages/terminal-core/src/theme.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import {
   listCommitments,
@@ -13,6 +8,9 @@ import type { CommitmentRecord, CommitmentStatus } from "../commitments/types.js
 import { getRuntimeConfig } from "../config/config.js";
 import { info } from "../globals.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
+import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { sanitizeTerminalText } from "../terminal/safe-text.js";
+import { isRich, theme } from "../terminal/theme.js";
 
 const STATUS_VALUES = new Set<CommitmentStatus>([
   "pending",
@@ -50,7 +48,7 @@ function isActiveCommitment(commitment: CommitmentRecord): boolean {
 }
 
 function formatDue(ms: number): string {
-  return timestampMsToIsoString(ms) ?? "n/a";
+  return new Date(ms).toISOString();
 }
 
 function formatRows(commitments: CommitmentRecord[], rich: boolean): string[] {
@@ -139,7 +137,7 @@ export async function commitmentsDismissCommand(
   opts: { ids: string[]; json?: boolean },
   runtime: RuntimeEnv,
 ): Promise<void> {
-  const ids = normalizeStringEntries(opts.ids);
+  const ids = opts.ids.map((id) => id.trim()).filter(Boolean);
   if (ids.length === 0) {
     runtime.error(
       `At least one commitment id is required. Run ${formatCliCommand("openclaw commitments list")} to choose one.`,

@@ -1,13 +1,8 @@
-import type { StreamFn } from "openclaw/plugin-sdk/agent-core";
-import {
-  streamSimple,
-  type AssistantMessage,
-  type AssistantMessageEvent,
-} from "openclaw/plugin-sdk/llm";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
+import { streamSimple } from "@earendil-works/pi-ai";
 import type { ProviderWrapStreamFnContext } from "openclaw/plugin-sdk/plugin-entry";
 import {
   composeProviderStreamWrappers,
-  createPlainTextToolCallCompatWrapper,
   createToolStreamWrapper,
 } from "openclaw/plugin-sdk/provider-stream-shared";
 
@@ -17,10 +12,6 @@ const XAI_FAST_MODEL_IDS = new Map<string, string>([
   ["grok-4", "grok-4-fast"],
   ["grok-4-0709", "grok-4-fast"],
 ]);
-
-interface MutableAssistantMessageEventStream extends AsyncIterable<AssistantMessageEvent> {
-  result: () => Promise<AssistantMessage>;
-}
 
 function resolveXaiFastModelId(modelId: unknown): string | undefined {
   if (typeof modelId !== "string") {
@@ -61,50 +52,34 @@ function supportsReasoningControls(model: { compat?: unknown; reasoning?: unknow
 
 const TOOL_RESULT_IMAGE_REPLAY_TEXT = "Attached image(s) from tool result:";
 const HTML_ENTITY_RE = /&(?:amp|lt|gt|quot|apos|#39|#x[0-9a-f]+|#\d+);/i;
-const NAMED_HTML_ENTITIES = new Map<string, string>([
-  ["amp", "&"],
-  ["apos", "'"],
-  ["gt", ">"],
-  ["lt", "<"],
-  ["quot", '"'],
-]);
 
 function decodeHtmlEntities(value: string): string {
-  return value.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|#39);/gi, (match, entity) => {
-    const normalized = String(entity).toLowerCase();
-    if (normalized === "#39") {
-      return "'";
-    }
-    if (normalized.startsWith("#x")) {
-      return String.fromCodePoint(Number.parseInt(normalized.slice(2), 16));
-    }
-    if (normalized.startsWith("#")) {
-      return String.fromCodePoint(Number.parseInt(normalized.slice(1), 10));
-    }
-    return NAMED_HTML_ENTITIES.get(normalized) ?? match;
-  });
+  return value
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/gi, (_, dec) => String.fromCodePoint(Number.parseInt(dec, 10)));
 }
 
 function decodeHtmlEntitiesInObject(value: unknown): unknown {
-  switch (typeof value) {
-    case "string":
-      return HTML_ENTITY_RE.test(value) ? decodeHtmlEntities(value) : value;
-    case "object":
-      if (!value) {
-        return value;
-      }
-      if (Array.isArray(value)) {
-        return value.map((entry) => decodeHtmlEntitiesInObject(entry));
-      }
-      return Object.fromEntries(
-        Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-          key,
-          decodeHtmlEntitiesInObject(entry),
-        ]),
-      );
-    default:
-      return value;
+  if (typeof value === "string") {
+    return HTML_ENTITY_RE.test(value) ? decodeHtmlEntities(value) : value;
   }
+  if (Array.isArray(value)) {
+    return value.map(decodeHtmlEntitiesInObject);
+  }
+  if (value && typeof value === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      result[key] = decodeHtmlEntitiesInObject(entry);
+    }
+    return result;
+  }
+  return value;
 }
 
 function visitContentBlocks(
@@ -294,22 +269,10 @@ export function createXaiFastModeWrapper(
   };
 }
 
-function transformXaiStreamEvent(
-  value: unknown,
-  transformMessage: (message: unknown) => void,
-): void {
-  if (!value || typeof value !== "object") {
-    return;
-  }
-  const event = value as { partial?: unknown; message?: unknown };
-  transformMessage(event.partial);
-  transformMessage(event.message);
-}
-
 function wrapStreamMessageObjects(
-  stream: MutableAssistantMessageEventStream,
+  stream: ReturnType<typeof streamSimple>,
   transformMessage: (message: unknown) => void,
-): MutableAssistantMessageEventStream {
+): ReturnType<typeof streamSimple> {
   const originalResult = stream.result.bind(stream);
   stream.result = async () => {
     const message = await originalResult();
@@ -324,8 +287,10 @@ function wrapStreamMessageObjects(
       return {
         async next() {
           const result = await iterator.next();
-          if (!result.done) {
-            transformXaiStreamEvent(result.value, transformMessage);
+          if (!result.done && result.value && typeof result.value === "object") {
+            const event = result.value as { partial?: unknown; message?: unknown };
+            transformMessage(event.partial);
+            transformMessage(event.message);
           }
           return result;
         },
@@ -363,7 +328,6 @@ export function wrapXaiProviderStream(ctx: ProviderWrapStreamFnContext): StreamF
       wrappedStreamFn = createXaiFastModeWrapper(wrappedStreamFn, fastMode);
     }
     wrappedStreamFn = createXaiToolCallArgumentDecodingWrapper(wrappedStreamFn);
-    wrappedStreamFn = createPlainTextToolCallCompatWrapper(wrappedStreamFn);
     return createToolStreamWrapper(wrappedStreamFn, toolStreamEnabled);
   });
 }
