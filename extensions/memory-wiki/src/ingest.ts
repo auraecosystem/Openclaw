@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathExists } from "openclaw/plugin-sdk/security-runtime";
 import { compileMemoryWikiVault } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import { renderMarkdownFence, renderWikiMarkdown, slugifyWikiSegment } from "./markdown.js";
 import { resolveMemoryWikiTimestamp } from "./time.js";
@@ -46,7 +47,7 @@ export async function ingestMemoryWikiSource(params: {
   const title = resolveSourceTitle(sourcePath, params.title);
   const slug = slugifyWikiSegment(title);
   const pageId = `source.${slug}`;
-  const pageRelativePath = path.join("sources", `${slug}.md`);
+  const pageRelativePath = path.join(getDefaultDirForKind(params.config.pageGroups, "source"), `${slug}.md`);
   const pagePath = path.join(params.config.vault.path, pageRelativePath);
   const created = !(await pathExists(pagePath));
   const timestamp = resolveMemoryWikiTimestamp(params.nowMs);

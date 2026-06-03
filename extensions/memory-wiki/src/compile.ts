@@ -27,6 +27,7 @@ import {
   type WikiPageContradictionCluster,
 } from "./claim-health.js";
 import type { ResolvedMemoryWikiConfig, WikiPageKind } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   formatWikiLink,
@@ -881,7 +882,9 @@ async function writeDashboardPage(params: {
   now: Date;
 }): Promise<boolean> {
   const root = await fsRoot(params.rootDir);
-  const original = await root.readText(params.definition.relativePath).catch(() =>
+  const reportDir = getDefaultDirForKind(params.config.pageGroups, "report");
+  const reportRelativePath = path.join(reportDir, path.basename(params.definition.relativePath));
+  const original = await root.readText(reportRelativePath).catch(() =>
     renderWikiMarkdown({
       frontmatter: {
         pageType: "report",
@@ -945,7 +948,7 @@ async function writeDashboardPage(params: {
       body: updatedBody,
     }),
   );
-  await root.write(params.definition.relativePath, rendered);
+  await root.write(reportRelativePath, rendered);
   return true;
 }
 
@@ -969,7 +972,7 @@ async function refreshDashboardPages(params: {
         now,
       })
     ) {
-      updatedFiles.push(path.join(params.rootDir, definition.relativePath));
+      updatedFiles.push(path.join(params.rootDir, getDefaultDirForKind(params.config.pageGroups, "report"), path.basename(definition.relativePath)));
     }
   }
   return updatedFiles;

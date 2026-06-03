@@ -8,6 +8,7 @@ import {
 } from "openclaw/plugin-sdk/memory-host-core";
 import type { OpenClawConfig } from "../api.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import {
   createWikiPageFilename,
@@ -102,7 +103,11 @@ function resolveBridgeTitle(artifact: BridgeArtifact, agentIds: string[]): strin
   return `Memory Bridge (${agentIds.join(", ")}): ${base}`;
 }
 
-function resolveBridgePagePath(params: { workspaceDir: string; relativePath: string }): {
+function resolveBridgePagePath(params: {
+  workspaceDir: string;
+  relativePath: string;
+  config?: ResolvedMemoryWikiConfig;
+}): {
   pageId: string;
   pagePath: string;
   workspaceSlug: string;
@@ -119,7 +124,7 @@ function resolveBridgePagePath(params: { workspaceDir: string; relativePath: str
   const fileName = createWikiPageFilename(`bridge-${workspaceSlug}-${artifactSlug}`);
   return {
     pageId: `source.bridge.${workspaceSlug}.${artifactSlug}`,
-    pagePath: path.join("sources", fileName).replace(/\\/g, "/"),
+    pagePath: path.join(getDefaultDirForKind(params.config?.pageGroups ?? [], "source"), fileName).replace(/\\/g, "/"),
     workspaceSlug,
     artifactSlug,
   };
@@ -136,6 +141,7 @@ async function writeBridgeSourcePage(params: {
   const { pageId, pagePath } = resolveBridgePagePath({
     workspaceDir: params.artifact.workspaceDir,
     relativePath: params.artifact.relativePath,
+    config: params.config,
   });
   const title = resolveBridgeTitle(params.artifact, params.agentIds);
   const renderFingerprint = createHash("sha1")

@@ -11,6 +11,7 @@ import {
 } from "./claim-health.js";
 import { compileMemoryWikiVault } from "./compile.js";
 import type { ResolvedMemoryWikiConfig } from "./config.js";
+import { getDefaultDirForKind } from "./config.js";
 import { appendMemoryWikiLog } from "./log.js";
 import { renderWikiMarkdown, type WikiPageSummary } from "./markdown.js";
 
@@ -325,8 +326,12 @@ function buildLintReportBody(issues: MemoryWikiLintIssue[]): string {
   return lines.join("\n");
 }
 
-async function writeLintReport(rootDir: string, issues: MemoryWikiLintIssue[]): Promise<string> {
-  const reportPath = path.join(rootDir, "reports", "lint.md");
+async function writeLintReport(
+  rootDir: string,
+  issues: MemoryWikiLintIssue[],
+  pageGroups?: ResolvedMemoryWikiConfig["pageGroups"],
+): Promise<string> {
+  const reportPath = path.join(rootDir, getDefaultDirForKind(pageGroups ?? [], "report"), "lint.md");
   const original = await fs.readFile(reportPath, "utf8").catch(() =>
     renderWikiMarkdown({
       frontmatter: {
@@ -355,7 +360,7 @@ export async function lintMemoryWikiVault(
   const compileResult = await compileMemoryWikiVault(config);
   const issues = collectPageIssues(compileResult.pages);
   const issuesByCategory = buildIssuesByCategory(issues);
-  const reportPath = await writeLintReport(config.vault.path, issues);
+  const reportPath = await writeLintReport(config.vault.path, issues, config.pageGroups);
 
   await appendMemoryWikiLog(config.vault.path, {
     type: "lint",
