@@ -349,6 +349,7 @@ describe("createTelegramDraftStream", () => {
       textSnapshot: "Message A partial",
       parseMode: undefined,
       visibleSinceMs: supersededPreview.visibleSinceMs,
+      retain: true,
     });
     expect(typeof supersededPreview.visibleSinceMs).toBe("number");
     expect(Number.isFinite(supersededPreview.visibleSinceMs)).toBe(true);
