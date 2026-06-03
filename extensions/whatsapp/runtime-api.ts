@@ -44,6 +44,7 @@ export {
 } from "./src/auto-reply.js";
 export {
   extractContactContext,
+  extractInteractiveListContext,
   extractLocationData,
   extractMediaPlaceholder,
   extractText,
@@ -65,6 +66,7 @@ export {
 } from "./src/media.js";
 export {
   sendMessageWhatsApp,
+  sendListReplyWhatsApp,
   sendPollWhatsApp,
   sendReactionWhatsApp,
   sendTypingWhatsApp,

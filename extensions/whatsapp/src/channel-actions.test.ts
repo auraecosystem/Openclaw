@@ -1,3 +1,4 @@
+import { Type, type TProperties } from "typebox";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   describeWhatsAppMessageActions,
@@ -22,15 +23,20 @@ vi.mock("./channel-actions.runtime.js", async () => {
   return {
     listWhatsAppAccountIds: hoisted.listWhatsAppAccountIds,
     resolveWhatsAppAccount: hoisted.resolveWhatsAppAccount,
-    createActionGate: (actions?: { reactions?: boolean; polls?: boolean }) => (name: string) => {
-      if (name === "reactions") {
-        return actions?.reactions !== false;
-      }
-      if (name === "polls") {
-        return actions?.polls !== false;
-      }
-      return true;
-    },
+    createActionGate:
+      (actions?: { reactions?: boolean; polls?: boolean; sendMessage?: boolean }) =>
+      (name: string) => {
+        if (name === "reactions") {
+          return actions?.reactions !== false;
+        }
+        if (name === "polls") {
+          return actions?.polls !== false;
+        }
+        if (name === "sendMessage") {
+          return actions?.sendMessage !== false;
+        }
+        return true;
+      },
     resolveWhatsAppReactionLevel: ({
       cfg,
       accountId,
@@ -130,14 +136,52 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
+  });
+
+  it("advertises the canonical list reply schema fields", () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig;
+
+    const schema = describeWhatsAppMessageActions({ cfg, accountId: "default" })?.schema;
+    expect(schema && !Array.isArray(schema) ? schema.actions : undefined).toEqual(["list-reply"]);
+    const properties = schema && !Array.isArray(schema) ? schema.properties : {};
+    const objectSchema = Type.Object(properties as TProperties);
+    expect((properties.selectedRowId as { type?: string } | undefined)?.type).toBe("string");
+    expect((properties.title as { type?: string } | undefined)?.type).toBe("string");
+    expect(objectSchema.required ?? []).not.toContain("selectedRowId");
+    expect(objectSchema.required ?? []).not.toContain("title");
+    expect(properties.rowId).toBeUndefined();
   });
 
   it("returns null when WhatsApp is not configured", () => {
     expect(
       describeWhatsAppMessageActions({ cfg: {} as OpenClawConfig, accountId: "default" }),
     ).toBeNull();
+  });
+
+  it("omits list replies when sendMessage actions are disabled", () => {
+    const cfg = {
+      channels: {
+        whatsapp: {
+          actions: { sendMessage: false },
+          allowFrom: ["*"],
+        },
+      },
+    } as OpenClawConfig;
+
+    expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
+      "react",
+      "poll",
+      "upload-file",
+    ]);
   });
 
   it("omits react when reactionLevel disables agent reactions", () => {
@@ -152,6 +196,7 @@ describe("whatsapp channel action helpers", () => {
 
     expect(describeWhatsAppMessageActions({ cfg, accountId: "default" })?.actions).toEqual([
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -174,6 +219,7 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg, accountId: "work" })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -197,6 +243,7 @@ describe("whatsapp channel action helpers", () => {
     expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual([
       "react",
       "poll",
+      "list-reply",
       "upload-file",
     ]);
   });
@@ -218,6 +265,10 @@ describe("whatsapp channel action helpers", () => {
     } as OpenClawConfig;
     hoisted.listWhatsAppAccountIds.mockReturnValue(["default", "work"]);
 
-    expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual(["poll", "upload-file"]);
+    expect(describeWhatsAppMessageActions({ cfg })?.actions).toEqual([
+      "poll",
+      "list-reply",
+      "upload-file",
+    ]);
   });
 });

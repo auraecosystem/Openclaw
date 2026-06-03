@@ -22,6 +22,7 @@ vi.mock("./text-runtime.js", () => ({
 vi.mock("./inbound/send-api.js", () => ({
   createWebSendApi: () => ({
     sendMessage: mocks.sendMessage,
+    sendListReply: vi.fn(),
   }),
 }));
 
