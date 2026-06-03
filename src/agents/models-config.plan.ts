@@ -100,6 +100,9 @@ export async function resolveProvidersForModelsJsonWithDeps(
 ): Promise<Record<string, ProviderConfig>> {
   const { cfg, agentDir, env } = params;
   const explicitProviders = cfg.models?.providers ?? {};
+  if (cfg.models?.mode === "replace") {
+    return mergeProviders({ implicit: {}, explicit: explicitProviders });
+  }
   const resolveImplicitProvidersImpl = deps?.resolveImplicitProviders ?? resolveImplicitProviders;
   const implicitProviders = await resolveImplicitProvidersImpl({
     agentDir,
