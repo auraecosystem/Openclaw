@@ -1623,6 +1623,12 @@ export async function runWithModelFallback<T>(
     }
     const err = attemptRun.error;
     {
+      // Command-lane watchdog timeouts are not provider/model failures. Do
+      // not burn further fallback candidates on a timeout that already
+      // surfaced the watchdog; abort the chain immediately (see #70903).
+      if (isCommandLaneTaskTimeoutError(err)) {
+        throw err;
+      }
       // Local runtime coordination errors (session write-lock timeout, embedded
       // attempt session takeover) are not provider/model failures. Aborting
       // here prevents the fallback chain from consuming candidates retrying
