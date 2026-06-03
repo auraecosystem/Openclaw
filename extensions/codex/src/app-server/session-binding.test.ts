@@ -59,6 +59,13 @@ describe("codex app-server session binding", () => {
       cwd: tempDir,
       model: "gpt-5.4-codex",
       modelProvider: "openai",
+      collaborationMode: "plan",
+      reasoningEffort: "xhigh",
+      reasoningEffortDefaults: {
+        execute: "medium",
+        plan: "xhigh",
+      },
+      liveProgress: true,
       dynamicToolsFingerprint: "tools-v1",
       userMcpServersFingerprint: "user-mcp-v1",
       nativeHookRelayGeneration: "generation-v1",
@@ -72,11 +79,43 @@ describe("codex app-server session binding", () => {
     expect(binding?.cwd).toBe(tempDir);
     expect(binding?.model).toBe("gpt-5.4-codex");
     expect(binding?.modelProvider).toBe("openai");
+    expect(binding?.collaborationMode).toBe("plan");
+    expect(binding?.reasoningEffort).toBe("xhigh");
+    expect(binding?.reasoningEffortDefaults).toEqual({
+      execute: "medium",
+      plan: "xhigh",
+    });
+    expect(binding?.liveProgress).toBe(true);
     expect(binding?.dynamicToolsFingerprint).toBe("tools-v1");
     expect(binding?.userMcpServersFingerprint).toBe("user-mcp-v1");
     expect(binding?.nativeHookRelayGeneration).toBe("generation-v1");
     const bindingStat = await fs.stat(resolveCodexAppServerBindingPath(sessionFile));
     expect(bindingStat.isFile()).toBe(true);
+  });
+
+  it("ignores invalid collaboration and reasoning values", async () => {
+    const sessionFile = path.join(tempDir, "session.json");
+    await fs.writeFile(
+      resolveCodexAppServerBindingPath(sessionFile),
+      `${JSON.stringify({
+        schemaVersion: 1,
+        threadId: "thread-123",
+        sessionFile,
+        cwd: tempDir,
+        collaborationMode: "execute",
+        reasoningEffort: "maximum",
+        reasoningEffortDefaults: {
+          execute: "maximum",
+          plan: "very-high",
+        },
+      })}\n`,
+    );
+
+    const binding = await readCodexAppServerBinding(sessionFile);
+
+    expect(binding?.collaborationMode).toBeUndefined();
+    expect(binding?.reasoningEffort).toBeUndefined();
+    expect(binding?.reasoningEffortDefaults).toBeUndefined();
   });
 
   it("round-trips plugin app policy context with app ids as record keys", async () => {

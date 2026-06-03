@@ -10,8 +10,11 @@ import {
 } from "./app-server/session-binding.js";
 import {
   setCodexConversationFastMode,
+  setCodexConversationLiveProgress,
   setCodexConversationModel,
   setCodexConversationPermissions,
+  setCodexConversationPlanMode,
+  setCodexConversationReasoningEffort,
 } from "./conversation-control.js";
 
 let tempDir: string;
@@ -62,6 +65,88 @@ describe("codex conversation controls", () => {
     expect(binding?.serviceTier).toBe("priority");
     expect(binding?.approvalPolicy).toBe("on-request");
     expect(binding?.sandbox).toBe("workspace-write");
+  });
+
+  it("persists live progress for later bound turns", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    await writeCodexAppServerBinding(sessionFile, {
+      threadId: "thread-1",
+      cwd: tempDir,
+      model: "gpt-5.4",
+    });
+
+    await expect(setCodexConversationLiveProgress({ sessionFile })).resolves.toBe(
+      "Codex live progress: off.",
+    );
+    await expect(setCodexConversationLiveProgress({ sessionFile, enabled: true })).resolves.toBe(
+      "Codex live progress enabled.",
+    );
+    await expect(setCodexConversationLiveProgress({ sessionFile })).resolves.toBe(
+      "Codex live progress: on.",
+    );
+
+    const binding = await readCodexAppServerBinding(sessionFile);
+    expect(binding?.liveProgress).toBe(true);
+
+    await expect(setCodexConversationLiveProgress({ sessionFile, enabled: false })).resolves.toBe(
+      "Codex live progress disabled.",
+    );
+    const disabledBinding = await readCodexAppServerBinding(sessionFile);
+    expect(disabledBinding?.liveProgress).toBeUndefined();
+  });
+
+  it("persists mode-specific Codex think defaults for later bound turns", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    await writeCodexAppServerBinding(sessionFile, {
+      threadId: "thread-1",
+      cwd: tempDir,
+      model: "gpt-5.4",
+    });
+
+    await expect(setCodexConversationPlanMode({ sessionFile, mode: "plan" })).resolves.toBe(
+      "Codex plan mode enabled. Codex think: default.",
+    );
+    await expect(
+      setCodexConversationReasoningEffort({ sessionFile, effort: "xhigh" }),
+    ).resolves.toBe("Codex plan-mode think set to xhigh.");
+    await expect(
+      setCodexConversationReasoningEffort({
+        sessionFile,
+        parsed: { mode: "execute", effort: "medium", status: false },
+      }),
+    ).resolves.toBe("Codex execute-mode think set to medium.");
+
+    let binding = await readCodexAppServerBinding(sessionFile);
+    expect(binding?.collaborationMode).toBe("plan");
+    expect(binding?.reasoningEffortDefaults).toEqual({ execute: "medium", plan: "xhigh" });
+
+    await expect(
+      setCodexConversationReasoningEffort({ sessionFile, effort: "default" }),
+    ).resolves.toBe("Codex plan-mode think reset to default.");
+
+    binding = await readCodexAppServerBinding(sessionFile);
+    expect(binding?.collaborationMode).toBe("plan");
+    expect(binding?.reasoningEffortDefaults).toEqual({ execute: "medium" });
+  });
+
+  it("reports configured Codex think defaults when a binding has no override", async () => {
+    const sessionFile = path.join(tempDir, "session.jsonl");
+    await writeCodexAppServerBinding(sessionFile, {
+      threadId: "thread-1",
+      cwd: tempDir,
+      model: "gpt-5.4",
+    });
+
+    await expect(
+      setCodexConversationReasoningEffort({
+        sessionFile,
+        pluginConfig: {
+          appServer: {
+            conversationReasoningDefaults: { execute: "medium", plan: "xhigh" },
+          },
+        },
+      }),
+    ).resolves.toBe("Codex think: medium. Execute default: medium. Plan default: xhigh.");
   });
 
   it("does not persist public OpenAI provider after model changes on native auth bindings", async () => {

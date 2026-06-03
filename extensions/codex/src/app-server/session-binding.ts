@@ -14,6 +14,13 @@ import {
 } from "./config.js";
 import type { PluginAppPolicyContext } from "./plugin-thread-config.js";
 import type { CodexServiceTier } from "./protocol.js";
+import {
+  readCodexAppServerConversationReasoningDefaults,
+  readCodexAppServerReasoningEffort,
+  type CodexAppServerCollaborationMode,
+  type CodexAppServerConversationReasoningDefaults,
+  type CodexAppServerReasoningEffort,
+} from "./reasoning-defaults.js";
 
 const CODEX_APP_SERVER_NATIVE_AUTH_PROVIDER = "openai";
 const PUBLIC_OPENAI_MODEL_PROVIDER = "openai";
@@ -36,9 +43,13 @@ export type CodexAppServerThreadBinding = {
   authProfileId?: string;
   model?: string;
   modelProvider?: string;
+  collaborationMode?: CodexAppServerCollaborationMode;
+  reasoningEffort?: CodexAppServerReasoningEffort;
+  reasoningEffortDefaults?: CodexAppServerConversationReasoningDefaults;
   approvalPolicy?: CodexAppServerApprovalPolicy;
   sandbox?: CodexAppServerSandboxMode;
   serviceTier?: CodexServiceTier;
+  liveProgress?: boolean;
   dynamicToolsFingerprint?: string;
   dynamicToolsContainDeferred?: boolean;
   userMcpServersFingerprint?: string;
@@ -52,6 +63,12 @@ export type CodexAppServerThreadBinding = {
   createdAt: string;
   updatedAt: string;
 };
+
+export type {
+  CodexAppServerCollaborationMode,
+  CodexAppServerConversationReasoningDefaults,
+  CodexAppServerReasoningEffort,
+} from "./reasoning-defaults.js";
 
 export type CodexAppServerContextEngineBinding = {
   schemaVersion: 1;
@@ -105,9 +122,15 @@ export async function readCodexAppServerBinding(
         authProfileId,
         modelProvider: typeof parsed.modelProvider === "string" ? parsed.modelProvider : undefined,
       }),
+      collaborationMode: readCollaborationMode(parsed.collaborationMode),
+      reasoningEffort: readCodexAppServerReasoningEffort(parsed.reasoningEffort),
+      reasoningEffortDefaults: readCodexAppServerConversationReasoningDefaults(
+        parsed.reasoningEffortDefaults,
+      ),
       approvalPolicy: readApprovalPolicy(parsed.approvalPolicy),
       sandbox: readSandboxMode(parsed.sandbox),
       serviceTier: readServiceTier(parsed.serviceTier),
+      liveProgress: parsed.liveProgress === true ? true : undefined,
       dynamicToolsFingerprint:
         typeof parsed.dynamicToolsFingerprint === "string"
           ? parsed.dynamicToolsFingerprint
@@ -171,9 +194,13 @@ export async function writeCodexAppServerBinding(
       authProfileId: binding.authProfileId,
       modelProvider: binding.modelProvider,
     }),
+    collaborationMode: binding.collaborationMode,
+    reasoningEffort: binding.reasoningEffort,
+    reasoningEffortDefaults: binding.reasoningEffortDefaults,
     approvalPolicy: binding.approvalPolicy,
     sandbox: binding.sandbox,
     serviceTier: binding.serviceTier,
+    liveProgress: binding.liveProgress === true ? true : undefined,
     dynamicToolsFingerprint: binding.dynamicToolsFingerprint,
     dynamicToolsContainDeferred: binding.dynamicToolsContainDeferred,
     userMcpServersFingerprint: binding.userMcpServersFingerprint,
@@ -191,6 +218,10 @@ export async function writeCodexAppServerBinding(
     resolveCodexAppServerBindingPath(sessionFile),
     `${JSON.stringify(payload, null, 2)}\n`,
   );
+}
+
+function readCollaborationMode(value: unknown): CodexAppServerCollaborationMode | undefined {
+  return value === "default" || value === "plan" ? value : undefined;
 }
 
 function readContextEngineBinding(value: unknown): CodexAppServerContextEngineBinding | undefined {
