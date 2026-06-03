@@ -258,6 +258,7 @@ function treeVisibilityMessage(action: SessionAccessAction): string {
 export function createSessionVisibilityChecker(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  currentSessionKeys?: ReadonlySet<string>;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
   spawnedKeys: Set<string> | null;
@@ -266,6 +267,7 @@ export function createSessionVisibilityChecker(params: {
   const rowChecker = createSessionVisibilityRowChecker({
     action: params.action,
     requesterSessionKey: params.requesterSessionKey,
+    currentSessionKeys: params.currentSessionKeys,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
   });
@@ -292,6 +294,7 @@ function rowOwnedByRequester(row: SessionVisibilityRow, requesterSessionKey: str
 export function createSessionVisibilityRowChecker(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  currentSessionKeys?: ReadonlySet<string>;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): { check: (row: SessionVisibilityRow) => SessionAccessResult } {
@@ -301,7 +304,9 @@ export function createSessionVisibilityRowChecker(params: {
     const targetSessionKey = row.key;
     const targetAgentId = row.agentId ?? resolveAgentIdFromSessionKey(targetSessionKey);
     const isRequesterSession =
-      targetSessionKey === params.requesterSessionKey || targetSessionKey === "current";
+      targetSessionKey === params.requesterSessionKey ||
+      targetSessionKey === "current" ||
+      params.currentSessionKeys?.has(targetSessionKey) === true;
     const isRequesterOwned = rowOwnedByRequester(row, params.requesterSessionKey);
     // Row ownership is stronger than agent ids: ACP children may use a backend
     // agent id while still belonging to the requester that spawned them.
@@ -363,6 +368,7 @@ export function createSessionVisibilityRowChecker(params: {
 export async function createSessionVisibilityGuard(params: {
   action: SessionAccessAction;
   requesterSessionKey: string;
+  currentSessionKeys?: ReadonlySet<string>;
   visibility: SessionToolsVisibility;
   a2aPolicy: AgentToAgentPolicy;
 }): Promise<{
@@ -377,6 +383,7 @@ export async function createSessionVisibilityGuard(params: {
   return createSessionVisibilityChecker({
     action: params.action,
     requesterSessionKey: params.requesterSessionKey,
+    currentSessionKeys: params.currentSessionKeys,
     visibility: params.visibility,
     a2aPolicy: params.a2aPolicy,
     spawnedKeys,
