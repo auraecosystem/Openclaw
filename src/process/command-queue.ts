@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import {
   diagnosticLogger as diag,
   logLaneDequeue,
@@ -95,6 +96,16 @@ type ActiveTaskWaiter = {
   timeout?: ReturnType<typeof setTimeout>;
 };
 
+const gatewayDrainInternalContext = new AsyncLocalStorage<boolean>();
+
+export function isGatewayDrainInternalContext(): boolean {
+  return gatewayDrainInternalContext.getStore() === true;
+}
+
+export function runWithGatewayDrainInternalContext<T>(task: () => Promise<T>): Promise<T> {
+  return gatewayDrainInternalContext.run(true, task);
+}
+
 function isExpectedNonErrorLaneFailure(err: unknown): boolean {
   return err instanceof Error && err.name === "LiveSessionModelSwitchError";
 }
@@ -108,6 +119,7 @@ const COMMAND_QUEUE_STATE_KEY = Symbol.for("openclaw.commandQueueState");
 function getQueueState() {
   const state = resolveGlobalSingleton(COMMAND_QUEUE_STATE_KEY, () => ({
     gatewayDraining: false,
+    gatewayDrainingStartedAt: undefined as number | undefined,
     lanes: new Map<string, LaneState>(),
     activeTaskWaiters: new Set<ActiveTaskWaiter>(),
     nextTaskId: 1,
@@ -401,11 +413,17 @@ function drainLane(lane: string) {
  * `GatewayDrainingError` instead of being silently killed on shutdown.
  */
 export function markGatewayDraining(): void {
-  getQueueState().gatewayDraining = true;
+  const queueState = getQueueState();
+  queueState.gatewayDraining = true;
+  queueState.gatewayDrainingStartedAt = Date.now();
 }
 
 export function isGatewayDraining(): boolean {
   return getQueueState().gatewayDraining;
+}
+
+export function getGatewayDrainingStartedAt(): number | undefined {
+  return getQueueState().gatewayDrainingStartedAt;
 }
 
 export function setCommandLaneConcurrency(lane: string, maxConcurrent: number) {
@@ -425,7 +443,11 @@ export function enqueueCommandInLane<T>(
   opts?: CommandQueueEnqueueOptions,
 ): Promise<T> {
   const queueState = getQueueState();
-  if (queueState.gatewayDraining) {
+  if (
+    queueState.gatewayDraining &&
+    opts?.allowDuringGatewayDrain !== true &&
+    !isGatewayDrainInternalContext()
+  ) {
     return Promise.reject(new GatewayDrainingError());
   }
   const cleaned = normalizeLane(lane);
@@ -541,6 +563,7 @@ export function resetCommandLane(lane: string = CommandLane.Main): number {
 export function resetCommandQueueStateForTest(): void {
   const queueState = getQueueState();
   queueState.gatewayDraining = false;
+  queueState.gatewayDrainingStartedAt = undefined;
   queueState.lanes.clear();
   for (const waiter of Array.from(queueState.activeTaskWaiters)) {
     resolveActiveTaskWaiter(waiter, { drained: true });
@@ -566,6 +589,7 @@ export function resetCommandQueueStateForTest(): void {
 export function resetAllLanes(): void {
   const queueState = getQueueState();
   queueState.gatewayDraining = false;
+  queueState.gatewayDrainingStartedAt = undefined;
   const lanesToDrain: string[] = [];
   for (const state of queueState.lanes.values()) {
     state.generation += 1;

@@ -939,6 +939,7 @@ export function createFollowupRunner(params: {
                 images: queuedImages,
                 imageOrder: queuedImageOrder,
                 allowTransientCooldownProbe: runOptions?.allowTransientCooldownProbe,
+                allowGatewayDrain: effectiveQueued.allowDuringGatewayDrain === true,
                 blockReplyBreak: run.blockReplyBreak,
                 bootstrapPromptWarningSignaturesSeen,
                 bootstrapPromptWarningSignature:
