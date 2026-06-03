@@ -81,6 +81,8 @@ export type GuardedFetchOptions = {
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
   resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
+  /** Preserve ambient Undici env-proxy routing for each eligible URL while keeping strict checks otherwise. */
+  useEnvProxyForEligibleUrls?: boolean;
   retainAuthorizationRedirectHostnameAllowlist?: string[];
   mode?: GuardedFetchMode;
   pinDns?: boolean;
@@ -494,12 +496,13 @@ async function fetchWithSsrFGuardInternal(
         usesTrustedExplicitProxyMode ? false : params.pinDns,
       );
       await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy);
-      const canUseTrustedEnvProxy =
-        mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY &&
-        !dispatcherPolicy &&
-        shouldUseEnvHttpProxyForUrl(parsedUrl.toString());
       const canUseManagedProxy =
         mode === GUARDED_FETCH_MODE.STRICT && isManagedProxyActive() && hasProxyEnvConfigured();
+      const canUseTrustedEnvProxy =
+        (mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY ||
+          (params.useEnvProxyForEligibleUrls === true && !canUseManagedProxy)) &&
+        !dispatcherPolicy &&
+        shouldUseEnvHttpProxyForUrl(parsedUrl.toString());
       const canUseMockedFetchWithoutDns =
         isUsingMockedFetch &&
         params.lookupFn === undefined &&

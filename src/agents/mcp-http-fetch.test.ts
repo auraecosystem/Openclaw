@@ -28,6 +28,13 @@ class TestProxyAgent {
   constructor(readonly options: unknown) {}
 }
 
+function redirectResponse(location: string, status = 302): Response {
+  return new Response(null, {
+    status,
+    headers: { location },
+  });
+}
+
 function getDispatcher(init: unknown): unknown {
   if (typeof init !== "object" || init === null || !("dispatcher" in init)) {
     return undefined;
@@ -123,6 +130,30 @@ describe("MCP HTTP fetch helpers", () => {
     expect(getDispatcherConnectOptions(fetchCalls[0]?.init)).toMatchObject({
       rejectUnauthorized: false,
     });
+    expect(getDispatcher(fetchCalls[1]?.init)).toBeInstanceOf(TestEnvHttpProxyAgent);
+  });
+
+  it("uses configured env proxy for redirected targets after a NO_PROXY first hop", async () => {
+    vi.stubEnv("https_proxy", "http://proxy.example:8080");
+    vi.stubEnv("no_proxy", "mcp.example.com");
+    testGlobal[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
+      Agent: TestAgent,
+      EnvHttpProxyAgent: TestEnvHttpProxyAgent,
+      ProxyAgent: TestProxyAgent,
+      fetch: async (url: string | URL | Request, init?: unknown) => {
+        fetchCalls.push({ url, init });
+        return fetchCalls.length === 1
+          ? redirectResponse("https://auth.example.com/token")
+          : new Response("ok");
+      },
+    };
+    const fetch = buildMcpHttpFetch({
+      resourceUrl: "https://mcp.example.com/mcp",
+    });
+
+    await fetch("https://mcp.example.com/token");
+
+    expect(getDispatcher(fetchCalls[0]?.init)).toBeInstanceOf(TestAgent);
     expect(getDispatcher(fetchCalls[1]?.init)).toBeInstanceOf(TestEnvHttpProxyAgent);
   });
 
