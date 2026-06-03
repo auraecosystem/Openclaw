@@ -1,7 +1,7 @@
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { MsgContext } from "../auto-reply/templating.js";
 import type { GroupKeyResolution } from "../config/sessions/types.js";
 import { normalizeSessionKeyPreservingOpaquePeerIds } from "../sessions/session-key-utils.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 import type { InboundLastRouteUpdate } from "./session.types.js";
 export type { InboundLastRouteUpdate, RecordInboundSession } from "./session.types.js";
 
@@ -65,6 +65,7 @@ export async function recordInboundSession(params: {
   await runtime.updateLastRoute({
     storePath,
     sessionKey: targetSessionKey,
+    route: update.route,
     deliveryContext: {
       channel: update.channel,
       to: update.to,

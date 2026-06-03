@@ -1,3 +1,8 @@
+import {
+  isRecord,
+  normalizeOptionalString as readNonEmptyString,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
+
 export type GatewayLogSentinelKind =
   | "plugin-hook-failure"
   | "plugin-contract-error"
@@ -68,7 +73,9 @@ const GATEWAY_LOG_SENTINEL_RULES: GatewayLogSentinelRule[] = [
     qaImpact: "P0",
     test: (line) =>
       /\bcontracts\.tools\b/iu.test(line) &&
-      /\b(?:missing|invalid|registration|register|manifest|contract|schema|error)\b/iu.test(line),
+      /\b(?:missing|invalid|registration|register|manifest|contract|schema|declare|error)\b/iu.test(
+        line,
+      ),
   },
   {
     kind: "codex-app-server-timeout",
@@ -134,14 +141,6 @@ function lineNumberForOffset(logs: string, offset: number) {
     return 1;
   }
   return logs.slice(0, offset).split(/\r?\n/u).length;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
-
-function readNonEmptyString(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
 function extractMessageText(message: Record<string, unknown>) {

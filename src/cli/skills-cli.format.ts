@@ -1,8 +1,15 @@
-import type { SkillStatusEntry, SkillStatusReport } from "../agents/skills-status.js";
-import { sanitizeForLog, stripAnsi } from "../terminal/ansi.js";
-import { decorativeEmoji, decorativePrefix } from "../terminal/decorative-emoji.js";
-import { getTerminalTableWidth, renderTable } from "../terminal/table.js";
-import { theme } from "../terminal/theme.js";
+import { sanitizeForLog, stripAnsi } from "../../packages/terminal-core/src/ansi.js";
+import {
+  decorativeEmoji,
+  decorativePrefix,
+} from "../../packages/terminal-core/src/decorative-emoji.js";
+import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core/src/table.js";
+import { theme } from "../../packages/terminal-core/src/theme.js";
+import {
+  resolveSkillStatusEntry,
+  type SkillStatusEntry,
+  type SkillStatusReport,
+} from "../skills/discovery/status.js";
 import { shortenHomePath } from "../utils.js";
 import { formatCliCommand } from "./command-format.js";
 
@@ -183,14 +190,20 @@ export function formatSkillInfo(
   skillName: string,
   opts: SkillInfoOptions,
 ): string {
-  const skill = report.skills.find((s) => s.name === skillName || s.skillKey === skillName);
+  const requestedName = skillName.trim();
+  const safeRequestedName = sanitizeJsonString(sanitizeForLog(requestedName));
+  const skill = resolveSkillStatusEntry(report.skills, requestedName);
 
   if (!skill) {
     if (opts.json) {
-      return JSON.stringify({ error: "not found", skill: skillName }, null, 2);
+      return JSON.stringify(
+        sanitizeJsonValue({ error: "not found", skill: requestedName }),
+        null,
+        2,
+      );
     }
     return appendClawHubHint(
-      `Skill "${skillName}" not found. Run \`${formatCliCommand("openclaw skills list")}\` to see available skills.`,
+      `Skill "${safeRequestedName}" not found. Run \`${formatCliCommand("openclaw skills list")}\` to see available skills.`,
       opts.json,
     );
   }

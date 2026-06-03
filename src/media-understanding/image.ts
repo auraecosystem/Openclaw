@@ -1,11 +1,4 @@
-import type {
-  Api,
-  AssistantMessage,
-  Context,
-  Model,
-  ProviderStreamOptions,
-} from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai";
+import { resolveModelAsync } from "../agents/embedded-agent-runner/model.js";
 import { isMinimaxVlmModel, minimaxUnderstandImage } from "../agents/minimax-vlm.js";
 import {
   getApiKeyForModel,
@@ -14,18 +7,21 @@ import {
 } from "../agents/model-auth.js";
 import { normalizeModelRef } from "../agents/model-selection.js";
 import { ensureOpenClawModelsJson } from "../agents/models-config.js";
-import { resolveModelAsync } from "../agents/pi-embedded-runner/model.js";
 import { resolveProviderRequestCapabilities } from "../agents/provider-attribution.js";
 import { registerProviderStreamForModel } from "../agents/provider-stream.js";
 import {
   coerceImageAssistantText,
   hasImageReasoningOnlyResponse,
 } from "../agents/tools/image-tool.helpers.js";
+import { isSecretRef } from "../config/types.secrets.js";
+import { complete } from "../llm/stream.js";
+import type { AssistantMessage, Context, Model, ProviderStreamOptions } from "../llm/types.js";
 import {
   buildCopilotIdeHeaders,
   COPILOT_INTEGRATION_ID,
   resolveCopilotApiToken,
 } from "../plugin-sdk/provider-auth.js";
+import { normalizeMediaProviderId } from "./provider-id.js";
 import type {
   ImageDescriptionRequest,
   ImageDescriptionResult,
@@ -48,11 +44,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isNativeResponsesReasoningPayload(model: Model<Api>): boolean {
+function isNativeResponsesReasoningPayload(model: Model): boolean {
   if (
     model.api !== "openai-responses" &&
     model.api !== "azure-openai-responses" &&
-    model.api !== "openai-codex-responses"
+    model.api !== "openai-chatgpt-responses"
   ) {
     return false;
   }
@@ -65,7 +61,7 @@ function isNativeResponsesReasoningPayload(model: Model<Api>): boolean {
   }).usesKnownNativeOpenAIRoute;
 }
 
-function formatModelInputCapabilities(input: Model<Api>["input"] | undefined): string {
+function formatModelInputCapabilities(input: Model["input"] | undefined): string {
   return input && input.length > 0 ? input.join(", ") : "none";
 }
 
@@ -77,7 +73,7 @@ function removeReasoningInclude(value: unknown): unknown {
   return next.length > 0 ? next : undefined;
 }
 
-function disableReasoningForImageRetryPayload(payload: unknown, model: Model<Api>): unknown {
+function disableReasoningForImageRetryPayload(payload: unknown, model: Model): unknown {
   if (!isRecord(payload)) {
     return undefined;
   }
@@ -143,7 +139,7 @@ async function resolveImageRuntime(params: {
   preferredProfile?: string;
   authStore?: ImageDescriptionRequest["authStore"];
   workspaceDir?: string;
-}): Promise<{ apiKey: string; model: Model<Api> }> {
+}): Promise<{ apiKey: string; model: Model }> {
   const resolvedRef = normalizeModelRef(params.provider, params.model);
   const fastResolved = await resolveModelAsync(
     resolvedRef.provider,
@@ -152,7 +148,7 @@ async function resolveImageRuntime(params: {
     params.cfg,
     {
       allowBundledStaticCatalogFallback: true,
-      skipPiDiscovery: true,
+      skipAgentDiscovery: true,
       skipProviderRuntimeHooks: true,
       ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
     },
@@ -165,7 +161,7 @@ async function resolveImageRuntime(params: {
       params.cfg,
       {
         allowBundledStaticCatalogFallback: true,
-        skipPiDiscovery: true,
+        skipAgentDiscovery: true,
         ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
       },
     );
@@ -191,7 +187,7 @@ async function resolveImageRuntime(params: {
     },
   );
   const { authStorage } = resolved;
-  let { model } = resolved;
+  const { model } = resolved;
   if (!model) {
     throw new Error(`Unknown model: ${resolvedRef.provider}/${resolvedRef.model}`);
   }
@@ -222,9 +218,9 @@ async function prepareResolvedImageRuntime(
     authStore?: ImageDescriptionRequest["authStore"];
     workspaceDir?: string;
   },
-  resolvedModel: Model<Api>,
+  resolvedModel: Model,
   authStorage: Awaited<ReturnType<typeof resolveModelAsync>>["authStorage"],
-): Promise<{ apiKey: string; model: Model<Api> }> {
+): Promise<{ apiKey: string; model: Model }> {
   let model = resolvedModel;
   const apiKeyInfo = await getApiKeyForModel({
     model,
@@ -279,7 +275,7 @@ function buildImageContext(
   };
 }
 
-function shouldPlaceImagePromptInUserContent(model: Model<Api>): boolean {
+function shouldPlaceImagePromptInUserContent(model: Model): boolean {
   // GitHub Copilot models (including Gemini 3.1 Pro Preview) require the
   // prompt text to be in the user message alongside the image. Placing it
   // in a separate system message produces "Request must contain at least
@@ -300,7 +296,7 @@ function shouldPlaceImagePromptInUserContent(model: Model<Api>): boolean {
   );
 }
 
-function buildImageRequestHeaders(model: Model<Api>): Record<string, string> | undefined {
+function buildImageRequestHeaders(model: Model): Record<string, string> | undefined {
   if (model.provider !== "github-copilot") {
     return undefined;
   }
@@ -315,6 +311,7 @@ function buildImageRequestHeaders(model: Model<Api>): Record<string, string> | u
 
 async function describeImagesWithMinimax(params: {
   apiKey: string;
+  provider: string;
   modelId: string;
   modelBaseUrl?: string;
   prompt: string;
@@ -329,6 +326,7 @@ async function describeImagesWithMinimax(params: {
         : params.prompt;
     const text = await minimaxUnderstandImage({
       apiKey: params.apiKey,
+      provider: params.provider,
       prompt,
       imageDataUrl: `data:${image.mime ?? "image/jpeg"};base64,${image.buffer.toString("base64")}`,
       modelBaseUrl: params.modelBaseUrl,
@@ -354,7 +352,51 @@ function resolveConfiguredProviderBaseUrl(
   if (typeof direct?.baseUrl === "string" && direct.baseUrl.trim()) {
     return direct.baseUrl.trim();
   }
+  const normalizedProvider = normalizeMediaProviderId(provider);
+  const normalized = cfg.models?.providers?.[normalizedProvider];
+  if (typeof normalized?.baseUrl === "string" && normalized.baseUrl.trim()) {
+    if (isMinimaxCnAlias(provider) && !isMinimaxCnBaseUrl(normalized.baseUrl)) {
+      return undefined;
+    }
+    return normalized.baseUrl.trim();
+  }
   return undefined;
+}
+
+function isMinimaxCnAlias(provider: string): boolean {
+  const normalized = provider.trim().toLowerCase();
+  return normalized === "minimax-cn" || normalized === "minimax-portal-cn";
+}
+
+function isMinimaxCnBaseUrl(baseUrl: string): boolean {
+  const trimmed = baseUrl.trim();
+  if (!trimmed) {
+    return false;
+  }
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+    return parsed.hostname.toLowerCase() === "api.minimaxi.com";
+  } catch {
+    return false;
+  }
+}
+
+function hasConfiguredProviderApiKey(
+  cfg: ImageDescriptionRequest["cfg"],
+  provider: string,
+): boolean {
+  const apiKey = cfg.models?.providers?.[provider]?.apiKey;
+  return (typeof apiKey === "string" && apiKey.trim().length > 0) || isSecretRef(apiKey);
+}
+
+function resolveMinimaxVlmAuthProvider(
+  cfg: ImageDescriptionRequest["cfg"],
+  provider: string,
+): string {
+  if (!isMinimaxCnAlias(provider) || hasConfiguredProviderApiKey(cfg, provider)) {
+    return provider;
+  }
+  return normalizeMediaProviderId(provider);
 }
 
 async function resolveMinimaxVlmFallbackRuntime(params: {
@@ -365,8 +407,9 @@ async function resolveMinimaxVlmFallbackRuntime(params: {
   profile?: string;
   preferredProfile?: string;
 }): Promise<{ apiKey: string; modelBaseUrl?: string }> {
+  const authProvider = resolveMinimaxVlmAuthProvider(params.cfg, params.provider);
   const auth = await resolveApiKeyForProvider({
-    provider: params.provider,
+    provider: authProvider,
     cfg: params.cfg,
     profileId: params.profile,
     preferredProfile: params.preferredProfile,
@@ -374,7 +417,7 @@ async function resolveMinimaxVlmFallbackRuntime(params: {
     ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
   });
   return {
-    apiKey: requireApiKey(auth, params.provider),
+    apiKey: requireApiKey(auth, authProvider),
     modelBaseUrl: resolveConfiguredProviderBaseUrl(params.cfg, params.provider),
   };
 }
@@ -420,7 +463,7 @@ async function describeImagesWithModelInternal(
   const startedAtMs = Date.now();
   const controller = new AbortController();
   let apiKey: string;
-  let model: Model<Api> | undefined;
+  let model: Model | undefined;
 
   try {
     const resolved = await withImageDescriptionTimeout({
@@ -437,6 +480,7 @@ async function describeImagesWithModelInternal(
     const fallback = await resolveMinimaxVlmFallbackRuntime(params);
     return await describeImagesWithMinimax({
       apiKey: fallback.apiKey,
+      provider: params.provider,
       modelId: params.model,
       modelBaseUrl: fallback.modelBaseUrl,
       prompt,
@@ -448,6 +492,7 @@ async function describeImagesWithModelInternal(
   if (isMinimaxVlmModel(model.provider, model.id)) {
     return await describeImagesWithMinimax({
       apiKey,
+      provider: model.provider,
       modelId: model.id,
       modelBaseUrl: model.baseUrl,
       prompt,
@@ -467,7 +512,7 @@ async function describeImagesWithModelInternal(
     promptInUserContent: shouldPlaceImagePromptInUserContent(model),
   });
 
-  const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens ?? 512);
+  const maxTokens = resolveImageToolMaxTokens(model.maxTokens, params.maxTokens);
   const completeImage = async (onPayload?: ProviderStreamOptions["onPayload"]) => {
     const payloadHandler = composeImageDescriptionPayloadHandlers(onPayload, options.onPayload);
     const timeoutMs = resolveImageDescriptionTimeoutMs(params.timeoutMs, startedAtMs);

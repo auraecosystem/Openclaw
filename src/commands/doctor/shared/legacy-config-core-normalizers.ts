@@ -1,57 +1,22 @@
+import { normalizeProviderId } from "@openclaw/model-catalog-core/provider-id";
 import {
-  legacyRuntimeModelAliasRequiresRuntimePolicy,
-  migrateLegacyRuntimeModelRef,
-} from "../../../agents/model-runtime-aliases.js";
-import { normalizeProviderId } from "../../../agents/provider-id.js";
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
+import { sanitizeForLog } from "../../../../packages/terminal-core/src/ansi.js";
 import { resolveSingleAccountKeysToMove } from "../../../channels/plugins/setup-promotion-helpers.js";
 import { resolveNormalizedProviderModelMaxTokens } from "../../../config/defaults.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { DEFAULT_GOOGLE_API_BASE_URL } from "../../../infra/google-api-base-url.js";
 import { DEFAULT_ACCOUNT_ID } from "../../../routing/session-key.js";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "../../../shared/string-coerce.js";
-import { sanitizeForLog } from "../../../terminal/ansi.js";
 import { hasOwnKey, isRecord } from "./legacy-config-record-shared.js";
 import { isLegacyModelsAddCodexMetadataModel } from "./legacy-models-add-metadata.js";
+import {
+  legacyRuntimeModelAliasRequiresRuntimePolicy,
+  listLegacyRuntimeModelProviderAliases,
+  migrateLegacyRuntimeModelRef,
+} from "./legacy-runtime-model-providers.js";
 export { normalizeLegacyTalkConfig } from "./legacy-talk-config-normalizer.js";
-
-function hasConfiguredChannels(cfg: OpenClawConfig): boolean {
-  const channels = cfg.channels;
-  if (!isRecord(channels)) {
-    return false;
-  }
-  return Object.keys(channels).some((channelId) => channelId !== "defaults");
-}
-
-export function normalizeMissingGroupVisibleRepliesDefault(
-  cfg: OpenClawConfig,
-  changes: string[],
-): OpenClawConfig {
-  const messages = cfg.messages;
-  if (
-    !hasConfiguredChannels(cfg) ||
-    messages?.visibleReplies !== undefined ||
-    messages?.groupChat?.visibleReplies !== undefined
-  ) {
-    return cfg;
-  }
-
-  const nextMessages = messages ? { ...messages } : {};
-  nextMessages.groupChat = {
-    ...messages?.groupChat,
-    visibleReplies: "message_tool",
-  };
-  changes.push(
-    'Set messages.groupChat.visibleReplies to "message_tool" so group/channel replies use the message tool by default.',
-  );
-
-  return {
-    ...cfg,
-    messages: nextMessages,
-  };
-}
 
 export function normalizeLegacyCommandsConfig(
   cfg: OpenClawConfig,
@@ -240,6 +205,32 @@ type SelectedRuntimeRef = {
 
 const LEGACY_CODEX_CLI_RUNTIME_ID = "codex-cli";
 const CODEX_APP_SERVER_RUNTIME_ID = "codex";
+
+function resolveLegacyWholeAgentRuntimePolicy(raw: unknown):
+  | {
+      provider: string;
+      runtime: string;
+      requiresRuntimePolicy: boolean;
+    }
+  | undefined {
+  if (!isRecord(raw)) {
+    return undefined;
+  }
+  const runtime = normalizeOptionalLowercaseString(raw.id);
+  if (!runtime || runtime === "auto" || runtime === "openclaw") {
+    return undefined;
+  }
+  const alias = listLegacyRuntimeModelProviderAliases().find(
+    (entry) => entry.cli && normalizeProviderId(entry.runtime) === runtime,
+  );
+  return alias
+    ? {
+        provider: alias.provider,
+        runtime: alias.runtime,
+        requiresRuntimePolicy: alias.requiresRuntimePolicy,
+      }
+    : undefined;
+}
 
 function migratedRuntimeRequiresPolicy(legacyProvider: string): boolean {
   return legacyRuntimeModelAliasRequiresRuntimePolicy(legacyProvider);
@@ -453,6 +444,44 @@ function ensureSelectedModelRuntimePolicies(
   return { value: next, changed };
 }
 
+function selectedCanonicalModelRefsForRuntimePolicy(
+  rawModel: unknown,
+  provider: string,
+  runtime: string,
+  requiresRuntimePolicy: boolean,
+): SelectedRuntimeRef[] {
+  const refs: SelectedRuntimeRef[] = [];
+  const addRef = (rawRef: unknown) => {
+    if (typeof rawRef !== "string") {
+      return;
+    }
+    const trimmed = rawRef.trim();
+    const slash = trimmed.indexOf("/");
+    if (slash <= 0 || slash >= trimmed.length - 1) {
+      return;
+    }
+    if (normalizeProviderId(trimmed.slice(0, slash)) !== normalizeProviderId(provider)) {
+      return;
+    }
+    refs.push({ ref: trimmed, runtime, requiresRuntimePolicy });
+  };
+
+  if (typeof rawModel === "string") {
+    addRef(rawModel);
+    return refs;
+  }
+  if (!isRecord(rawModel)) {
+    return refs;
+  }
+  addRef(rawModel.primary);
+  if (Array.isArray(rawModel.fallbacks)) {
+    for (const fallback of rawModel.fallbacks) {
+      addRef(fallback);
+    }
+  }
+  return refs;
+}
+
 function normalizeLegacyCodexCliRuntimePinsInModels(
   rawModels: unknown,
   path: string,
@@ -487,6 +516,7 @@ function normalizeLegacyRuntimeAgentContainer(
 ): { value: Record<string, unknown>; changed: boolean } {
   let changed = false;
   const next: Record<string, unknown> = { ...raw };
+  const legacyWholeAgentRuntime = resolveLegacyWholeAgentRuntimePolicy(raw.agentRuntime);
 
   const model = normalizeLegacyRuntimeAgentModelConfig(raw.model);
   if (model.changed) {
@@ -517,6 +547,23 @@ function normalizeLegacyRuntimeAgentContainer(
       next.models = modelRuntimes.value;
       changed = true;
       changes.push(`Selected ${model.selectedRuntime} runtime for ${path}.models entries.`);
+    }
+  }
+
+  if (legacyWholeAgentRuntime) {
+    const selectedRefs = selectedCanonicalModelRefsForRuntimePolicy(
+      next.model ?? raw.model,
+      legacyWholeAgentRuntime.provider,
+      legacyWholeAgentRuntime.runtime,
+      legacyWholeAgentRuntime.requiresRuntimePolicy,
+    );
+    const modelRuntimes = ensureSelectedModelRuntimePolicies(next.models, selectedRefs);
+    if (modelRuntimes.changed) {
+      next.models = modelRuntimes.value;
+      changed = true;
+      changes.push(
+        `Moved ${path}.agentRuntime.id ${legacyWholeAgentRuntime.runtime} to matching ${legacyWholeAgentRuntime.provider} model runtime policy.`,
+      );
     }
   }
 
@@ -1309,7 +1356,47 @@ export function normalizeLegacyOllamaNativeNumCtxParams(
   };
 }
 
-export function normalizeLegacyMistralModelMaxTokens(
+const MISTRAL_MODEL_CACHE_READ_COST_BY_ID: Record<string, number> = {
+  "codestral-latest": 0.03,
+  "devstral-medium-latest": 0.04,
+  "magistral-small": 0.05,
+  "mistral-large-latest": 0.05,
+  "mistral-medium-2508": 0.04,
+  "mistral-medium-3-5": 0.15,
+  "mistral-small-latest": 0.01,
+  "pixtral-large-latest": 0.2,
+};
+
+function normalizeLegacyMistralModelCost<T extends Record<string, unknown>>(params: {
+  providerId: string;
+  model: T;
+  modelId: string;
+  index: number;
+  changes: string[];
+}): { model: T; changed: boolean } {
+  const cost = params.model.cost;
+  if (!isRecord(cost) || cost.cacheRead !== 0) {
+    return { model: params.model, changed: false };
+  }
+
+  const normalizedCacheRead = MISTRAL_MODEL_CACHE_READ_COST_BY_ID[params.modelId.toLowerCase()];
+  if (normalizedCacheRead === undefined) {
+    return { model: params.model, changed: false };
+  }
+
+  params.changes.push(
+    `Normalized models.providers.${sanitizeForLog(params.providerId)}.models[${params.index}].cost.cacheRead (0 → ${normalizedCacheRead}) for Mistral prompt-cache billing.`,
+  );
+  return {
+    model: {
+      ...params.model,
+      cost: { ...cost, cacheRead: normalizedCacheRead },
+    },
+    changed: true,
+  };
+}
+
+export function normalizeLegacyMistralModelDefaults(
   cfg: OpenClawConfig,
   changes: string[],
 ): OpenClawConfig {
@@ -1335,6 +1422,12 @@ export function normalizeLegacyMistralModelMaxTokens(
         return model;
       }
       const modelId = normalizeOptionalString(model.id) ?? "";
+      if (!modelId) {
+        return model;
+      }
+
+      let nextModel = model;
+      let modelChanged = false;
       const contextWindow =
         typeof model.contextWindow === "number" && Number.isFinite(model.contextWindow)
           ? model.contextWindow
@@ -1343,25 +1436,39 @@ export function normalizeLegacyMistralModelMaxTokens(
         typeof model.maxTokens === "number" && Number.isFinite(model.maxTokens)
           ? model.maxTokens
           : null;
-      if (!modelId || contextWindow === null || maxTokens === null) {
-        return model;
+
+      if (contextWindow !== null && maxTokens !== null) {
+        const normalizedMaxTokens = resolveNormalizedProviderModelMaxTokens({
+          providerId,
+          modelId,
+          contextWindow,
+          rawMaxTokens: maxTokens,
+        });
+        if (normalizedMaxTokens !== maxTokens) {
+          nextModel = Object.assign({}, nextModel, { maxTokens: normalizedMaxTokens });
+          modelChanged = true;
+          changes.push(
+            `Normalized models.providers.${providerId}.models[${index}].maxTokens (${maxTokens} → ${normalizedMaxTokens}) to avoid Mistral context-window rejects.`,
+          );
+        }
       }
 
-      const normalizedMaxTokens = resolveNormalizedProviderModelMaxTokens({
+      const costNormalization = normalizeLegacyMistralModelCost({
         providerId,
+        model: nextModel,
         modelId,
-        contextWindow,
-        rawMaxTokens: maxTokens,
+        index,
+        changes,
       });
-      if (normalizedMaxTokens === maxTokens) {
-        return model;
+      if (costNormalization.changed) {
+        nextModel = costNormalization.model;
+        modelChanged = true;
       }
 
-      modelsChanged = true;
-      changes.push(
-        `Normalized models.providers.${providerId}.models[${index}].maxTokens (${maxTokens} → ${normalizedMaxTokens}) to avoid Mistral context-window rejects.`,
-      );
-      return Object.assign({}, model, { maxTokens: normalizedMaxTokens });
+      if (modelChanged) {
+        modelsChanged = true;
+      }
+      return modelChanged ? nextModel : model;
     });
 
     if (!modelsChanged) {

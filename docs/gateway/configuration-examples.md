@@ -51,7 +51,7 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
   messages: {
     visibleReplies: "automatic",
     groupChat: {
-      visibleReplies: "message_tool", // default; visible output requires message(action=send)
+      visibleReplies: "message_tool", // opt-in; visible output requires message(action=send)
       unmentionedInbound: "room_event",
     },
   },
@@ -82,12 +82,11 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
       "anthropic:default": { provider: "anthropic", mode: "api_key" },
       "anthropic:work": { provider: "anthropic", mode: "api_key" },
       "openai:default": { provider: "openai", mode: "api_key" },
-      "openai-codex:personal": { provider: "openai-codex", mode: "oauth" },
+      "openai:personal": { provider: "openai", mode: "oauth" },
     },
     order: {
       anthropic: ["anthropic:default", "anthropic:work"],
-      openai: ["openai:default"],
-      "openai-codex": ["openai-codex:personal"],
+      openai: ["openai:personal", "openai:default"],
     },
   },
 
@@ -111,7 +110,7 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
     ackReactionScope: "group-mentions",
     groupChat: {
       historyLimit: 50,
-      visibleReplies: "message_tool", // prefer message tool; final text falls back for normal requests
+      visibleReplies: "message_tool", // opt in for shared rooms with tool-reliable models
       unmentionedInbound: "room_event",
     },
     queue: {
@@ -385,7 +384,7 @@ Save to `~/.openclaw/openclaw.json` and you can DM the bot from that number.
   cron: {
     enabled: true,
     store: "~/.openclaw/cron/cron.json",
-    maxConcurrentRuns: 2, // cron dispatch + isolated cron agent-turn execution
+    maxConcurrentRuns: 8, // default; cron dispatch + isolated cron agent-turn execution
     sessionRetention: "24h",
     runLog: {
       maxBytes: "2mb",

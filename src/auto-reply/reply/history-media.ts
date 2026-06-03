@@ -1,6 +1,7 @@
-import { mimeTypeFromFilePath } from "../../media/mime.js";
-import { normalizeOptionalString } from "../../shared/string-coerce.js";
-import type { FinalizedMsgContext } from "../templating.js";
+import { mimeTypeFromFilePath } from "@openclaw/media-core/mime";
+import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import type { MsgContext } from "../templating.js";
 import type { HistoryEntry, HistoryMediaEntry } from "./history.types.js";
 
 export const RECENT_HISTORY_IMAGE_TTL_MS = 30 * 60_000;
@@ -41,15 +42,15 @@ function isHistoryImageMedia(media: HistoryMediaEntry): boolean {
 }
 
 function resolveTimestamp(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  return asFiniteNumber(value);
 }
 
-function resolveHistoryEntries(ctx: FinalizedMsgContext): HistoryEntry[] {
+function resolveHistoryEntries(ctx: MsgContext): HistoryEntry[] {
   return Array.isArray(ctx.InboundHistory) ? ctx.InboundHistory : [];
 }
 
 export function resolveRecentInboundHistoryImages(params: {
-  ctx: FinalizedMsgContext;
+  ctx: MsgContext;
   nowMs?: number;
   ttlMs?: number;
   limit?: number;

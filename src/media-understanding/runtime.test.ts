@@ -1,3 +1,4 @@
+import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AuthProfileStore } from "../agents/auth-profiles/types.js";
 import type { OpenClawConfig } from "../config/types.js";
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => {
     getMediaUnderstandingProvider: vi.fn(),
     readLocalFileSafely: vi.fn(async () => ({ buffer: Buffer.from("image") })),
     describeImageWithModel: vi.fn(async () => ({ text: "generic image ok", model: "vision" })),
+    convertHeicToJpeg: vi.fn(async () => Buffer.from("jpeg-normalized")),
     runCapability: vi.fn(),
     cleanup,
     getBuffer,
@@ -55,6 +57,10 @@ vi.mock("./image-runtime.js", () => ({
   describeImageWithModel: mocks.describeImageWithModel,
 }));
 
+vi.mock("../media/media-services.js", () => ({
+  convertHeicToJpeg: mocks.convertHeicToJpeg,
+}));
+
 function requireRunCapabilityRequest(): unknown {
   const [call] = mocks.runCapability.mock.calls;
   if (!call) {
@@ -67,6 +73,10 @@ describe("media-understanding runtime", () => {
   afterEach(() => {
     mocks.buildProviderRegistry.mockReset();
     mocks.createMediaAttachmentCache.mockReset();
+    mocks.createMediaAttachmentCache.mockReturnValue({
+      cleanup: mocks.cleanup,
+      getBuffer: mocks.getBuffer,
+    });
     mocks.normalizeMediaAttachments.mockReset();
     mocks.normalizeMediaProviderId.mockReset();
     mocks.buildMediaUnderstandingRegistry.mockReset();
@@ -75,6 +85,8 @@ describe("media-understanding runtime", () => {
     mocks.readLocalFileSafely.mockResolvedValue({ buffer: Buffer.from("image") });
     mocks.describeImageWithModel.mockReset();
     mocks.describeImageWithModel.mockResolvedValue({ text: "generic image ok", model: "vision" });
+    mocks.convertHeicToJpeg.mockReset();
+    mocks.convertHeicToJpeg.mockResolvedValue(Buffer.from("jpeg-normalized"));
     mocks.runCapability.mockReset();
     mocks.cleanup.mockReset();
     mocks.cleanup.mockResolvedValue(undefined);
@@ -186,6 +198,76 @@ describe("media-understanding runtime", () => {
     expect(mocks.cleanup).toHaveBeenCalledTimes(1);
   });
 
+  it("classifies extensionless remote image URLs before capability filtering", async () => {
+    const output: MediaUnderstandingOutput = {
+      kind: "image.description",
+      attachmentIndex: 0,
+      provider: "vision-plugin",
+      model: "vision-v1",
+      text: "image ok",
+    };
+    mocks.normalizeMediaAttachments.mockReturnValue([
+      { index: 0, url: "https://httpbin.org/image/png", mime: "image/*" },
+    ]);
+    mocks.runCapability.mockResolvedValue({
+      outputs: [output],
+    });
+
+    await expect(
+      describeImageFile({
+        filePath: "https://httpbin.org/image/png",
+        cfg: {} as OpenClawConfig,
+        agentDir: "/tmp/agent",
+      }),
+    ).resolves.toEqual({
+      text: "image ok",
+      provider: "vision-plugin",
+      model: "vision-v1",
+      output,
+    });
+
+    expect(mocks.normalizeMediaAttachments).toHaveBeenCalledWith({
+      MediaUrl: "https://httpbin.org/image/png",
+      MediaType: "image/*",
+    });
+    expect(requireRunCapabilityRequest()).toMatchObject({
+      ctx: {
+        MediaUrl: "https://httpbin.org/image/png",
+        MediaType: "image/*",
+      },
+    });
+  });
+
+  it("does not force typed remote URLs into the requested capability", async () => {
+    const media = [{ index: 0, url: "https://example.com/clip.mp4", mime: "video/mp4" }];
+    mocks.normalizeMediaAttachments.mockReturnValue(media);
+    mocks.runCapability.mockResolvedValue({
+      outputs: [],
+      decision: { capability: "image", outcome: "skipped", attachments: [] },
+    });
+
+    await expect(
+      describeImageFile({
+        filePath: "https://example.com/clip.mp4",
+        cfg: {} as OpenClawConfig,
+        agentDir: "/tmp/agent",
+      }),
+    ).resolves.toMatchObject({
+      text: undefined,
+      output: undefined,
+    });
+
+    expect(mocks.normalizeMediaAttachments).toHaveBeenCalledWith({
+      MediaUrl: "https://example.com/clip.mp4",
+      MediaType: "video/mp4",
+    });
+    expect(requireRunCapabilityRequest()).toMatchObject({
+      capability: "image",
+      ctx: { MediaUrl: "https://example.com/clip.mp4", MediaType: "video/mp4" },
+      media,
+    });
+  });
+
   it("passes workspaceDir through file media understanding requests", async () => {
     const output: MediaUnderstandingOutput = {
       kind: "image.description",
@@ -212,6 +294,49 @@ describe("media-understanding runtime", () => {
     expect(requireRunCapabilityRequest()).toMatchObject({
       agentDir: "/tmp/agent",
       workspaceDir: "/tmp/workspace",
+    });
+  });
+
+  it("passes media scope context through file media understanding requests", async () => {
+    const output: MediaUnderstandingOutput = {
+      kind: "image.description",
+      attachmentIndex: 0,
+      provider: "vision-plugin",
+      model: "vision-v1",
+      text: "image ok",
+    };
+    mocks.normalizeMediaAttachments.mockReturnValue([
+      { index: 0, path: "/tmp/sample.jpg", mime: "image/jpeg" },
+    ]);
+    mocks.runCapability.mockResolvedValue({
+      outputs: [output],
+    });
+
+    await describeImageFile({
+      filePath: "/tmp/sample.jpg",
+      mime: "image/jpeg",
+      cfg: {} as OpenClawConfig,
+      scopeContext: {
+        sessionKey: "agent:main:telegram:dm:123",
+        channel: "telegram",
+        chatType: "private",
+      },
+    });
+
+    expect(mocks.normalizeMediaAttachments).toHaveBeenCalledWith({
+      MediaPath: "/tmp/sample.jpg",
+      MediaType: "image/jpeg",
+      SessionKey: "agent:main:telegram:dm:123",
+      Provider: "telegram",
+      Surface: "telegram",
+      ChatType: "private",
+    });
+    expect(requireRunCapabilityRequest()).toMatchObject({
+      ctx: {
+        SessionKey: "agent:main:telegram:dm:123",
+        Surface: "telegram",
+        ChatType: "private",
+      },
     });
   });
 
@@ -391,10 +516,34 @@ describe("media-understanding runtime", () => {
     });
   });
 
+  it("normalizes local HEIC explicit image descriptions before provider execution", async () => {
+    mocks.readLocalFileSafely.mockResolvedValue({ buffer: Buffer.from("heic-source") });
+
+    await describeImageFileWithModel({
+      filePath: "/tmp/sample.bin",
+      mime: "image/heic; charset=binary",
+      provider: "zai",
+      model: "glm-4.6v",
+      prompt: "Describe it",
+      cfg: {} as OpenClawConfig,
+      agentDir: "/tmp/agent",
+    });
+
+    expect(mocks.convertHeicToJpeg).toHaveBeenCalledWith(Buffer.from("heic-source"));
+    expect(mocks.describeImageWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buffer: Buffer.from("jpeg-normalized"),
+        fileName: "sample.bin",
+        mime: "image/jpeg",
+      }),
+    );
+  });
+
   it("preserves fetched metadata for explicit model URL inputs", async () => {
     await describeImageFileWithModel({
       filePath: "https://example.com/photo.png",
       mediaUrl: "https://example.com/photo.png",
+      mime: "image/*",
       provider: "zai",
       model: "glm-4.6v",
       prompt: "Describe it",
@@ -410,6 +559,82 @@ describe("media-understanding runtime", () => {
       }),
     );
     expect(mocks.cleanup).toHaveBeenCalledTimes(1);
+  });
+
+  it("fetches remote explicit image descriptions through the media attachment cache", async () => {
+    mocks.normalizeMediaAttachments.mockReturnValue([
+      { index: 0, url: "https://httpbin.org/image/png", mime: "image/png" },
+    ]);
+    mocks.buildProviderRegistry.mockReturnValue(
+      new Map([["zai", { id: "zai", capabilities: ["image"] }]]),
+    );
+    mocks.getBuffer.mockResolvedValue({
+      buffer: Buffer.from("remote-png"),
+      fileName: "png",
+      mime: "image/png",
+      size: 10,
+    });
+
+    await expect(
+      describeImageFileWithModel({
+        filePath: "https://httpbin.org/image/png",
+        provider: "zai",
+        model: "glm-4.6v",
+        prompt: "Describe it",
+        cfg: {} as OpenClawConfig,
+        agentDir: "/tmp/agent",
+        timeoutMs: 45_000,
+      }),
+    ).resolves.toEqual({ text: "generic image ok", model: "vision" });
+
+    expect(mocks.readLocalFileSafely).not.toHaveBeenCalled();
+    expect(mocks.normalizeMediaAttachments).toHaveBeenCalledWith({
+      MediaUrl: "https://httpbin.org/image/png",
+      MediaType: "image/*",
+    });
+    expect(mocks.createMediaAttachmentCache).toHaveBeenCalledWith(
+      [{ index: 0, url: "https://httpbin.org/image/png", mime: "image/png" }],
+      { ssrfPolicy: undefined },
+    );
+    expect(mocks.getBuffer).toHaveBeenCalledWith({
+      attachmentIndex: 0,
+      maxBytes: 10 * 1024 * 1024,
+      timeoutMs: 45_000,
+    });
+    expect(mocks.describeImageWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        buffer: Buffer.from("remote-png"),
+        fileName: "png",
+        mime: "image/png",
+        provider: "zai",
+        model: "glm-4.6v",
+      }),
+    );
+    expect(mocks.cleanup).toHaveBeenCalledOnce();
+  });
+
+  it("caps explicit image description timeouts before fetch and provider execution", async () => {
+    mocks.normalizeMediaAttachments.mockReturnValue([
+      { index: 0, url: "https://example.com/photo.png", mime: "image/png" },
+    ]);
+
+    await describeImageFileWithModel({
+      filePath: "https://example.com/photo.png",
+      mediaUrl: "https://example.com/photo.png",
+      provider: "zai",
+      model: "glm-4.6v",
+      prompt: "Describe it",
+      cfg: {} as OpenClawConfig,
+      agentDir: "/tmp/agent",
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+    });
+
+    expect(mocks.getBuffer).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: MAX_TIMER_TIMEOUT_MS }),
+    );
+    expect(mocks.describeImageWithModel).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: MAX_TIMER_TIMEOUT_MS }),
+    );
   });
 
   it("routes direct image description through a provider-specific image hook", async () => {
@@ -539,6 +764,37 @@ describe("media-understanding runtime", () => {
     expect(extractOptions?.authStore).toBe(authStore);
     expect(extractOptions?.timeoutMs).toBe(45_000);
     expect(extractOptions?.agentDir).toBe("/tmp/agent");
+  });
+
+  it("caps explicit structured extraction timeouts before provider execution", async () => {
+    const extractStructured = vi.fn(async () => ({
+      text: "{}",
+      parsed: {},
+      model: "vision-json",
+      provider: "vision-plugin",
+      contentType: "json" as const,
+    }));
+    mocks.getMediaUnderstandingProvider.mockReturnValue({ id: "vision-plugin", extractStructured });
+
+    await extractStructuredWithModel({
+      input: [
+        {
+          type: "image",
+          buffer: Buffer.from("image-bytes"),
+          fileName: "fact.png",
+          mime: "image/png",
+        },
+      ],
+      instructions: "Return JSON.",
+      provider: "vision-plugin",
+      model: "vision-json",
+      timeoutMs: Number.MAX_SAFE_INTEGER,
+      cfg: {} as OpenClawConfig,
+    });
+
+    expect(extractStructured).toHaveBeenCalledWith(
+      expect.objectContaining({ timeoutMs: MAX_TIMER_TIMEOUT_MS }),
+    );
   });
 
   it("rejects text-only structured extraction before provider lookup", async () => {

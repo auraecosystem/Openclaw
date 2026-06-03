@@ -21,25 +21,6 @@ const {
   wakeImageGenerationTaskCompletion,
 } = await import("./image-generate-background.js");
 
-function getDeliveredInternalEvents(): Array<Record<string, unknown>> {
-  const params = announceDeliveryMocks.deliverSubagentAnnouncement.mock.calls.at(0)?.[0] as
-    | { internalEvents?: unknown }
-    | undefined;
-  if (!Array.isArray(params?.internalEvents)) {
-    throw new Error("Expected delivered internal events");
-  }
-  return params.internalEvents as Array<Record<string, unknown>>;
-}
-
-function expectReplyInstructionContains(text: string) {
-  const event = getDeliveredInternalEvents().find(
-    (item) => typeof item.replyInstruction === "string" && item.replyInstruction.includes(text),
-  );
-  if (!event) {
-    throw new Error(`Expected reply instruction containing ${text}`);
-  }
-}
-
 describe("image generate background helpers", () => {
   beforeEach(() => {
     resetMediaBackgroundMocks({
@@ -124,10 +105,12 @@ describe("image generate background helpers", () => {
     });
   });
 
-  it("routes failure completion notices through the message tool", async () => {
+  it("delivers failure completion notices directly", async () => {
     announceDeliveryMocks.deliverSubagentAnnouncement.mockResolvedValue({
-      delivered: true,
+      delivered: false,
       path: "direct",
+      reason: "generated_media_missing",
+      error: "completion agent did not deliver generated media",
     });
     const completion = createMediaCompletionFixture({
       runId: "tool:image_generate:abc",
@@ -141,8 +124,12 @@ describe("image generate background helpers", () => {
       statusLabel: "failed",
     });
 
-    expectReplyInstructionContains("failure summary");
-    expectReplyInstructionContains("the user will NOT see your normal assistant final reply");
-    expectReplyInstructionContains('message tool with action="send"');
+    expect(taskDeliveryRuntimeMocks.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        content: "Image generation failed: provider failed",
+        idempotencyKey: "image_generate:task-123:error:direct",
+      }),
+    );
+    expect(announceDeliveryMocks.deliverSubagentAnnouncement).toHaveBeenCalledTimes(1);
   });
 });

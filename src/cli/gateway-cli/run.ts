@@ -1,6 +1,10 @@
 import fs from "node:fs";
 import { request } from "node:http";
 import path from "node:path";
+import {
+  normalizeOptionalLowercaseString,
+  normalizeOptionalString,
+} from "@openclaw/normalization-core/string-coerce";
 import type { Command } from "commander";
 import type {
   ConfigFileSnapshot,
@@ -9,9 +13,15 @@ import type {
   GatewayTailscaleMode,
   ReadConfigFileSnapshotWithPluginMetadataResult,
 } from "../../config/config.js";
-import { CONFIG_PATH, resolveGatewayPort, resolveStateDir } from "../../config/paths.js";
+import {
+  CONFIG_PATH,
+  normalizeStateDirEnv,
+  resolveGatewayPort,
+  resolveStateDir,
+} from "../../config/paths.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { hasConfiguredSecretInput } from "../../config/types.secrets.js";
+import { GATEWAY_SERVICE_RUNTIME_PID_ENV } from "../../daemon/constants.js";
 import {
   defaultGatewayBindMode,
   isContainerEnvironment,
@@ -29,10 +39,6 @@ import { setConsoleSubsystemFilter, setConsoleTimestampPrefix } from "../../logg
 import { withDiagnosticPhase } from "../../logging/diagnostic-phase.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { defaultRuntime } from "../../runtime.js";
-import {
-  normalizeOptionalLowercaseString,
-  normalizeOptionalString,
-} from "../../shared/string-coerce.js";
 import { formatCliCommand } from "../command-format.js";
 import { inheritOptionFromParent } from "../command-options.js";
 import { formatInvalidConfigPort, formatInvalidPortOption } from "../error-format.js";
@@ -200,10 +206,6 @@ function parseEnumOption<T extends string>(
   return (allowed as readonly string[]).includes(raw) ? (raw as T) : null;
 }
 
-function formatModeChoices(modes: readonly string[]): string {
-  return modes.map((mode) => `"${mode}"`).join("|");
-}
-
 function formatModeErrorList(modes: readonly string[]): string {
   const quoted = modes.map((mode) => `"${mode}"`);
   if (quoted.length === 0) {
@@ -292,7 +294,7 @@ async function readGatewayStartupConfig(params: {
   const { readConfigFileSnapshotWithPluginMetadata } = await import("../../config/config.js");
   const snapshotRead: ReadConfigFileSnapshotWithPluginMetadataResult | null =
     await params.startupTrace.measure("cli.config-snapshot", () =>
-      readConfigFileSnapshotWithPluginMetadata().catch(() => null),
+      readConfigFileSnapshotWithPluginMetadata({ recoverSuspicious: true }).catch(() => null),
     );
   const snapshot: ConfigFileSnapshot | null = snapshotRead?.snapshot ?? null;
   const cfg = snapshot?.config ?? {};
@@ -303,7 +305,7 @@ async function readGatewayStartupConfig(params: {
   };
 }
 
-function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command): GatewayRunOpts {
+export function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command): GatewayRunOpts {
   const resolved: GatewayRunOpts = { ...opts };
 
   for (const key of GATEWAY_RUN_VALUE_KEYS) {
@@ -327,7 +329,9 @@ function resolveGatewayRunOptions(opts: GatewayRunOpts, command?: Command): Gate
 function isGatewayLockError(err: unknown): err is GatewayLockError {
   return (
     err instanceof GatewayLockError ||
-    (!!err && typeof err === "object" && (err as { name?: string }).name === "GatewayLockError")
+    (Boolean(err) &&
+      typeof err === "object" &&
+      (err as { name?: string }).name === "GatewayLockError")
   );
 }
 
@@ -413,7 +417,11 @@ async function runGatewayLoopWithSupervisedLockRecovery(params: {
 
   const now = params.now ?? Date.now;
   const sleep =
-    params.sleep ?? (async (ms: number) => await new Promise((resolve) => setTimeout(resolve, ms)));
+    params.sleep ??
+    (async (ms: number) =>
+      await new Promise((resolve) => {
+        setTimeout(resolve, ms);
+      }));
   const probeHealth = params.probeHealth ?? ((probeParams) => probeGatewayHealthz(probeParams));
   const retryMs = params.retryMs ?? SUPERVISED_GATEWAY_LOCK_RETRY_MS;
   const timeoutMs = params.timeoutMs ?? SUPERVISED_GATEWAY_LOCK_RETRY_TIMEOUT_MS;
@@ -467,8 +475,12 @@ async function maybeWriteGatewayStartupFailureBundle(err: unknown): Promise<void
   }
 }
 
-async function runGatewayCommand(opts: GatewayRunOpts) {
+export async function runGatewayCommand(opts: GatewayRunOpts) {
+  normalizeStateDirEnv(process.env);
   installQaParentWatchdog();
+  if (process.env.OPENCLAW_SERVICE_MARKER?.trim()) {
+    process.env[GATEWAY_SERVICE_RUNTIME_PID_ENV] = String(process.pid);
+  }
   const isDevProfile = normalizeOptionalLowercaseString(process.env.OPENCLAW_PROFILE) === "dev";
   const devMode = Boolean(opts.dev) || isDevProfile;
   if (opts.reset && !devMode) {
@@ -529,7 +541,7 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   const { cfg, snapshot, startupConfigSnapshotRead } = await readGatewayStartupConfig({
     startupTrace,
   });
-  void maybeLogPendingControlUiBuild(cfg).catch((err) => {
+  void maybeLogPendingControlUiBuild(cfg).catch((err: unknown) => {
     gatewayLog.warn(`Control UI asset check failed: ${String(err)}`);
   });
   const portOverride = parsePort(opts.port);
@@ -801,6 +813,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   gatewayLog.info("starting...");
   startupTrace.mark("cli.gateway-loop");
   let startupConfigSnapshotReadForNextStart = startupConfigSnapshotRead;
+  const deferStartupSidecars =
+    isTruthyEnvValue(process.env.OPENCLAW_SKIP_CHANNELS) ||
+    isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS);
   const startLoop = async () =>
     await runGatewayLoop({
       runtime: defaultRuntime,
@@ -817,6 +832,7 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
           ...(startupConfigSnapshotReadForThisStart
             ? { startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart }
             : {}),
+          ...(deferStartupSidecars ? { deferStartupSidecars: true } : {}),
         });
       },
     });
@@ -861,59 +877,9 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
   }
 }
 
-export const __testing = {
+export const testing = {
   normalizeGatewayHealthProbeHost,
   resolveGatewayLockErrorExitCode,
   runGatewayLoopWithSupervisedLockRecovery,
 };
-
-export function addGatewayRunCommand(cmd: Command): Command {
-  return cmd
-    .option("--port <port>", "Port for the gateway WebSocket")
-    .option(
-      "--bind <mode>",
-      'Bind mode ("loopback"|"lan"|"tailnet"|"auto"|"custom"). Defaults to config gateway.bind (or loopback).',
-    )
-    .option(
-      "--token <token>",
-      "Shared token required in connect.params.auth.token (default: OPENCLAW_GATEWAY_TOKEN env if set)",
-    )
-    .option("--auth <mode>", `Gateway auth mode (${formatModeChoices(GATEWAY_AUTH_MODES)})`)
-    .option("--password <password>", "Password for auth mode=password")
-    .option("--password-file <path>", "Read gateway password from file")
-    .option(
-      "--tailscale <mode>",
-      `Tailscale exposure mode (${formatModeChoices(GATEWAY_TAILSCALE_MODES)})`,
-    )
-    .option(
-      "--tailscale-reset-on-exit",
-      "Reset Tailscale serve/funnel configuration on shutdown",
-      false,
-    )
-    .option(
-      "--allow-unconfigured",
-      "Allow gateway start without enforcing gateway.mode=local in config (does not repair config)",
-      false,
-    )
-    .option("--dev", "Create a dev config + workspace if missing (no BOOTSTRAP.md)", false)
-    .option(
-      "--reset",
-      "Reset dev config + credentials + sessions + workspace (requires --dev)",
-      false,
-    )
-    .option("--force", "Kill any existing listener on the target port before starting", false)
-    .option("--verbose", "Verbose logging to stdout/stderr", false)
-    .option(
-      "--cli-backend-logs",
-      "Only show CLI backend logs in the console (includes stdout/stderr)",
-      false,
-    )
-    .option("--claude-cli-logs", "Deprecated alias for --cli-backend-logs", false)
-    .option("--ws-log <style>", 'WebSocket log style ("auto"|"full"|"compact")', "auto")
-    .option("--compact", 'Alias for "--ws-log compact"', false)
-    .option("--raw-stream", "Log raw model stream events to jsonl", false)
-    .option("--raw-stream-path <path>", "Raw stream jsonl path")
-    .action(async (opts, command) => {
-      await runGatewayCommand(resolveGatewayRunOptions(opts, command));
-    });
-}
+export { testing as __testing };

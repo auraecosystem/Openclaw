@@ -1,8 +1,16 @@
 import type { IncomingMessage } from "node:http";
 import net from "node:net";
+import {
+  isCanonicalDottedDecimalIPv4,
+  isIpInCidr,
+  isLoopbackIpAddress,
+  isPrivateOrLoopbackIpAddress,
+  normalizeIpAddress,
+} from "@openclaw/net-policy/ip";
+import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { GatewayBindMode } from "../config/types.gateway.js";
 import {
-  __resetContainerEnvironmentCacheForTest,
+  resetContainerEnvironmentCacheForTest,
   isContainerEnvironment,
 } from "../infra/container-environment.js";
 import {
@@ -12,14 +20,6 @@ import {
   type NetworkInterfacesSnapshot,
 } from "../infra/network-interfaces.js";
 import { pickPrimaryTailnetIPv4 } from "../infra/tailnet.js";
-import {
-  isCanonicalDottedDecimalIPv4,
-  isIpInCidr,
-  isLoopbackIpAddress,
-  isPrivateOrLoopbackIpAddress,
-  normalizeIpAddress,
-} from "../shared/net/ip.js";
-import { normalizeLowercaseStringOrEmpty } from "../shared/string-coerce.js";
 
 /**
  * Pick the primary non-internal IPv4 address (LAN IP).
@@ -244,7 +244,7 @@ export function resolveRequestClientIp(
 
 export {
   isContainerEnvironment,
-  __resetContainerEnvironmentCacheForTest as __resetContainerCacheForTest,
+  resetContainerEnvironmentCacheForTest as __resetContainerCacheForTest,
 };
 
 /**

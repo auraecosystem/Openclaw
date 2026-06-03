@@ -2,6 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { formatErrorMessage } from "openclaw/plugin-sdk/error-runtime";
+import {
+  isRecord,
+  normalizeOptionalString as readNonEmptyString,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
+import { scanDirectReplyTranscriptSentinels } from "./gateway-log-sentinel.js";
 import { liveTurnTimeoutMs } from "./suite-runtime-agent-common.js";
 import type {
   QaRawSessionStoreEntry,
@@ -15,14 +20,86 @@ type QaGatewayCallEnv = Pick<
 >;
 
 const SESSION_STORE_LOCK_RETRY_DELAYS_MS = [1_000, 3_000, 5_000] as const;
+let sessionStoreLockRetryDelaysMsForTests: readonly number[] | undefined;
+
+function resolveSessionStoreLockRetryDelaysMs(): readonly number[] {
+  return sessionStoreLockRetryDelaysMsForTests ?? SESSION_STORE_LOCK_RETRY_DELAYS_MS;
+}
+
+type QaSessionTranscriptSummary = {
+  finalText: string;
+  hasDirectReplySelfMessage: boolean;
+};
 
 function isSessionStoreLockTimeout(error: unknown) {
   const text = formatErrorMessage(error);
   return (
     text.includes("OPENCLAW_SESSION_WRITE_LOCK_TIMEOUT") ||
+    text.includes("OPENCLAW_SESSION_WRITE_LOCK_STALE") ||
     text.includes("SessionWriteLockTimeoutError") ||
-    text.includes("session file locked")
+    text.includes("SessionWriteLockStaleError") ||
+    text.includes("session file locked") ||
+    text.includes("session file lock stale")
   );
+}
+
+function extractSessionTranscriptText(message: Record<string, unknown>) {
+  const rawContent = message.content;
+  if (typeof rawContent === "string") {
+    return rawContent.trim();
+  }
+  if (!Array.isArray(rawContent)) {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const block of rawContent) {
+    if (typeof block === "string") {
+      if (block.trim()) {
+        parts.push(block.trim());
+      }
+      continue;
+    }
+    if (!isRecord(block)) {
+      continue;
+    }
+    const text = readNonEmptyString(block.text);
+    if (text) {
+      parts.push(text);
+      continue;
+    }
+    const content = readNonEmptyString(block.content);
+    if (
+      content &&
+      (block.type === "output_text" || block.type === "text" || block.type === "message")
+    ) {
+      parts.push(content);
+    }
+  }
+  return parts.join("\n").trim();
+}
+
+function extractFinalAssistantTextFromTranscript(transcriptBytes: string) {
+  let finalText = "";
+  for (const line of transcriptBytes.split(/\r?\n/u)) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      const message = isRecord(parsed) && isRecord(parsed.message) ? parsed.message : undefined;
+      if (!message || message.role !== "assistant") {
+        continue;
+      }
+      const text = extractSessionTranscriptText(message);
+      if (text) {
+        finalText = text;
+      }
+    } catch {
+      // Ignore malformed transcript rows and keep QA summary checks deterministic.
+    }
+  }
+  return finalText;
 }
 
 async function callGatewayWithSessionStoreLockRetry<T>(
@@ -31,17 +108,15 @@ async function callGatewayWithSessionStoreLockRetry<T>(
   params: Record<string, unknown>,
   options: { timeoutMs: number },
 ) {
-  for (let attempt = 0; attempt <= SESSION_STORE_LOCK_RETRY_DELAYS_MS.length; attempt += 1) {
+  const retryDelaysMs = resolveSessionStoreLockRetryDelaysMs();
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt += 1) {
     try {
       return (await env.gateway.call(method, params, options)) as T;
     } catch (error) {
-      if (
-        !isSessionStoreLockTimeout(error) ||
-        attempt === SESSION_STORE_LOCK_RETRY_DELAYS_MS.length
-      ) {
+      if (!isSessionStoreLockTimeout(error) || attempt === retryDelaysMs.length) {
         throw error;
       }
-      await sleep(SESSION_STORE_LOCK_RETRY_DELAYS_MS[attempt]);
+      await sleep(retryDelaysMs[attempt]);
     }
   }
   throw new Error(`${method} failed after session store lock retries`);
@@ -106,6 +181,18 @@ async function readSkillStatus(env: QaGatewayCallEnv, agentId = "qa") {
   return payload.skills ?? [];
 }
 
+function resolveQaSessionTranscriptFile(params: {
+  sessionsDir: string;
+  sessionId: string;
+  sessionFile?: string;
+}) {
+  const explicit = readNonEmptyString(params.sessionFile);
+  if (explicit) {
+    return path.isAbsolute(explicit) ? explicit : path.join(params.sessionsDir, explicit);
+  }
+  return path.join(params.sessionsDir, `${params.sessionId}.jsonl`);
+}
+
 async function readRawQaSessionStore(env: Pick<QaSuiteRuntimeEnv, "gateway">) {
   const storePath = path.join(
     env.gateway.tempRoot,
@@ -126,4 +213,45 @@ async function readRawQaSessionStore(env: Pick<QaSuiteRuntimeEnv, "gateway">) {
   }
 }
 
-export { createSession, readEffectiveTools, readRawQaSessionStore, readSkillStatus };
+async function readSessionTranscriptSummary(
+  env: Pick<QaSuiteRuntimeEnv, "gateway">,
+  sessionKey: string,
+): Promise<QaSessionTranscriptSummary> {
+  const normalizedSessionKey = sessionKey.trim();
+  if (!normalizedSessionKey) {
+    throw new Error("readSessionTranscriptSummary requires a session key");
+  }
+  const store = await readRawQaSessionStore(env);
+  const entry = store[normalizedSessionKey];
+  const sessionId = readNonEmptyString(entry?.sessionId);
+  if (!sessionId) {
+    throw new Error(`session transcript entry not found for ${normalizedSessionKey}`);
+  }
+  const sessionsDir = path.join(env.gateway.tempRoot, "state", "agents", "qa", "sessions");
+  const transcriptPath = resolveQaSessionTranscriptFile({
+    sessionsDir,
+    sessionId,
+    sessionFile: entry?.sessionFile,
+  });
+  const transcriptBytes = await fs.readFile(transcriptPath, "utf8");
+  if (!transcriptBytes.trim()) {
+    throw new Error(`session transcript is empty for ${normalizedSessionKey}`);
+  }
+  return {
+    finalText: extractFinalAssistantTextFromTranscript(transcriptBytes),
+    hasDirectReplySelfMessage: scanDirectReplyTranscriptSentinels(transcriptBytes).length > 0,
+  };
+}
+
+export {
+  createSession,
+  readEffectiveTools,
+  readRawQaSessionStore,
+  readSessionTranscriptSummary,
+  readSkillStatus,
+  setSessionStoreLockRetryDelaysMsForTests,
+};
+
+function setSessionStoreLockRetryDelaysMsForTests(delays?: readonly number[]): void {
+  sessionStoreLockRetryDelaysMsForTests = delays;
+}

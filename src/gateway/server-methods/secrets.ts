@@ -1,52 +1,53 @@
-import type { ErrorObject } from "ajv";
-import { isKnownSecretTargetId } from "../../secrets/target-registry.js";
 import {
   ErrorCodes,
   errorShape,
+  type ValidationError,
   validateSecretsResolveParams,
   validateSecretsResolveResult,
-} from "../protocol/index.js";
+} from "../../../packages/gateway-protocol/src/index.js";
+import { isKnownSecretTargetId } from "../../secrets/target-registry.js";
 import type { GatewayRequestHandlers } from "./types.js";
-
-type SecretsResolveProviderOverrides = {
-  webSearch?: string;
-  webFetch?: string;
-};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
 function invalidSecretsResolveField(
-  errors: ErrorObject[] | null | undefined,
-): "commandName" | "targetIds" | "providerOverrides" {
+  errors: ValidationError[] | null | undefined,
+):
+  | "allowedPaths"
+  | "commandName"
+  | "forcedActivePaths"
+  | "optionalActivePaths"
+  | "providerOverrides"
+  | "targetIds" {
+  // Return the offending top-level field only. Detailed validator output can
+  // include paths and schema internals that are not useful for callers here.
   for (const issue of errors ?? []) {
+    const instancePath = issue.instancePath ?? "";
     if (
-      issue.instancePath === "/commandName" ||
-      (issue.instancePath === "" &&
-        String((issue.params as { missingProperty?: unknown })?.missingProperty) === "commandName")
+      instancePath === "/commandName" ||
+      (instancePath === "" &&
+        (String(issue.params?.missingProperty) === "commandName" ||
+          (Array.isArray(issue.params?.requiredProperties) &&
+            issue.params.requiredProperties.includes("commandName"))))
     ) {
       return "commandName";
     }
-    if (issue.instancePath.startsWith("/providerOverrides")) {
+    if (instancePath.startsWith("/allowedPaths")) {
+      return "allowedPaths";
+    }
+    if (instancePath.startsWith("/forcedActivePaths")) {
+      return "forcedActivePaths";
+    }
+    if (instancePath.startsWith("/optionalActivePaths")) {
+      return "optionalActivePaths";
+    }
+    if (instancePath.startsWith("/providerOverrides")) {
       return "providerOverrides";
     }
   }
   return "targetIds";
-}
-
-function normalizeSecretsResolveProviderOverrides(
-  overrides: { webSearch?: string; webFetch?: string } | undefined,
-): SecretsResolveProviderOverrides | undefined {
-  const webSearch = overrides?.webSearch?.trim();
-  const webFetch = overrides?.webFetch?.trim();
-  if (!webSearch && !webFetch) {
-    return undefined;
-  }
-  return {
-    ...(webSearch ? { webSearch } : {}),
-    ...(webFetch ? { webFetch } : {}),
-  };
 }
 
 export function createSecretsHandlers(params: {
@@ -54,7 +55,13 @@ export function createSecretsHandlers(params: {
   resolveSecrets: (params: {
     commandName: string;
     targetIds: string[];
-    providerOverrides?: SecretsResolveProviderOverrides;
+    allowedPaths?: string[];
+    forcedActivePaths?: string[];
+    optionalActivePaths?: string[];
+    providerOverrides?: {
+      webSearch?: string;
+      webFetch?: string;
+    };
   }) => Promise<{
     assignments: Array<{
       path: string;
@@ -100,10 +107,28 @@ export function createSecretsHandlers(params: {
       const targetIds = requestParams.targetIds
         .map((entry) => entry.trim())
         .filter((entry) => entry.length > 0);
-      const providerOverrides = normalizeSecretsResolveProviderOverrides(
-        requestParams.providerOverrides,
-      );
+      // Normalize allow/force/optional path lists before resolving so secrets
+      // code receives policy paths, not UI whitespace artifacts.
+      const allowedPaths = requestParams.allowedPaths
+        ?.map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      const forcedActivePaths = requestParams.forcedActivePaths
+        ?.map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      const optionalActivePaths = requestParams.optionalActivePaths
+        ?.map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      const providerOverrides = {
+        ...(requestParams.providerOverrides?.webSearch?.trim()
+          ? { webSearch: requestParams.providerOverrides.webSearch.trim() }
+          : {}),
+        ...(requestParams.providerOverrides?.webFetch?.trim()
+          ? { webFetch: requestParams.providerOverrides.webFetch.trim() }
+          : {}),
+      };
 
+      // Target ids are a closed registry. Reject unknown ids before resolving
+      // so callers cannot probe arbitrary config paths through this method.
       for (const targetId of targetIds) {
         if (!isKnownSecretTargetId(targetId)) {
           respond(
@@ -122,7 +147,10 @@ export function createSecretsHandlers(params: {
         const result = await params.resolveSecrets({
           commandName,
           targetIds,
-          ...(providerOverrides ? { providerOverrides } : {}),
+          ...(allowedPaths ? { allowedPaths } : {}),
+          ...(forcedActivePaths ? { forcedActivePaths } : {}),
+          ...(optionalActivePaths ? { optionalActivePaths } : {}),
+          ...(Object.keys(providerOverrides).length > 0 ? { providerOverrides } : {}),
         });
         const payload = {
           ok: true,
@@ -131,6 +159,8 @@ export function createSecretsHandlers(params: {
           inactiveRefPaths: result.inactiveRefPaths,
         };
         if (!validateSecretsResolveResult(payload)) {
+          // Validate the returned shape as a final boundary check before any
+          // secret assignment payload leaves the gateway.
           throw new Error("secrets.resolve returned invalid payload.");
         }
         respond(true, payload);

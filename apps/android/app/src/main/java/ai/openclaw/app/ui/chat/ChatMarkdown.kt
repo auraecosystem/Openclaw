@@ -75,10 +75,13 @@ import org.commonmark.node.SoftLineBreak
 import org.commonmark.node.StrongEmphasis
 import org.commonmark.node.ThematicBreak
 import org.commonmark.parser.Parser
+import java.net.URI
+import java.util.Locale
 import org.commonmark.node.Image as MarkdownImage
 import org.commonmark.node.Text as MarkdownTextNode
 
 private const val LIST_INDENT_DP = 14
+private const val DATA_IMAGE_HEADER_MAX_CHARS = 64
 private val dataImageRegex = Regex("^data:image/([a-zA-Z0-9+.-]+);base64,([A-Za-z0-9+/=\\n\\r]+)$")
 
 private val markdownParser: Parser by lazy {
@@ -95,6 +98,7 @@ private val markdownParser: Parser by lazy {
     .build()
 }
 
+/** Renders gateway/chat Markdown using the restricted mobile-safe feature set. */
 @Composable
 fun ChatMarkdown(
   text: String,
@@ -231,6 +235,7 @@ private fun RenderParagraph(
 ) {
   val standaloneImage = remember(paragraph) { standaloneDataImage(paragraph) }
   if (standaloneImage != null) {
+    // Render a paragraph that is only a data image as media, not as an inline alt label.
     InlineBase64Image(base64 = standaloneImage.base64, mimeType = standaloneImage.mimeType)
     return
   }
@@ -547,15 +552,14 @@ private fun AnnotatedString.Builder.appendLinkNode(
       color = linkColor,
       textDecoration = TextDecoration.Underline,
     )
-  if (destination.isEmpty()) {
-    withStyle(linkStyle) {
-      appendInlineNode(
-        link.firstChild,
-        inlineCodeBg = inlineCodeBg,
-        inlineCodeColor = inlineCodeColor,
-        linkColor = linkColor,
-      )
-    }
+  if (destination.isEmpty() || !isSafeMarkdownLinkDestination(destination)) {
+    // Drop unsafe schemes while preserving visible link text.
+    appendInlineNode(
+      link.firstChild,
+      inlineCodeBg = inlineCodeBg,
+      inlineCodeColor = inlineCodeColor,
+      linkColor = linkColor,
+    )
     return
   }
 
@@ -569,6 +573,17 @@ private fun AnnotatedString.Builder.appendLinkNode(
   }
 }
 
+private fun isSafeMarkdownLinkDestination(destination: String): Boolean {
+  val scheme =
+    runCatching { URI(destination).scheme?.lowercase(Locale.US) }
+      .getOrNull()
+      ?: return false
+  // Chat markdown links are user/model supplied; keep navigation limited to
+  // browser-safe web URLs instead of custom Android intents or file URLs.
+  return scheme == "http" || scheme == "https"
+}
+
+/** Builds styled inline markdown for compact chat labels and preview text. */
 internal fun buildChatInlineMarkdown(
   text: String,
   linkColor: Color = Color.Blue,
@@ -606,9 +621,12 @@ private fun standaloneDataImage(paragraph: Paragraph): ParsedDataImage? {
   return parseDataImageDestination(only.destination)
 }
 
-private fun parseDataImageDestination(destination: String?): ParsedDataImage? {
+/** Parses a data:image Markdown destination when it is safe to render inline. */
+internal fun parseDataImageDestination(destination: String?): ParsedDataImage? {
   val raw = destination?.trim().orEmpty()
   if (raw.isEmpty()) return null
+  // Bound the full URI before regex parsing so pasted data images cannot allocate huge match buffers.
+  if (raw.length > CHAT_IMAGE_MAX_BASE64_CHARS + DATA_IMAGE_HEADER_MAX_CHARS) return null
   val match = dataImageRegex.matchEntire(raw) ?: return null
   val subtype =
     match.groupValues
@@ -623,6 +641,7 @@ private fun parseDataImageDestination(destination: String?): ParsedDataImage? {
       ?.trim()
       .orEmpty()
   if (base64.isEmpty()) return null
+  if (base64.length > CHAT_IMAGE_MAX_BASE64_CHARS) return null
   return ParsedDataImage(mimeType = "image/$subtype", base64 = base64)
 }
 
@@ -650,7 +669,10 @@ private data class TableRenderRow(
   val cells: List<AnnotatedString>,
 )
 
-private data class ParsedDataImage(
+/**
+ * Parsed bounded data-image payload for chat markdown rendering.
+ */
+internal data class ParsedDataImage(
   val mimeType: String,
   val base64: String,
 )

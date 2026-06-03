@@ -1,15 +1,15 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import { createExecApprovalForwarder } from "../infra/exec-approval-forwarder.js";
-import { type PluginApprovalRequestPayload } from "../infra/plugin-approvals.js";
+import type { PluginApprovalRequestPayload } from "../infra/plugin-approvals.js";
 import {
   resolveCommandSecretsFromActiveRuntimeSnapshot,
   type CommandSecretAssignment,
 } from "../secrets/runtime-command-secrets.js";
 import {
-  activateSecretsRuntimeSnapshot,
   getActiveSecretsRuntimeSnapshot,
-} from "../secrets/runtime.js";
+  type PreparedSecretsRuntimeSnapshot,
+} from "../secrets/runtime-state.js";
 import { diffConfigPaths } from "./config-diff.js";
 import {
   buildGatewayReloadPlan,
@@ -37,6 +37,13 @@ type GatewayAuxHandlerLogger = {
 type ReloadSecretsResult = {
   warningCount: number;
 };
+
+async function activateSecretsRuntimeSnapshot(
+  snapshot: PreparedSecretsRuntimeSnapshot,
+): Promise<void> {
+  const runtime = await import("../secrets/runtime.js");
+  runtime.activateSecretsRuntimeSnapshot(snapshot);
+}
 
 function createLazyHandler(
   method: string,
@@ -126,7 +133,7 @@ export function createGatewayAuxHandlers(params: {
                 params.sharedGatewaySessionGenerationState.current;
               const previousSharedGatewaySessionGenerationRequired =
                 params.sharedGatewaySessionGenerationState.required;
-              let nextSharedGatewaySessionGeneration = previousSharedGatewaySessionGeneration;
+              let nextSharedGatewaySessionGeneration;
               let sharedGatewaySessionGenerationChanged = false;
               const stoppedChannels: ChannelKind[] = [];
               const restartedChannels = new Set<ChannelKind>();
@@ -193,7 +200,7 @@ export function createGatewayAuxHandlers(params: {
                 }
                 return { warningCount: prepared.warnings.length };
               } catch (err) {
-                activateSecretsRuntimeSnapshot(previousSnapshot);
+                await activateSecretsRuntimeSnapshot(previousSnapshot);
                 params.sharedGatewaySessionGenerationState.current =
                   previousSharedGatewaySessionGeneration;
                 params.sharedGatewaySessionGenerationState.required =
@@ -223,11 +230,23 @@ export function createGatewayAuxHandlers(params: {
               }
             }),
           log: params.log,
-          resolveSecrets: async ({ commandName, targetIds, providerOverrides }) => {
+          resolveSecrets: async ({
+            allowedPaths,
+            commandName,
+            forcedActivePaths,
+            optionalActivePaths,
+            providerOverrides,
+            targetIds,
+          }) => {
             const { assignments, diagnostics, inactiveRefPaths } =
               await resolveCommandSecretsFromActiveRuntimeSnapshot({
                 commandName,
                 targetIds: new Set(targetIds),
+                ...(allowedPaths ? { allowedPaths: new Set(allowedPaths) } : {}),
+                ...(forcedActivePaths ? { forcedActivePaths: new Set(forcedActivePaths) } : {}),
+                ...(optionalActivePaths
+                  ? { optionalActivePaths: new Set(optionalActivePaths) }
+                  : {}),
                 ...(providerOverrides ? { providerOverrides } : {}),
               });
             if (assignments.length === 0) {

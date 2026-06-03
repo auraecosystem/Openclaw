@@ -8,14 +8,26 @@ extension ChannelsSettings {
             self.detail
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .settingsDetailContent()
         .onAppear {
-            self.store.start()
+            self.updateActiveWork(active: self.isActive)
             self.ensureSelection(in: channels)
+        }
+        .onChange(of: self.isActive) { _, active in
+            self.updateActiveWork(active: active)
         }
         .onChange(of: channels) { _, newValue in
             self.ensureSelection(in: newValue)
         }
         .onDisappear { self.store.stop() }
+    }
+
+    private func updateActiveWork(active: Bool) {
+        if active {
+            self.store.start()
+        } else {
+            self.store.stop()
+        }
     }
 
     private func sidebar(channels: [ChannelItem]) -> some View {
@@ -49,7 +61,8 @@ extension ChannelsSettings {
                 self.emptyDetail
             }
         }
-        .frame(minWidth: 460, maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .layoutPriority(1)
     }
 
     private var emptyDetail: some View {
@@ -60,8 +73,8 @@ extension ChannelsSettings {
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 18)
+        .padding(.horizontal, SettingsLayout.detailHorizontalPadding)
+        .padding(.vertical, SettingsLayout.detailVerticalPadding)
     }
 
     private func channelDetail(_ channel: ChannelItem) -> some View {
@@ -73,8 +86,8 @@ extension ChannelsSettings {
                 Spacer(minLength: 0)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 18)
+            .padding(.horizontal, SettingsLayout.detailHorizontalPadding)
+            .padding(.vertical, SettingsLayout.detailVerticalPadding)
         }
     }
 
@@ -124,7 +137,7 @@ extension ChannelsSettings {
                 self.statusBadge(
                     self.channelSummary(channel),
                     color: self.channelTint(channel))
-                Spacer()
+                Spacer(minLength: 12)
                 self.channelHeaderActions(channel)
             }
 

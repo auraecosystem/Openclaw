@@ -1,17 +1,19 @@
 import fs from "node:fs";
 import path from "node:path";
+import { uniqueStrings } from "@openclaw/normalization-core/string-normalization";
+import { sanitizeTerminalText } from "../../packages/terminal-core/src/safe-text.js";
 import { resolveBundledInstallPlanForCatalogEntry } from "../cli/plugin-install-plan.js";
 import { assertConfigWriteAllowedInCurrentMode } from "../config/nix-mode-write-guard.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { parseClawHubPluginSpec } from "../infra/clawhub-spec.js";
-import { parseRegistryNpmSpec } from "../infra/npm-registry-spec.js";
+import { isOpenClawOrgNpmSpec, parseRegistryNpmSpec } from "../infra/npm-registry-spec.js";
 import { normalizeUpdateChannel, resolveRegistryUpdateChannel } from "../infra/update-channels.js";
 import {
   findBundledPluginSourceInMap,
   resolveBundledPluginSources,
 } from "../plugins/bundled-sources.js";
+import { CLAWHUB_INSTALL_ERROR_CODE } from "../plugins/clawhub-error-codes.js";
 import { buildClawHubPluginInstallRecordFields } from "../plugins/clawhub-install-records.js";
-import { CLAWHUB_INSTALL_ERROR_CODE } from "../plugins/clawhub.js";
 import { enablePluginInConfig, type PluginEnableResult } from "../plugins/enable.js";
 import {
   resolveClawHubInstallSpecsForUpdateChannel,
@@ -32,7 +34,6 @@ import {
 import { buildNpmResolutionInstallFields, recordPluginInstall } from "../plugins/installs.js";
 import type { PluginPackageInstall } from "../plugins/manifest.js";
 import type { RuntimeEnv } from "../runtime.js";
-import { sanitizeTerminalText } from "../terminal/safe-text.js";
 import { withTimeout } from "../utils/with-timeout.js";
 import { VERSION } from "../version.js";
 import { t } from "../wizard/i18n/index.js";
@@ -62,10 +63,18 @@ export type OnboardingPluginInstallResult = {
   status: OnboardingPluginInstallStatus;
 };
 
-function shouldFallbackClawHubToNpm(result: { ok: false; code?: string }): boolean {
+function shouldFallbackClawHubToNpm(params: {
+  result: { ok: false; code?: string };
+  npmSpec?: string;
+}): boolean {
+  if (!isOpenClawOrgNpmSpec(params.npmSpec)) {
+    return false;
+  }
   return (
-    result.code === CLAWHUB_INSTALL_ERROR_CODE.PACKAGE_NOT_FOUND ||
-    result.code === CLAWHUB_INSTALL_ERROR_CODE.VERSION_NOT_FOUND
+    params.result.code === CLAWHUB_INSTALL_ERROR_CODE.PACKAGE_NOT_FOUND ||
+    params.result.code === CLAWHUB_INSTALL_ERROR_CODE.VERSION_NOT_FOUND ||
+    params.result.code === CLAWHUB_INSTALL_ERROR_CODE.ARTIFACT_DOWNLOAD_UNAVAILABLE ||
+    params.result.code === CLAWHUB_INSTALL_ERROR_CODE.ARTIFACT_UNAVAILABLE
   );
 }
 
@@ -137,7 +146,7 @@ function hasGitWorkspace(workspaceDir?: string): boolean {
 
 function addPluginLoadPath(cfg: OpenClawConfig, pluginPath: string): OpenClawConfig {
   const existing = cfg.plugins?.load?.paths ?? [];
-  const merged = Array.from(new Set([...existing, pluginPath]));
+  const merged = uniqueStrings([...existing, pluginPath]);
   return {
     ...cfg,
     plugins: {
@@ -1141,7 +1150,7 @@ export async function ensureOnboardingPluginInstalled(params: {
       t("wizard.plugins.installTitle"),
     );
 
-    if (!npmInstallSpec || !shouldFallbackClawHubToNpm(result)) {
+    if (!npmInstallSpec || !shouldFallbackClawHubToNpm({ result, npmSpec: npmInstallSpec })) {
       runtime.error?.(`Plugin install failed: ${sanitizeTerminalText(result.error)}`);
       return {
         cfg: next,
