@@ -1,15 +1,18 @@
 import path from "node:path";
 import { mimeTypeFromFilePath } from "@openclaw/media-core/mime";
 import type { AgentMessage } from "../agents/runtime/index.js";
-import { appendSessionTranscriptMessage } from "../config/sessions/transcript-append.js";
+import {
+  appendTranscriptMessage,
+  publishTranscriptUpdate,
+} from "../config/sessions/session-accessor.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
   applyInputProvenanceToUserMessage,
   type InputProvenance,
   normalizeInputProvenance,
 } from "./input-provenance.js";
-import { emitSessionTranscriptUpdate } from "./transcript-events.js";
 
-type TranscriptAppendConfig = Parameters<typeof appendSessionTranscriptMessage>[0]["config"];
+type TranscriptAppendConfig = OpenClawConfig;
 
 type UserTurnSessionEntry = {
   sessionId: string;
@@ -390,13 +393,17 @@ export async function appendUserTurnTranscriptMessage(
     return undefined;
   }
 
-  const appended = await appendSessionTranscriptMessage({
-    transcriptPath: params.transcriptPath,
+  const transcriptScope = {
+    sessionFile: params.transcriptPath,
+    sessionKey: params.sessionKey ?? "",
+    ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.sessionId ? { sessionId: params.sessionId } : {}),
-    ...(params.cwd ? { cwd: params.cwd } : {}),
-    ...(params.config ? { config: params.config } : {}),
+  };
+  const appended = await appendTranscriptMessage(transcriptScope, {
     message: resolvedMessage,
     idempotencyLookup: "scan",
+    ...(params.cwd ? { cwd: params.cwd } : {}),
+    ...(params.config ? { config: params.config } : {}),
     prepareMessageAfterIdempotencyCheck: (message) =>
       applyBeforeMessageWriteToUserTurn(message, params),
   });
@@ -407,8 +414,7 @@ export async function appendUserTurnTranscriptMessage(
   switch (params.updateMode ?? "inline") {
     case "inline":
       if (appended.appended) {
-        emitSessionTranscriptUpdate({
-          sessionFile: params.transcriptPath,
+        await publishTranscriptUpdate(transcriptScope, {
           ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
           ...(params.agentId ? { agentId: params.agentId } : {}),
           message: appended.message,
