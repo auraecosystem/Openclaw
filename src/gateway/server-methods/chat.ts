@@ -40,6 +40,7 @@ import { runAgentHarnessBeforeMessageWriteHook } from "../../agents/harness/hook
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import type { AgentMessage } from "../../agents/runtime/index.js";
 import { ensureSandboxWorkspaceForSession } from "../../agents/sandbox/context.js";
+import { isSessionsYieldToolResult } from "../../agents/subagent-yield-output.js";
 import { resolveAgentTimeoutMs } from "../../agents/timeout.js";
 import { dispatchInboundMessage } from "../../auto-reply/dispatch.js";
 import { getReplyPayloadMetadata, type ReplyPayload } from "../../auto-reply/reply-payload.js";
@@ -121,8 +122,10 @@ import {
 import {
   isToolHistoryBlockType,
   projectChatDisplayMessage,
+  projectChatDisplayMessages,
   projectRecentChatDisplayMessages,
   resolveEffectiveChatHistoryMaxChars,
+  resolveSessionsYieldMirrorSourceMessageId,
 } from "../chat-display-projection.js";
 import { stripEnvelopeFromMessage } from "../chat-sanitize.js";
 import { augmentChatHistoryWithCliSessionImports } from "../cli-session-history.js";
@@ -2561,6 +2564,33 @@ async function isChatMessageIdVisibleAfterHistoryFilters(params: {
   );
 }
 
+function isSessionsYieldHistoryResult(message: unknown): boolean {
+  return isSessionsYieldToolResult(message, true);
+}
+
+async function projectChatMessageWithHistoryContext(params: {
+  sessionId: string;
+  storePath: string | undefined;
+  sessionFile: string | undefined;
+  messageId: string;
+  sessionStartedAt?: number;
+  maxChars: number;
+}): Promise<Record<string, unknown> | undefined> {
+  const messages = await readSessionMessagesAsync(
+    params.sessionId,
+    params.storePath,
+    params.sessionFile,
+    {
+      mode: "full",
+      reason: "chat.message.get projection context",
+    },
+  );
+  const visibleMessages = dropPreSessionStartAnnouncePairs(messages, params.sessionStartedAt);
+  return projectChatDisplayMessages(visibleMessages, { maxChars: params.maxChars }).find(
+    (message) => readChatHistoryMessageId(message) === params.messageId,
+  );
+}
+
 function dropLocalHistoryOverreadContextMessage(
   messages: unknown[],
   contextMessage: unknown,
@@ -2814,11 +2844,13 @@ export const chatHandlers: GatewayRequestHandlers = {
       return;
     }
 
+    const sourceMessageId = resolveSessionsYieldMirrorSourceMessageId(messageId);
+    const transcriptMessageId = sourceMessageId ?? messageId;
     const resolved = await readSessionMessageByIdAsync(
       sessionId,
       storePath,
       entry?.sessionFile,
-      messageId,
+      transcriptMessageId,
     );
     if (!resolved.found) {
       respond(true, { ok: false, unavailableReason: "not_found" });
@@ -2828,7 +2860,7 @@ export const chatHandlers: GatewayRequestHandlers = {
       sessionId,
       storePath,
       sessionFile: entry?.sessionFile,
-      messageId,
+      messageId: transcriptMessageId,
       sessionStartedAt:
         typeof entry?.sessionStartedAt === "number" ? entry.sessionStartedAt : undefined,
     });
@@ -2843,11 +2875,35 @@ export const chatHandlers: GatewayRequestHandlers = {
 
     const effectiveMaxChars =
       typeof maxChars === "number" ? maxChars : Math.min(MAX_PAYLOAD_BYTES, 1_000_000);
-    const projectedMessage = resolved.message
+    const projectedSingleMessage = resolved.message
       ? projectChatDisplayMessage(resolved.message, {
           maxChars: effectiveMaxChars,
         })
       : undefined;
+    let projectedMessage: Record<string, unknown> | undefined;
+    if (sourceMessageId !== undefined) {
+      projectedMessage = await projectChatMessageWithHistoryContext({
+        sessionId,
+        storePath,
+        sessionFile: entry?.sessionFile,
+        messageId,
+        sessionStartedAt:
+          typeof entry?.sessionStartedAt === "number" ? entry.sessionStartedAt : undefined,
+        maxChars: effectiveMaxChars,
+      });
+    } else if (resolved.message && isSessionsYieldHistoryResult(resolved.message)) {
+      projectedMessage = await projectChatMessageWithHistoryContext({
+        sessionId,
+        storePath,
+        sessionFile: entry?.sessionFile,
+        messageId,
+        sessionStartedAt:
+          typeof entry?.sessionStartedAt === "number" ? entry.sessionStartedAt : undefined,
+        maxChars: effectiveMaxChars,
+      });
+    } else {
+      projectedMessage = projectedSingleMessage;
+    }
     const projected = projectedMessage
       ? augmentChatHistoryWithCanvasBlocks([projectedMessage])[0]
       : undefined;
