@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  getSessionEntry as getConfigRuntimeSessionEntry,
+  listSessionEntries as listConfigRuntimeSessionEntries,
+  readSessionUpdatedAt as readConfigRuntimeSessionUpdatedAt,
   resolveLivePluginConfigObject,
   resolvePluginConfigObject,
   type OpenClawConfig,
 } from "./config-runtime.js";
+import {
+  getSessionEntry,
+  listSessionEntries,
+  readSessionUpdatedAt,
+} from "./session-store-runtime.js";
+
+describe("config-runtime session read exports", () => {
+  it("routes read helpers through the session-store runtime wrapper", () => {
+    expect(getConfigRuntimeSessionEntry).toBe(getSessionEntry);
+    expect(listConfigRuntimeSessionEntries).toBe(listSessionEntries);
+    expect(readConfigRuntimeSessionUpdatedAt).toBe(readSessionUpdatedAt);
+  });
+});
 
 describe("resolvePluginConfigObject", () => {
   it("returns the plugin config object for a configured plugin entry", () => {
