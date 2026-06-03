@@ -50,8 +50,9 @@ describe("isCronRunSessionKey", () => {
     expect(isCronRunSessionKey("agent:main:cron:abc-123:run:def-456:thread:reply")).toBe(true);
   });
 
-  it("does not match base cron session keys", () => {
-    expect(isCronRunSessionKey("agent:main:cron:abc-123")).toBe(false);
+  it("matches isolated cron session keys (no :run: segment)", () => {
+    // Isolated-target cron jobs generate session keys without :run: (#89666)
+    expect(isCronRunSessionKey("agent:main:cron:abc-123")).toBe(true);
   });
 
   it("does not match regular session keys", () => {
