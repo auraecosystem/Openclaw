@@ -425,6 +425,15 @@ function hasPolicyRefreshTargets(
   return policyPluginIds.every((pluginId) => pluginIds.has(pluginId));
 }
 
+function hasPersistedPluginRecordsForInstallRecords(persisted: InstalledPluginIndex): boolean {
+  const installRecordPluginIds = Object.keys(persisted.installRecords ?? {});
+  if (installRecordPluginIds.length === 0) {
+    return true;
+  }
+  const pluginIds = new Set(persisted.plugins.map((plugin) => plugin.pluginId));
+  return installRecordPluginIds.every((pluginId) => pluginIds.has(pluginId));
+}
+
 function canRefreshPersistedPolicyState(
   persisted: InstalledPluginIndex | null,
   params: RefreshInstalledPluginIndexParams & InstalledPluginIndexStoreOptions,
@@ -448,7 +457,10 @@ function canRefreshPersistedPolicyState(
   ) {
     return false;
   }
-  return hasPolicyRefreshTargets(persisted, params.policyPluginIds);
+  return (
+    hasPolicyRefreshTargets(persisted, params.policyPluginIds) &&
+    hasPersistedPluginRecordsForInstallRecords(persisted)
+  );
 }
 
 function refreshPersistedPolicyState(

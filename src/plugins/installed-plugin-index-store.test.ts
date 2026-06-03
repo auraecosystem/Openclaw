@@ -593,6 +593,60 @@ describe("installed plugin index persistence", () => {
     expect(refreshed.plugins.map((plugin) => plugin.pluginId)).toContain("next-demo");
   });
 
+  it("falls back to a source rebuild when persisted plugins omit an installed plugin", async () => {
+    const stateDir = makeTempDir();
+    const pluginDir = path.join(stateDir, "plugins", "demo");
+    fs.mkdirSync(pluginDir, { recursive: true });
+    const candidate = createCandidate(pluginDir);
+    const env = {
+      OPENCLAW_BUNDLED_PLUGINS_DIR: undefined,
+      OPENCLAW_VERSION: "2026.4.25",
+      VITEST: "true",
+    };
+    const initial = await refreshPersistedInstalledPluginIndex({
+      reason: "manual",
+      stateDir,
+      candidates: [candidate],
+      env,
+      installRecords: {
+        demo: {
+          source: "path",
+          installPath: pluginDir,
+        },
+      },
+    });
+    await writePersistedInstalledPluginIndex(
+      {
+        ...initial,
+        plugins: [],
+      },
+      { stateDir },
+    );
+
+    const refreshed = await refreshPersistedInstalledPluginIndex({
+      reason: "policy-changed",
+      stateDir,
+      candidates: [candidate],
+      env,
+      config: {
+        plugins: {
+          entries: {
+            demo: {
+              enabled: false,
+            },
+          },
+        },
+      },
+    });
+
+    expectPluginIds(refreshed, ["demo"]);
+    expectPluginFields(refreshed, "demo", { enabled: false });
+    expectInstallRecord(refreshed, "demo", {
+      source: "path",
+      installPath: pluginDir,
+    });
+  });
+
   it("preserves existing install records when refreshing the manifest cache", async () => {
     const stateDir = makeTempDir();
     await writePersistedInstalledPluginIndex(
