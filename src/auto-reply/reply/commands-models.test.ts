@@ -1,8 +1,12 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { testing as cliBackendsTesting } from "../../agents/cli-backends.js";
+import {
+  testing as cliBackendsTesting,
+  type ResolvedCliBackend,
+} from "../../agents/cli-backends.js";
 import type { ChannelPlugin } from "../../channels/plugins/types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
+import type { CliBackendPlugin } from "../../plugins/types.js";
 import {
   createChannelTestPluginBase,
   createTestRegistry,
@@ -32,31 +36,50 @@ const normalizeProviderModelIdWithRuntimeMock = vi.hoisted(() => vi.fn());
 const MODELS_ADD_DEPRECATED_TEXT =
   "⚠️ /models add is deprecated. Use /models to browse providers and /model to switch models.";
 
-function setFastModelsCliBackendDeps(): void {
+type TestRuntimeCliBackend = ResolvedCliBackend & { pluginId: string };
+
+function defaultRuntimeCliBackends(): TestRuntimeCliBackend[] {
+  return [
+    {
+      id: "claude-cli",
+      pluginId: "claude-cli",
+      modelProvider: "anthropic",
+      config: { command: "claude" },
+      bundleMcp: false,
+    },
+    {
+      id: "google-gemini-cli",
+      pluginId: "google-gemini-cli",
+      modelProvider: "google",
+      config: { command: "gemini" },
+      bundleMcp: false,
+    },
+  ];
+}
+
+function buildSetupRegistry(
+  cliBackends: Array<{ pluginId: string; backend: CliBackendPlugin }> = [],
+) {
+  return {
+    providers: [],
+    cliBackends,
+    configMigrations: [],
+    autoEnableProbes: [],
+    diagnostics: [],
+  };
+}
+
+function setFastModelsCliBackendDeps(
+  params: {
+    runtimeCliBackends?: TestRuntimeCliBackend[];
+    setupCliBackends?: Array<{ pluginId: string; backend: CliBackendPlugin }>;
+  } = {},
+): void {
   cliBackendsTesting.setDepsForTest({
-    resolvePluginSetupRegistry: () => ({
-      providers: [],
-      cliBackends: [],
-      configMigrations: [],
-      autoEnableProbes: [],
-      diagnostics: [],
-    }),
-    resolveRuntimeCliBackends: () => [
-      {
-        id: "claude-cli",
-        pluginId: "claude-cli",
-        modelProvider: "anthropic",
-        config: { command: "claude" },
-        bundleMcp: false,
-      },
-      {
-        id: "google-gemini-cli",
-        pluginId: "google-gemini-cli",
-        modelProvider: "google",
-        config: { command: "gemini" },
-        bundleMcp: false,
-      },
-    ],
+    resolvePluginSetupCliBackend: ({ backend }) =>
+      params.setupCliBackends?.find((entry) => entry.backend.id === backend),
+    resolvePluginSetupRegistry: () => buildSetupRegistry(params.setupCliBackends),
+    resolveRuntimeCliBackends: () => params.runtimeCliBackends ?? defaultRuntimeCliBackends(),
   });
 }
 
@@ -380,7 +403,7 @@ describe("handleModelsCommand", () => {
     expect(result?.reply?.text).not.toContain("- anthropic");
   });
 
-  it("hides bare backwards-compat aliases but surfaces supported CLI runtime providers in /models lists", async () => {
+  it("dedupes implicit CLI runtime providers when canonical providers already list the same models", async () => {
     modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
       { provider: "codex", id: "gpt-5.5", name: "GPT-5.5" },
       { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus" },
@@ -407,10 +430,138 @@ describe("handleModelsCommand", () => {
     expect(result?.reply?.text).toContain("- anthropic (1)");
     expect(result?.reply?.text).toContain("- google (1)");
     expect(result?.reply?.text).toContain("- openai (1)");
-    expect(result?.reply?.text).toContain("- claude-cli (1)");
-    expect(result?.reply?.text).toContain("- google-gemini-cli (1)");
+    expect(result?.reply?.text).not.toContain("- claude-cli (1)");
+    expect(result?.reply?.text).not.toContain("- google-gemini-cli (1)");
     expect(result?.reply?.text).not.toMatch(/^- codex \(/m);
     expect(result?.reply?.text).not.toMatch(/^- codex-cli \(/m);
+  });
+
+  it("preserves explicit CLI runtime provider full-catalog browse", async () => {
+    modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
+      { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus" },
+      { provider: "anthropic", id: "claude-opus-4-7", name: "Claude Opus" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["anthropic", "claude-cli"]);
+
+    const result = await handleModelsCommand(
+      buildParams("/models claude-cli all", {
+        agents: { defaults: { model: { primary: "anthropic/claude-opus-4-7" } } },
+      }),
+      true,
+    );
+
+    expect(result?.reply?.text).toContain("Models (claude-cli)");
+    expect(result?.reply?.text).toContain("- claude-cli/claude-opus-4-7");
+  });
+
+  it("dedupes the CLI runtime alias for a canonical model routed through that runtime", async () => {
+    modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
+      { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus" },
+      { provider: "anthropic", id: "claude-opus-4-7", name: "Claude Opus" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["anthropic", "claude-cli"]);
+
+    const result = await handleModelsCommand(
+      buildParams("/models", {
+        agents: {
+          defaults: {
+            model: { primary: "anthropic/claude-opus-4-7" },
+            models: {
+              "anthropic/claude-opus-4-7": { agentRuntime: { id: "claude-cli" } },
+            },
+          },
+        },
+      }),
+      true,
+    );
+
+    expect(result?.reply?.text).toContain("- anthropic (1)");
+    expect(result?.reply?.text).not.toContain("- claude-cli (1)");
+  });
+
+  it("dedupes runtime-registered custom CLI aliases", async () => {
+    setFastModelsCliBackendDeps({
+      runtimeCliBackends: [
+        ...defaultRuntimeCliBackends(),
+        {
+          id: "acme-cli",
+          pluginId: "acme",
+          modelProvider: "acme",
+          config: { command: "acme" },
+          bundleMcp: false,
+        },
+      ],
+    });
+    modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
+      { provider: "acme-cli", id: "acme-large", name: "Acme Large CLI" },
+      { provider: "acme", id: "acme-large", name: "Acme Large" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["acme", "acme-cli"]);
+
+    const result = await handleModelsCommand(
+      buildParams("/models", {
+        agents: { defaults: { model: { primary: "acme/acme-large" } } },
+      }),
+      true,
+    );
+
+    expect(result?.reply?.text).toContain("- acme (1)");
+    expect(result?.reply?.text).not.toContain("- acme-cli (1)");
+  });
+
+  it("dedupes setup-registered custom CLI aliases", async () => {
+    setFastModelsCliBackendDeps({
+      setupCliBackends: [
+        {
+          pluginId: "setup-llm",
+          backend: {
+            id: "setup-llm-cli",
+            modelProvider: "setup-llm",
+            config: { command: "setup-llm" },
+          },
+        },
+      ],
+    });
+    modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
+      { provider: "setup-llm-cli", id: "setup-large", name: "Setup Large CLI" },
+      { provider: "setup-llm", id: "setup-large", name: "Setup Large" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["setup-llm", "setup-llm-cli"]);
+
+    const result = await handleModelsCommand(
+      buildParams("/models", {
+        agents: { defaults: { model: { primary: "setup-llm/setup-large" } } },
+      }),
+      true,
+    );
+
+    expect(result?.reply?.text).toContain("- setup-llm (1)");
+    expect(result?.reply?.text).not.toContain("- setup-llm-cli (1)");
+  });
+
+  it("preserves explicitly configured legacy CLI runtime provider refs", async () => {
+    modelCatalogMocks.loadModelCatalog.mockResolvedValueOnce([
+      { provider: "claude-cli", id: "claude-opus-4-7", name: "Claude Opus" },
+      { provider: "anthropic", id: "claude-opus-4-7", name: "Claude Opus" },
+    ]);
+    modelProviderAuthMocks.authenticatedProviders = new Set(["anthropic", "claude-cli"]);
+
+    const result = await handleModelsCommand(
+      buildParams("/models", {
+        agents: {
+          defaults: {
+            model: { primary: "anthropic/claude-opus-4-7" },
+            models: {
+              "claude-cli/claude-opus-4-7": {},
+            },
+          },
+        },
+      }),
+      true,
+    );
+
+    expect(result?.reply?.text).toContain("- anthropic (1)");
+    expect(result?.reply?.text).toContain("- claude-cli (1)");
   });
 
   it("sources CLI runtime provider model lists from the catalog", async () => {

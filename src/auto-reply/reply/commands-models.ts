@@ -16,9 +16,13 @@ import { resolveVisibleModelCatalog } from "../../agents/model-catalog-visibilit
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import { isModelPickerVisibleProvider } from "../../agents/model-picker-visibility.js";
 import { createProviderAuthChecker } from "../../agents/model-provider-auth.js";
-import { isCliRuntimeProvider } from "../../agents/model-runtime-aliases.js";
+import {
+  isCliRuntimeProvider,
+  migrateLegacyRuntimeModelRef,
+} from "../../agents/model-runtime-aliases.js";
 import {
   buildModelAliasIndex,
+  modelKey,
   normalizeProviderId,
   resolveBareModelDefaultProvider,
   resolveDefaultModelForAgent,
@@ -76,10 +80,10 @@ type ParsedModelsCommand =
       modelId?: string;
     };
 
-function isModelsBrowseVisibleProvider(provider: string): boolean {
+function isModelsBrowseVisibleProvider(provider: string, cfg: OpenClawConfig): boolean {
   const normalized = normalizeProviderId(provider);
   return (
-    isCliRuntimeProvider(normalized, { includeSetupRegistry: true }) ||
+    isCliRuntimeProvider(normalized, { config: cfg, includeSetupRegistry: true }) ||
     isModelPickerVisibleProvider(normalized)
   );
 }
@@ -145,6 +149,78 @@ function addRuntimeChoice(
   return choices;
 }
 
+function addExplicitLegacyRuntimeModelRef(
+  explicitLegacyRuntimeModelKeys: Set<string>,
+  cfg: OpenClawConfig,
+  raw?: string,
+): void {
+  const trimmed = normalizeOptionalString(raw);
+  if (!trimmed) {
+    return;
+  }
+  const migrated = migrateLegacyRuntimeModelRef(trimmed, {
+    config: cfg,
+    includeSetupRegistry: true,
+  });
+  if (!migrated?.cli) {
+    return;
+  }
+  explicitLegacyRuntimeModelKeys.add(modelKey(migrated.legacyProvider, migrated.model));
+}
+
+function hasExplicitLegacyRuntimeModelRef(params: {
+  explicitLegacyRuntimeModelKeys: ReadonlySet<string>;
+  provider: string;
+  model: string;
+}): boolean {
+  return (
+    params.explicitLegacyRuntimeModelKeys.has(modelKey(params.provider, params.model)) ||
+    params.explicitLegacyRuntimeModelKeys.has(modelKey(params.provider, "*"))
+  );
+}
+
+function pruneImplicitRuntimeAliasProviderModels(params: {
+  byProvider: Map<string, Set<string>>;
+  cfg: OpenClawConfig;
+  explicitLegacyRuntimeModelKeys: ReadonlySet<string>;
+  canonicalRuntimeAliasModelKeys: ReadonlySet<string>;
+  canonicalRuntimeAliasProviderWildcards: ReadonlySet<string>;
+}): void {
+  for (const [provider, models] of params.byProvider.entries()) {
+    if (!isCliRuntimeProvider(provider, { config: params.cfg, includeSetupRegistry: true })) {
+      continue;
+    }
+    for (const model of models) {
+      const migrated = migrateLegacyRuntimeModelRef(modelKey(provider, model), {
+        config: params.cfg,
+        includeSetupRegistry: true,
+      });
+      if (!migrated?.cli) {
+        continue;
+      }
+      if (
+        hasExplicitLegacyRuntimeModelRef({
+          explicitLegacyRuntimeModelKeys: params.explicitLegacyRuntimeModelKeys,
+          provider,
+          model,
+        })
+      ) {
+        continue;
+      }
+      const canonicalProvider = normalizeProviderId(migrated.provider);
+      if (
+        params.canonicalRuntimeAliasModelKeys.has(modelKey(canonicalProvider, migrated.model)) ||
+        params.canonicalRuntimeAliasProviderWildcards.has(canonicalProvider)
+      ) {
+        models.delete(model);
+      }
+    }
+    if (models.size === 0) {
+      params.byProvider.delete(provider);
+    }
+  }
+}
+
 export async function buildModelsProviderData(
   cfg: OpenClawConfig,
   agentId?: string,
@@ -190,9 +266,12 @@ export async function buildModelsProviderData(
     options.view !== "all" && visibilityPolicy.hasProviderWildcards;
 
   const byProvider = new Map<string, Set<string>>();
+  const explicitLegacyRuntimeModelKeys = new Set<string>();
+  const canonicalRuntimeAliasModelKeys = new Set<string>();
+  const canonicalRuntimeAliasProviderWildcards = new Set<string>();
   const add = (p: string, m: string) => {
     const key = normalizeProviderId(p);
-    if (!isModelsBrowseVisibleProvider(key)) {
+    if (!isModelsBrowseVisibleProvider(key, cfg)) {
       return;
     }
     if (
@@ -207,10 +286,10 @@ export async function buildModelsProviderData(
     byProvider.set(key, set);
   };
 
-  const addRawModelRef = (raw?: string) => {
+  const resolveRawModelRef = (raw?: string) => {
     const trimmed = normalizeOptionalString(raw);
     if (!trimmed) {
-      return;
+      return null;
     }
     const defaultProvider = !trimmed.includes("/")
       ? resolveBareModelDefaultProvider({
@@ -225,10 +304,32 @@ export async function buildModelsProviderData(
       defaultProvider,
       aliasIndex,
     });
+    return resolved?.ref ?? null;
+  };
+
+  const addCanonicalRuntimeAliasModelRef = (raw?: string) => {
+    const resolved = resolveRawModelRef(raw);
+    if (
+      !resolved ||
+      isCliRuntimeProvider(resolved.provider, { config: cfg, includeSetupRegistry: true })
+    ) {
+      return;
+    }
+    const provider = normalizeProviderId(resolved.provider);
+    if (resolved.model === "*") {
+      canonicalRuntimeAliasProviderWildcards.add(provider);
+      return;
+    }
+    canonicalRuntimeAliasModelKeys.add(modelKey(provider, resolved.model));
+  };
+
+  const addRawModelRef = (raw?: string) => {
+    addExplicitLegacyRuntimeModelRef(explicitLegacyRuntimeModelKeys, cfg, raw);
+    const resolved = resolveRawModelRef(raw);
     if (!resolved) {
       return;
     }
-    add(resolved.ref.provider, resolved.ref.model);
+    add(resolved.provider, resolved.model);
   };
 
   const addModelConfigEntries = () => {
@@ -251,10 +352,18 @@ export async function buildModelsProviderData(
         addRawModelRef(fallback);
       }
     }
+
+    for (const raw of Object.keys(cfg.agents?.defaults?.models ?? {})) {
+      addExplicitLegacyRuntimeModelRef(explicitLegacyRuntimeModelKeys, cfg, raw);
+    }
   };
 
   for (const entry of visibleCatalog) {
     add(entry.provider, entry.id);
+    const provider = normalizeProviderId(entry.provider);
+    if (!isCliRuntimeProvider(provider, { config: cfg, includeSetupRegistry: true })) {
+      canonicalRuntimeAliasModelKeys.add(modelKey(provider, entry.id));
+    }
   }
 
   const hasAuth: (provider: string) => Promise<boolean> =
@@ -277,11 +386,25 @@ export async function buildModelsProviderData(
 
   for (const raw of visibilityPolicy.exactModelRefs) {
     addRawModelRef(raw);
+    addCanonicalRuntimeAliasModelRef(raw);
   }
 
   add(resolvedDefault.provider, resolvedDefault.model);
   addModelConfigEntries();
 
+  for (const raw of Object.keys(cfg.agents?.defaults?.models ?? {})) {
+    addCanonicalRuntimeAliasModelRef(raw);
+  }
+
+  if (options.view !== "all") {
+    pruneImplicitRuntimeAliasProviderModels({
+      byProvider,
+      cfg,
+      explicitLegacyRuntimeModelKeys,
+      canonicalRuntimeAliasModelKeys,
+      canonicalRuntimeAliasProviderWildcards,
+    });
+  }
   const providers = [...byProvider.keys()].toSorted();
 
   const modelNames = new Map<string, string>();
@@ -294,7 +417,10 @@ export async function buildModelsProviderData(
   const runtimeChoicesByProvider = new Map<string, ModelsRuntimeChoice[]>();
   const runtimeBindings = [
     { provider: "openai", runtime: "codex", cli: false },
-    ...listCliRuntimeModelBackendBindings().map((binding) => ({
+    ...listCliRuntimeModelBackendBindings({
+      config: cfg,
+      includeSetupRegistry: true,
+    }).map((binding) => ({
       provider: binding.provider,
       runtime: binding.runtime,
       cli: true,
