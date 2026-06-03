@@ -50,6 +50,27 @@ function readLoopbackToolParameters(tool: McpLoopbackTool): Record<string, unkno
   }
 }
 
+function readSchemaField(
+  schema: Record<string, unknown>,
+  key: string,
+): { ok: true; value: unknown } | { ok: false } {
+  try {
+    return { ok: true, value: schema[key] };
+  } catch {
+    return { ok: false };
+  }
+}
+
+function readSchemaEntries(
+  schema: Record<string, unknown>,
+): { ok: true; entries: [string, unknown][] } | { ok: false } {
+  try {
+    return { ok: true, entries: Object.entries(schema) };
+  } catch {
+    return { ok: false };
+  }
+}
+
 function flattenUnionSchema(raw: Record<string, unknown>): Record<string, unknown> {
   const variants = (raw.anyOf ?? raw.oneOf) as unknown[] | undefined;
   if (!Array.isArray(variants) || variants.length === 0) {
@@ -65,9 +86,19 @@ function flattenUnionSchema(raw: Record<string, unknown>): Record<string, unknow
     if (!isRecord(variant)) {
       continue;
     }
-    const props = isRecord(variant.properties) ? variant.properties : undefined;
+    const propsRead = readSchemaField(variant, "properties");
+    if (!propsRead.ok) {
+      logWarn("mcp loopback: unreadable schema variant properties, ignoring that variant");
+      continue;
+    }
+    const props = isRecord(propsRead.value) ? propsRead.value : undefined;
     if (props) {
-      for (const [key, schema] of Object.entries(props)) {
+      const propsEntries = readSchemaEntries(props);
+      if (!propsEntries.ok) {
+        logWarn("mcp loopback: unreadable schema variant properties, ignoring that variant");
+        continue;
+      }
+      for (const [key, schema] of propsEntries.entries) {
         if (!isPropertySchema(schema)) {
           logWarn(`mcp loopback: malformed schema definition for "${key}", ignoring that variant`);
           continue;
@@ -118,9 +149,9 @@ function flattenUnionSchema(raw: Record<string, unknown>): Record<string, unknow
         );
       }
     }
-    requiredSets.push(
-      new Set(Array.isArray(variant.required) ? (variant.required as string[]) : []),
-    );
+    const requiredRead = readSchemaField(variant, "required");
+    const requiredValue = requiredRead.ok ? requiredRead.value : undefined;
+    requiredSets.push(new Set(Array.isArray(requiredValue) ? requiredValue : []));
   }
   const required =
     requiredSets.length > 0
