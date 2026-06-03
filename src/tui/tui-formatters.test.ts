@@ -4,6 +4,7 @@ import {
   extractContentFromMessage,
   extractTextFromMessage,
   extractThinkingFromMessage,
+  formatConnectionHostFooter,
   formatGoalFooter,
   isCommandMessage,
   sanitizeRenderableText,
@@ -41,6 +42,19 @@ describe("formatGoalFooter", () => {
         continuationTurns: 0,
       }),
     ).toBe("Goal blocked (/goal resume)");
+  });
+});
+
+describe("formatConnectionHostFooter", () => {
+  it("renders only the connection hostname", () => {
+    expect(formatConnectionHostFooter("ws://gateway-host:18789")).toBe("host gateway-host");
+    expect(
+      formatConnectionHostFooter("wss://user:secret@example.com:443/path?token=redacted"),
+    ).toBe("host example.com");
+  });
+
+  it("skips non-url local connection labels", () => {
+    expect(formatConnectionHostFooter("local embedded")).toBeNull();
   });
 });
 
