@@ -682,6 +682,15 @@ export function resolveChannelStreamingProgressCommentary(
   return asBoolean(progress?.commentary) ?? defaultValue;
 }
 
+export function resolveChannelStreamingProgressPersist(
+  entry: StreamingCompatEntry | null | undefined,
+  defaultValue = false,
+): boolean {
+  const config = getChannelStreamingConfigObject(entry);
+  const progress = asObjectRecord(config?.progress);
+  return asBoolean(progress?.persistProgress) ?? defaultValue;
+}
+
 export function resolveChannelStreamingPreviewCommandText(
   entry: StreamingCompatEntry | null | undefined,
   defaultValue: ChannelStreamingCommandTextMode = "raw",

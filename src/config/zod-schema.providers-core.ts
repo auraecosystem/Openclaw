@@ -99,6 +99,7 @@ const ChannelStreamingProgressSchema = z
     maxLines: z.number().int().positive().optional(),
     maxLineChars: z.number().int().positive().optional(),
     render: z.enum(["text", "rich"]).optional(),
+    persistProgress: z.boolean().optional(),
     toolProgress: z.boolean().optional(),
     commandText: z.enum(["raw", "status"]).optional(),
   })
