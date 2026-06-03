@@ -4,6 +4,10 @@ import { pickPrimaryTailnetIPv4, pickPrimaryTailnetIPv6 } from "../infra/tailnet
 import { parseTcpPort } from "../infra/tcp-port.js";
 import { resolveWideAreaDiscoveryDomain, writeWideAreaGatewayZone } from "../infra/widearea-dns.js";
 import type { PluginGatewayDiscoveryServiceRegistration } from "../plugins/registry-types.js";
+import type {
+  OpenClawGatewayDiscoveryAdvertiseContext,
+  OpenClawGatewayDiscoveryService,
+} from "../plugins/types.js";
 import {
   formatBonjourInstanceName,
   resolveBonjourCliPath,
@@ -11,6 +15,102 @@ import {
 } from "./server-discovery.js";
 
 const DEFAULT_DISCOVERY_ADVERTISE_TIMEOUT_MS = 5_000;
+const UNKNOWN_DISCOVERY_SERVICE_ID = "unknown-discovery-service";
+const UNKNOWN_DISCOVERY_PLUGIN_ID = "unknown-plugin";
+
+type PreparedGatewayDiscoveryServiceRegistration =
+  | {
+      ok: true;
+      pluginId: string;
+      serviceId: string;
+      advertise: (
+        context: OpenClawGatewayDiscoveryAdvertiseContext,
+      ) => ReturnType<OpenClawGatewayDiscoveryService["advertise"]>;
+    }
+  | {
+      ok: false;
+      pluginId: string;
+      serviceId: string;
+      error: unknown;
+    };
+
+function readStringField(
+  read: () => unknown,
+  fallback: string,
+): { value: string; usedFallback: boolean; error?: unknown } {
+  try {
+    const value = read();
+    if (typeof value === "string" && value.trim().length > 0) {
+      return { value, usedFallback: false };
+    }
+    return { value: fallback, usedFallback: true };
+  } catch (error) {
+    return { value: fallback, usedFallback: true, error };
+  }
+}
+
+function readGatewayDiscoveryServiceRegistration(
+  entry: PluginGatewayDiscoveryServiceRegistration,
+): PreparedGatewayDiscoveryServiceRegistration {
+  const pluginId = readStringField(() => entry.pluginId, UNKNOWN_DISCOVERY_PLUGIN_ID).value;
+
+  let service: OpenClawGatewayDiscoveryService;
+  try {
+    service = entry.service;
+  } catch (error) {
+    return {
+      ok: false,
+      pluginId,
+      serviceId: UNKNOWN_DISCOVERY_SERVICE_ID,
+      error,
+    };
+  }
+
+  const serviceId = readStringField(() => service.id, UNKNOWN_DISCOVERY_SERVICE_ID);
+  if (serviceId.error) {
+    return {
+      ok: false,
+      pluginId,
+      serviceId: serviceId.value,
+      error: serviceId.error,
+    };
+  }
+  if (serviceId.usedFallback) {
+    return {
+      ok: false,
+      pluginId,
+      serviceId: serviceId.value,
+      error: new Error("gateway discovery service id must be a non-empty string"),
+    };
+  }
+
+  let advertise: OpenClawGatewayDiscoveryService["advertise"];
+  try {
+    advertise = service.advertise;
+  } catch (error) {
+    return {
+      ok: false,
+      pluginId,
+      serviceId: serviceId.value,
+      error,
+    };
+  }
+  if (typeof advertise !== "function") {
+    return {
+      ok: false,
+      pluginId,
+      serviceId: serviceId.value,
+      error: new Error("gateway discovery service advertise must be a function"),
+    };
+  }
+
+  return {
+    ok: true,
+    pluginId,
+    serviceId: serviceId.value,
+    advertise: (context) => advertise.call(service, context),
+  };
+}
 
 function resolveDiscoveryAdvertiseTimeoutMs(env: NodeJS.ProcessEnv): number {
   const raw = env.OPENCLAW_GATEWAY_DISCOVERY_ADVERTISE_TIMEOUT_MS?.trim();
@@ -64,6 +164,13 @@ export async function startGatewayDiscovery(params: {
     let stoppedLocalDiscovery = false;
     for (const entry of params.gatewayDiscoveryServices ?? []) {
       attemptedLocalDiscovery = true;
+      const registration = readGatewayDiscoveryServiceRegistration(entry);
+      if (!registration.ok) {
+        params.logDiscovery.warn(
+          `gateway discovery service failed (${registration.serviceId}, plugin=${registration.pluginId}): ${String(registration.error)}`,
+        );
+        continue;
+      }
       try {
         let timer: ReturnType<typeof setTimeout> | undefined;
         let timedOut = false;
@@ -80,7 +187,7 @@ export async function startGatewayDiscovery(params: {
           minimal: mdnsMinimal,
         };
         const advertisePromise = Promise.resolve()
-          .then(() => entry.service.advertise(context))
+          .then(() => registration.advertise(context))
           .then(
             async (started) => {
               if (timedOut) {
@@ -96,14 +203,14 @@ export async function startGatewayDiscovery(params: {
                   }
                 }
                 params.logDiscovery.warn(
-                  `gateway discovery service completed after startup timeout (${entry.service.id}, plugin=${entry.pluginId})`,
+                  `gateway discovery service completed after startup timeout (${registration.serviceId}, plugin=${registration.pluginId})`,
                 );
               }
               return started;
             },
             (err: unknown) => {
               params.logDiscovery.warn(
-                `gateway discovery service failed${timedOut ? " after startup timeout" : ""} (${entry.service.id}, plugin=${entry.pluginId}): ${String(err)}`,
+                `gateway discovery service failed${timedOut ? " after startup timeout" : ""} (${registration.serviceId}, plugin=${registration.pluginId}): ${String(err)}`,
               );
               return undefined;
             },
@@ -112,7 +219,7 @@ export async function startGatewayDiscovery(params: {
           timer = setTimeout(() => {
             timedOut = true;
             params.logDiscovery.warn(
-              `gateway discovery service timed out after ${advertiseTimeoutMs}ms (${entry.service.id}, plugin=${entry.pluginId}); continuing startup`,
+              `gateway discovery service timed out after ${advertiseTimeoutMs}ms (${registration.serviceId}, plugin=${registration.pluginId}); continuing startup`,
             );
             resolve(undefined);
           }, advertiseTimeoutMs);
@@ -127,7 +234,7 @@ export async function startGatewayDiscovery(params: {
         }
       } catch (err) {
         params.logDiscovery.warn(
-          `gateway discovery service failed (${entry.service.id}, plugin=${entry.pluginId}): ${String(err)}`,
+          `gateway discovery service failed (${registration.serviceId}, plugin=${registration.pluginId}): ${String(err)}`,
         );
       }
     }

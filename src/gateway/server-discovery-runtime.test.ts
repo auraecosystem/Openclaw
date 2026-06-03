@@ -186,6 +186,71 @@ describe("startGatewayDiscovery", () => {
     expect(stopped).toEqual(["peer", "bonjour"]);
   });
 
+  it("continues local discovery after unreadable discovery service metadata", async () => {
+    useDevelopmentDiscoveryEnv();
+
+    const healthyStop = vi.fn();
+    const healthy = makeDiscoveryService({
+      id: "healthy-discovery",
+      pluginId: "healthy-plugin",
+      stop: healthyStop,
+    });
+    const broken = {
+      pluginId: "broken-plugin",
+      pluginName: "Broken Plugin",
+      source: "test",
+      get service() {
+        throw new Error("gateway discovery service getter exploded");
+      },
+    } as PluginGatewayDiscoveryServiceRegistration;
+    const logs = makeLogs();
+
+    const result = await startGatewayDiscovery({
+      machineDisplayName: "Lab Mac",
+      port: 18789,
+      wideAreaDiscoveryEnabled: false,
+      tailscaleMode: "serve",
+      mdnsMode: "full",
+      gatewayDiscoveryServices: [broken, healthy],
+      logDiscovery: logs,
+    });
+
+    expect(healthy.service.advertise).toHaveBeenCalledTimes(1);
+    expect(result.bonjourStop).toBeTypeOf("function");
+    expect(logs.warn.mock.calls).toEqual([
+      [
+        "gateway discovery service failed (unknown-discovery-service, plugin=broken-plugin): Error: gateway discovery service getter exploded",
+      ],
+    ]);
+
+    await result.bonjourStop?.();
+    expect(healthyStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows unknown-discovery-service as an explicit discovery service id", async () => {
+    useDevelopmentDiscoveryEnv();
+
+    const service = makeDiscoveryService({
+      id: "unknown-discovery-service",
+      pluginId: "custom-discovery-plugin",
+    });
+    const logs = makeLogs();
+
+    const result = await startGatewayDiscovery({
+      machineDisplayName: "Lab Mac",
+      port: 18789,
+      wideAreaDiscoveryEnabled: false,
+      tailscaleMode: "serve",
+      mdnsMode: "full",
+      gatewayDiscoveryServices: [service],
+      logDiscovery: logs,
+    });
+
+    expect(service.service.advertise).toHaveBeenCalledTimes(1);
+    expect(logs.warn).not.toHaveBeenCalled();
+    await result.bonjourStop?.();
+  });
+
   it("omits invalid SSH discovery ports", async () => {
     await expectSshPortOmitted("2222abc");
   });
