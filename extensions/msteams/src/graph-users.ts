@@ -12,11 +12,14 @@ export function clearAadProfileCache(): void {
 
 /**
  * Fetch a user's AAD profile by object ID from Microsoft Graph.
- * Results are cached in-process with a configurable TTL.
+ * Results are cached in-process with a configurable TTL. The cache key
+ * includes the tenant ID so multi-tenant bots cannot leak profiles
+ * across directories.
  */
 export async function fetchAadUserProfile(params: {
   token: string;
   aadObjectId: string;
+  tenantId?: string;
   cacheTtlMs?: number;
 }): Promise<GraphUser | null> {
   const { token, aadObjectId } = params;
@@ -24,8 +27,9 @@ export async function fetchAadUserProfile(params: {
     return null;
   }
 
+  const cacheKey = params.tenantId ? `${params.tenantId}:${aadObjectId}` : aadObjectId;
   const ttl = params.cacheTtlMs ?? DEFAULT_PROFILE_CACHE_TTL_MS;
-  const cached = profileCache.get(aadObjectId);
+  const cached = profileCache.get(cacheKey);
   if (cached && Date.now() - cached.ts < ttl) {
     return cached.profile;
   }
@@ -35,7 +39,7 @@ export async function fetchAadUserProfile(params: {
   try {
     const profile = await fetchGraphJson<GraphUser>({ token, path });
     if (profile?.id) {
-      profileCache.set(aadObjectId, { profile, ts: Date.now() });
+      profileCache.set(cacheKey, { profile, ts: Date.now() });
       return profile;
     }
   } catch {
