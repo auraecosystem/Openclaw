@@ -12,6 +12,7 @@ import type { CallManager } from "../manager.js";
 import {
   MsteamsMediaStream,
   type MsteamsLogger,
+  type MsteamsRecordingStatus,
   type MsteamsSession,
 } from "../msteams-media-stream.js";
 import {
@@ -77,6 +78,10 @@ interface MsteamsCallState {
   outboundTimestampMs: number;
   /** Current assistant turn id (used for assistant.cancel on barge-in). */
   turnId: number;
+  /** Teams recording status — transcripts are only persisted while this is true. */
+  recordingActive: boolean;
+  /** Caller audio captured before the STT session finished connecting. */
+  pendingAudio: Buffer[];
 }
 
 /** PCM 16 kHz, 16-bit mono — the wire format both directions of the Teams bridge. */
@@ -85,6 +90,9 @@ const FRAME_DURATION_MS = 20;
 const BYTES_PER_SAMPLE = 2;
 /** 16000 Hz * 0.02 s * 2 bytes = 640 bytes per 20 ms mono frame. */
 const FRAME_BYTES = (MSTEAMS_SAMPLE_RATE_HZ / 1000) * FRAME_DURATION_MS * BYTES_PER_SAMPLE;
+
+/** Cap the pre-connect audio buffer at ~5 s of 20 ms frames to bound memory. */
+const MAX_PRECONNECT_FRAMES = 250;
 
 /**
  * Microsoft Teams voice-call provider.
@@ -132,6 +140,7 @@ export class MsteamsProvider implements VoiceCallProvider {
         onSessionStart: (session) => this.handleSessionStart(session),
         onSessionEnd: (info) => this.handleSessionEnd(info),
         onAudioFrame: (frame) => this.handleAudioFrame(frame),
+        onRecordingStatus: (info) => this.handleRecordingStatus(info),
       });
     } else {
       logger?.warn(
@@ -290,15 +299,20 @@ export class MsteamsProvider implements VoiceCallProvider {
       outboundSeq: 0,
       outboundTimestampMs: 0,
       turnId: 0,
+      recordingActive: session.recordingStatus === "active",
+      pendingAudio: [],
     };
     // Register state BEFORE `call.answered` so the greeting's playTts can find it.
     this.calls.set(providerCallId, state);
 
-    void sttSession.connect().catch((err: unknown) => {
-      this.logger?.error(
-        `MsteamsProvider: STT connect failed for ${providerCallId} — ${describeError(err)}`,
-      );
-    });
+    void sttSession
+      .connect()
+      .then(() => this.flushPendingAudio(providerCallId))
+      .catch((err: unknown) => {
+        this.logger?.error(
+          `MsteamsProvider: STT connect failed for ${providerCallId} — ${describeError(err)}`,
+        );
+      });
 
     this.manager.processEvent(this.buildEvent(providerCallId, { type: "call.answered", from, to }));
     this.logger?.info(
@@ -317,11 +331,37 @@ export class MsteamsProvider implements VoiceCallProvider {
       return;
     }
     // PCM 16 kHz passes straight through (provider configured for pcm_16000).
-    // Drop frames that arrive before the STT socket finishes connecting.
-    if (!state.sttSession.isConnected()) {
+    if (state.sttSession.isConnected()) {
+      state.sttSession.sendAudio(frame.payload);
       return;
     }
-    state.sttSession.sendAudio(frame.payload);
+    // Buffer a bounded amount of opening audio until the STT socket connects so
+    // the caller's first words are not lost; flushed on connect.
+    if (state.pendingAudio.length < MAX_PRECONNECT_FRAMES) {
+      state.pendingAudio.push(frame.payload);
+    }
+  }
+
+  /** Flush any caller audio captured while the STT session was still connecting. */
+  private flushPendingAudio(providerCallId: string): void {
+    const state = this.calls.get(providerCallId);
+    if (!state || !state.sttSession.isConnected()) {
+      return;
+    }
+    const buffered = state.pendingAudio;
+    state.pendingAudio = [];
+    for (const frame of buffered) {
+      state.sttSession.sendAudio(frame);
+    }
+  }
+
+  /** Track Teams recording status so transcript persistence can be gated on it. */
+  private handleRecordingStatus(info: { callId: string; status: MsteamsRecordingStatus }): void {
+    const state = this.calls.get(info.callId);
+    if (state) {
+      state.recordingActive = info.status === "active";
+      this.logger?.info(`MsteamsProvider: recording.status ${info.callId} = ${info.status}`);
+    }
   }
 
   private handleTranscript(providerCallId: string, transcript: string): void {
@@ -331,6 +371,18 @@ export class MsteamsProvider implements VoiceCallProvider {
     }
     const state = this.calls.get(providerCallId);
     if (!state || !this.manager) {
+      return;
+    }
+    // Microsoft Media Access API: media-derived data must not be persisted or
+    // processed before the worker has set Teams recording status. Drop
+    // transcripts until recording is confirmed active (operator can opt out via
+    // msteams.requireRecordingStatus=false).
+    const requireRecording =
+      this.responseRuntime?.voiceConfig.msteams?.requireRecordingStatus ?? true;
+    if (requireRecording && !state.recordingActive) {
+      this.logger?.warn(
+        `MsteamsProvider: dropping transcript for ${providerCallId} — Teams recording status not active`,
+      );
       return;
     }
     this.manager.processEvent({

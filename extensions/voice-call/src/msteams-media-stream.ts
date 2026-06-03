@@ -23,6 +23,8 @@ import { safeEqualSecret } from "openclaw/plugin-sdk/security-runtime";
 import { type RawData, WebSocket, WebSocketServer } from "ws";
 import { z } from "zod";
 
+const RecordingStatusSchema = z.enum(["active", "inactive", "unknown"]);
+
 const SessionStartSchema = z.object({
   type: z.literal("session.start"),
   callId: z.string().min(1),
@@ -32,11 +34,22 @@ const SessionStartSchema = z.object({
     displayName: z.string().nullable().optional(),
     tenantId: z.string().nullable().optional(),
   }),
+  /**
+   * Microsoft Teams recording status at answer time. The worker must call Graph
+   * `updateRecordingStatus` before media-derived data may be persisted; it
+   * reports the resulting state here (and via `recording.status` if it changes).
+   */
+  recordingStatus: RecordingStatusSchema.optional(),
 });
 
 const SessionEndSchema = z.object({
   type: z.literal("session.end"),
   reason: z.string(),
+});
+
+const RecordingStatusMessageSchema = z.object({
+  type: z.literal("recording.status"),
+  status: RecordingStatusSchema,
 });
 
 const AudioFrameSchema = z.object({
@@ -54,9 +67,12 @@ const PingSchema = z.object({
 const InboundMessageSchema = z.discriminatedUnion("type", [
   SessionStartSchema,
   SessionEndSchema,
+  RecordingStatusMessageSchema,
   AudioFrameSchema,
   PingSchema,
 ]);
+
+export type MsteamsRecordingStatus = z.infer<typeof RecordingStatusSchema>;
 
 type InboundMessage = z.infer<typeof InboundMessageSchema>;
 
@@ -75,6 +91,8 @@ export interface MsteamsSession {
     displayName?: string | null;
     tenantId?: string | null;
   };
+  /** Teams recording status reported at answer time (if the worker set it). */
+  recordingStatus?: MsteamsRecordingStatus;
   /** Push a JSON-serializable message back to the worker. No-op if the socket has closed. */
   send: (message: unknown) => void;
   /** Close the WebSocket gracefully with the given reason text. */
@@ -103,6 +121,8 @@ export interface MsteamsMediaStreamConfig {
   preStartTimeoutMs?: number;
   logger?: MsteamsLogger;
   onSessionStart?: (session: MsteamsSession) => void;
+  /** Teams recording status changed mid-call (worker called Graph updateRecordingStatus). */
+  onRecordingStatus?: (info: { callId: string; status: MsteamsRecordingStatus }) => void;
   onSessionEnd?: (info: { callId: string; reason: string }) => void;
   onAudioFrame?: (info: {
     callId: string;
@@ -398,9 +418,14 @@ export class MsteamsMediaStream {
           callId,
           threadId: parsed.threadId,
           caller: parsed.caller,
+          recordingStatus: parsed.recordingStatus,
           send: (message) => this.sendTo(callId, message),
           close: (reason) => this.closeSession(callId, reason),
         });
+        break;
+      }
+      case "recording.status": {
+        this.config.onRecordingStatus?.({ callId, status: parsed.status });
         break;
       }
       case "session.end": {

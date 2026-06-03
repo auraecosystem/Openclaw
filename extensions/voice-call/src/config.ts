@@ -77,6 +77,13 @@ const MsteamsConfigSchema = z
     path: z.string().min(1).default("/voice/msteams/stream"),
     /** Shared secret used to verify HMAC-SHA256 on the WS handshake (SecretRef-compatible). */
     sharedSecret: SecretInputSchema.optional(),
+    /**
+     * Require the worker to report active Teams recording status before any
+     * media-derived transcript is persisted or processed (Microsoft Media
+     * Access API obligation). Default true; set false only if recording/
+     * compliance is enforced out-of-band.
+     */
+    requireRecordingStatus: z.boolean().default(true),
   })
   .strict();
 export type MsteamsConfig = z.infer<typeof MsteamsConfigSchema>;
@@ -712,10 +719,15 @@ export function normalizeVoiceCallConfig(config: VoiceCallConfigInput): VoiceCal
     serve,
     tailscale: { ...defaults.tailscale, ...config.tailscale },
     tunnel: { ...defaults.tunnel, ...config.tunnel },
-    // msteams.path carries a schema default, so apply it explicitly here — the
-    // `...config` spread above only sees the optional input shape.
+    // msteams.path and requireRecordingStatus carry schema defaults, so apply
+    // them explicitly here — the `...config` spread above only sees the optional
+    // input shape.
     msteams: config.msteams
-      ? { ...config.msteams, path: config.msteams.path ?? "/voice/msteams/stream" }
+      ? {
+          ...config.msteams,
+          path: config.msteams.path ?? "/voice/msteams/stream",
+          requireRecordingStatus: config.msteams.requireRecordingStatus ?? true,
+        }
       : config.msteams,
     webhookSecurity: {
       ...defaults.webhookSecurity,

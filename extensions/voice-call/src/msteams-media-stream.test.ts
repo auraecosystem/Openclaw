@@ -28,6 +28,7 @@ async function startServer(opts: {
     timestampMs: number;
     payload: Buffer;
   }) => void;
+  onRecordingStatus?: (info: { callId: string; status: string }) => void;
 }): Promise<MsteamsMediaStream> {
   const server = new MsteamsMediaStream({
     port: opts.port,
@@ -39,6 +40,7 @@ async function startServer(opts: {
     onSessionStart: opts.onSessionStart,
     onSessionEnd: opts.onSessionEnd,
     onAudioFrame: opts.onAudioFrame,
+    onRecordingStatus: opts.onRecordingStatus,
   });
   await server.start();
   return server;
@@ -405,5 +407,45 @@ describe("MsteamsMediaStream", () => {
       ws.once("close", () => resolve());
     });
     expect(server.sessionCount).toBe(0);
+  });
+
+  it("surfaces recording status from session.start and recording.status messages", async () => {
+    const port = randomPort();
+    let startStatus: string | undefined;
+    const statuses: string[] = [];
+    server = await startServer({
+      port,
+      onSessionStart: (s) => {
+        startStatus = s.recordingStatus;
+      },
+      onRecordingStatus: (info) => {
+        statuses.push(info.status);
+      },
+    });
+
+    const callId = "call-rec";
+    const ws = openAuthed(port, callId);
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    ws.send(
+      JSON.stringify({
+        type: "session.start",
+        callId,
+        threadId: "thread-rec",
+        caller: { aadId: "aad-1" },
+        recordingStatus: "inactive",
+      }),
+    );
+    await waitFor(() => startStatus !== undefined);
+    expect(startStatus).toBe("inactive");
+
+    ws.send(JSON.stringify({ type: "recording.status", status: "active" }));
+    await waitFor(() => statuses.length > 0);
+    expect(statuses).toEqual(["active"]);
+
+    ws.close();
   });
 });

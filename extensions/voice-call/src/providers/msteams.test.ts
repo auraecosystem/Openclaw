@@ -291,6 +291,7 @@ describe("MsteamsProvider (audio loop wiring)", () => {
         callId,
         threadId: "thread-2",
         caller: { aadId: "aad-9", displayName: "Bob", tenantId: "tenant-9" },
+        recordingStatus: "active",
       }),
     );
     await waitFor(() => captured.current !== undefined);
@@ -314,6 +315,40 @@ describe("MsteamsProvider (audio loop wiring)", () => {
         (call) => call[0] === internalCallId && call[1] === "Sure, happy to help.",
       ),
     );
+
+    ws.close();
+  });
+
+  it("drops transcripts until Teams recording status is active (Media Access API)", async () => {
+    generateVoiceResponseMock.mockResolvedValue({ text: "should not be reached" });
+    const { port, captured } = await setup();
+    const callId = "teams-call-rec";
+    const { ws } = await connect(port, callId);
+
+    // session.start WITHOUT recordingStatus -> recording is not active.
+    ws.send(
+      JSON.stringify({
+        type: "session.start",
+        callId,
+        threadId: "thread-rec",
+        caller: { aadId: "aad-rec" },
+      }),
+    );
+    await waitFor(() => captured.current !== undefined);
+
+    // A transcript before recording is active must not reach the agent.
+    captured.current?.callbacks.onTranscript?.("do something");
+    await new Promise((r) => setTimeout(r, 50));
+    expect(generateVoiceResponseMock).not.toHaveBeenCalled();
+
+    // Worker reports recording active -> subsequent transcripts are processed.
+    ws.send(JSON.stringify({ type: "recording.status", status: "active" }));
+    await new Promise((r) => setTimeout(r, 20));
+    captured.current?.callbacks.onTranscript?.("now do it");
+    await waitFor(() => generateVoiceResponseMock.mock.calls.length > 0);
+    expect(
+      (generateVoiceResponseMock.mock.calls[0][0] as { userMessage: string }).userMessage,
+    ).toBe("now do it");
 
     ws.close();
   });
