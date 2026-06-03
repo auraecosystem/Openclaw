@@ -68,12 +68,22 @@ export type PluginUpdateLogger = {
 
 export type PluginUpdateStatus = "updated" | "unchanged" | "skipped" | "error";
 
+export type PluginUpdateChannelFallback = {
+  requestedSpec: string;
+  usedSpec: string;
+  requestedLabel: string;
+  usedLabel: string;
+  reason: "unavailable" | "failed";
+  message: string;
+};
+
 export type PluginUpdateOutcome = {
   pluginId: string;
   status: PluginUpdateStatus;
   message: string;
   currentVersion?: string;
   nextVersion?: string;
+  channelFallback?: PluginUpdateChannelFallback;
 };
 
 export type PluginUpdateSummary = {
@@ -485,6 +495,13 @@ function shouldFallbackBetaClawHubUpdate(result: { ok: false; code?: string }): 
   return shouldFallbackClawHubToDefault(result);
 }
 
+function isUnavailableNpmTarget(result: { ok: false; code?: string; error: string }): boolean {
+  return (
+    result.code === PLUGIN_INSTALL_ERROR_CODE.NPM_PACKAGE_NOT_FOUND ||
+    /\b(ETARGET|notarget)\b|No matching version found|dist-tag|tag .*not found/i.test(result.error)
+  );
+}
+
 function describeBetaNpmFallback(params: {
   pluginId: string;
   betaSpec: string | undefined;
@@ -492,13 +509,44 @@ function describeBetaNpmFallback(params: {
   result: { ok: false; code?: string; error: string };
 }): string {
   const betaSpec = params.betaSpec ?? "the beta npm release";
-  const missingBeta =
-    params.result.code === PLUGIN_INSTALL_ERROR_CODE.NPM_PACKAGE_NOT_FOUND ||
-    /\b(ETARGET|notarget)\b|No matching version found|dist-tag|tag .*not found/i.test(
-      params.result.error,
-    );
+  const missingBeta = isUnavailableNpmTarget(params.result);
   const reason = missingBeta ? "has no beta npm release" : "failed beta npm update";
   return `Plugin "${params.pluginId}" ${reason} for ${betaSpec}; using ${params.fallbackSpec} instead. Core update can still complete.`;
+}
+
+function formatNpmSpecSelectorLabel(spec: string | undefined): string {
+  const parsed = spec ? parseRegistryNpmSpec(spec) : undefined;
+  if (!parsed) {
+    return spec ?? "unknown";
+  }
+  if (parsed.selectorKind === "none") {
+    return "@latest";
+  }
+  return `@${parsed.selector}`;
+}
+
+function describeNpmChannelFallback(params: {
+  pluginId: string;
+  requestedSpec: string | undefined;
+  usedSpec: string;
+  result: { ok: false; code?: string; error: string };
+}): PluginUpdateChannelFallback {
+  const requestedSpec = params.requestedSpec ?? "unknown";
+  const requestedLabel = formatNpmSpecSelectorLabel(params.requestedSpec);
+  const usedLabel = formatNpmSpecSelectorLabel(params.usedSpec);
+  const reason = isUnavailableNpmTarget(params.result) ? "unavailable" : "failed";
+  const message =
+    reason === "unavailable"
+      ? `plugin channel fallback: ${params.pluginId} used ${usedLabel} because ${requestedLabel} was unavailable`
+      : `plugin channel fallback: ${params.pluginId} used ${usedLabel} after ${requestedLabel} failed`;
+  return {
+    requestedSpec,
+    usedSpec: params.usedSpec,
+    requestedLabel,
+    usedLabel,
+    reason,
+    message,
+  };
 }
 
 function formatBetaChannelFallbackOutcomeSuffix(params: {
@@ -990,7 +1038,11 @@ export async function updateNpmInstalledPlugins(params: {
     return await installPluginFromNpmSpec(installParams);
   };
 
-  const recordFailure = (pluginId: string, message: string) => {
+  const recordFailure = (
+    pluginId: string,
+    message: string,
+    channelFallback?: PluginUpdateChannelFallback,
+  ) => {
     if (params.disableOnFailure && !params.dryRun) {
       const disabledMessage =
         `Disabled "${pluginId}" after plugin update failure; OpenClaw will continue without it. ` +
@@ -1002,6 +1054,7 @@ export async function updateNpmInstalledPlugins(params: {
         pluginId,
         status: "skipped",
         message: disabledMessage,
+        ...(channelFallback ? { channelFallback } : {}),
       });
       return;
     }
@@ -1009,6 +1062,7 @@ export async function updateNpmInstalledPlugins(params: {
       pluginId,
       status: "error",
       message,
+      ...(channelFallback ? { channelFallback } : {}),
     });
   };
 
@@ -1313,6 +1367,7 @@ export async function updateNpmInstalledPlugins(params: {
       let usedNpmFallback = false;
       let usedOfficialNpmFallback = false;
       let channelFallbackSuffix = "";
+      let npmChannelFallback: PluginUpdateChannelFallback | undefined;
       if (!probe.ok && record.source === "npm" && npmSpecs?.fallbackSpec) {
         logger.warn?.(
           describeBetaNpmFallback({
@@ -1323,6 +1378,12 @@ export async function updateNpmInstalledPlugins(params: {
           }),
         );
         usedNpmFallback = true;
+        npmChannelFallback = describeNpmChannelFallback({
+          pluginId,
+          requestedSpec: npmSpecs.fallbackLabel ?? effectiveSpec,
+          usedSpec: npmSpecs.fallbackSpec,
+          result: probe,
+        });
         channelFallbackSuffix = formatBetaChannelFallbackOutcomeSuffix({
           fallbackLabel: npmSpecs.fallbackLabel ?? effectiveSpec,
           fallbackSpec: npmSpecs.fallbackSpec,
@@ -1441,6 +1502,7 @@ export async function updateNpmInstalledPlugins(params: {
                     phase: "check",
                     error: probe.error,
                   }),
+          undefined,
         );
         continue;
       }
@@ -1478,6 +1540,7 @@ export async function updateNpmInstalledPlugins(params: {
           currentVersion: currentVersion ?? undefined,
           nextVersion: resolvedProbeVersion,
           message: `${pluginId} is up to date (${currentLabel}).${channelFallbackSuffix}`,
+          ...(npmChannelFallback ? { channelFallback: npmChannelFallback } : {}),
         });
       } else {
         outcomes.push({
@@ -1486,6 +1549,7 @@ export async function updateNpmInstalledPlugins(params: {
           currentVersion: currentVersion ?? undefined,
           nextVersion: resolvedProbeVersion,
           message: `Would update ${pluginId}: ${currentLabel} -> ${nextVersion}.${channelFallbackSuffix}`,
+          ...(npmChannelFallback ? { channelFallback: npmChannelFallback } : {}),
         });
       }
       continue;
@@ -1556,6 +1620,7 @@ export async function updateNpmInstalledPlugins(params: {
     let channelFallbackSuffix = "";
     let resultSource = record.source;
     activeClawHubInstallSpec = effectiveSpec;
+    let npmChannelFallback: PluginUpdateChannelFallback | undefined;
     if (!result.ok && record.source === "npm" && npmSpecs?.fallbackSpec) {
       logger.warn?.(
         describeBetaNpmFallback({
@@ -1566,6 +1631,12 @@ export async function updateNpmInstalledPlugins(params: {
         }),
       );
       usedNpmFallback = true;
+      npmChannelFallback = describeNpmChannelFallback({
+        pluginId,
+        requestedSpec: npmSpecs.fallbackLabel ?? effectiveSpec,
+        usedSpec: npmSpecs.fallbackSpec,
+        result,
+      });
       channelFallbackSuffix = formatBetaChannelFallbackOutcomeSuffix({
         fallbackLabel: npmSpecs.fallbackLabel ?? effectiveSpec,
         fallbackSpec: npmSpecs.fallbackSpec,
@@ -1683,6 +1754,7 @@ export async function updateNpmInstalledPlugins(params: {
                   phase: "update",
                   error: result.error,
                 }),
+        undefined,
       );
       continue;
     }
@@ -1763,6 +1835,7 @@ export async function updateNpmInstalledPlugins(params: {
         currentVersion: currentVersion ?? undefined,
         nextVersion: nextVersion ?? undefined,
         message: `${pluginId} already at ${currentLabel}.${channelFallbackSuffix}`,
+        ...(npmChannelFallback ? { channelFallback: npmChannelFallback } : {}),
       });
     } else {
       outcomes.push({
@@ -1771,6 +1844,7 @@ export async function updateNpmInstalledPlugins(params: {
         currentVersion: currentVersion ?? undefined,
         nextVersion: nextVersion ?? undefined,
         message: `Updated ${pluginId}: ${currentLabel} -> ${nextLabel}.${channelFallbackSuffix}`,
+        ...(npmChannelFallback ? { channelFallback: npmChannelFallback } : {}),
       });
     }
   }
