@@ -1,7 +1,7 @@
 import path from "node:path";
 import { resolveAgentWorkspaceDir } from "../agents/agent-scope.js";
 import { resolveStorePath } from "../config/sessions/paths.js";
-import { readSessionStoreReadOnly } from "../config/sessions/store-read.js";
+import { listSessionEntries } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
 import { pathExists } from "../infra/fs-safe.js";
@@ -45,10 +45,9 @@ export async function getAgentLocalStatuses(
     const bootstrapPending = bootstrapPath != null ? await pathExists(bootstrapPath) : null;
 
     const sessionsPath = resolveStorePath(cfg.session?.store, { agentId });
-    const store = readSessionStoreReadOnly(sessionsPath);
-    const sessions = Object.entries(store)
-      .filter(([key]) => key !== "global" && key !== "unknown")
-      .map(([, entry]) => entry);
+    const sessions = listSessionEntries({ agentId, storePath: sessionsPath })
+      .filter(({ sessionKey }) => sessionKey !== "global" && sessionKey !== "unknown")
+      .map(({ entry }) => entry);
     const sessionsCount = sessions.length;
     const lastUpdatedAt = sessions.reduce((max, e) => Math.max(max, e?.updatedAt ?? 0), 0);
     const resolvedLastUpdatedAt = lastUpdatedAt > 0 ? lastUpdatedAt : null;
