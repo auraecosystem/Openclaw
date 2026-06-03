@@ -38,6 +38,7 @@ import type {
 import { cleanupTimedOutCronAgentRun, createCronAgentWatchdog } from "./agent-watchdog.js";
 import {
   abortErrorMessage,
+  isToolExecutionStartedTimeoutError,
   normalizeCronRunErrorText,
   timeoutErrorMessage,
 } from "./execution-errors.js";
@@ -312,8 +313,11 @@ function resolveDeliveryState(params: {
   failureNotification: CronFailureNotificationDelivery;
 } {
   const primaryDeliveryRequested = resolveCronDeliveryPlan(params.job).requested;
+  const failureNotificationSuppressed =
+    params.runStatus === "error" && isToolExecutionStartedTimeoutError(params.error);
   const alternateFailureNotificationRequested =
     params.runStatus === "error" &&
+    !failureNotificationSuppressed &&
     params.job.delivery?.bestEffort !== true &&
     resolveFailureDestination(params.job, params.globalFailureDestination) !== null;
   if (!primaryDeliveryRequested) {
@@ -326,7 +330,11 @@ function resolveDeliveryState(params: {
   }
   if (params.runStatus === "error") {
     const failureNotification: CronFailureNotificationDelivery =
-      alternateFailureNotificationRequested ? { status: "unknown" } : { status: "delivered" };
+      alternateFailureNotificationRequested
+        ? { status: "unknown" }
+        : failureNotificationSuppressed
+          ? { status: "not-requested" }
+          : { status: "delivered" };
     if (params.delivered === true) {
       return {
         delivered: false,
@@ -334,7 +342,9 @@ function resolveDeliveryState(params: {
         error: params.error,
         failureNotification: alternateFailureNotificationRequested
           ? failureNotification
-          : { delivered: true, status: "delivered" },
+          : failureNotificationSuppressed
+            ? failureNotification
+            : { delivered: true, status: "delivered" },
       };
     }
     if (params.delivered === false) {
@@ -344,17 +354,21 @@ function resolveDeliveryState(params: {
         error: params.error,
         failureNotification: alternateFailureNotificationRequested
           ? failureNotification
-          : {
-              delivered: false,
-              status: "not-delivered",
-              ...(params.error ? { error: params.error } : {}),
-            },
+          : failureNotificationSuppressed
+            ? failureNotification
+            : {
+                delivered: false,
+                status: "not-delivered",
+                ...(params.error ? { error: params.error } : {}),
+              },
       };
     }
     return {
       status: "unknown",
       error: params.error,
-      failureNotification: { status: "unknown" },
+      failureNotification: failureNotificationSuppressed
+        ? { status: "not-requested" }
+        : { status: "unknown" },
     };
   }
   if (params.delivered === true) {
