@@ -924,9 +924,9 @@ export async function sendChatMessage(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
+  const hasText = message.trim().length > 0;
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  if (!hasText && !hasAttachments) {
     return null;
   }
   if (state.chatSending) {
@@ -934,7 +934,9 @@ export async function sendChatMessage(
   }
 
   const now = Date.now();
-  appendUserChatMessage(state, msg, attachments, now);
+  // Preserve user-authored whitespace (code blocks); emptiness uses trimmed text.
+  const messageToSend = hasText ? message : "";
+  appendUserChatMessage(state, messageToSend, attachments, now);
 
   state.chatSending = true;
   setChatError(state, null);
@@ -947,7 +949,7 @@ export async function sendChatMessage(
   state.chatStreamStartedAt = now;
 
   try {
-    const ack = await requestChatSend(state, { message: msg, attachments, runId });
+    const ack = await requestChatSend(state, { message: messageToSend, attachments, runId });
     if (ack.status === "ok") {
       state.chatRunId = null;
       state.chatStream = null;
@@ -1005,15 +1007,20 @@ async function sendChatMessageWithGeneratedRunId(
   if (!state.client || !state.connected) {
     return null;
   }
-  const msg = message.trim();
+  const hasText = message.trim().length > 0;
   const hasAttachments = attachments && attachments.length > 0;
-  if (!msg && !hasAttachments) {
+  if (!hasText && !hasAttachments) {
     return null;
   }
   setChatError(state, null);
   const runId = generateUUID();
   try {
-    const ack = await requestChatSend(state, { message: msg, attachments, runId });
+    // Send the raw text so user-authored whitespace survives.
+    const ack = await requestChatSend(state, {
+      message: hasText ? message : "",
+      attachments,
+      runId,
+    });
     return ack.runId;
   } catch (err) {
     setChatError(state, formatConnectError(err));

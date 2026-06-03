@@ -422,14 +422,16 @@ function enqueuePendingSendMessage(
     ? "sending"
     : "waiting-reconnect",
 ): ChatQueueItem | null {
-  const trimmed = text.trim();
   const hasAttachments = Boolean(attachments && attachments.length > 0);
-  if (!trimmed && !hasAttachments) {
+  if (!text.trim() && !hasAttachments) {
     return null;
   }
+  // Preserve user-authored whitespace (leading spaces in code blocks / ASCII
+  // diagrams). Emptiness is judged on the trimmed text, but the queued payload
+  // and the eventual chat.send keep the raw text.
   const pending: ChatQueueItem = {
     id: generateUUID(),
-    text: trimmed,
+    text,
     createdAt: Date.now(),
     attachments: hasAttachments ? attachments : undefined,
     refreshSessions,
@@ -861,10 +863,12 @@ async function sendQueuedChatMessage(
     return "failed";
   }
   const prepared = ensureQueuedSendState(host, queued, queuedSessionKey);
-  const message = prepared.text.trim();
+  // Send the raw queued text so code-block whitespace survives; emptiness is
+  // still judged on the trimmed form.
+  const message = prepared.text;
   const attachments = prepared.attachments ?? [];
   const hasAttachments = attachments.length > 0;
-  if (!message && !hasAttachments) {
+  if (!message.trim() && !hasAttachments) {
     removeQueuedMessageWithoutReleasing(host, id, prepared.sessionKey ?? host.sessionKey);
     return "sent";
   }
@@ -1226,10 +1230,11 @@ export async function steerQueuedChatMessage(host: ChatHost, id: string) {
   if (!item) {
     return;
   }
-  const message = item.text.trim();
+  // Steer the raw queued text so code-block whitespace survives.
+  const message = item.text;
   const attachments = item.attachments ?? [];
   const hasAttachments = attachments.length > 0;
-  if (!message && !hasAttachments) {
+  if (!message.trim() && !hasAttachments) {
     return;
   }
 
@@ -1535,7 +1540,10 @@ export async function handleSendChat(
   opts?: ChatSendOptions,
 ) {
   const previousDraft = host.chatMessage;
-  const message = (messageOverride ?? host.chatMessage).trim();
+  // Command detection, dedup, and history run on the trimmed text; the normal
+  // send path keeps the raw text so user whitespace (code blocks) is preserved.
+  const rawMessage = messageOverride ?? host.chatMessage;
+  const message = rawMessage.trim();
   const submittedAtMs = controlUiNowMs();
   const submittedSessionKey = host.sessionKey;
   const attachments = host.chatAttachments ?? [];
@@ -1632,7 +1640,7 @@ export async function handleSendChat(
     const waitingForModel = modelSwitchReady !== true;
     const queued = enqueuePendingSendMessage(
       host,
-      message,
+      rawMessage,
       hasAttachments ? attachmentsToSend : undefined,
       refreshSessions,
       submittedAtMs,
@@ -1678,7 +1686,7 @@ export async function handleSendChat(
       return;
     }
 
-    await sendChatMessageNow(host, message, {
+    await sendChatMessageNow(host, rawMessage, {
       queueItemId: queued.id,
       previousDraft: cleared.previousDraft,
       restoreDraft: Boolean(messageOverride && opts?.restoreDraft),
