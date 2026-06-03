@@ -751,6 +751,7 @@ type DiagnosticEventsGlobalState = {
 
 const MAX_ASYNC_DIAGNOSTIC_EVENTS = 10_000;
 const MAX_ASYNC_DIAGNOSTIC_EVENTS_PER_TURN = 100;
+const MAX_SANITIZED_DIAGNOSTIC_ARRAY_ITEMS = 1000;
 const DIAGNOSTIC_EVENTS_STATE_KEY = Symbol.for("openclaw.diagnosticEvents.state.v1");
 const dispatchedTrustedDiagnosticMetadata = new WeakSet<object>();
 const ASYNC_DIAGNOSTIC_EVENT_TYPES = new Set<DiagnosticEventPayload["type"]>([
@@ -916,7 +917,9 @@ function createDiagnosticMetadataForListener(
 }
 
 function cloneDiagnosticEventForListener(event: DiagnosticEventPayload): DiagnosticEventPayload {
-  return deepFreezeDiagnosticValue(structuredClone(event)) as DiagnosticEventPayload;
+  return deepFreezeDiagnosticValue(
+    cloneDiagnosticValueForListener(event),
+  ) as DiagnosticEventPayload;
 }
 
 function cloneDiagnosticPrivateDataForListener(
@@ -925,7 +928,103 @@ function cloneDiagnosticPrivateDataForListener(
   if (!privateData) {
     return Object.freeze({});
   }
-  return deepFreezeDiagnosticValue(structuredClone(privateData)) as DiagnosticEventPrivateData;
+  return deepFreezeDiagnosticValue(
+    cloneDiagnosticValueForListener(privateData),
+  ) as DiagnosticEventPrivateData;
+}
+
+function cloneDiagnosticValueForListener(value: unknown): unknown {
+  try {
+    return structuredClone(value);
+  } catch {
+    return sanitizeUncloneableDiagnosticValue(value, new WeakMap<object, unknown>());
+  }
+}
+
+function sanitizeUncloneableDiagnosticValue(
+  value: unknown,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    typeof value === "bigint"
+  ) {
+    return value;
+  }
+  if (value === undefined || typeof value === "function" || typeof value === "symbol") {
+    return undefined;
+  }
+  if (typeof value !== "object") {
+    return { truncated: true, reason: "uncloneable_diagnostic_value" };
+  }
+  const existing = seen.get(value);
+  if (existing) {
+    return existing;
+  }
+  if (Array.isArray(value)) {
+    return sanitizeUncloneableDiagnosticArray(value, seen);
+  }
+  return sanitizeUncloneableDiagnosticObject(value as Record<string, unknown>, seen);
+}
+
+function sanitizeUncloneableDiagnosticArray(
+  value: readonly unknown[],
+  seen: WeakMap<object, unknown>,
+): unknown {
+  let length: number;
+  try {
+    length = value.length;
+  } catch {
+    return { truncated: true, reason: "unreadable_diagnostic_array" };
+  }
+  if (!Number.isSafeInteger(length) || length < 0) {
+    return { truncated: true, reason: "invalid_diagnostic_array_length" };
+  }
+  const sanitized: unknown[] = [];
+  seen.set(value, sanitized);
+  const itemCount = Math.min(length, MAX_SANITIZED_DIAGNOSTIC_ARRAY_ITEMS);
+  for (let index = 0; index < itemCount; index += 1) {
+    try {
+      sanitized.push(sanitizeUncloneableDiagnosticValue(value[index], seen));
+    } catch {
+      sanitized.push({ truncated: true, reason: "unreadable_diagnostic_item" });
+    }
+  }
+  if (length > itemCount) {
+    sanitized.push({ truncated: true, omittedItems: length - itemCount });
+  }
+  return sanitized;
+}
+
+function sanitizeUncloneableDiagnosticObject(
+  value: Record<string, unknown>,
+  seen: WeakMap<object, unknown>,
+): unknown {
+  let keys: string[];
+  try {
+    keys = Object.keys(value);
+  } catch {
+    return { truncated: true, reason: "unreadable_diagnostic_object" };
+  }
+  const sanitized = Object.create(null) as Record<string, unknown>;
+  seen.set(value, sanitized);
+  for (const key of keys) {
+    if (isBlockedObjectKey(key)) {
+      continue;
+    }
+    try {
+      const field = value[key];
+      if (field !== undefined && typeof field !== "function" && typeof field !== "symbol") {
+        sanitized[key] = sanitizeUncloneableDiagnosticValue(field, seen);
+      }
+    } catch {
+      sanitized[key] = { truncated: true, reason: "unreadable_diagnostic_field" };
+    }
+  }
+  return sanitized;
 }
 
 function isPriorityAsyncDiagnosticEvent(entry: QueuedDiagnosticEvent): boolean {
