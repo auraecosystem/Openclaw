@@ -44,7 +44,10 @@ import { normalizeMessagePresentation } from "openclaw/plugin-sdk/interactive-ru
 import { parseStrictPositiveInteger } from "openclaw/plugin-sdk/number-runtime";
 import { chunkMarkdownTextWithMode } from "openclaw/plugin-sdk/reply-chunking";
 import { createChannelHistoryWindow } from "openclaw/plugin-sdk/reply-history";
-import { resolveSendableOutboundReplyParts } from "openclaw/plugin-sdk/reply-payload";
+import {
+  isReplyPayloadNonTerminalToolErrorWarning,
+  resolveSendableOutboundReplyParts,
+} from "openclaw/plugin-sdk/reply-payload";
 import type { ReplyPayload } from "openclaw/plugin-sdk/reply-payload";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
 import {
@@ -1622,9 +1625,6 @@ export const dispatchTelegramMessage = async ({
                     if (isDispatchSuperseded()) {
                       return;
                     }
-                    if (payload.isError === true) {
-                      hadErrorReplyFailureOrSkip = true;
-                    }
 
                     const deduped =
                       info.kind === "final"
@@ -1658,13 +1658,22 @@ export const dispatchTelegramMessage = async ({
                     if (info.kind === "final") {
                       await enqueueDraftLaneEvent(async () => {});
                     }
+                    // Hide handled post-answer probe failures while preserving final warnings.
+                    // Agents may intentionally run searches/commands with no result, recover,
+                    // and send a final answer; late text-only failures are non-actionable noise.
+                    const isPostFinalToolNoise =
+                      info.kind === "tool" ||
+                      isReplyPayloadNonTerminalToolErrorWarning(effectivePayload);
                     if (
-                      info.kind === "tool" &&
+                      isPostFinalToolNoise &&
                       (finalAnswerDeliveryStarted || finalAnswerDelivered) &&
                       !reply.hasMedia &&
                       !hasExecApprovalPayload(effectivePayload)
                     ) {
                       return;
+                    }
+                    if (payload.isError === true) {
+                      hadErrorReplyFailureOrSkip = true;
                     }
 
                     const deliverFinalAnswerText = async (
