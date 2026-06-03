@@ -7,7 +7,6 @@ import { resolvePreferredOpenClawTmpDir, withTempWorkspace } from "openclaw/plug
 import { resolveWhatsAppDocumentFileName } from "./document-filename.js";
 import { formatError } from "./session-errors.js";
 import {
-  sanitizeAssistantVisibleText,
   sanitizeAssistantVisibleTextWithProfile,
   stripToolCallXmlTags,
   sleep,
@@ -58,12 +57,41 @@ function stripWhatsAppPluralToolXml(text: string): string {
   return stripToolCallXmlTags(text, { stripFunctionCallsXmlPayloads: true });
 }
 
+// Defensive regex fallback for <think>/<final> reasoning tags.
+//
+// IMPORTANT: This must run BEFORE sanitizeAssistantVisibleTextWithProfile, not after.
+// The core sanitizer's strict-mode parser has a bug with unclosed <think> blocks
+// (streaming truncation): it removes the opening <think> tag but keeps the content,
+// so any post-sanitization regex can no longer detect it. By running this first on
+// the raw text, we strip the unclosed <think> tail before the core parser sees it.
+//
+// Cases handled:
+//   1. <final>…</final> present → extract only its content (discard everything else)
+//   2. Closed <think>…</think> blocks → stripped
+//   3. Unclosed <think> tail (streaming truncation) → stripped to empty string
+function stripResidualReasoningTags(text: string): string {
+  const finalMatch = /<final>([\s\S]*?)<\/final>/.exec(text);
+  if (finalMatch) {
+    return finalMatch[1] ?? "";
+  }
+  return text.replace(/<think>[\s\S]*?<\/think>/g, "").replace(/<think>[\s\S]*/g, "");
+}
+
 function finalizeWhatsAppVisibleText(text: string): string {
   return sanitizeForPlainText(stripWhatsAppPluralToolXml(text));
 }
 
+// Uses the "delivery" sanitizer profile (reasoningMode:"strict") to strip
+// <think>/<final> tags emitted by Gemini and other reasoning-capable models.
+// stripResidualReasoningTags runs FIRST on the raw text so that unclosed <think>
+// tails from streaming truncation are caught before the core parser strips the tag
+// but exposes the content.
+// See: extensions/whatsapp/src/channel-outbound.ts for the channel path which
+// uses normalizeWhatsAppPayloadTextPreservingIndentation ("history" profile).
 export function normalizeWhatsAppPayloadText(text: string | undefined): string {
-  return finalizeWhatsAppVisibleText(sanitizeAssistantVisibleText(text ?? "")).trimStart();
+  return finalizeWhatsAppVisibleText(
+    sanitizeAssistantVisibleTextWithProfile(stripResidualReasoningTags(text ?? ""), "delivery"),
+  ).trimStart();
 }
 
 function stripLeadingBlankLines(text: string): string {
@@ -73,8 +101,10 @@ function stripLeadingBlankLines(text: string): string {
 export function normalizeWhatsAppPayloadTextPreservingIndentation(
   text: string | undefined,
 ): string {
+  // stripResidualReasoningTags runs first — see comment above for why order matters.
+  const pre = stripResidualReasoningTags(text ?? "");
   const sanitized = sanitizeAssistantVisibleTextWithProfile(
-    stripLeadingBlankLines(text ?? ""),
+    stripLeadingBlankLines(pre),
     "history",
   );
   const normalized = stripLeadingBlankLines(finalizeWhatsAppVisibleText(sanitized));
