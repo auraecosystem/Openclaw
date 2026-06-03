@@ -80,6 +80,7 @@ export type GuardedFetchOptions = {
   policy?: SsrFPolicy;
   lookupFn?: LookupFn;
   dispatcherPolicy?: PinnedDispatcherPolicy;
+  resolveDispatcherPolicy?: (url: URL) => PinnedDispatcherPolicy | undefined;
   retainAuthorizationRedirectHostnameAllowlist?: string[];
   mode?: GuardedFetchMode;
   pinDns?: boolean;
@@ -114,6 +115,10 @@ type GuardedFetchPresetOptions = Omit<
 
 const DEFAULT_MAX_REDIRECTS = 3;
 const OPENCLAW_DEBUG_PROXY_ENABLED = "OPENCLAW_DEBUG_PROXY_ENABLED";
+
+function getRedirectVisitKey(url: string, init: RequestInit | undefined): string {
+  return `${init?.method?.toUpperCase() ?? "GET"} ${url}`;
+}
 
 function isTruthyEnvValue(value: string | undefined): boolean {
   return value === "1" || value === "true" || value === "yes" || value === "on";
@@ -451,11 +456,11 @@ async function fetchWithSsrFGuardInternal(
     await closeDispatcher(dispatcher ?? undefined);
   };
 
-  const visited = new Set<string>([params.url]);
   let currentUrl = params.url;
   let currentInit = normalizeRequestInitHeadersForFetch(
     params.init ? { ...params.init } : undefined,
   );
+  const visited = new Set<string>([getRedirectVisitKey(currentUrl, currentInit)]);
   let redirectCount = 0;
 
   while (true) {
@@ -478,16 +483,17 @@ async function fetchWithSsrFGuardInternal(
     let dispatcher: Dispatcher | null = null;
     // Resolve inside the redirect loop so exact-origin trust never carries across origins.
     const policyForUrl = resolveSsrFPolicyForUrl(parsedUrl, params.policy);
+    const dispatcherPolicy = params.resolveDispatcherPolicy?.(parsedUrl) ?? params.dispatcherPolicy;
     try {
       const usesTrustedExplicitProxyMode =
         mode === GUARDED_FETCH_MODE.TRUSTED_EXPLICIT_PROXY &&
-        params.dispatcherPolicy?.mode === "explicit-proxy";
+        dispatcherPolicy?.mode === "explicit-proxy";
       assertExplicitProxySupportsPinnedDns(
         parsedUrl,
-        params.dispatcherPolicy,
+        dispatcherPolicy,
         usesTrustedExplicitProxyMode ? false : params.pinDns,
       );
-      await assertExplicitProxyAllowed(params.dispatcherPolicy, params.lookupFn, params.policy);
+      await assertExplicitProxyAllowed(dispatcherPolicy, params.lookupFn, params.policy);
       const canUseTrustedEnvProxy =
         mode === GUARDED_FETCH_MODE.TRUSTED_ENV_PROXY &&
         shouldUseEnvHttpProxyForUrl(parsedUrl.toString());
@@ -520,13 +526,13 @@ async function fetchWithSsrFGuardInternal(
           managedProxyBypass: params.managedProxyBypass,
           resolvedAddresses: pinned.addresses,
         })
-          ? createPinnedDispatcher(pinned, params.dispatcherPolicy, policyForUrl, timeoutMs)
+          ? createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs)
           : createHttp1EnvHttpProxyAgent(undefined, timeoutMs);
       } else if (usesTrustedExplicitProxyMode) {
         // Explicit proxy targets are still checked against the caller's hostname
         // policy, but the proxy does the DNS resolution for the final target.
         assertHostnameAllowedWithPolicy(parsedUrl.hostname, policyForUrl);
-        dispatcher = createPolicyDispatcherWithoutPinnedDns(params.dispatcherPolicy, timeoutMs);
+        dispatcher = createPolicyDispatcherWithoutPinnedDns(dispatcherPolicy, timeoutMs);
       } else if (canUseMockedFetchWithoutDns) {
         // Test-installed fetch mocks should stay hermetic. Host/IP policy still runs;
         // real fetches continue through pinned DNS below.
@@ -536,18 +542,13 @@ async function fetchWithSsrFGuardInternal(
           lookupFn: params.lookupFn,
           policy: policyForUrl,
         });
-        dispatcher = createPolicyDispatcherWithoutPinnedDns(params.dispatcherPolicy, timeoutMs);
+        dispatcher = createPolicyDispatcherWithoutPinnedDns(dispatcherPolicy, timeoutMs);
       } else {
         const pinned = await resolvePinnedHostnameWithPolicy(parsedUrl.hostname, {
           lookupFn: params.lookupFn,
           policy: policyForUrl,
         });
-        dispatcher = createPinnedDispatcher(
-          pinned,
-          params.dispatcherPolicy,
-          policyForUrl,
-          timeoutMs,
-        );
+        dispatcher = createPinnedDispatcher(pinned, dispatcherPolicy, policyForUrl, timeoutMs);
       }
 
       const init: DispatcherAwareRequestInit = {
@@ -605,10 +606,6 @@ async function fetchWithSsrFGuardInternal(
         }
         const nextParsedUrl = new URL(location, parsedUrl);
         const nextUrl = nextParsedUrl.toString();
-        if (visited.has(nextUrl)) {
-          await release(dispatcher);
-          throw new Error("Redirect loop detected");
-        }
         const retainedAuthorization = resolveRetainedAuthorizationForRedirect({
           init: currentInit,
           nextUrl: nextParsedUrl,
@@ -626,7 +623,12 @@ async function fetchWithSsrFGuardInternal(
             authorization: retainedAuthorization,
           });
         }
-        visited.add(nextUrl);
+        const nextVisitKey = getRedirectVisitKey(nextUrl, currentInit);
+        if (visited.has(nextVisitKey)) {
+          await release(dispatcher);
+          throw new Error("Redirect loop detected");
+        }
+        visited.add(nextVisitKey);
         void response.body?.cancel();
         await closeDispatcher(dispatcher);
         currentUrl = nextUrl;

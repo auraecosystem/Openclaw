@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TEST_UNDICI_RUNTIME_DEPS_KEY } from "../infra/net/undici-runtime.js";
 import {
   buildMcpHttpFetch,
@@ -8,6 +8,13 @@ import {
 } from "./mcp-http-fetch.js";
 
 const testGlobal = globalThis as Record<string, unknown>;
+const { lookupMock } = vi.hoisted(() => ({
+  lookupMock: vi.fn(),
+}));
+
+vi.mock("node:dns/promises", () => ({
+  lookup: lookupMock,
+}));
 
 class TestAgent {
   constructor(readonly options: unknown) {}
@@ -28,6 +35,15 @@ function getDispatcher(init: unknown): unknown {
   return (init as { dispatcher?: unknown }).dispatcher;
 }
 
+function getDispatcherConnectOptions(init: unknown): Record<string, unknown> | undefined {
+  const dispatcher = getDispatcher(init);
+  if (!(dispatcher instanceof TestAgent)) {
+    return undefined;
+  }
+  const options = dispatcher.options as { connect?: Record<string, unknown> };
+  return options.connect;
+}
+
 describe("MCP HTTP fetch helpers", () => {
   const fetchCalls: Array<{
     url: string | URL | Request;
@@ -36,6 +52,8 @@ describe("MCP HTTP fetch helpers", () => {
 
   beforeEach(() => {
     fetchCalls.length = 0;
+    lookupMock.mockReset();
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     testGlobal[TEST_UNDICI_RUNTIME_DEPS_KEY] = {
       Agent: TestAgent,
       EnvHttpProxyAgent: TestEnvHttpProxyAgent,
@@ -61,7 +79,13 @@ describe("MCP HTTP fetch helpers", () => {
     await fetch("https://auth.example.com/token");
 
     expect(getDispatcher(fetchCalls[0]?.init)).toBeInstanceOf(TestAgent);
-    expect(getDispatcher(fetchCalls[1]?.init)).toBeUndefined();
+    expect(getDispatcherConnectOptions(fetchCalls[0]?.init)).toMatchObject({
+      rejectUnauthorized: false,
+    });
+    expect(getDispatcher(fetchCalls[1]?.init)).toBeInstanceOf(TestAgent);
+    expect(
+      getDispatcherConnectOptions(fetchCalls[1]?.init)?.["rejectUnauthorized"],
+    ).toBeUndefined();
   });
 
   it("removes static Authorization headers for OAuth-backed runtime requests", () => {
