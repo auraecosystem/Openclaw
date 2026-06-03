@@ -712,6 +712,11 @@ export function normalizeVoiceCallConfig(config: VoiceCallConfigInput): VoiceCal
     serve,
     tailscale: { ...defaults.tailscale, ...config.tailscale },
     tunnel: { ...defaults.tunnel, ...config.tunnel },
+    // msteams.path carries a schema default, so apply it explicitly here — the
+    // `...config` spread above only sees the optional input shape.
+    msteams: config.msteams
+      ? { ...config.msteams, path: config.msteams.path ?? "/voice/msteams/stream" }
+      : config.msteams,
     webhookSecurity: {
       ...defaults.webhookSecurity,
       ...config.webhookSecurity,
