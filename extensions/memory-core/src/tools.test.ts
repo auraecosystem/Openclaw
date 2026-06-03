@@ -345,6 +345,7 @@ describe("memory_search unavailable payloads", () => {
         configuredMode?: unknown;
         effectiveMode?: unknown;
         fallback?: unknown;
+        rerank?: unknown;
         hits?: unknown;
         searchMs?: number;
       };
@@ -354,8 +355,102 @@ describe("memory_search unavailable payloads", () => {
     expect(details.debug?.configuredMode).toBe("search");
     expect(details.debug?.effectiveMode).toBe("query");
     expect(details.debug?.fallback).toBe("unsupported-search-flags");
+    expect(details.debug?.rerank).toBeUndefined();
     expect(details.debug?.hits).toBe(1);
     expect(details.debug?.searchMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("surfaces rerank state in search debug when emitted by the backend", async () => {
+    setMemoryBackend("builtin");
+    setMemorySearchImpl(async (opts) => {
+      opts?.onDebug?.({ backend: "builtin", rerank: "active" });
+      return [
+        {
+          path: "MEMORY.md",
+          startLine: 1,
+          endLine: 2,
+          score: 0.9,
+          snippet: "reranked result",
+          source: "memory",
+        },
+      ];
+    });
+
+    const tool = createMemorySearchToolOrThrow({
+      config: { memory: { backend: "builtin" } },
+    });
+    const result = await tool.execute("debug", { query: "rerank test" });
+    const details = result.details as {
+      debug?: { rerank?: unknown };
+    };
+    expect(details.debug?.rerank).toBe("active");
+  });
+
+  it("preserves rerank ordering in tool output (promoted low-fusion-score doc stays first)", async () => {
+    setMemoryBackend("builtin");
+    // manager.search returns reranked order: a promoted doc with LOW fusion score
+    // but HIGH rerankScore ahead of a demoted doc with high fusion score.
+    setMemorySearchImpl(async () => [
+      {
+        path: "memory/promoted.md",
+        startLine: 1,
+        endLine: 2,
+        score: 0.3,
+        rerankScore: 0.95,
+        snippet: "cross-encoder promoted this",
+        source: "memory" as const,
+      },
+      {
+        path: "memory/demoted.md",
+        startLine: 1,
+        endLine: 2,
+        score: 0.9,
+        rerankScore: 0.1,
+        snippet: "high fusion score, demoted by reranker",
+        source: "memory" as const,
+      },
+    ]);
+
+    const tool = createMemorySearchToolOrThrow({ config: { memory: { backend: "builtin" } } });
+    const result = await tool.execute("rerank-order", { query: "anything" });
+    const results = (result.details as { results: Array<{ path: string; rerankScore?: number }> })
+      .results;
+
+    // Before the fix the tool re-sorted by raw score, sinking the promoted doc;
+    // the rerankScore ordering must survive to the tool output.
+    expect(results[0]?.path).toBe("memory/promoted.md");
+    expect(results[0]?.rerankScore).toBe(0.95);
+    expect(results[1]?.path).toBe("memory/demoted.md");
+  });
+
+  it("orders tool output by raw score when no reranker ran (rerankScore absent)", async () => {
+    setMemoryBackend("builtin");
+    setMemorySearchImpl(async () => [
+      {
+        path: "memory/low.md",
+        startLine: 1,
+        endLine: 2,
+        score: 0.4,
+        snippet: "lower fusion score",
+        source: "memory" as const,
+      },
+      {
+        path: "memory/high.md",
+        startLine: 1,
+        endLine: 2,
+        score: 0.8,
+        snippet: "higher fusion score",
+        source: "memory" as const,
+      },
+    ]);
+
+    const tool = createMemorySearchToolOrThrow({ config: { memory: { backend: "builtin" } } });
+    const result = await tool.execute("no-rerank", { query: "anything" });
+    const results = (result.details as { results: Array<{ path: string }> }).results;
+
+    // No rerankScore present -> sort falls back to raw score, unchanged behavior.
+    expect(results[0]?.path).toBe("memory/high.md");
+    expect(results[1]?.path).toBe("memory/low.md");
   });
 });
 
