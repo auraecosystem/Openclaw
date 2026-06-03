@@ -92,10 +92,10 @@ import {
   resolveStoredSessionKeyForAgentStore,
 } from "./session-store-key.js";
 import {
-  readRecentSessionUsageFromTranscript,
-  readSessionTitleFieldsFromTranscriptAsync,
-  readSessionTitleFieldsFromTranscript,
-} from "./session-utils.fs.js";
+  readRecentSessionUsageFromTranscript as readScopedRecentSessionUsageFromTranscript,
+  readSessionTitleFieldsFromTranscriptAsync as readScopedSessionTitleFieldsFromTranscriptAsync,
+  readSessionTitleFieldsFromTranscript as readScopedSessionTitleFieldsFromTranscript,
+} from "./session-transcript-readers.js";
 import type {
   GatewayAgentRow,
   GatewaySessionRow,
@@ -107,6 +107,9 @@ import type {
 export {
   archiveFileOnDisk,
   archiveSessionTranscripts,
+  resolveSessionTranscriptCandidates,
+} from "./session-utils.fs.js";
+export {
   attachOpenClawTranscriptMeta,
   capArrayByJsonBytes,
   readFirstUserMessageFromTranscript,
@@ -124,9 +127,11 @@ export {
   readSessionPreviewItemsFromTranscript,
   readSessionMessagesAsync,
   visitSessionMessagesAsync,
-  resolveSessionTranscriptCandidates,
-} from "./session-utils.fs.js";
-export type { ReadSessionMessagesAsyncOptions } from "./session-utils.fs.js";
+} from "./session-transcript-readers.js";
+export type {
+  ReadSessionMessagesAsyncOptions,
+  SessionTranscriptReadScope,
+} from "./session-transcript-readers.js";
 export { canonicalizeSpawnedByForAgent, resolveSessionStoreKey } from "./session-store-key.js";
 export type {
   GatewayAgentRow,
@@ -859,11 +864,13 @@ function resolveTranscriptUsageFallback(params: {
   const agentId = parsed?.agentId
     ? normalizeAgentId(parsed.agentId)
     : normalizeAgentId(params.agentId ?? resolveDefaultAgentId(params.cfg));
-  const snapshot = readRecentSessionUsageFromTranscript(
-    entry.sessionId,
-    params.storePath,
-    entry.sessionFile,
-    agentId,
+  const snapshot = readScopedRecentSessionUsageFromTranscript(
+    {
+      agentId,
+      sessionFile: entry.sessionFile,
+      sessionId: entry.sessionId,
+      storePath: params.storePath,
+    },
     typeof params.maxTranscriptBytes === "number" ? params.maxTranscriptBytes : 256 * 1024,
   );
   if (!snapshot) {
@@ -2099,12 +2106,12 @@ export function buildGatewaySessionRow(params: {
   let derivedTitle: string | undefined;
   let lastMessagePreview: string | undefined;
   if (entry?.sessionId && (params.includeDerivedTitles || params.includeLastMessage)) {
-    const fields = readSessionTitleFieldsFromTranscript(
-      entry.sessionId,
+    const fields = readScopedSessionTitleFieldsFromTranscript({
+      agentId: sessionAgentId,
+      sessionFile: entry.sessionFile,
+      sessionId: entry.sessionId,
       storePath,
-      entry.sessionFile,
-      sessionAgentId,
-    );
+    });
     if (params.includeDerivedTitles) {
       derivedTitle = deriveSessionTitle(entry, fields.firstUserMessage);
     }
@@ -2798,12 +2805,12 @@ export async function listSessionsFromStoreAsync(params: {
       const sessionAgentId =
         rowAgentId ??
         (parsed?.agentId ? normalizeAgentId(parsed.agentId) : resolveDefaultAgentId(cfg));
-      const fields = await readSessionTitleFieldsFromTranscriptAsync(
-        entry.sessionId,
+      const fields = await readScopedSessionTitleFieldsFromTranscriptAsync({
+        agentId: sessionAgentId,
+        sessionFile: entry.sessionFile,
+        sessionId: entry.sessionId,
         storePath,
-        entry.sessionFile,
-        sessionAgentId,
-      );
+      });
       if (includeDerivedTitles) {
         row.derivedTitle = deriveSessionTitle(entry, fields.firstUserMessage);
       }

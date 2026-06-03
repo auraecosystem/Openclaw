@@ -202,9 +202,10 @@ export async function readSubagentOutput(
   let messages: unknown[] | undefined;
   if (options?.sessionFile) {
     const transcriptMessages = await subagentAnnounceOutputDeps.readSessionMessagesAsync(
-      sessionKey,
-      undefined,
-      options.sessionFile,
+      {
+        sessionFile: options.sessionFile,
+        sessionId: sessionKey,
+      },
       {
         mode: "recent",
         maxMessages: 100,
