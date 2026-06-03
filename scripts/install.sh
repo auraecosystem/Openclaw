@@ -32,6 +32,21 @@ cleanup_tmpfiles() {
 }
 trap cleanup_tmpfiles EXIT
 
+abort_install_int() {
+    cleanup_tmpfiles
+    echo ""
+    ui_warn "Installation interrupted"
+    exit 130
+}
+abort_install_term() {
+    cleanup_tmpfiles
+    echo ""
+    ui_warn "Installation terminated"
+    exit 143
+}
+trap abort_install_int INT
+trap abort_install_term TERM
+
 mktempfile() {
     local f
     f="$(mktemp)"
@@ -2805,7 +2820,11 @@ run_doctor() {
         warn_openclaw_not_found
         return 0
     fi
-    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || true
+    local doctor_exit=0
+    run_quiet_step "Running doctor" "$claw" doctor --non-interactive || doctor_exit=$?
+    if (( doctor_exit == 130 )); then
+        abort_install_int
+    fi
     ui_success "Doctor complete"
 }
 
@@ -3261,10 +3280,17 @@ main() {
             fi
             ui_info "Running openclaw doctor"
             local doctor_ok=0
+            local doctor_exit=0
             if (( ${#doctor_args[@]} )); then
-                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor "${doctor_args[@]}" </dev/null && doctor_ok=1
+                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor "${doctor_args[@]}" </dev/null || doctor_exit=$?
             else
-                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty && doctor_ok=1
+                OPENCLAW_UPDATE_IN_PROGRESS=1 "$claw" doctor </dev/tty || doctor_exit=$?
+            fi
+            if (( doctor_exit == 130 )); then
+                abort_install_int
+            fi
+            if (( doctor_exit == 0 )); then
+                doctor_ok=1
             fi
             if (( doctor_ok )); then
                 ui_info "Updating plugins"
