@@ -135,6 +135,100 @@ You can customize this deny list via `gateway.tools`:
 }
 ```
 
+### Opt-in: coding tool `read` over direct-invoke
+
+The `read` coding tool can be exposed for deterministic automation (CI/preflight
+checks, lint pipelines, browser capture flows) without an LLM round-trip. This
+applies to BOTH `POST /tools/invoke` AND the SDK-facing JSON-RPC `tools.invoke`
+(they share the same direct-invoke resolver).
+
+**`read` is denied by default.** To enable it, operators must set TWO distinct
+config keys, intentionally:
+
+```json5
+{
+  gateway: {
+    tools: {
+      // (1) Lift `read` from the HTTP default deny list (same opt-in shape as
+      // the other dangerous-by-default tools).
+      allow: ["read"],
+      // (2) NEW: distinct direct-invoke opt-in. Without this, the `read` tool
+      // is not materialized into the candidate set even if `allow` includes it.
+      // This dual-key gating prevents an upgrade-time compatibility break for
+      // pre-existing configs that already include `"read"` in `allow` for
+      // unrelated reasons (e.g. for an MCP/agent surface where `read` is
+      // already available).
+      directInvoke: {
+        hostFsRead: true,
+      },
+    },
+  },
+}
+```
+
+**Either key alone is insufficient.** Only the combination grants direct-invoke
+read access:
+
+| `tools.allow` includes `"read"` | `directInvoke.hostFsRead` | `read` reachable           |
+| ------------------------------- | ------------------------- | -------------------------- |
+| no                              | no                        | ❌                         |
+| yes                             | no                        | ❌ (tool not materialized) |
+| no                              | yes                       | ❌ (filtered by HTTP deny) |
+| yes                             | yes                       | ✅                         |
+
+**Security:** When enabled, `read` can access any file the gateway process can
+open, **outside the configured workspace** unless `tools.fs.workspaceOnly: true`
+is set. The default-deny config audit (`gateway.tools_invoke_http.host_read_allow`)
+warns when both keys are set without workspace confinement.
+
+### Opt-in: coding tools `write` / `edit` / `apply_patch` over direct-invoke
+
+The host-filesystem write coding tools follow the same dual-key gating pattern
+as `read`. Each tool name must appear in `gateway.tools.allow` AND the
+`directInvoke.hostFsWrite: true` opt-in must be set; either alone leaves all
+three write tools unreachable.
+
+```json5
+{
+  gateway: {
+    tools: {
+      // (1) Per-tool names you want enabled (subset of write/edit/apply_patch).
+      allow: ["write", "edit", "apply_patch"],
+      // (2) Single class-level opt-in for the entire write family.
+      directInvoke: {
+        hostFsWrite: true,
+      },
+    },
+  },
+}
+```
+
+Truth table (per tool name `T` ∈ `{write, edit, apply_patch}`):
+
+| `tools.allow` includes `T` | `directInvoke.hostFsWrite` | `T` reachable on direct-invoke |
+| -------------------------- | -------------------------- | ------------------------------ |
+| no                         | no                         | ❌                             |
+| yes                        | no                         | ❌ (tool not materialized)     |
+| no                         | yes                        | ❌ (filtered by HTTP deny)     |
+| yes                        | yes                        | ✅                             |
+
+**Security:** When enabled, write-class tools can mutate any file the gateway
+process can open, **outside the configured workspace** unless
+`tools.fs.workspaceOnly: true` is set. Strongly recommend pairing
+`directInvoke.hostFsWrite: true` with `tools.fs.workspaceOnly: true`. The
+config audit `gateway.tools_invoke_http.host_write_allow` warns when both
+keys are set without workspace confinement (escalates to critical when bind
+is non-loopback).
+
+### NOT yet exposed: `exec` / `process` / `spawn` / `shell`
+
+RCE-class tools (`exec`, `process`, `spawn`, `shell`) remain unavailable on the
+direct-invoke surface. They require a distinct owner/admin enforcement model
+that is deferred to a separate follow-up PR. The `gateway.tools.allow` knob
+alone (even paired with a hypothetical opt-in flag) is insufficient because a
+trusted-proxy caller with `operator.write` could otherwise reach them without
+operator-level intent.
+
 To help group policies resolve context, you can optionally set:
 
 - `x-openclaw-message-channel: <channel>` (example: `slack`, `telegram`)
