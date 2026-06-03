@@ -1,4 +1,4 @@
-import { resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
+import { addTimerTimeoutGraceMs, resolveTimerTimeoutMs } from "openclaw/plugin-sdk/number-runtime";
 
 export const CODEX_APP_SERVER_STARTUP_TIMEOUT_FLOOR_MS = 100;
 export const CODEX_TURN_COMPLETION_IDLE_TIMEOUT_MS = 60_000;
@@ -7,7 +7,7 @@ export const CODEX_TURN_ASSISTANT_COMPLETION_IDLE_TIMEOUT_MS = 10_000;
 // progress item. Forwarded deltas count as activity, but older native paths may
 // not surface them, so keep this terminal guard conservative.
 export const CODEX_POST_TOOL_RAW_ASSISTANT_COMPLETION_IDLE_TIMEOUT_MS = 5 * 60_000;
-export const CODEX_POST_REASONING_SOURCE_REPLY_IDLE_TIMEOUT_MS = 5 * 60_000;
+export const CODEX_POST_REASONING_REPLY_IDLE_TIMEOUT_MS = 5 * 60_000;
 export const CODEX_TURN_TERMINAL_IDLE_TIMEOUT_MS = 30 * 60_000;
 
 function resolvePositiveIntegerTimeoutMs(value: number | undefined, fallbackMs: number): number {
@@ -108,5 +108,5 @@ export function resolveCodexTurnTerminalIdleTimeoutMs(value: number | undefined)
 export function resolveCodexGatewayTimeoutWithGraceMs(timeoutMs: number, graceMs = 10_000): number {
   const timeout = resolvePositiveIntegerTimeoutMs(timeoutMs, 1);
   const grace = resolveTimerTimeoutMs(graceMs, 0, 0);
-  return resolveTimerTimeoutMs(timeout + grace, timeout);
+  return addTimerTimeoutGraceMs(timeout, grace) ?? timeout;
 }

@@ -1,7 +1,14 @@
+import {
+  addTimerTimeoutGraceMs,
+  asDateTimestampMs,
+  clampTimerTimeoutMs,
+  parseFiniteNumber,
+  resolveDateTimestampMs,
+  resolveExpiresAtMsFromDurationMs,
+} from "@openclaw/normalization-core/number-coercion";
 import { callGateway } from "../gateway/call.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { normalizeBlockedLivenessWaitStatus } from "../shared/agent-liveness.js";
-import { clampTimerTimeoutMs, parseFiniteNumber } from "../shared/number-coercion.js";
 import {
   buildAgentRunTerminalOutcomeFromWaitResult,
   type AgentRunTerminalOutcome,
@@ -25,6 +32,16 @@ let runWaitDeps: {
 
 function resolveRunWaitTimeoutMs(value: number | undefined): number {
   return clampTimerTimeoutMs(parseFiniteNumber(value) ?? 1) ?? 1;
+}
+
+function resolveRunWaitDeadlineAtMs(params: { deadlineAtMs?: number; timeoutMs?: number }): number {
+  if (params.deadlineAtMs !== undefined) {
+    return asDateTimestampMs(params.deadlineAtMs) ?? resolveDateTimestampMs(Date.now());
+  }
+  return (
+    resolveExpiresAtMsFromDurationMs(resolveRunWaitTimeoutMs(params.timeoutMs)) ??
+    resolveDateTimestampMs(Date.now())
+  );
 }
 
 export type AssistantReplySnapshot = {
@@ -201,7 +218,7 @@ export async function waitForAgentRun(params: {
         runId: params.runId,
         timeoutMs,
       },
-      timeoutMs: clampTimerTimeoutMs(timeoutMs + 2000),
+      timeoutMs: addTimerTimeoutGraceMs(timeoutMs, 2_000),
     });
     if (wait?.status === "timeout") {
       return normalizeAgentWaitResult("timeout", wait);
@@ -262,8 +279,7 @@ export async function waitForAgentRunsToDrain(params: {
   deadlineAtMs?: number;
   callGateway?: GatewayCaller;
 }): Promise<AgentRunsDrainResult> {
-  const deadlineAtMs =
-    params.deadlineAtMs ?? Date.now() + resolveRunWaitTimeoutMs(params.timeoutMs);
+  const deadlineAtMs = resolveRunWaitDeadlineAtMs(params);
 
   // Runs may finish and spawn more runs, so refresh until no pending IDs remain.
   let pendingRunIds = new Set<string>(
