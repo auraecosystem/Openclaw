@@ -154,6 +154,7 @@ import { runAgentHarnessBeforeAgentFinalizeHook } from "../../harness/lifecycle-
 import { resolveHeartbeatPromptForSystemPrompt } from "../../heartbeat-system-prompt.js";
 import { resolveImageSanitizationLimits } from "../../image-sanitization.js";
 import {
+  applyLocalModelLeanToolSearchDefaults,
   filterLocalModelLeanTools,
   isLocalModelLeanEnabled,
   resolveLocalModelLeanPreserveToolNames,
@@ -1103,12 +1104,12 @@ export async function runEmbeddedAttempt(
       });
     };
     const corePluginToolStages = createEmbeddedRunStageTracker();
+    const forceDirectMessageTool =
+      params.forceMessageTool === true || params.sourceReplyDeliveryMode === "message_tool_only";
     const toolsAllowWithForcedRuntimeTools = mergeForcedEmbeddedAttemptToolsAllow(
       params.toolsAllow,
       {
-        forceMessageTool:
-          params.forceMessageTool === true ||
-          params.sourceReplyDeliveryMode === "message_tool_only",
+        forceMessageTool: forceDirectMessageTool,
       },
     );
     const toolConstructionPlan = resolveEmbeddedAttemptToolConstructionPlan({
@@ -1118,6 +1119,13 @@ export async function runEmbeddedAttempt(
     });
     const toolsEnabled = supportsModelTools(params.model);
     const codeModeConfig = resolveCodeModeConfig(params.config, sessionAgentId);
+    const toolSearchRuntimeConfig = forceDirectMessageTool
+      ? params.config
+      : applyLocalModelLeanToolSearchDefaults({
+          config: params.config,
+          agentId: sessionAgentId,
+          sessionKey: sandboxSessionKey,
+        });
     const codeModeControlsEnabledForRun =
       toolsEnabled &&
       params.disableTools !== true &&
@@ -1130,7 +1138,7 @@ export async function runEmbeddedAttempt(
       !isRawModelRun &&
       params.toolsAllow?.length !== 0 &&
       !codeModeControlsEnabledForRun &&
-      resolveToolSearchConfig(params.config).enabled;
+      resolveToolSearchConfig(toolSearchRuntimeConfig).enabled;
     const effectiveToolsAllow =
       toolSearchControlsEnabledForRun && toolsAllowWithForcedRuntimeTools
         ? [
@@ -1205,7 +1213,7 @@ export async function runEmbeddedAttempt(
                     sandbox,
                     resolvedWorkspace,
                   }),
-            config: params.config,
+            config: toolSearchRuntimeConfig,
             abortSignal: runAbortController.signal,
             modelProvider: params.provider,
             modelId: params.modelId,
@@ -1591,7 +1599,7 @@ export async function runEmbeddedAttempt(
         })
       : applyToolSearchCatalog({
           tools: effectiveTools,
-          config: params.config,
+          config: toolSearchRuntimeConfig,
           sessionId: params.sessionId,
           sessionKey: sandboxSessionKey,
           agentId: sessionAgentId,
@@ -2178,7 +2186,7 @@ export async function runEmbeddedAttempt(
             {
               agentId: sessionAgentId,
               sessionKey: sandboxSessionKey,
-              config: params.config,
+              config: toolSearchRuntimeConfig,
               sessionId: params.sessionId,
               runId: params.runId,
               loopDetection: clientToolLoopDetection,
@@ -2198,7 +2206,7 @@ export async function runEmbeddedAttempt(
           })
         : addClientToolsToToolSearchCatalog({
             tools: clientToolDefs,
-            config: params.config,
+            config: toolSearchRuntimeConfig,
             sessionId: params.sessionId,
             sessionKey: sandboxSessionKey,
             agentId: sessionAgentId,
