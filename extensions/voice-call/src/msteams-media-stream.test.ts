@@ -249,4 +249,46 @@ describe("MsteamsMediaStream", () => {
     expect(endInfo?.callId).toBe(callId);
     expect(endInfo?.reason).toBe("call-ended");
   });
+
+  it("drops the connection when an inbound frame exceeds the payload cap", async () => {
+    const port = randomPort();
+    let frames = 0;
+    server = await startServer({
+      port,
+      onAudioFrame: () => {
+        frames += 1;
+      },
+    });
+
+    const callId = "call-oversize";
+    const ts = Date.now();
+    const sig = signHmac(SECRET, ts, callId);
+    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+      headers: {
+        "x-azurebot-timestamp": String(ts),
+        "x-azurebot-signature": sig,
+      },
+    });
+    await new Promise<void>((resolve, reject) => {
+      ws.once("open", () => resolve());
+      ws.once("error", reject);
+    });
+
+    // ~70 KB base64 payload — over the 64 KB inbound cap. ws closes oversized
+    // frames with code 1009 (message too big) before they reach JSON parsing.
+    const closeCode = await new Promise<number>((resolve) => {
+      ws.once("close", (code) => resolve(code));
+      ws.send(
+        JSON.stringify({
+          type: "audio.frame",
+          seq: 0,
+          timestampMs: Date.now(),
+          payloadBase64: "A".repeat(70 * 1024),
+        }),
+      );
+    });
+
+    expect(closeCode).toBe(1009);
+    expect(frames).toBe(0);
+  });
 });

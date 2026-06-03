@@ -103,6 +103,14 @@ export interface MsteamsMediaStreamConfig {
 
 const DEFAULT_HMAC_WINDOW_MS = 60_000;
 
+/**
+ * Hard cap on a single inbound WebSocket frame. Legitimate messages are small
+ * JSON envelopes — control messages plus one base64-encoded PCM audio frame,
+ * well under 1 KB. Bounding the payload rejects oversized frames before they
+ * reach JSON parsing, mitigating memory-exhaustion from unauthenticated peers.
+ */
+const MAX_INBOUND_PAYLOAD_BYTES = 64 * 1024;
+
 export class MsteamsMediaStream {
   private readonly config: MsteamsMediaStreamConfig;
   private readonly hmacWindowMs: number;
@@ -121,7 +129,7 @@ export class MsteamsMediaStream {
     }
 
     const server = http.createServer();
-    const wss = new WebSocketServer({ noServer: true });
+    const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_INBOUND_PAYLOAD_BYTES });
 
     server.on("upgrade", (request, socket, head) => {
       this.handleUpgrade(request, socket, head, wss);
