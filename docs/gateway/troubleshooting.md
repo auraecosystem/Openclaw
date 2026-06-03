@@ -506,6 +506,97 @@ Related:
 - [Logging](/logging)
 - [Doctor](/gateway/doctor)
 
+## macOS launchd supervisor loop with duplicate gateway/node LaunchAgents
+
+Use this when a macOS install keeps restarting every few seconds, `openclaw`
+health checks flap between healthy and unavailable, and channel dispatch stalls
+even though the service appears to be running.
+
+This was observed on `2026.5.26` when both `ai.openclaw.gateway` and
+`ai.openclaw.node` LaunchAgents were active and each injected
+`OPENCLAW_LAUNCHD_LABEL`. In that state OpenClaw can detect launchd
+supervision, try to hand restart back to launchd, and fall into a fast
+`EADDRINUSE`/respawn loop instead of one stable gateway process.
+
+```bash
+for i in 1 2 3 4; do
+  ps aux | grep 'openclaw.*index.js' | grep -v grep | awk '{print $2}'
+  sleep 10
+done
+
+launchctl print gui/$UID/ai.openclaw.gateway | grep -E 'state|last exit|runs'
+tail -n 80 ~/Library/Logs/openclaw/gateway.log
+```
+
+Look for:
+
+- More than one gateway PID across the 30-second sample instead of one stable
+  process.
+- `EADDRINUSE`, `another gateway instance is already listening`, or repeated
+  restart/handoff lines in `gateway.log`.
+- Both `~/Library/LaunchAgents/ai.openclaw.gateway.plist` and
+  `~/Library/LaunchAgents/ai.openclaw.node.plist` loaded at the same time on a
+  host that should only run one managed gateway service.
+
+What to do:
+
+1. Verify the gateway env-wrapper clears launchd markers after sourcing the
+   managed env file. Putting `unset` before `. "$env_file"` is a no-op because
+   the env file reintroduces the marker:
+
+   ```sh
+   # ~/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh
+   # Correct order: source first, then unset launchd markers.
+   . "$env_file"
+   unset OPENCLAW_LAUNCHD_LABEL LAUNCH_JOB_LABEL LAUNCH_JOB_NAME XPC_SERVICE_NAME || true
+   exec "$@"
+   ```
+
+2. Dry-run the wrapper before restarting:
+
+   ```bash
+   cat >/tmp/openclaw-launchd-test.env <<'EOF'
+   export OPENCLAW_LAUNCHD_LABEL='ai.openclaw.gateway'
+   EOF
+
+   sh ~/.openclaw/service-env/ai.openclaw.gateway-env-wrapper.sh \
+     /tmp/openclaw-launchd-test.env \
+     /bin/sh -c 'echo "OPENCLAW_LAUNCHD_LABEL=$OPENCLAW_LAUNCHD_LABEL"'
+   ```
+
+   Expected output is an empty value:
+
+   ```text
+   OPENCLAW_LAUNCHD_LABEL=
+   ```
+
+3. If a legacy `ai.openclaw.node` LaunchAgent is still installed and your host
+   should only run the gateway service, boot it out and disable it:
+
+   ```bash
+   launchctl bootout gui/$UID/ai.openclaw.node
+   mv ~/Library/LaunchAgents/ai.openclaw.node.plist \
+     ~/Library/LaunchAgents/ai.openclaw.node.plist.disabled
+   ```
+
+4. Reinstall or repair the intended gateway service, then restart it:
+
+   ```bash
+   openclaw doctor --fix
+   openclaw gateway install --force
+   openclaw gateway restart
+   ```
+
+After the fix, the 30-second PID sample should show one stable process instead
+of a rotating set of PIDs, and inbound channel dispatch should resume without
+manual dashboard/SSH nudges.
+
+Related:
+
+- [Gateway on macOS](/platforms/mac/bundled-gateway)
+- [Doctor](/gateway/doctor)
+- [Gateway CLI](/cli/gateway)
+
 ## Gateway exits during high memory use
 
 Use this when the Gateway disappears under load, the supervisor reports an OOM-style restart, or logs mention `critical memory pressure bundle written`.
