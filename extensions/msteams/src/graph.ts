@@ -16,6 +16,8 @@ export type GraphUser = {
   displayName?: string;
   userPrincipalName?: string;
   mail?: string;
+  department?: string;
+  jobTitle?: string;
 };
 
 type GraphGroup = {
