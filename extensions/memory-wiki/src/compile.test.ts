@@ -101,7 +101,7 @@ describe("compileMemoryWikiVault", () => {
       "- Claims: 1",
     );
     await expect(fs.readFile(path.join(rootDir, "sources", "index.md"), "utf8")).resolves.toContain(
-      "[Alpha](sources/alpha.md)",
+      "[Alpha](alpha.md)",
     );
     const agentDigest = JSON.parse(
       await fs.readFile(path.join(rootDir, ".openclaw-wiki", "cache", "agent-digest.json"), "utf8"),
@@ -247,16 +247,16 @@ describe("compileMemoryWikiVault", () => {
       "## Related",
     );
     await expect(fs.readFile(path.join(rootDir, "entities", "beta.md"), "utf8")).resolves.toContain(
-      "[Alpha](sources/alpha.md)",
+      "[Alpha](../sources/alpha.md)",
     );
     await expect(fs.readFile(path.join(rootDir, "entities", "beta.md"), "utf8")).resolves.toContain(
-      "[Gamma](concepts/gamma.md)",
+      "[Gamma](../concepts/gamma.md)",
     );
     await expect(fs.readFile(path.join(rootDir, "sources", "alpha.md"), "utf8")).resolves.toContain(
-      "[Beta](entities/beta.md)",
+      "[Beta](../entities/beta.md)",
     );
     await expect(fs.readFile(path.join(rootDir, "sources", "alpha.md"), "utf8")).resolves.toContain(
-      "[Gamma](concepts/gamma.md)",
+      "[Gamma](../concepts/gamma.md)",
     );
   });
 
@@ -313,7 +313,7 @@ describe("compileMemoryWikiVault", () => {
 
     const firstEntity = await fs.readFile(path.join(rootDir, "entities", "entity-0.md"), "utf8");
     const sourcePage = await fs.readFile(path.join(rootDir, "sources", "alpha.md"), "utf8");
-    expect(firstEntity).toContain("[Alpha](sources/alpha.md)");
+    expect(firstEntity).toContain("[Alpha](../sources/alpha.md)");
     expect(firstEntity).not.toContain("### Related Pages");
     expect(sourcePage).not.toContain("### Referenced By");
   });
@@ -580,7 +580,7 @@ describe("compileMemoryWikiVault", () => {
 
     expect(second.updatedFiles).toStrictEqual([]);
     await expect(fs.readFile(path.join(rootDir, "entities", "beta.md"), "utf8")).resolves.toContain(
-      "[Gamma](concepts/gamma.md)",
+      "[Gamma](../concepts/gamma.md)",
     );
     await expect(
       fs.readFile(path.join(rootDir, "concepts", "gamma.md"), "utf8"),
