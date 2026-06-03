@@ -687,6 +687,69 @@ describe("web_fetch extraction fallbacks", () => {
     expect(details.title).toContain("Shell App");
   });
 
+  it("falls back to body HTML when readability returns only the page title", async () => {
+    extractReadableContentMock.mockResolvedValue({
+      text: "Sample Page",
+      title: "Sample Page",
+      extractor: "readability",
+    });
+    installMockFetch(
+      (input: RequestInfo | URL) =>
+        Promise.resolve(
+          htmlResponse(
+            "<!doctype html><html><head><title>Sample Page</title></head><body><main><p>Body marker 82685 content.</p></main></body></html>",
+            resolveRequestUrl(input),
+          ),
+        ) as Promise<Response>,
+    );
+
+    const tool = createFetchTool({
+      firecrawl: { enabled: false },
+    });
+    const result = await executeFetch(tool, { url: "https://example.com/body" });
+    const details = result?.details as { extractor?: string; text?: string; title?: string };
+
+    expect(details.extractor).toBe("raw-html");
+    expect(details.text).toContain("Body marker 82685 content.");
+    expect(details.text).not.toContain("Sample Page\nBody marker");
+    expect(details.title).toContain("Sample Page");
+  });
+
+  it("tries provider fallback before body HTML when readability returns only the page title", async () => {
+    extractReadableContentMock.mockResolvedValue({
+      text: "Sample Page",
+      title: "Sample Page",
+      extractor: "readability",
+    });
+    installMockFetch(
+      (input: RequestInfo | URL) =>
+        Promise.resolve(
+          htmlResponse(
+            "<!doctype html><html><head><title>Sample Page</title></head><body><main><p>Body marker 82685 content.</p></main></body></html>",
+            resolveRequestUrl(input),
+          ),
+        ) as Promise<Response>,
+    );
+    resolveWebFetchDefinitionMock.mockReturnValue({
+      provider: { id: "test-fetch", label: "Test Fetch" },
+      definition: {
+        description: "test provider",
+        parameters: {},
+        execute: async () => ({
+          extractor: "test-fetch",
+          text: "provider fallback body",
+        }),
+      },
+    });
+
+    const tool = createProviderFallbackTool();
+    const result = await executeFetch(tool, { url: "https://example.com/body" });
+    const details = result?.details as { extractor?: string; text?: string };
+
+    expect(details.extractor).toBe("test-fetch");
+    expect(details.text).toContain("provider fallback body");
+  });
+
   it("uses the provider fallback when direct fetch fails", async () => {
     installMockFetch((_input: RequestInfo | URL) => {
       return Promise.resolve({

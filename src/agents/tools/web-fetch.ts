@@ -25,6 +25,7 @@ import {
   extractBasicHtmlContent,
   htmlToMarkdown,
   markdownToText,
+  normalizeWhitespace,
   truncateText,
   type ExtractMode,
 } from "./web-fetch-utils.js";
@@ -190,6 +191,35 @@ function formatWebFetchErrorDetail(params: {
   }
   const truncated = truncateText(text.trim(), maxChars);
   return truncated.text;
+}
+
+function normalizeComparableWebFetchText(value: string | undefined): string {
+  return normalizeWhitespace(value ?? "").toLowerCase();
+}
+
+function hasOnlyReadableTitle(params: { text: string; title?: string }): boolean {
+  const title = normalizeComparableWebFetchText(params.title);
+  return title.length > 0 && normalizeComparableWebFetchText(params.text) === title;
+}
+
+function extractHtmlBody(html: string): string | undefined {
+  const bodyMatch = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i);
+  if (bodyMatch) {
+    return bodyMatch[1];
+  }
+  const openBodyMatch = html.match(/<body\b[^>]*>([\s\S]*)/i);
+  return openBodyMatch?.[1];
+}
+
+async function extractBasicHtmlBodyContent(params: {
+  html: string;
+  extractMode: ExtractMode;
+}): Promise<{ text: string; title?: string } | null> {
+  const bodyHtml = extractHtmlBody(params.html);
+  if (bodyHtml === undefined) {
+    return await extractBasicHtmlContent(params);
+  }
+  return await extractBasicHtmlContent({ html: bodyHtml, extractMode: params.extractMode });
 }
 
 function redactUrlForDebugLog(rawUrl: string): string {
@@ -546,7 +576,8 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
           extractMode: params.extractMode,
           config: params.config,
         });
-        if (readable?.text) {
+        const readableTitleOnly = readable?.text ? hasOnlyReadableTitle(readable) : false;
+        if (readable?.text && !readableTitleOnly) {
           text = readable.text;
           title = readable.title;
           extractor = readable.extractor;
@@ -565,13 +596,18 @@ async function runWebFetch(params: WebFetchRuntimeParams): Promise<Record<string
           if (payload) {
             return payload;
           }
-          const basic = await extractBasicHtmlContent({
-            html: body,
-            extractMode: params.extractMode,
-          });
+          const basic = readableTitleOnly
+            ? await extractBasicHtmlBodyContent({
+                html: body,
+                extractMode: params.extractMode,
+              })
+            : await extractBasicHtmlContent({
+                html: body,
+                extractMode: params.extractMode,
+              });
           if (basic?.text) {
             text = basic.text;
-            title = basic.title;
+            title = basic.title ?? readable?.title;
             extractor = "raw-html";
           } else {
             const providerLabel =
