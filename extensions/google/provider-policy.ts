@@ -40,11 +40,14 @@ function stripUrlUserInfo(url: URL): void {
 
 const GOOGLE_VERTEX_HOST = "aiplatform.googleapis.com";
 const GOOGLE_VERTEX_REGION_HOST_SUFFIX = "-aiplatform.googleapis.com";
+const GOOGLE_VERTEX_MULTI_REGION_HOST_SUFFIX = ".rep.googleapis.com";
 
 export function isGoogleVertexHostname(hostname: string): boolean {
   const normalized = hostname.toLowerCase();
   return (
-    normalized === GOOGLE_VERTEX_HOST || normalized.endsWith(GOOGLE_VERTEX_REGION_HOST_SUFFIX)
+    normalized === GOOGLE_VERTEX_HOST ||
+    normalized.endsWith(GOOGLE_VERTEX_REGION_HOST_SUFFIX) ||
+    normalized.endsWith(GOOGLE_VERTEX_MULTI_REGION_HOST_SUFFIX)
   );
 }
 
