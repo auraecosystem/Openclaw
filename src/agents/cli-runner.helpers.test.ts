@@ -8,6 +8,7 @@ import { resolvePreferredOpenClawTmpDir } from "../infra/tmp-openclaw-dir.js";
 import { escapeRegExp } from "../shared/regexp.js";
 import {
   buildCliArgs,
+  buildSystemPrompt,
   loadPromptRefImages,
   prepareCliPromptImagePayload,
   resolveCliRunQueueKey,
@@ -216,6 +217,40 @@ describe("buildCliArgs", () => {
       "--model",
       "gemini-3.1-pro-preview",
     ]);
+  });
+});
+
+describe("buildSystemPrompt", () => {
+  it("skips unreadable tool names while preserving healthy CLI prompt tools", () => {
+    const unreadableTool = Object.defineProperty(
+      {
+        description: "bad experimental tool",
+        parameters: { type: "object", properties: {} },
+        execute: async () => ({ text: "bad" }),
+      },
+      "name",
+      {
+        get() {
+          throw new Error("fuzzplugin cli prompt tool name getter exploded");
+        },
+      },
+    );
+
+    const systemPrompt = buildSystemPrompt({
+      workspaceDir: "/tmp",
+      modelDisplay: "codex/gpt-5.5",
+      tools: [
+        unreadableTool,
+        {
+          name: "sessions_spawn",
+          description: "delegate work",
+          parameters: { type: "object", properties: {} },
+          execute: async () => ({ text: "ok" }),
+        },
+      ] as never,
+    });
+
+    expect(systemPrompt).toContain("sessions_spawn");
   });
 });
 
