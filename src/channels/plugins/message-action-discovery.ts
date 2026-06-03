@@ -115,6 +115,25 @@ function normalizeToolSchemaContributions(
   return Array.isArray(value) ? value : [value];
 }
 
+function readMessageToolDiscoveryField<K extends keyof ChannelMessageToolDiscovery>(params: {
+  pluginId: string;
+  described: ChannelMessageToolDiscovery | null;
+  field: K;
+}): ChannelMessageToolDiscovery[K] | undefined {
+  // Plugin discovery can return getter/proxy-backed objects; one bad field
+  // must not poison the shared message tool schema for healthy plugins.
+  try {
+    return params.described?.[params.field];
+  } catch (error) {
+    logMessageActionError({
+      pluginId: params.pluginId,
+      operation: "describeMessageTool",
+      error,
+    });
+    return undefined;
+  }
+}
+
 type ResolvedChannelMessageActionDiscovery = {
   actions: ChannelMessageActionName[];
   capabilities: readonly ChannelMessageCapability[];
@@ -124,10 +143,29 @@ type ResolvedChannelMessageActionDiscovery = {
 
 type MessageToolMediaSourceParamMap = Partial<Record<ChannelMessageActionName, readonly string[]>>;
 
-function normalizeMessageToolMediaSourceParams(
-  mediaSourceParams: ChannelMessageToolDiscovery["mediaSourceParams"],
-  action?: ChannelMessageActionName,
-): readonly string[] {
+function readSchemaContributionField<K extends keyof ChannelMessageToolSchemaContribution>(params: {
+  pluginId: string;
+  contribution: ChannelMessageToolSchemaContribution;
+  field: K;
+}): ChannelMessageToolSchemaContribution[K] | undefined {
+  try {
+    return params.contribution[params.field];
+  } catch (error) {
+    logMessageActionError({
+      pluginId: params.pluginId,
+      operation: "describeMessageTool",
+      error,
+    });
+    return undefined;
+  }
+}
+
+function normalizeMessageToolMediaSourceParams(params: {
+  pluginId: string;
+  mediaSourceParams: ChannelMessageToolDiscovery["mediaSourceParams"];
+  action?: ChannelMessageActionName;
+}): readonly string[] {
+  const { mediaSourceParams } = params;
   if (Array.isArray(mediaSourceParams)) {
     return mediaSourceParams;
   }
@@ -135,13 +173,22 @@ function normalizeMessageToolMediaSourceParams(
     return [];
   }
   const scopedMediaSourceParams = mediaSourceParams as MessageToolMediaSourceParamMap;
-  if (action) {
-    const scoped = scopedMediaSourceParams[action];
-    return Array.isArray(scoped) ? scoped : [];
+  try {
+    if (params.action) {
+      const scoped = scopedMediaSourceParams[params.action];
+      return Array.isArray(scoped) ? scoped : [];
+    }
+    return Object.values(scopedMediaSourceParams).flatMap((scoped) =>
+      Array.isArray(scoped) ? scoped : [],
+    );
+  } catch (error) {
+    logMessageActionError({
+      pluginId: params.pluginId,
+      operation: "describeMessageTool",
+      error,
+    });
+    return [];
   }
-  return Object.values(scopedMediaSourceParams).flatMap((scoped) =>
-    Array.isArray(scoped) ? scoped : [],
-  );
 }
 
 export function resolveCurrentChannelMessageToolDiscoveryAdapter(channel?: string | null): {
@@ -200,20 +247,33 @@ export function resolveMessageActionDiscoveryForPlugin(params: {
     context: params.context,
     describeMessageTool: adapter.describeMessageTool,
   });
+  const actions = params.includeActions
+    ? readMessageToolDiscoveryField({ pluginId: params.pluginId, described, field: "actions" })
+    : undefined;
+  const capabilities = params.includeCapabilities
+    ? readMessageToolDiscoveryField({
+        pluginId: params.pluginId,
+        described,
+        field: "capabilities",
+      })
+    : undefined;
+  const schema = params.includeSchema
+    ? readMessageToolDiscoveryField({ pluginId: params.pluginId, described, field: "schema" })
+    : undefined;
+  const mediaSourceParams = readMessageToolDiscoveryField({
+    pluginId: params.pluginId,
+    described,
+    field: "mediaSourceParams",
+  });
   return {
-    actions:
-      params.includeActions && Array.isArray(described?.actions) ? [...described.actions] : [],
-    capabilities:
-      params.includeCapabilities && Array.isArray(described?.capabilities)
-        ? described.capabilities
-        : [],
-    schemaContributions: params.includeSchema
-      ? normalizeToolSchemaContributions(described?.schema)
-      : [],
-    mediaSourceParams: normalizeMessageToolMediaSourceParams(
-      described?.mediaSourceParams,
-      params.action,
-    ),
+    actions: Array.isArray(actions) ? [...actions] : [],
+    capabilities: Array.isArray(capabilities) ? capabilities : [],
+    schemaContributions: normalizeToolSchemaContributions(schema),
+    mediaSourceParams: normalizeMessageToolMediaSourceParams({
+      pluginId: params.pluginId,
+      mediaSourceParams,
+      action: params.action,
+    }),
   };
 }
 
@@ -254,13 +314,34 @@ export function listCrossChannelSchemaSupportedMessageActions(
   });
   const schemaBlockedActions = new Set<ChannelMessageActionName>();
   for (const contribution of resolved.schemaContributions) {
-    if ((contribution.visibility ?? "current-channel") !== "current-channel") {
+    const visibility =
+      readSchemaContributionField({
+        pluginId: pluginActions.pluginId,
+        contribution,
+        field: "visibility",
+      }) ?? "current-channel";
+    if (visibility !== "current-channel") {
       continue;
     }
-    if (!Object.hasOwn(contribution, "actions")) {
+    let hasActions: boolean;
+    try {
+      hasActions = Object.hasOwn(contribution, "actions");
+    } catch (error) {
+      logMessageActionError({
+        pluginId: pluginActions.pluginId,
+        operation: "describeMessageTool",
+        error,
+      });
       return [];
     }
-    const actions = contribution.actions;
+    if (!hasActions) {
+      return [];
+    }
+    const actions = readSchemaContributionField({
+      pluginId: pluginActions.pluginId,
+      contribution,
+      field: "actions",
+    });
     if (!Array.isArray(actions)) {
       return [];
     }
@@ -306,17 +387,31 @@ export function listChannelMessageCapabilitiesForChannel(
   );
 }
 
-function mergeToolSchemaProperties(
-  target: Record<string, TSchema>,
-  source: Record<string, TSchema> | undefined,
-) {
+function mergeToolSchemaProperties(params: {
+  pluginId: string;
+  target: Record<string, TSchema>;
+  contribution: ChannelMessageToolSchemaContribution;
+}) {
+  const source = readSchemaContributionField({
+    pluginId: params.pluginId,
+    contribution: params.contribution,
+    field: "properties",
+  });
   if (!source) {
     return;
   }
-  for (const [name, schema] of Object.entries(source)) {
-    if (!(name in target)) {
-      target[name] = schema;
+  try {
+    for (const [name, schema] of Object.entries(source)) {
+      if (!(name in params.target)) {
+        params.target[name] = schema;
+      }
     }
+  } catch (error) {
+    logMessageActionError({
+      pluginId: params.pluginId,
+      operation: "describeMessageTool",
+      error,
+    });
   }
 }
 
@@ -339,14 +434,27 @@ export function resolveChannelMessageToolSchemaProperties(
       context: discoveryBase,
       includeSchema: true,
     }).schemaContributions) {
-      const visibility = contribution.visibility ?? "current-channel";
+      const visibility =
+        readSchemaContributionField({
+          pluginId: plugin.id,
+          contribution,
+          field: "visibility",
+        }) ?? "current-channel";
       if (currentChannel) {
         if (visibility === "all-configured" || plugin.id === currentChannel) {
-          mergeToolSchemaProperties(properties, contribution.properties);
+          mergeToolSchemaProperties({
+            pluginId: plugin.id,
+            target: properties,
+            contribution,
+          });
         }
         continue;
       }
-      mergeToolSchemaProperties(properties, contribution.properties);
+      mergeToolSchemaProperties({
+        pluginId: plugin.id,
+        target: properties,
+        contribution,
+      });
     }
   }
   if (currentChannel && !seenPluginIds.has(currentChannel)) {
@@ -358,9 +466,18 @@ export function resolveChannelMessageToolSchemaProperties(
         context: discoveryBase,
         includeSchema: true,
       }).schemaContributions) {
-        const visibility = contribution.visibility ?? "current-channel";
+        const visibility =
+          readSchemaContributionField({
+            pluginId: currentActions.pluginId,
+            contribution,
+            field: "visibility",
+          }) ?? "current-channel";
         if (visibility === "all-configured" || currentActions.pluginId === currentChannel) {
-          mergeToolSchemaProperties(properties, contribution.properties);
+          mergeToolSchemaProperties({
+            pluginId: currentActions.pluginId,
+            target: properties,
+            contribution,
+          });
         }
       }
     }

@@ -193,6 +193,114 @@ describe("message action capability checks", () => {
     ).toHaveProperty("components");
   });
 
+  it("skips unreadable message tool discovery schema while preserving healthy schema contributions", () => {
+    const badPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-bad-schema",
+        label: "Demo Bad Schema",
+        capabilities: { chatTypes: ["direct", "group"] },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          actions: ["send"],
+          get schema(): never {
+            throw new Error("fuzzplugin schema exploded");
+          },
+        }),
+      },
+    };
+    const healthyPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-healthy-schema",
+        label: "Demo Healthy Schema",
+        capabilities: { chatTypes: ["direct", "group"] },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          actions: ["send"],
+          schema: {
+            visibility: "all-configured",
+            properties: {
+              healthyParam: Type.Optional(Type.String()),
+            },
+          },
+        }),
+      },
+    };
+    setActivePluginRegistry(
+      createTestRegistry([
+        { pluginId: "demo-bad-schema", source: "test", plugin: badPlugin },
+        { pluginId: "demo-healthy-schema", source: "test", plugin: healthyPlugin },
+      ]),
+    );
+
+    expect(
+      resolveChannelMessageToolSchemaProperties({
+        cfg: {} as OpenClawConfig,
+        channel: "demo-healthy-schema",
+      }),
+    ).toHaveProperty("healthyParam");
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("fuzzplugin schema exploded"));
+  });
+
+  it("skips unreadable message tool schema properties while preserving healthy schema contributions", () => {
+    const unreadableProperties = new Proxy({} as Record<string, never>, {
+      ownKeys() {
+        throw new Error("fuzzplugin schema properties exploded");
+      },
+    });
+    const badPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-bad-properties",
+        label: "Demo Bad Properties",
+        capabilities: { chatTypes: ["direct", "group"] },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          actions: ["send"],
+          schema: {
+            visibility: "all-configured",
+            properties: unreadableProperties,
+          },
+        }),
+      },
+    };
+    const healthyPlugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({
+        id: "demo-healthy-properties",
+        label: "Demo Healthy Properties",
+        capabilities: { chatTypes: ["direct", "group"] },
+      }),
+      actions: {
+        describeMessageTool: () => ({
+          actions: ["send"],
+          schema: {
+            visibility: "all-configured",
+            properties: {
+              fallbackParam: Type.Optional(Type.String()),
+            },
+          },
+        }),
+      },
+    };
+    setActivePluginRegistry(
+      createTestRegistry([
+        { pluginId: "demo-bad-properties", source: "test", plugin: badPlugin },
+        { pluginId: "demo-healthy-properties", source: "test", plugin: healthyPlugin },
+      ]),
+    );
+
+    expect(
+      resolveChannelMessageToolSchemaProperties({
+        cfg: {} as OpenClawConfig,
+        channel: "demo-healthy-properties",
+      }),
+    ).toHaveProperty("fallbackParam");
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("fuzzplugin schema properties exploded"),
+    );
+  });
+
   it("filters only actions that depend on current-channel-only schema", () => {
     const scopedSchemaPlugin: ChannelPlugin = {
       ...createChannelTestPluginBase({
