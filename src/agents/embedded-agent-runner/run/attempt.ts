@@ -1111,12 +1111,13 @@ export async function runEmbeddedAttempt(
           params.sourceReplyDeliveryMode === "message_tool_only",
       },
     );
+    const toolsEnabled = supportsModelTools(params.model);
     const toolConstructionPlan = resolveEmbeddedAttemptToolConstructionPlan({
       disableTools: params.disableTools,
       isRawModelRun,
+      toolsEnabled,
       toolsAllow: toolsAllowWithForcedRuntimeTools,
     });
-    const toolsEnabled = supportsModelTools(params.model);
     const codeModeConfig = resolveCodeModeConfig(params.config, sessionAgentId);
     const codeModeControlsEnabledForRun =
       toolsEnabled &&
