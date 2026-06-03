@@ -54,6 +54,30 @@ function collectInvalidHookTransformsDirWarnings(
   ];
 }
 
+function collectUnsupportedInternalHookEntryWarnings(cfg: OpenClawConfig): string[] {
+  const entries = cfg.hooks?.internal?.entries;
+  if (!entries) {
+    return [];
+  }
+  const unsupportedKeysByEntry = Object.entries(entries)
+    .map(([hookKey, entry]) => {
+      const unsupportedKeys = ["handler", "module", "extraDirs", "installs"].filter((key) =>
+        Object.hasOwn(entry, key),
+      );
+      return { hookKey, unsupportedKeys };
+    })
+    .filter(({ unsupportedKeys }) => unsupportedKeys.length > 0);
+
+  if (unsupportedKeysByEntry.length === 0) {
+    return [];
+  }
+
+  return unsupportedKeysByEntry.map(
+    ({ hookKey, unsupportedKeys }) =>
+      `- hooks.internal.entries.${hookKey}: unsupported loader key${unsupportedKeys.length === 1 ? "" : "s"} ${unsupportedKeys.join(", ")} will not load hook modules. Use a managed or workspace hook directory with HOOK.md + handler.js, hooks.internal.load.extraDirs for extra roots, or legacy hooks.internal.handlers for module handlers.`,
+  );
+}
+
 function collectConfiguredChannelIds(cfg: OpenClawConfig): string[] {
   const channels =
     cfg.channels && typeof cfg.channels === "object" && !Array.isArray(cfg.channels)
@@ -182,6 +206,10 @@ export async function loadAndMaybeMigrateDoctorConfig(params: {
   const hookTransformsDirWarnings = collectInvalidHookTransformsDirWarnings(cfg, snapshot.path);
   if (hookTransformsDirWarnings.length > 0) {
     note(sanitizeDoctorNote(hookTransformsDirWarnings.join("\n")), "Doctor warnings");
+  }
+  const unsupportedInternalHookEntryWarnings = collectUnsupportedInternalHookEntryWarnings(cfg);
+  if (unsupportedInternalHookEntryWarnings.length > 0) {
+    note(sanitizeDoctorNote(unsupportedInternalHookEntryWarnings.join("\n")), "Doctor warnings");
   }
 
   const normalized = normalizeCompatibilityConfigValues(candidate);
