@@ -312,6 +312,7 @@ describe("appendAssistantMessageToSessionTranscript", () => {
       | undefined;
     expect(event?.sessionFile).toBe(sessionFile);
     expect(event?.sessionKey).toBe(sessionKey);
+    expect(event?.sessionId).toBe(sessionId);
     expect(event?.messageId).toBeTypeOf("string");
     expect(message?.role).toBe("assistant");
     expect(message?.provider).toBe("openclaw");
@@ -826,6 +827,7 @@ describe("appendAssistantMessageToSessionTranscript", () => {
       expect(emitSpy).toHaveBeenCalledWith({
         sessionFile: result.sessionFile,
         sessionKey,
+        sessionId,
       });
     }
     emitSpy.mockRestore();

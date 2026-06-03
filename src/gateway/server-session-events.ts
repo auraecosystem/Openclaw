@@ -132,17 +132,20 @@ async function handleTranscriptUpdateBroadcast(
   },
   update: SessionTranscriptUpdate,
 ): Promise<void> {
-  const sessionKey = update.sessionKey ?? resolveSessionKeyForTranscriptFile(update.sessionFile);
+  const sessionKey =
+    update.target?.sessionKey ??
+    update.sessionKey ??
+    (update.sessionFile ? resolveSessionKeyForTranscriptFile(update.sessionFile) : undefined);
   if (!sessionKey || update.message === undefined) {
     return;
   }
-  const effectiveAgentId = update.agentId;
+  const effectiveAgentId = update.target?.agentId ?? update.agentId;
   const defaultGlobalAgentId =
     sessionKey === "global"
       ? normalizeAgentId(resolveDefaultAgentId(getRuntimeConfig()))
       : undefined;
   const visibleAgentId =
-    update.agentId ??
+    effectiveAgentId ??
     (effectiveAgentId && effectiveAgentId !== defaultGlobalAgentId ? effectiveAgentId : undefined);
   const connIds = new Set<string>();
   for (const connId of params.sessionEventSubscribers.getAll()) {

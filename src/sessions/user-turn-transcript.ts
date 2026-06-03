@@ -410,6 +410,7 @@ export async function appendUserTurnTranscriptMessage(
         emitSessionTranscriptUpdate({
           sessionFile: params.transcriptPath,
           ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+          ...(params.sessionId ? { sessionId: params.sessionId } : {}),
           ...(params.agentId ? { agentId: params.agentId } : {}),
           message: appended.message,
           messageId: appended.messageId,

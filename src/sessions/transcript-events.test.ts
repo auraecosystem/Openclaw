@@ -43,6 +43,75 @@ describe("transcript events", () => {
     });
   });
 
+  it("emits storage-neutral identity updates without session files", () => {
+    const listener = vi.fn();
+    cleanup.push(onSessionTranscriptUpdate(listener));
+
+    emitSessionTranscriptUpdate({
+      target: {
+        agentId: " main ",
+        sessionId: " sess-1 ",
+        sessionKey: " agent:main:main ",
+        targetKind: "runtime-session",
+      },
+      messageId: " msg-1 ",
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      target: {
+        agentId: "main",
+        sessionId: "sess-1",
+        sessionKey: "agent:main:main",
+        targetKind: "runtime-session",
+      },
+      agentId: "main",
+      sessionId: "sess-1",
+      sessionKey: "agent:main:main",
+      messageId: "msg-1",
+    });
+  });
+
+  it("derives target identity from top-level session metadata", () => {
+    const listener = vi.fn();
+    cleanup.push(onSessionTranscriptUpdate(listener));
+
+    emitSessionTranscriptUpdate({
+      sessionFile: "/tmp/session.jsonl",
+      sessionKey: "agent:main:main",
+      sessionId: "sess-1",
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      sessionFile: "/tmp/session.jsonl",
+      target: {
+        agentId: "main",
+        sessionId: "sess-1",
+        sessionKey: "agent:main:main",
+        targetKind: "active-session-file",
+      },
+      agentId: "main",
+      sessionId: "sess-1",
+      sessionKey: "agent:main:main",
+    });
+  });
+
+  it("does not derive agent-scoped target identity from global session keys", () => {
+    const listener = vi.fn();
+    cleanup.push(onSessionTranscriptUpdate(listener));
+
+    emitSessionTranscriptUpdate({
+      sessionFile: "/tmp/session.jsonl",
+      sessionKey: "global",
+      sessionId: "global",
+    });
+
+    expect(listener).toHaveBeenCalledWith({
+      sessionFile: "/tmp/session.jsonl",
+      sessionId: "global",
+      sessionKey: "global",
+    });
+  });
+
   it("drops invalid message sequence values", () => {
     const listener = vi.fn();
     cleanup.push(onSessionTranscriptUpdate(listener));

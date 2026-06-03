@@ -517,6 +517,45 @@ describe("session.message websocket events", () => {
     });
   });
 
+  test("broadcasts identity-only transcript updates to live session listeners", async () => {
+    const storePath = await createSessionStoreFile();
+    await writeSessionStore({
+      entries: {
+        main: {
+          sessionId: "sess-main",
+          updatedAt: Date.now(),
+        },
+      },
+      storePath,
+    });
+
+    await withOperatorSessionSubscriber(async (ws) => {
+      const messageEventPromise = waitForSessionMessageEvent(ws, "agent:main:main");
+      emitSessionTranscriptUpdate({
+        target: {
+          agentId: "main",
+          sessionId: "sess-main",
+          sessionKey: "agent:main:main",
+          targetKind: "runtime-session",
+        },
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "identity frame" }],
+          timestamp: Date.now(),
+        },
+        messageId: "msg-identity-frame",
+        messageSeq: 1,
+      });
+
+      const messageEvent = await messageEventPromise;
+      expectRecordFields(messageEvent.payload, {
+        sessionKey: "agent:main:main",
+        messageId: "msg-identity-frame",
+        messageSeq: 1,
+      });
+    });
+  });
+
   test("includes live usage metadata on session.message transcript events", async () => {
     const storePath = await createSessionStoreFile();
     await writeSessionStore({

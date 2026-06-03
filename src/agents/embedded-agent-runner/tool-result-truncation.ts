@@ -711,6 +711,7 @@ function truncateOversizedToolResultsInExistingSessionManager(params: {
     emitSessionTranscriptUpdate({
       sessionFile: params.sessionFile,
       sessionKey: params.sessionKey,
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       ...(params.agentId ? { agentId: params.agentId } : {}),
     });
   }
@@ -782,6 +783,7 @@ async function truncateOversizedToolResultsInTranscriptState(params: {
     emitSessionTranscriptUpdate({
       sessionFile: params.sessionFile,
       sessionKey: params.sessionKey,
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       ...(params.agentId ? { agentId: params.agentId } : {}),
     });
   }
@@ -889,6 +891,7 @@ export async function truncateOversizedToolResultsInSession(params: {
       sessionFile,
       sessionId: params.sessionId,
       sessionKey: params.sessionKey,
+      agentId: params.agentId,
     });
   } catch (err) {
     const errMsg = formatErrorMessage(err);

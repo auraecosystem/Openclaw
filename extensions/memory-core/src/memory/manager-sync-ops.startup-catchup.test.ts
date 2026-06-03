@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
+import { emitSessionTranscriptUpdate } from "openclaw/plugin-sdk/agent-harness-runtime";
 import {
   resolveSessionTranscriptsDirForAgent,
   type OpenClawConfig,
@@ -110,8 +111,21 @@ class SessionStartupCatchupHarness extends MemoryManagerSyncOps {
     return Array.from(this.sessionsDirtyFiles);
   }
 
+  getPendingSessionTargets(): MemorySyncParams["sessions"] {
+    return Array.from(this.sessionPendingTargets.values());
+  }
+
   isSessionsDirty(): boolean {
     return this.sessionsDirty;
+  }
+
+  startTranscriptListener(): void {
+    this.ensureSessionListener();
+  }
+
+  stopTranscriptListener(): void {
+    this.sessionUnsubscribe?.();
+    this.sessionUnsubscribe = null;
   }
 
   protected computeProviderKey(): string {
@@ -155,6 +169,8 @@ describe("session startup catch-up", () => {
   });
 
   afterEach(async () => {
+    vi.clearAllTimers();
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     await fs.rm(stateDir, { recursive: true, force: true });
   });
@@ -248,5 +264,62 @@ describe("session startup catch-up", () => {
     });
 
     expect(harness.indexedPaths).toEqual([]);
+  });
+
+  it("queues transcript update identity without requiring a session file", async () => {
+    vi.useFakeTimers();
+    const harness = new SessionStartupCatchupHarness([]);
+    harness.startTranscriptListener();
+
+    emitSessionTranscriptUpdate({
+      target: {
+        agentId: "main",
+        sessionId: "thread",
+        sessionKey: "agent:main:thread",
+        targetKind: "runtime-session",
+      },
+    });
+
+    expect(harness.getPendingSessionTargets()).toEqual([
+      { agentId: "main", sessionId: "thread", sessionKey: "agent:main:thread" },
+    ]);
+    harness.stopTranscriptListener();
+  });
+
+  it("keeps canonical path transcript update compatibility", async () => {
+    vi.useFakeTimers();
+    const session = await writeSessionFile("thread.jsonl");
+    const harness = new SessionStartupCatchupHarness([]);
+    harness.startTranscriptListener();
+
+    emitSessionTranscriptUpdate({
+      sessionFile: session.filePath,
+      sessionKey: "agent:main:thread",
+    });
+
+    expect(harness.getPendingSessionTargets()).toEqual([
+      { agentId: "main", sessionId: "thread", sessionKey: "agent:main:thread" },
+    ]);
+    harness.stopTranscriptListener();
+  });
+
+  it("uses active-session-file update paths before target identity", async () => {
+    vi.useFakeTimers();
+    const session = await writeSessionFile("thread.jsonl");
+    const harness = new SessionStartupCatchupHarness([]);
+    harness.startTranscriptListener();
+
+    emitSessionTranscriptUpdate({
+      sessionFile: session.filePath,
+      target: {
+        agentId: "main",
+        sessionId: "wrong-target",
+        sessionKey: "agent:main:wrong-target",
+        targetKind: "active-session-file",
+      },
+    });
+
+    expect(harness.getPendingSessionTargets()).toEqual([{ agentId: "main", sessionId: "thread" }]);
+    harness.stopTranscriptListener();
   });
 });

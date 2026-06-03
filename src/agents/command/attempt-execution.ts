@@ -299,6 +299,7 @@ async function persistTextTurnTranscript(
   emitSessionTranscriptUpdate({
     sessionFile,
     sessionKey: params.sessionKey,
+    sessionId: params.sessionId,
     agentId: params.sessionAgentId,
   });
   return sessionEntry;

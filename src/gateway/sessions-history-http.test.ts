@@ -599,6 +599,35 @@ describe("session history HTTP endpoints", () => {
     });
   });
 
+  test("streams identity-only transcript updates over SSE", async () => {
+    await seedSession({ text: "first message" });
+
+    await withGatewayHarness(async (harness) => {
+      const stream = await openSessionHistorySse(harness.port, "agent:main:main");
+      await expectHistoryEventTexts(stream, ["first message"]);
+
+      emitSessionTranscriptUpdate({
+        target: {
+          agentId: "main",
+          sessionId: "sess-main",
+          sessionKey: "agent:main:main",
+          targetKind: "runtime-session",
+        },
+        message: makeTranscriptAssistantMessage({ text: "identity second message" }),
+        messageId: "msg-identity-second",
+        messageSeq: 2,
+      });
+
+      await expectMessageEventMatch(stream, {
+        text: "identity second message",
+        seq: 2,
+        id: "msg-identity-second",
+      });
+
+      await stream.reader.cancel();
+    });
+  });
+
   test("refreshes SSE history for non-monotonic carried sequence", async () => {
     const storePath = await createSessionStoreFile();
     const transcriptPath = path.join(path.dirname(storePath), "sess-main.jsonl");

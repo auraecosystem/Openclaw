@@ -406,6 +406,7 @@ export async function rewriteTranscriptEntriesInRuntimeTranscript(params: {
       emitSessionTranscriptUpdate({
         sessionFile: target.sessionFile,
         sessionKey: target.sessionKey,
+        sessionId: target.sessionId,
         agentId: target.agentId,
       });
       log.info(
@@ -465,6 +466,7 @@ export async function rewriteTranscriptEntriesInSessionFile(params: {
       emitSessionTranscriptUpdate({
         sessionFile: params.sessionFile,
         sessionKey: params.sessionKey,
+        ...(params.sessionId ? { sessionId: params.sessionId } : {}),
         ...(params.agentId ? { agentId: params.agentId } : {}),
       });
       log.info(

@@ -358,6 +358,7 @@ export async function mirrorCodexAppServerTranscript(params: {
     emitSessionTranscriptUpdate({
       sessionFile: params.sessionFile,
       ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
+      ...(params.sessionId ? { sessionId: params.sessionId } : {}),
       ...(params.agentId ? { agentId: params.agentId } : {}),
       message: update.message,
       messageId: update.messageId,

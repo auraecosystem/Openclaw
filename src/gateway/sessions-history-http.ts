@@ -8,6 +8,7 @@ import {
 import { getRuntimeConfig } from "../config/io.js";
 import { loadSessionStore } from "../config/sessions.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import { normalizeAgentId } from "../routing/session-key.js";
 import { onSessionTranscriptUpdate } from "../sessions/transcript-events.js";
 import type { AuthRateLimiter } from "./auth-rate-limit.js";
 import type { ResolvedGatewayAuth } from "./auth.js";
@@ -306,8 +307,11 @@ export async function handleSessionHistoryHttpRequest(
     if (!entry?.sessionId) {
       return;
     }
-    const updatePath = canonicalizePath(update.sessionFile);
-    if (!updatePath || !transcriptCandidates.has(updatePath)) {
+    const updateMatchesIdentity =
+      update.target?.sessionId === entry.sessionId &&
+      normalizeAgentId(update.target.agentId) === normalizeAgentId(target.agentId);
+    const updatePath = update.sessionFile ? canonicalizePath(update.sessionFile) : undefined;
+    if (!updateMatchesIdentity && (!updatePath || !transcriptCandidates.has(updatePath))) {
       return;
     }
     queueStreamWork(async () => {
