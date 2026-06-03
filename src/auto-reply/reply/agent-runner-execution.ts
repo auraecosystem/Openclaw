@@ -850,6 +850,7 @@ function buildExternalRunFailureReply(
 }
 
 function markAgentRunFailureReplyPayload<T extends ReplyPayload>(payload: T): T {
+  payload.isError = true;
   return markReplyPayloadForSourceSuppressionDelivery(payload);
 }
 
@@ -2303,8 +2304,9 @@ export async function runAgentTurnWithFallback(params: {
                       params.followupRun.run.suppressTranscriptOnlyAssistantPersistence,
                     suppressAssistantErrorPersistence:
                       suppressAssistantErrorPersistenceForCandidate,
-                    onAssistantErrorMessagePersisted: () => {
+                    onAssistantErrorMessagePersisted: (message) => {
                       assistantErrorPersistedAcrossFallback = true;
+                      void params.opts?.onAssistantErrorMessagePersisted?.(message);
                     },
                     toolResultFormat: (() => {
                       const channel = resolveMessageChannel(
