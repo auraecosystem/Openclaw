@@ -218,6 +218,14 @@ function truncateTitle(text: string, maxLen: number): string {
   return cut + "…";
 }
 
+function isGenericSessionTitleMessage(text: string): boolean {
+  const normalized = text
+    .toLowerCase()
+    .replace(/[.!?]+$/g, "")
+    .trim();
+  return /^(hi|hello|hey|yo|sup|thanks|thank you)$/.test(normalized);
+}
+
 export function deriveSessionTitle(
   entry: SessionEntry | undefined,
   firstUserMessage?: string | null,
@@ -236,7 +244,9 @@ export function deriveSessionTitle(
 
   if (firstUserMessage?.trim()) {
     const normalized = firstUserMessage.replace(/\s+/g, " ").trim();
-    return truncateTitle(normalized, DERIVED_TITLE_MAX_LEN);
+    if (!isGenericSessionTitleMessage(normalized)) {
+      return truncateTitle(normalized, DERIVED_TITLE_MAX_LEN);
+    }
   }
 
   if (entry.sessionId) {
