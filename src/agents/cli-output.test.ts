@@ -892,4 +892,199 @@ describe("createCliJsonlStreamingParser", () => {
       },
     ]);
   });
+
+  it("fires onCommentaryText with accumulated text before a tool_use block", () => {
+    const commentaryTexts: string[] = [];
+    const deltas: Array<{ text: string; delta: string }> = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "claude",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: (delta) => deltas.push({ text: delta.text, delta: delta.delta }),
+      onCommentaryText: (text) => commentaryTexts.push(text),
+    });
+
+    parser.push(
+      [
+        JSON.stringify({ type: "init", session_id: "session-commentary" }),
+        // Text delta accumulating assistant commentary
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "Let me check " },
+          },
+        }),
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "that for you." },
+          },
+        }),
+        // Tool use block starts -- should flush commentary
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "tool_use", id: "toolu_1", name: "Bash", input: {} },
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(commentaryTexts).toEqual(["Let me check that for you."]);
+    // Assistant deltas should still have been emitted normally
+    expect(deltas).toHaveLength(2);
+    expect(deltas[1]?.text).toBe("Let me check that for you.");
+  });
+
+  it("does not fire onCommentaryText when no text precedes tool_use", () => {
+    const commentaryTexts: string[] = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "claude",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onCommentaryText: (text) => commentaryTexts.push(text),
+    });
+
+    parser.push(
+      [
+        JSON.stringify({ type: "init", session_id: "session-no-commentary" }),
+        // Tool use block starts immediately without preceding text
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 0,
+            content_block: { type: "tool_use", id: "toolu_1", name: "Bash", input: {} },
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(commentaryTexts).toEqual([]);
+  });
+
+  it("does not duplicate commentary when consecutive tool_use blocks have no new text", () => {
+    const commentaryTexts: string[] = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "claude",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onCommentaryText: (text) => commentaryTexts.push(text),
+    });
+
+    parser.push(
+      [
+        JSON.stringify({ type: "init", session_id: "session-multi-commentary" }),
+        // First commentary
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "First, checking files." },
+          },
+        }),
+        // First tool_use -- should flush commentary
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "tool_use", id: "toolu_1", name: "Read", input: {} },
+          },
+        }),
+        // Second tool_use immediately (no new text) -- should NOT duplicate
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 2,
+            content_block: { type: "tool_use", id: "toolu_2", name: "Bash", input: {} },
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    // Commentary fires only once for the first tool_use. The second tool_use
+    // has no new accumulated text, so it does not fire again.
+    expect(commentaryTexts).toEqual(["First, checking files."]);
+  });
+
+  it("emits only the new segment on text-tool-text-tool sequences", () => {
+    const commentaryTexts: string[] = [];
+    const parser = createCliJsonlStreamingParser({
+      backend: {
+        command: "claude",
+        output: "jsonl",
+        jsonlDialect: "claude-stream-json",
+        sessionIdFields: ["session_id"],
+      },
+      providerId: "claude-cli",
+      onAssistantDelta: () => undefined,
+      onCommentaryText: (text) => commentaryTexts.push(text),
+    });
+
+    parser.push(
+      [
+        JSON.stringify({ type: "init", session_id: "session-segment" }),
+        // First commentary text
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: "Reading the file now." },
+          },
+        }),
+        // First tool_use — flushes "Reading the file now."
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 1,
+            content_block: { type: "tool_use", id: "toolu_a", name: "Read", input: {} },
+          },
+        }),
+        // Second commentary text (new segment only)
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            delta: { type: "text_delta", text: " Now searching." },
+          },
+        }),
+        // Second tool_use — should flush only "Now searching.", not the full cumulative
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_start",
+            index: 3,
+            content_block: { type: "tool_use", id: "toolu_b", name: "Grep", input: {} },
+          },
+        }),
+      ].join("\n") + "\n",
+    );
+    parser.finish();
+
+    expect(commentaryTexts).toEqual(["Reading the file now.", "Now searching."]);
+  });
 });
