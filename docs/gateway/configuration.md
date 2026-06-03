@@ -550,12 +550,12 @@ for the checklist.
 
 ### Reload modes
 
-| Mode                   | Behavior                                                                                |
-| ---------------------- | --------------------------------------------------------------------------------------- |
-| **`hybrid`** (default) | Hot-applies safe changes instantly. Automatically restarts for critical ones.           |
-| **`hot`**              | Hot-applies safe changes only. Logs a warning when a restart is needed - you handle it. |
-| **`restart`**          | Restarts the Gateway on any config change, safe or not.                                 |
-| **`off`**              | Disables file watching. Changes take effect on the next manual restart.                 |
+| Mode                   | Behavior                                                                                                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`hybrid`** (default) | Hot-applies safe changes instantly. Automatically restarts for critical ones.                                                                                                     |
+| **`hot`**              | Hot-applies safe changes and schedules a restart through the supervised restart path when a restart-required change lands, so disk-config repairs do not leave the runtime stale. |
+| **`restart`**          | Restarts the Gateway on any config change, safe or not.                                                                                                                           |
+| **`off`**              | Disables file watching. Changes take effect on the next manual restart.                                                                                                           |
 
 ```json5
 {
