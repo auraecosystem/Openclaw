@@ -12,6 +12,13 @@ import type {
   ResponseReasoningItem,
   ResponseStreamEvent,
 } from "openai/resources/responses/responses.js";
+import {
+  AZURE_RESPONSES_TEXT_CONTENT_PART_TYPE,
+  OPENAI_RESPONSES_OUTPUT_TEXT_CONTENT_PART_TYPE,
+  type AzureResponsesTextContentPart,
+  type AzureResponsesTextDeltaEvent,
+  isAzureResponsesTextDeltaEvent,
+} from "../../shared/openai-responses-stream-compat.js";
 import { calculateCost, clampThinkingLevel } from "../model-utils.js";
 import type {
   Api,
@@ -42,6 +49,32 @@ import { transformMessages } from "./transform-messages.js";
 
 type ReplayableResponseOutputMessage = Omit<ResponseOutputMessage, "id"> & { id?: string };
 type ReplayableResponseReasoningItem = Omit<ResponseReasoningItem, "id"> & { id?: string };
+type ResponsesTextContentPart =
+  | ResponseOutputMessage["content"][number]
+  | AzureResponsesTextContentPart;
+type ResponsesStreamOutputMessage = Omit<ResponseOutputMessage, "content"> & {
+  content: ResponsesTextContentPart[];
+};
+type ResponsesContentPartAddedEvent = Extract<
+  ResponseStreamEvent,
+  { type: "response.content_part.added" }
+>;
+type ResponsesOutputItemDoneEvent = Extract<
+  ResponseStreamEvent,
+  { type: "response.output_item.done" }
+>;
+type AzureResponsesContentPartAddedEvent = Omit<ResponsesContentPartAddedEvent, "part"> & {
+  part: AzureResponsesTextContentPart;
+};
+type AzureResponsesOutputItemDoneEvent = Omit<ResponsesOutputItemDoneEvent, "item"> & {
+  item: ResponsesStreamOutputMessage;
+};
+
+export type OpenAIResponsesStreamEvent =
+  | ResponseStreamEvent
+  | AzureResponsesContentPartAddedEvent
+  | AzureResponsesOutputItemDoneEvent
+  | AzureResponsesTextDeltaEvent;
 
 function normalizeResponsesReasoningReplayItem(params: {
   item: ReplayableResponseReasoningItem;
@@ -216,8 +249,9 @@ export function convertResponsesMessages<TApi extends Api>(
   if (includeSystemPrompt && context.systemPrompt) {
     const role = model.reasoning ? "developer" : "system";
     messages.push({
+      type: "message",
       role,
-      content: sanitizeSurrogates(context.systemPrompt),
+      content: [{ type: "input_text", text: sanitizeSurrogates(context.systemPrompt) }],
     });
   }
 
@@ -226,6 +260,7 @@ export function convertResponsesMessages<TApi extends Api>(
     if (msg.role === "user") {
       if (typeof msg.content === "string") {
         messages.push({
+          type: "message",
           role: "user",
           content: [{ type: "input_text", text: sanitizeSurrogates(msg.content) }],
         });
@@ -247,6 +282,7 @@ export function convertResponsesMessages<TApi extends Api>(
           continue;
         }
         messages.push({
+          type: "message",
           role: "user",
           content,
         });
@@ -525,14 +561,17 @@ export async function runResponsesStreamLifecycle<TApi extends Api>(params: {
 // =============================================================================
 
 export async function processResponsesStream<TApi extends Api>(
-  openaiStream: AsyncIterable<ResponseStreamEvent>,
+  openaiStream: AsyncIterable<OpenAIResponsesStreamEvent>,
   output: AssistantMessage,
   stream: AssistantMessageEventStream,
   model: Model<TApi>,
   options?: OpenAIResponsesStreamOptions,
 ): Promise<void> {
-  let currentItem: ResponseReasoningItem | ResponseOutputMessage | ResponseFunctionToolCall | null =
-    null;
+  let currentItem:
+    | ResponseReasoningItem
+    | ResponsesStreamOutputMessage
+    | ResponseFunctionToolCall
+    | null = null;
   let currentBlock: ThinkingContent | TextContent | (ToolCall & { partialJson: string }) | null =
     null;
   const blocks = output.content;
@@ -613,27 +652,41 @@ export async function processResponsesStream<TApi extends Api>(
     } else if (event.type === "response.content_part.added") {
       if (currentItem?.type === "message") {
         currentItem.content = currentItem.content || [];
-        // Filter out ReasoningText, only accept output_text and refusal
-        if (event.part.type === "output_text" || event.part.type === "refusal") {
+        if (
+          event.part.type === OPENAI_RESPONSES_OUTPUT_TEXT_CONTENT_PART_TYPE ||
+          event.part.type === AZURE_RESPONSES_TEXT_CONTENT_PART_TYPE ||
+          event.part.type === "refusal"
+        ) {
           currentItem.content.push(event.part);
         }
       }
-    } else if (event.type === "response.output_text.delta") {
+    } else if (
+      event.type === "response.output_text.delta" ||
+      isAzureResponsesTextDeltaEvent(event)
+    ) {
       if (currentItem?.type === "message" && currentBlock?.type === "text") {
-        if (!currentItem.content || currentItem.content.length === 0) {
-          continue;
+        currentItem.content = currentItem.content || [];
+        let lastPart = currentItem.content[currentItem.content.length - 1];
+        // Azure AI Foundry Responses streams emit text deltas (under either the
+        // documented `response.output_text.delta` event or the Azure `response.text.delta`
+        // alias) that may not be preceded by a `response.content_part.added` event, so
+        // lazily open an Azure text content part when no text part is currently active.
+        if (
+          !lastPart ||
+          (lastPart.type !== OPENAI_RESPONSES_OUTPUT_TEXT_CONTENT_PART_TYPE &&
+            lastPart.type !== AZURE_RESPONSES_TEXT_CONTENT_PART_TYPE)
+        ) {
+          lastPart = { type: AZURE_RESPONSES_TEXT_CONTENT_PART_TYPE, text: "" };
+          currentItem.content.push(lastPart);
         }
-        const lastPart = currentItem.content[currentItem.content.length - 1];
-        if (lastPart?.type === "output_text") {
-          currentBlock.text += event.delta;
-          lastPart.text += event.delta;
-          stream.push({
-            type: "text_delta",
-            contentIndex: blockIndex(),
-            delta: event.delta,
-            partial: output,
-          });
-        }
+        currentBlock.text += event.delta;
+        lastPart.text += event.delta;
+        stream.push({
+          type: "text_delta",
+          contentIndex: blockIndex(),
+          delta: event.delta,
+          partial: output,
+        });
       }
     } else if (event.type === "response.refusal.delta") {
       if (currentItem?.type === "message" && currentBlock?.type === "text") {
@@ -697,8 +750,9 @@ export async function processResponsesStream<TApi extends Api>(
         });
         currentBlock = null;
       } else if (item.type === "message" && currentBlock?.type === "text") {
+        // Support both OpenAI "output_text" and Azure "text" content types
         currentBlock.text = item.content
-          .map((c) => (c.type === "output_text" ? c.text : c.refusal))
+          .map((c) => (c.type === "output_text" || c.type === "text" ? c.text : c.refusal))
           .join("");
         currentBlock.textSignature = encodeTextSignatureV1(item.id, item.phase ?? undefined);
         stream.push({
