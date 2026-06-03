@@ -95,13 +95,13 @@ export function resolveCronDeliveryPlan(job: CronJob): CronDeliveryPlan {
     };
   }
 
-  const isIsolatedAgentTurn =
-    job.payload.kind === "agentTurn" &&
+  const isDetachedOutputJob =
+    (job.payload.kind === "agentTurn" || job.payload.kind === "command") &&
     typeof job.sessionTarget === "string" &&
     (job.sessionTarget === "isolated" ||
       job.sessionTarget === "current" ||
       job.sessionTarget.startsWith("session:"));
-  const resolvedMode = isIsolatedAgentTurn ? "announce" : "none";
+  const resolvedMode = isDetachedOutputJob ? "announce" : "none";
 
   return {
     mode: resolvedMode,

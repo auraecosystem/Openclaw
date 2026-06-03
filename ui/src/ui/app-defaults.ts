@@ -35,6 +35,7 @@ export const DEFAULT_CRON_FORM: CronFormState = {
   sessionTarget: "isolated",
   wakeMode: "now",
   payloadKind: "agentTurn",
+  payloadLocked: false,
   payloadText: "",
   payloadModel: "",
   payloadThinking: "",
