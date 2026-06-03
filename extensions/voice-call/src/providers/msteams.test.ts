@@ -158,7 +158,7 @@ describe("MsteamsProvider (audio loop wiring)", () => {
     port: number;
     captured: { current?: CapturedStt };
     manager: CallManager;
-    tts: TelephonyTtsProvider;
+    tts: MsteamsTtsProvider;
   }> {
     installVoiceCallStateRuntimeForTests();
     const port = randomPort();
