@@ -13,6 +13,7 @@ import {
   readSessionStoreCache,
   setSerializedSessionStore,
   setSerializedSessionStorePromptRefs,
+  setSessionStoreRuntimeCacheMaxBytesForTest,
   writeSessionStoreCache,
 } from "./sessions/store-cache.js";
 import {
@@ -69,12 +70,15 @@ describe("Session Store Cache", () => {
 
     // Reset environment variable
     delete process.env.OPENCLAW_SESSION_CACHE_TTL_MS;
+    delete process.env.OPENCLAW_SESSION_SERIALIZED_CACHE_MAX_BYTES;
+    setSessionStoreRuntimeCacheMaxBytesForTest(null);
   });
 
   afterEach(() => {
     clearSessionStoreCacheForTest();
     delete process.env.OPENCLAW_SESSION_CACHE_TTL_MS;
     delete process.env.OPENCLAW_SESSION_SERIALIZED_CACHE_MAX_BYTES;
+    setSessionStoreRuntimeCacheMaxBytesForTest(null);
   });
 
   it("bounds the serialized session store cache by total bytes", () => {
@@ -88,6 +92,41 @@ describe("Session Store Cache", () => {
     expect(getSerializedSessionStore("store:2")).toBe("b".repeat(40));
     expect(getSerializedSessionStoreCacheStatsForTest().entries).toBe(1);
     expect(getSerializedSessionStoreCacheStatsForTest().totalBytes).toBe(40);
+  });
+
+  it("drops oversized session store runtime caches instead of retaining them in memory", async () => {
+    setSessionStoreRuntimeCacheMaxBytesForTest(64);
+    clearSessionStoreCacheForTest();
+
+    const smallStore = {
+      s: {
+        sessionId: "x",
+        updatedAt: 1,
+      },
+    } as Record<string, SessionEntry>;
+    const smallSerialized = JSON.stringify(smallStore);
+
+    writeSessionStoreCache({
+      storePath,
+      store: smallStore,
+      mtimeMs: 1,
+      sizeBytes: Buffer.byteLength(smallSerialized, "utf8"),
+      serialized: smallSerialized,
+      cloneSerialized: smallSerialized,
+    });
+
+    expect(getSerializedSessionStoreCacheStatsForTest().entries).toBe(1);
+    expect(getSessionStoreSnapshotCacheStatsForTest().entries).toBe(0);
+
+    expect(
+      readSessionStoreCache({
+        storePath,
+        mtimeMs: 1,
+        sizeBytes: 128,
+      }),
+    ).toBeNull();
+    expect(getSerializedSessionStoreCacheStatsForTest().entries).toBe(0);
+    expect(getSessionStoreSnapshotCacheStatsForTest().entries).toBe(0);
   });
 
   it("bounds the serialized session store cache by path count", () => {
@@ -150,6 +189,41 @@ describe("Session Store Cache", () => {
     expect(loaded2).toEqual(testStore);
     expect(readSpy).toHaveBeenCalledTimes(0);
     readSpy.mockRestore();
+  });
+
+  it("re-reads oversized session stores from disk instead of caching them", async () => {
+    setSessionStoreRuntimeCacheMaxBytesForTest(64);
+    clearSessionStoreCacheForTest();
+
+    const testStore = createSingleSessionStore(
+      createSessionEntry({
+        displayName: "Oversized session store",
+        skillsSnapshot: {
+          prompt: "oversized prompt ".repeat(40),
+          skills: [{ name: "alpha" }],
+        },
+      }),
+    );
+
+    await saveSessionStore(storePath, testStore);
+    clearSessionStoreCacheForTest();
+
+    const readSpy = vi.spyOn(fs, "readFileSync");
+    try {
+      const loaded1 = loadSessionStore(storePath);
+      const loaded2 = loadSessionStore(storePath);
+
+      expect(loaded1).toEqual(testStore);
+      expect(loaded2).toEqual(testStore);
+      expect(loaded1).not.toBe(loaded2);
+
+      const storeReads = readSpy.mock.calls.filter(([file]) => file === storePath);
+      expect(storeReads).toHaveLength(2);
+      expect(getSerializedSessionStoreCacheStatsForTest().entries).toBe(0);
+      expect(getSessionStoreSnapshotCacheStatsForTest().entries).toBe(0);
+    } finally {
+      readSpy.mockRestore();
+    }
   });
 
   it("should not allow cached session mutations to leak across loads", async () => {
@@ -586,10 +660,12 @@ describe("Session Store Cache", () => {
       return result;
     });
 
-    const first = readSessionStoreSnapshot(storePath);
-    expect(first["session:1"].displayName).toBe("Before race");
-
-    readSpy.mockRestore();
+    try {
+      const first = readSessionStoreSnapshot(storePath);
+      expect(first["session:1"].displayName).toBe("Before race");
+    } finally {
+      readSpy.mockRestore();
+    }
 
     const second = readSessionStoreSnapshot(storePath);
     expect(second["session:1"].displayName).toBe("After cross-process race");
