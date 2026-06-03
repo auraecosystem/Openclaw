@@ -175,6 +175,7 @@ describe("MsteamsProvider (audio loop wiring)", () => {
     const tts = createMockTtsProvider();
 
     provider = new MsteamsProvider({ port, path: STREAM_PATH, sharedSecret: SECRET });
+    await provider.start();
     await manager.initialize(provider, "http://localhost/voice/webhook");
     provider.setCallManager(manager);
     provider.setTranscriptionProvider(
@@ -201,7 +202,7 @@ describe("MsteamsProvider (audio loop wiring)", () => {
 
   function connect(port: number, callId: string): Promise<{ ws: WebSocket; inbound: unknown[] }> {
     const ts = Date.now();
-    const ws = new WebSocket(`ws://localhost:${port}${STREAM_PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${STREAM_PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": signHmac(ts, callId),

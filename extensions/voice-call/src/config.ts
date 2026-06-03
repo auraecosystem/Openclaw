@@ -66,10 +66,17 @@ const MsteamsConfigSchema = z
   .object({
     /** TCP port the Teams bridge WebSocket server listens on. */
     port: z.number().int().min(1).max(65535).optional(),
+    /**
+     * Address the Teams bridge WebSocket server binds to. Defaults to the
+     * loopback interface (127.0.0.1) so the bridge is never exposed on all
+     * interfaces. Set to a specific trusted-network address only when the
+     * Windows worker connects from another host (e.g. a private/VPN IP).
+     */
+    bindAddress: z.string().min(1).optional(),
     /** URL path prefix for the WebSocket upgrade (per-call path = {path}/{callId}). */
-    path: z.string().min(1).optional(),
-    /** Shared secret used to verify HMAC-SHA256 on the WS handshake. */
-    sharedSecret: z.string().min(1).optional(),
+    path: z.string().min(1).default("/voice/msteams/stream"),
+    /** Shared secret used to verify HMAC-SHA256 on the WS handshake (SecretRef-compatible). */
+    sharedSecret: SecretInputSchema.optional(),
   })
   .strict();
 export type MsteamsConfig = z.infer<typeof MsteamsConfigSchema>;
@@ -661,6 +668,18 @@ export function resolveTwilioAuthToken(
   });
 }
 
+const MSTEAMS_SHARED_SECRET_PATH = "plugins.entries.voice-call.config.msteams.sharedSecret";
+
+/** Resolve the msteams HMAC shared secret from its SecretRef-compatible config value. */
+export function resolveMsteamsSharedSecret(
+  config: Pick<VoiceCallConfig, "msteams">,
+): string | undefined {
+  return normalizeResolvedSecretInputString({
+    value: config.msteams?.sharedSecret,
+    path: MSTEAMS_SHARED_SECRET_PATH,
+  });
+}
+
 export function normalizeVoiceCallConfig(config: VoiceCallConfigInput): VoiceCallConfig {
   const defaults = cloneDefaultVoiceCallConfig();
   const serve = { ...defaults.serve, ...config.serve };
@@ -873,6 +892,18 @@ export function validateProviderConfig(config: VoiceCallConfig): {
       errors.push(
         "plugins.entries.voice-call.config.plivo.authToken is required (or set PLIVO_AUTH_TOKEN env)",
       );
+    }
+  }
+
+  if (config.provider === "msteams") {
+    // The Teams bridge cannot accept calls without a listening port and an HMAC
+    // shared secret, so require them up front rather than starting a runtime that
+    // silently never binds. (path has a schema default.)
+    if (!config.msteams?.port) {
+      errors.push("plugins.entries.voice-call.config.msteams.port is required");
+    }
+    if (!hasConfiguredSecretInput(config.msteams?.sharedSecret)) {
+      errors.push("plugins.entries.voice-call.config.msteams.sharedSecret is required");
     }
   }
 

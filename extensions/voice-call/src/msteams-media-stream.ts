@@ -83,6 +83,11 @@ export interface MsteamsSession {
 
 export interface MsteamsMediaStreamConfig {
   port: number;
+  /**
+   * Interface address to bind the WebSocket server to. Defaults to the loopback
+   * interface (127.0.0.1) so the bridge is not exposed on all interfaces.
+   */
+  bindAddress?: string;
   path: string;
   sharedSecret: string;
   /**
@@ -102,6 +107,14 @@ export interface MsteamsMediaStreamConfig {
 }
 
 const DEFAULT_HMAC_WINDOW_MS = 60_000;
+
+/**
+ * Bind to loopback by default. The Teams bridge worker typically runs on the
+ * same host (or reaches OpenClaw over a private/VPN interface the operator names
+ * explicitly via `bindAddress`); binding all interfaces would expose the audio
+ * transport to untrusted networks.
+ */
+const DEFAULT_BIND_ADDRESS = "127.0.0.1";
 
 /**
  * Hard cap on a single inbound WebSocket frame. Legitimate messages are small
@@ -146,13 +159,13 @@ export class MsteamsMediaStream {
       };
       server.once("error", onError);
       server.once("listening", onListening);
-      server.listen(this.config.port);
+      server.listen(this.config.port, this.config.bindAddress ?? DEFAULT_BIND_ADDRESS);
     });
 
     this.server = server;
     this.wss = wss;
     this.config.logger?.info(
-      `MsteamsMediaStream listening port=${this.config.port} path=${this.config.path}`,
+      `MsteamsMediaStream listening host=${this.config.bindAddress ?? DEFAULT_BIND_ADDRESS} port=${this.config.port} path=${this.config.path}`,
     );
   }
 

@@ -13,6 +13,7 @@ import type { VoiceCallConfig } from "./config.js";
 import {
   resolveVoiceCallEffectiveConfig,
   resolveVoiceCallSessionKey,
+  resolveMsteamsSharedSecret,
   resolveTwilioAuthToken,
   resolveVoiceCallConfig,
   validateProviderConfig,
@@ -21,6 +22,7 @@ import type { CoreAgentDeps, CoreConfig } from "./core-bridge.js";
 import { CallManager } from "./manager.js";
 import { wireMsteamsRuntime } from "./msteams.runtime.js";
 import type { VoiceCallProvider } from "./providers/base.js";
+import type { MsteamsProvider } from "./providers/msteams.js";
 import type { TwilioProvider } from "./providers/twilio.js";
 import { buildRealtimeVoiceInstructions } from "./realtime-agent-context.js";
 import { resolveRealtimeFastContextConsult } from "./realtime-fast-context.js";
@@ -159,9 +161,11 @@ function createRuntimeResourceLifecycle(params: {
   webhookServer: VoiceCallWebhookServer;
 }): {
   setTunnelResult: (result: TunnelResult | null) => void;
+  setProviderStop: (stop: (() => Promise<void>) | null) => void;
   stop: (opts?: { suppressErrors?: boolean }) => Promise<void>;
 } {
   let tunnelResult: TunnelResult | null = null;
+  let providerStop: (() => Promise<void>) | null = null;
   let stopped = false;
 
   const runStep = async (step: () => Promise<void>, suppressErrors: boolean) => {
@@ -176,12 +180,22 @@ function createRuntimeResourceLifecycle(params: {
     setTunnelResult: (result) => {
       tunnelResult = result;
     },
+    setProviderStop: (stop) => {
+      providerStop = stop;
+    },
     stop: async (opts) => {
       if (stopped) {
         return;
       }
       stopped = true;
       const suppressErrors = opts?.suppressErrors ?? false;
+      // Stop the provider first so any network listener it owns (e.g. the Teams
+      // bridge WebSocket server) releases its port before the rest of teardown.
+      await runStep(async () => {
+        if (providerStop) {
+          await providerStop();
+        }
+      }, suppressErrors);
       await runStep(async () => {
         if (tunnelResult) {
           await tunnelResult.stop();
@@ -256,8 +270,9 @@ async function resolveProvider(config: VoiceCallConfig, log: Logger): Promise<Vo
       const { MsteamsProvider } = await loadMsteamsProvider();
       return new MsteamsProvider({
         port: config.msteams?.port,
+        bindAddress: config.msteams?.bindAddress,
         path: config.msteams?.path,
-        sharedSecret: config.msteams?.sharedSecret,
+        sharedSecret: resolveMsteamsSharedSecret(config),
         logger: log,
       });
     }
@@ -525,17 +540,29 @@ export async function createVoiceCallRuntime(params: {
       }
     }
 
-    if (provider.name === "msteams" && config.streaming?.enabled) {
-      await wireMsteamsRuntime({
-        config,
-        coreConfig,
-        fullConfig: cfg,
-        agentRuntime,
-        ttsRuntime,
-        manager,
-        provider,
-        logger: log,
-      });
+    if (provider.name === "msteams") {
+      const msteamsProvider = provider as MsteamsProvider;
+      if (config.streaming?.enabled) {
+        await wireMsteamsRuntime({
+          config,
+          coreConfig,
+          fullConfig: cfg,
+          agentRuntime,
+          ttsRuntime,
+          manager,
+          provider,
+          logger: log,
+        });
+      } else {
+        log.warn(
+          "[voice-call] msteams: streaming.enabled is false — caller speech cannot be transcribed",
+        );
+      }
+      // Bind the Teams bridge WebSocket server as part of runtime startup so a
+      // failed bind aborts initialization (the catch below cleans up); register
+      // its stop so teardown releases the port instead of leaving it occupied.
+      await msteamsProvider.start();
+      lifecycle.setProviderStop(() => msteamsProvider.stop());
     }
 
     if (realtimeProvider) {

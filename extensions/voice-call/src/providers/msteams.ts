@@ -36,6 +36,7 @@ import type { VoiceCallProvider } from "./base.js";
 
 export interface MsteamsProviderOptions {
   port?: number;
+  bindAddress?: string;
   path?: string;
   sharedSecret?: string;
   logger?: MsteamsLogger;
@@ -108,11 +109,12 @@ export class MsteamsProvider implements VoiceCallProvider {
   private readonly calls = new Map<string, MsteamsCallState>();
 
   constructor(options: MsteamsProviderOptions) {
-    const { port, path, sharedSecret, logger } = options;
+    const { port, bindAddress, path, sharedSecret, logger } = options;
     this.logger = logger;
     if (port !== undefined && path && sharedSecret) {
       this.mediaStream = new MsteamsMediaStream({
         port,
+        bindAddress,
         path,
         sharedSecret,
         logger,
@@ -120,16 +122,27 @@ export class MsteamsProvider implements VoiceCallProvider {
         onSessionEnd: (info) => this.handleSessionEnd(info),
         onAudioFrame: (frame) => this.handleAudioFrame(frame),
       });
-      // Fire-and-forget; bind failures are surfaced via logger.error so a
-      // misconfigured port does not crash the entire voice-call runtime.
-      void this.mediaStream.start().catch((err: unknown) => {
-        logger?.error(`MsteamsProvider: failed to start media stream: ${describeError(err)}`);
-      });
     } else {
       logger?.warn(
         "MsteamsProvider: msteams.port / msteams.path / msteams.sharedSecret not all set; WebSocket server not started",
       );
     }
+  }
+
+  /**
+   * Bind the Teams bridge WebSocket server. Called from the voice-call runtime's
+   * startup path and awaited, so a failed bind aborts runtime initialization
+   * (and is cleaned up) instead of being swallowed. No-op when the provider was
+   * constructed without a complete config (e.g. unit tests).
+   */
+  async start(): Promise<void> {
+    if (!this.mediaStream) {
+      this.logger?.warn(
+        "MsteamsProvider: start() called without a complete config; WebSocket server not started",
+      );
+      return;
+    }
+    await this.mediaStream.start();
   }
 
   // ---------------------------------------------------------------------------

@@ -74,7 +74,7 @@ describe("MsteamsMediaStream", () => {
     const ts = Date.now();
     const sig = signHmac(SECRET, ts, callId);
 
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": sig,
@@ -111,7 +111,7 @@ describe("MsteamsMediaStream", () => {
     server = await startServer({ port });
 
     const callId = "call-bad-sig";
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(Date.now()),
         "x-azurebot-signature": "deadbeef",
@@ -139,7 +139,7 @@ describe("MsteamsMediaStream", () => {
     const staleTs = Date.now() - 5 * 60_000; // 5 minutes old
     const sig = signHmac(SECRET, staleTs, callId);
 
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(staleTs),
         "x-azurebot-signature": sig,
@@ -161,7 +161,7 @@ describe("MsteamsMediaStream", () => {
 
     const ts = Date.now();
     const sig = signHmac(SECRET, ts, "");
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": sig,
@@ -190,7 +190,7 @@ describe("MsteamsMediaStream", () => {
     const callId = "call-audio";
     const ts = Date.now();
     const sig = signHmac(SECRET, ts, callId);
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": sig,
@@ -232,7 +232,7 @@ describe("MsteamsMediaStream", () => {
     const callId = "call-end";
     const ts = Date.now();
     const sig = signHmac(SECRET, ts, callId);
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": sig,
@@ -263,7 +263,7 @@ describe("MsteamsMediaStream", () => {
     const callId = "call-oversize";
     const ts = Date.now();
     const sig = signHmac(SECRET, ts, callId);
-    const ws = new WebSocket(`ws://localhost:${port}${PATH}/${callId}`, {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}${PATH}/${callId}`, {
       headers: {
         "x-azurebot-timestamp": String(ts),
         "x-azurebot-signature": sig,
