@@ -1,6 +1,6 @@
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentMessage } from "./runtime/index.js";
 import type { ExtensionContext } from "./sessions/index.js";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const compactionMocks = vi.hoisted(() => {
   function readText(value: unknown): string {
@@ -104,9 +104,9 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
 
     const result = await callSummarize();
 
-    expect(result).toContain("Summary of chunk 1");
-    expect(result).toContain("[Partial summary:");
-    expect(result).toMatch(/chunks 1-1 of 2 were summarized/);
+    expect(result.text).toContain("Summary of chunk 1");
+    expect(result.text).toContain("[Partial summary:");
+    expect(result.text).toMatch(/chunks 1-1 of 2 were summarized/);
     expect(compactionMocks.logWarn).toHaveBeenCalledWith(
       "chunk summarization failed after retries; partial summary available",
       expect.objectContaining({ err: expect.any(Error) }),
@@ -126,7 +126,7 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
     // Abort error propagates from summarizeChunks; summarizeWithFallback catches it
     // and falls through to the final fallback (not the partial summary).
     expect(result).not.toBe("Summary of chunk 1");
-    expect(result).toContain("Context contained");
+    expect(result.text).toContain("Context contained");
     expect(compactionMocks.logWarn).not.toHaveBeenCalledWith(
       "chunk summarization failed after retries; partial summary available",
       expect.anything(),
@@ -144,7 +144,7 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
     const result = await callSummarize();
 
     expect(result).not.toBe("Summary of chunk 1");
-    expect(result).toContain("Context contained");
+    expect(result.text).toContain("Context contained");
     expect(compactionMocks.logWarn).not.toHaveBeenCalledWith(
       "chunk summarization failed after retries; partial summary available",
       expect.anything(),
@@ -158,7 +158,7 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
 
     const result = await callSummarize();
 
-    expect(result).toBe("Combined summary of chunks 1+2");
+    expect(result.text).toBe("Combined summary of chunks 1+2");
     expect(compactionMocks.generateSummary).toHaveBeenCalledTimes(2);
   });
 
@@ -169,7 +169,7 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
 
     // With no successful chunk, summarizeChunks rethrows into
     // summarizeWithFallback's outer catch -> final fallback path.
-    expect(result).toContain("Context contained");
+    expect(result.text).toContain("Context contained");
     expect(result).not.toBe("Summary of chunk 1");
   });
 
@@ -198,7 +198,7 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
 
     // The oversized retry should have recovered more content than
     // the partial summary from chunk 1 alone.
-    expect(result).toContain("Summary of small messages (oversized retry)");
+    expect(result.text).toContain("Summary of small messages (oversized retry)");
     // The partial summary should NOT be the final result because the
     // oversized retry succeeded.
     expect(result).not.toContain("[Partial summary:");
@@ -228,10 +228,10 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
     const result = await callSummarize(mixedMessages);
 
     // The oversized retry's partial summary should win, with oversized notes
-    expect(result).toContain("Oversized retry chunk 1 (better coverage)");
-    expect(result).toContain("[Partial summary:");
-    expect(result).toContain("[Large assistant");
-    expect(result).toContain("omitted from summary]");
+    expect(result.text).toContain("Oversized retry chunk 1 (better coverage)");
+    expect(result.text).toContain("[Partial summary:");
+    expect(result.text).toContain("[Large assistant");
+    expect(result.text).toContain("omitted from summary]");
   });
 
   it("preserves the latest successful summary in a 3+ chunk chain", async () => {
@@ -249,8 +249,8 @@ describe("summarizeChunks partial summary preservation (#82952)", () => {
     const result = await callSummarize(threeChunkMessages);
 
     // Chunk 3 failed -> partial summary from chunk 2 is returned with marker.
-    expect(result).toContain("Summary after chunks 1+2");
-    expect(result).toMatch(/\[Partial summary: chunks 1-2 of 3 were summarized/);
+    expect(result.text).toContain("Summary after chunks 1+2");
+    expect(result.text).toMatch(/\[Partial summary: chunks 1-2 of 3 were summarized/);
     expect(compactionMocks.generateSummary).toHaveBeenCalledTimes(3);
     expect(compactionMocks.logWarn).toHaveBeenCalledWith(
       "chunk summarization failed after retries; partial summary available",
