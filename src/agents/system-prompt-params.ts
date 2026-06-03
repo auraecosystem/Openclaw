@@ -3,6 +3,8 @@ import path from "node:path";
 import { normalizeStringEntries } from "@openclaw/normalization-core/string-normalization";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { findGitRoot } from "../infra/git-root.js";
+import { readStringValue } from "../shared/string-coerce.js";
+import { resolveAgentConfig } from "./agent-scope-config.js";
 import type { ActiveProcessSessionReference } from "./bash-process-references.js";
 import {
   formatUserTime,
@@ -13,6 +15,7 @@ import {
 
 type RuntimeInfoInput = {
   agentId?: string;
+  agentName?: string;
   host: string;
   os: string;
   arch: string;
@@ -38,7 +41,7 @@ type SystemPromptRuntimeParams = {
 export function buildSystemPromptParams(params: {
   config?: OpenClawConfig;
   agentId?: string;
-  runtime: Omit<RuntimeInfoInput, "agentId">;
+  runtime: Omit<RuntimeInfoInput, "agentId" | "agentName">;
   workspaceDir?: string;
   cwd?: string;
 }): SystemPromptRuntimeParams {
@@ -54,12 +57,21 @@ export function buildSystemPromptParams(params: {
     runtimeInfo: {
       agentId: params.agentId,
       ...params.runtime,
+      agentName: resolveRuntimeAgentName(params.config, params.agentId),
       repoRoot,
     },
     userTimezone,
     userTime,
     userTimeFormat,
   };
+}
+
+function resolveRuntimeAgentName(config: OpenClawConfig | undefined, agentId: string | undefined) {
+  if (!config || !agentId) {
+    return undefined;
+  }
+  const identityName = readStringValue(resolveAgentConfig(config, agentId)?.identity?.name)?.trim();
+  return identityName || undefined;
 }
 
 function resolveRepoRoot(params: {
