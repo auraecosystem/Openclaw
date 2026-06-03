@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearOpenAIToolSchemaCacheForTest,
+  findOpenAIStrictToolSchemaDiagnostics,
   isStrictOpenAIJsonSchemaCompatible,
   normalizeStrictOpenAIJsonSchema,
   resolveOpenAIStrictToolFlagForInventory,
@@ -90,5 +91,29 @@ describe("OpenAI strict tool schema normalization", () => {
         unsupportedToolSchemaKeywords: ["minimum"],
       }),
     ).toBe(third);
+  });
+
+  it("reports unreadable schemas without aborting strict compatibility checks", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        safe: { type: "string" },
+        get broken() {
+          throw new Error("strict schema child getter exploded");
+        },
+      },
+      required: ["safe", "broken"],
+    };
+    const tool = { name: "fuzzplugin_strict", parameters: schema };
+
+    expect(isStrictOpenAIJsonSchemaCompatible(schema)).toBe(false);
+    expect(resolveOpenAIStrictToolFlagForInventory([tool], true)).toBe(false);
+    expect(findOpenAIStrictToolSchemaDiagnostics([tool])).toEqual([
+      {
+        toolIndex: 0,
+        toolName: "fuzzplugin_strict",
+        violations: ["fuzzplugin_strict.parameters is unreadable"],
+      },
+    ]);
   });
 });

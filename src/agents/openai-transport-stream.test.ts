@@ -4903,6 +4903,256 @@ describe("openai transport stream", () => {
     });
   });
 
+  it("skips unreadable responses tool schemas while preserving healthy siblings", () => {
+    const unreadableSchema = {
+      type: "object",
+      properties: {
+        safe: { type: "string" },
+        get broken() {
+          throw new Error("responses schema child getter exploded");
+        },
+      },
+      required: ["safe", "broken"],
+    };
+
+    const params = buildOpenAIResponsesParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-responses",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-responses">,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [
+          {
+            name: "fuzzplugin_strict",
+            description: "Broken tool",
+            parameters: unreadableSchema,
+          },
+          {
+            name: "read",
+            description: "Read file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      } as never,
+      undefined,
+    ) as {
+      tools?: Array<{ name?: string; parameters?: Record<string, unknown>; strict?: boolean }>;
+      tool_choice?: unknown;
+    };
+
+    expect(params.tools?.map((tool) => tool.name)).toEqual(["read"]);
+    expect(params.tools?.[0]?.strict).toBe(true);
+    expect(params).not.toHaveProperty("tool_choice");
+    expectRecordFields(params.tools?.[0]?.parameters, {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    });
+
+    expect(() =>
+      buildOpenAIResponsesParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-responses",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-responses">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+            {
+              name: "read",
+              description: "Read file",
+              parameters: {
+                type: "object",
+                properties: { path: { type: "string" } },
+                required: ["path"],
+              },
+            },
+          ],
+        } as never,
+        {
+          toolChoice: { type: "function", name: "fuzzplugin_strict" },
+        } as never,
+      ),
+    ).toThrow(/tool_choice selected skipped tool "fuzzplugin_strict"/);
+
+    const filteredAllowedTools = buildOpenAIResponsesParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-responses",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-responses">,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [
+          {
+            name: "fuzzplugin_strict",
+            description: "Broken tool",
+            parameters: unreadableSchema,
+          },
+          {
+            name: "read",
+            description: "Read file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      } as never,
+      {
+        toolChoice: {
+          type: "allowed_tools",
+          mode: "required",
+          tools: [
+            { type: "function", name: "fuzzplugin_strict" },
+            { type: "function", name: "read" },
+          ],
+        },
+      } as never,
+    ) as {
+      tool_choice?: { tools?: Array<{ name?: string }> };
+      tools?: Array<{ name?: string }>;
+    };
+
+    expect(filteredAllowedTools.tools?.map((tool) => tool.name)).toEqual(["read"]);
+    expect(filteredAllowedTools.tool_choice?.tools?.map((tool) => tool.name)).toEqual(["read"]);
+
+    const customChoice = buildOpenAIResponsesParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-responses",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-responses">,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [
+          {
+            name: "fuzzplugin_strict",
+            description: "Broken tool",
+            parameters: unreadableSchema,
+          },
+        ],
+      } as never,
+      {
+        toolChoice: { type: "custom", name: "native_custom" },
+      } as never,
+    ) as { tools?: unknown; tool_choice?: unknown };
+
+    expect(customChoice).not.toHaveProperty("tools");
+    expect(customChoice.tool_choice).toEqual({ type: "custom", name: "native_custom" });
+
+    expect(() =>
+      buildOpenAIResponsesParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-responses",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-responses">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+          ],
+        } as never,
+        {
+          toolChoice: "required",
+        } as never,
+      ),
+    ).toThrow(/tool_choice requires a tool/);
+
+    expect(() =>
+      buildOpenAIResponsesParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-responses",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-responses">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+          ],
+        } as never,
+        {
+          toolChoice: {
+            type: "allowed_tools",
+            mode: "required",
+            tools: [{ type: "function", name: "fuzzplugin_strict" }],
+          },
+        } as never,
+      ),
+    ).toThrow(/tool_choice allowed_tools selected only skipped tools/);
+  });
+
   it("adds native OpenAI turn metadata on direct Responses routes", () => {
     const params = buildOpenAIResponsesParams(
       {
@@ -6526,6 +6776,232 @@ describe("openai transport stream", () => {
       type: "array",
       items: { type: "string" },
     });
+  });
+
+  it("skips unreadable completions tool schemas while preserving healthy siblings", () => {
+    const unreadableSchema = {
+      type: "object",
+      properties: {
+        safe: { type: "string" },
+        get broken() {
+          throw new Error("completions schema child getter exploded");
+        },
+      },
+      required: ["safe", "broken"],
+    };
+
+    const params = buildOpenAICompletionsParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-completions",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-completions">,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [
+          {
+            name: "fuzzplugin_strict",
+            description: "Broken tool",
+            parameters: unreadableSchema,
+          },
+          {
+            name: "read",
+            description: "Read file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      } as never,
+      undefined,
+    ) as {
+      tools?: Array<{
+        function?: { name?: string; parameters?: Record<string, unknown>; strict?: boolean };
+      }>;
+      tool_choice?: unknown;
+    };
+
+    expect(params.tools?.map((tool) => tool.function?.name)).toEqual(["read"]);
+    expect(params.tools?.[0]?.function?.strict).toBe(true);
+    expect(params).not.toHaveProperty("tool_choice");
+    expectRecordFields(params.tools?.[0]?.function?.parameters, {
+      type: "object",
+      properties: { path: { type: "string" } },
+      required: ["path"],
+    });
+
+    expect(() =>
+      buildOpenAICompletionsParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-completions",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-completions">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+            {
+              name: "read",
+              description: "Read file",
+              parameters: {
+                type: "object",
+                properties: { path: { type: "string" } },
+                required: ["path"],
+              },
+            },
+          ],
+        } as never,
+        {
+          toolChoice: { type: "function", function: { name: "fuzzplugin_strict" } },
+        } as never,
+      ),
+    ).toThrow(/tool_choice selected skipped tool "fuzzplugin_strict"/);
+
+    const filteredAllowedTools = buildOpenAICompletionsParams(
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        api: "openai-completions",
+        provider: "openai",
+        baseUrl: "https://api.openai.com/v1",
+        reasoning: true,
+        input: ["text"],
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+        contextWindow: 200000,
+        maxTokens: 8192,
+      } satisfies Model<"openai-completions">,
+      {
+        systemPrompt: "system",
+        messages: [],
+        tools: [
+          {
+            name: "fuzzplugin_strict",
+            description: "Broken tool",
+            parameters: unreadableSchema,
+          },
+          {
+            name: "read",
+            description: "Read file",
+            parameters: {
+              type: "object",
+              properties: { path: { type: "string" } },
+              required: ["path"],
+            },
+          },
+        ],
+      } as never,
+      {
+        toolChoice: {
+          type: "allowed_tools",
+          allowed_tools: {
+            mode: "required",
+            tools: [
+              { type: "function", name: "fuzzplugin_strict" },
+              { type: "function", name: "read" },
+            ],
+          },
+        },
+      } as never,
+    ) as {
+      tool_choice?: { allowed_tools?: { tools?: Array<{ name?: string }> } };
+      tools?: Array<{ function?: { name?: string } }>;
+    };
+
+    expect(filteredAllowedTools.tools?.map((tool) => tool.function?.name)).toEqual(["read"]);
+    expect(
+      filteredAllowedTools.tool_choice?.allowed_tools?.tools?.map((tool) => tool.name),
+    ).toEqual(["read"]);
+
+    expect(() =>
+      buildOpenAICompletionsParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-completions",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-completions">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+          ],
+        } as never,
+        {
+          toolChoice: "required",
+        } as never,
+      ),
+    ).toThrow(/tool_choice requires a tool/);
+
+    expect(() =>
+      buildOpenAICompletionsParams(
+        {
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          api: "openai-completions",
+          provider: "openai",
+          baseUrl: "https://api.openai.com/v1",
+          reasoning: true,
+          input: ["text"],
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+          contextWindow: 200000,
+          maxTokens: 8192,
+        } satisfies Model<"openai-completions">,
+        {
+          systemPrompt: "system",
+          messages: [],
+          tools: [
+            {
+              name: "fuzzplugin_strict",
+              description: "Broken tool",
+              parameters: unreadableSchema,
+            },
+          ],
+        } as never,
+        {
+          toolChoice: {
+            type: "allowed_tools",
+            allowed_tools: {
+              mode: "required",
+              tools: [{ type: "function", name: "fuzzplugin_strict" }],
+            },
+          },
+        } as never,
+      ),
+    ).toThrow(/tool_choice allowed_tools selected only skipped tools/);
   });
 
   it("omits tools from completions payload when model compat sets supportsTools to false", () => {

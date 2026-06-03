@@ -12,6 +12,10 @@ type ToolWithParameters = {
   parameters: unknown;
 };
 
+type ToolFieldRead<TField extends keyof ToolWithParameters> =
+  | { readable: true; value: ToolWithParameters[TField] }
+  | { readable: false };
+
 const MAX_STRICT_SCHEMA_CACHE_ENTRIES_PER_SCHEMA = 8;
 let strictOpenAISchemaCache = new WeakMap<object, Array<{ key: string; value: unknown }>>();
 
@@ -154,7 +158,11 @@ export function normalizeOpenAIStrictToolParameters<T>(
 }
 
 export function isStrictOpenAIJsonSchemaCompatible(schema: unknown): boolean {
-  return isStrictOpenAIJsonSchemaCompatibleRecursive(normalizeStrictOpenAIJsonSchema(schema));
+  try {
+    return isStrictOpenAIJsonSchemaCompatibleRecursive(normalizeStrictOpenAIJsonSchema(schema));
+  } catch {
+    return false;
+  }
 }
 
 type OpenAIStrictToolSchemaDiagnostic = {
@@ -167,21 +175,59 @@ export function findOpenAIStrictToolSchemaDiagnostics(
   tools: readonly ToolWithParameters[],
 ): OpenAIStrictToolSchemaDiagnostic[] {
   return tools.flatMap((tool, toolIndex) => {
-    const violations = findStrictOpenAIJsonSchemaViolations(
-      normalizeStrictOpenAIJsonSchema(tool.parameters),
-      `${typeof tool.name === "string" && tool.name ? tool.name : `tool[${toolIndex}]`}.parameters`,
-    );
+    const nameRead = readToolField(tool, "name");
+    const toolName =
+      nameRead.readable && typeof nameRead.value === "string" && nameRead.value
+        ? nameRead.value
+        : `tool[${toolIndex}]`;
+    const descriptorViolations = nameRead.readable ? [] : [`${toolName}.name is unreadable`];
+    const parametersRead = readToolField(tool, "parameters");
+    if (!parametersRead.readable) {
+      return [
+        {
+          toolIndex,
+          ...(nameRead.readable && typeof nameRead.value === "string" && nameRead.value
+            ? { toolName: nameRead.value }
+            : {}),
+          violations: [...descriptorViolations, `${toolName}.parameters is unreadable`],
+        },
+      ];
+    }
+
+    let schemaViolations: string[];
+    try {
+      schemaViolations = findStrictOpenAIJsonSchemaViolations(
+        normalizeStrictOpenAIJsonSchema(parametersRead.value),
+        `${toolName}.parameters`,
+      );
+    } catch {
+      schemaViolations = [`${toolName}.parameters is unreadable`];
+    }
+    const violations = [...descriptorViolations, ...schemaViolations];
     if (violations.length === 0) {
       return [];
     }
     return [
       {
         toolIndex,
-        ...(typeof tool.name === "string" && tool.name ? { toolName: tool.name } : {}),
+        ...(nameRead.readable && typeof nameRead.value === "string" && nameRead.value
+          ? { toolName: nameRead.value }
+          : {}),
         violations,
       },
     ];
   });
+}
+
+function readToolField<TField extends keyof ToolWithParameters>(
+  tool: ToolWithParameters,
+  field: TField,
+): ToolFieldRead<TField> {
+  try {
+    return { readable: true, value: tool[field] };
+  } catch {
+    return { readable: false };
+  }
 }
 
 function isStrictOpenAIJsonSchemaCompatibleRecursive(schema: unknown): boolean {
@@ -304,5 +350,8 @@ export function resolveOpenAIStrictToolFlagForInventory(
   if (strict !== true) {
     return strict === false ? false : undefined;
   }
-  return tools.every((tool) => isStrictOpenAIJsonSchemaCompatible(tool.parameters));
+  return tools.every((tool) => {
+    const parametersRead = readToolField(tool, "parameters");
+    return parametersRead.readable && isStrictOpenAIJsonSchemaCompatible(parametersRead.value);
+  });
 }
