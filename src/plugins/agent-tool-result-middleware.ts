@@ -3,6 +3,7 @@ import type {
   AgentToolResultMiddlewareOptions,
   AgentToolResultMiddlewareRuntime,
 } from "./agent-tool-result-middleware-types.js";
+import type { PluginAgentToolResultMiddlewareRegistration } from "./registry-types.js";
 import { getActivePluginRegistry } from "./runtime.js";
 
 export const AGENT_TOOL_RESULT_MIDDLEWARE_RUNTIMES = [
@@ -71,12 +72,27 @@ export function normalizeAgentToolResultMiddlewareRuntimeIds(
   return normalized;
 }
 
+function readAgentToolResultMiddleware(
+  entry: PluginAgentToolResultMiddlewareRegistration,
+  runtime: AgentToolResultMiddlewareRuntime,
+): AgentToolResultMiddleware | null {
+  try {
+    if (!entry.runtimes.includes(runtime)) {
+      return null;
+    }
+    return typeof entry.handler === "function" ? entry.handler : null;
+  } catch {
+    return null;
+  }
+}
+
 export function listAgentToolResultMiddlewares(
   runtime: AgentToolResultMiddlewareRuntime,
 ): AgentToolResultMiddleware[] {
   return (
-    getActivePluginRegistry()
-      ?.agentToolResultMiddlewares?.filter((entry) => entry.runtimes.includes(runtime))
-      .map((entry) => entry.handler) ?? []
+    getActivePluginRegistry()?.agentToolResultMiddlewares?.flatMap((entry) => {
+      const handler = readAgentToolResultMiddleware(entry, runtime);
+      return handler ? [handler] : [];
+    }) ?? []
   );
 }
