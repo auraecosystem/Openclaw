@@ -2356,6 +2356,7 @@ export async function runEmbeddedAttempt(
           sessionFile: params.sessionFile,
           tokenBudget: params.contextTokenBudget,
           modelId: params.modelId,
+          isHeartbeat: params.bootstrapContextRunKind === "heartbeat",
           getPrePromptMessageCount: () => prePromptMessageCount,
           onAfterTurnCheckpoint: (messageCount) => {
             contextEngineAfterTurnCheckpoint = messageCount;
@@ -4645,6 +4646,7 @@ export async function runEmbeddedAttempt(
             promptError: Boolean(promptError),
             aborted,
             yieldAborted,
+            isHeartbeat: params.bootstrapContextRunKind === "heartbeat",
             sessionIdUsed,
             sessionKey: params.sessionKey,
             sessionFile: params.sessionFile,

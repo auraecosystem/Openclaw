@@ -2371,6 +2371,7 @@ export async function runCodexAppServerAttempt(
         promptError: Boolean(finalPromptError),
         aborted: finalAborted,
         yieldAborted: Boolean(result.yieldDetected),
+        isHeartbeat: params.bootstrapContextRunKind === "heartbeat",
         sessionIdUsed: activeSessionId,
         sessionKey: contextSessionKey,
         sessionFile: activeSessionFile,
