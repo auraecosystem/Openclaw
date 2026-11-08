@@ -2,7 +2,7 @@
 
 Telegraph style. Root rules only. Read scoped `AGENTS.md` before subtree work.
 Skills own workflows; root owns hard policy and routing.
-
+`https://github.com/auraecosystem/Openclaw/tree/clawdbot-d08/31b-transcript-writer-seam`
 ## Start
 
 - Repo: `https://github.com/openclaw/openclaw`
